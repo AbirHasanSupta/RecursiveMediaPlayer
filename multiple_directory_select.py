@@ -2,7 +2,7 @@ import os
 import fnmatch
 import time
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 import vlc
 import keyboard
 import threading
@@ -166,6 +166,22 @@ class VLCPlayerController:
                 self.player.play()
                 print("Resumed")
 
+    def fast_forward(self):
+        with self.lock:
+            current_time = self.player.get_time()
+            new_time = current_time + 100
+            length = self.player.get_length()
+            if length > 0 and new_time > length:
+                new_time = length - 10
+            self.player.set_time(new_time)
+            print(f"Fast forward to {new_time / 10:.1f}s")
+
+    def rewind(self):
+        with self.lock:
+            current_time = self.player.get_time()
+            new_time = max(0, current_time - 100)
+            self.player.set_time(new_time)
+            print(f"Rewind to {new_time / 10:.1f}s")
 
     def run(self):
         self.play_video(self.index)
@@ -218,21 +234,91 @@ def listen_keys(controller):
     keyboard.wait('esc')
 
 
-def select_folder_and_play():
+def select_multiple_folders_and_play():
+    class DirectorySelector:
+        def __init__(self, root):
+            self.root = root
+            self.selected_dirs = []
+
+            root.title("Select Video Directories")
+            root.geometry("600x500")
+
+            self.list_frame = tk.Frame(root)
+            self.list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+            self.scrollbar = tk.Scrollbar(self.list_frame)
+            self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+            self.dir_listbox = tk.Listbox(self.list_frame, selectmode=tk.MULTIPLE,
+                                          yscrollcommand=self.scrollbar.set)
+            self.dir_listbox.pack(fill=tk.BOTH, expand=True)
+            self.scrollbar.config(command=self.dir_listbox.yview)
+
+            self.button_frame = tk.Frame(root)
+            self.button_frame.pack(fill=tk.X, padx=10, pady=10)
+
+            self.add_button = tk.Button(self.button_frame, text="Add Directory",
+                                        command=self.add_directory)
+            self.add_button.pack(side=tk.LEFT, padx=5)
+
+            self.remove_button = tk.Button(self.button_frame, text="Remove Selected",
+                                           command=self.remove_directory)
+            self.remove_button.pack(side=tk.LEFT, padx=5)
+
+            self.play_button = tk.Button(self.button_frame, text="Play Videos",
+                                         command=self.play_videos)
+            self.play_button.pack(side=tk.RIGHT, padx=5)
+
+            self.cancel_button = tk.Button(self.button_frame, text="Cancel",
+                                           command=self.cancel)
+            self.cancel_button.pack(side=tk.RIGHT, padx=5)
+
+            self.result = None
+
+        def add_directory(self):
+            directory = filedialog.askdirectory(title="Select a Directory")
+            if directory and directory not in self.selected_dirs:
+                self.selected_dirs.append(directory)
+                self.dir_listbox.insert(tk.END, directory)
+
+        def remove_directory(self):
+            selected_indices = self.dir_listbox.curselection()
+            for i in sorted(selected_indices, reverse=True):
+                self.dir_listbox.delete(i)
+                self.selected_dirs.pop(i)
+
+        def play_videos(self):
+            if self.selected_dirs:
+                self.result = self.selected_dirs.copy()
+                self.root.destroy()
+            else:
+                tk.messagebox.showwarning("No Directories", "Please select at least one directory.")
+
+        def cancel(self):
+            self.root.destroy()
+
     root = tk.Tk()
-    root.withdraw()
-    folder = filedialog.askdirectory(title="Select Folder Containing Videos")
-    if not folder:
-        print("No folder selected.")
+    selector = DirectorySelector(root)
+
+    root.mainloop()
+
+    if not hasattr(selector, 'result') or not selector.result:
+        print("No directories selected.")
         return
 
-    videos = gather_videos(folder)
-    if not videos:
-        print("No videos found.")
+    all_videos = []
+    for directory in selector.result:
+        videos = gather_videos(directory)
+        all_videos.extend(videos)
+        print(f"Found {len(videos)} videos in {directory}")
+
+    if not all_videos:
+        print("No videos found in the selected directories.")
         return
 
-    controller = VLCPlayerController(videos)
+    print(f"Total videos to play: {len(all_videos)}")
 
+    controller = VLCPlayerController(all_videos)
     player_thread = threading.Thread(target=controller.run, daemon=True)
     player_thread.start()
 
@@ -240,5 +326,6 @@ def select_folder_and_play():
 
     print("Exiting player...")
 
+
 if __name__ == "__main__":
-    select_folder_and_play()
+    select_multiple_folders_and_play()
