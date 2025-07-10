@@ -102,7 +102,7 @@ class VLCPlayerController:
         self.video_to_dir = video_to_dir
         self.directories = directories
         self.index = 0
-        self.volume = 100
+        self.volume = 50
         self.lock = threading.Lock()
         self.running = True
         self.fullscreen_enabled = False
@@ -312,7 +312,6 @@ class VLCPlayerController:
                 self.player.set_media(current_media)
                 if was_playing:
                     self.player.play()
-                    time.sleep(0.5)
                     self.player.set_time(current_position)
                     if self.fullscreen_enabled:
                         self.player.set_fullscreen(True)
@@ -332,7 +331,6 @@ def listen_keys(controller):
     keyboard.add_hotkey('2', lambda: controller.switch_to_monitor(2))
     keyboard.add_hotkey('right', lambda: controller.fast_forward())
     keyboard.add_hotkey('left', lambda: controller.rewind())
-    # New hotkeys for directory navigation
     keyboard.add_hotkey('e', lambda: controller.next_directory())
     keyboard.add_hotkey('q', lambda: controller.prev_directory())
     keyboard.wait('esc')
