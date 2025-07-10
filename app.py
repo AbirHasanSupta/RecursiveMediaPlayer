@@ -124,6 +124,17 @@ class VLCPlayerController:
                 self.position_on_monitor2()
             print(f"Fullscreen set to {self.fullscreen_enabled}")
 
+
+    def toggle_pause(self):
+        with self.lock:
+            if self.player.is_playing():
+                self.player.pause()
+                print("Paused")
+            else:
+                self.player.play()
+                print("Resumed")
+
+
     def run(self):
         self.play_video(self.index)
         while self.running:
@@ -140,7 +151,9 @@ def listen_keys(controller):
     keyboard.add_hotkey('up', lambda: controller.volume_up())
     keyboard.add_hotkey('down', lambda: controller.volume_down())
     keyboard.add_hotkey('f', lambda: controller.toggle_fullscreen())
+    keyboard.add_hotkey('space', lambda: controller.toggle_pause())
     keyboard.wait('esc')
+
 
 def select_folder_and_play():
     root = tk.Tk()
