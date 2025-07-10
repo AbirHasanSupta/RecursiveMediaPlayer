@@ -231,6 +231,8 @@ def listen_keys(controller):
     keyboard.add_hotkey('space', lambda: controller.toggle_pause())
     keyboard.add_hotkey('1', lambda: controller.switch_to_monitor(1))
     keyboard.add_hotkey('2', lambda: controller.switch_to_monitor(2))
+    keyboard.add_hotkey('d', lambda: controller.fast_forward())
+    keyboard.add_hotkey('a', lambda: controller.rewind())
     keyboard.wait('esc')
 
 
