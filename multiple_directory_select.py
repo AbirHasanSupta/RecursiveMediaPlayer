@@ -321,8 +321,8 @@ class VLCPlayerController:
 
 
 def listen_keys(controller):
-    keyboard.add_hotkey('right', lambda: controller.next_video())
-    keyboard.add_hotkey('left', lambda: controller.prev_video())
+    keyboard.add_hotkey('d', lambda: controller.next_video())
+    keyboard.add_hotkey('a', lambda: controller.prev_video())
     keyboard.add_hotkey('esc', lambda: controller.stop())
     keyboard.add_hotkey('w', lambda: controller.volume_up())
     keyboard.add_hotkey('s', lambda: controller.volume_down())
@@ -330,8 +330,8 @@ def listen_keys(controller):
     keyboard.add_hotkey('space', lambda: controller.toggle_pause())
     keyboard.add_hotkey('1', lambda: controller.switch_to_monitor(1))
     keyboard.add_hotkey('2', lambda: controller.switch_to_monitor(2))
-    keyboard.add_hotkey('d', lambda: controller.fast_forward())
-    keyboard.add_hotkey('a', lambda: controller.rewind())
+    keyboard.add_hotkey('right', lambda: controller.fast_forward())
+    keyboard.add_hotkey('left', lambda: controller.rewind())
     # New hotkeys for directory navigation
     keyboard.add_hotkey('e', lambda: controller.next_directory())
     keyboard.add_hotkey('q', lambda: controller.prev_directory())
@@ -345,21 +345,62 @@ def select_multiple_folders_and_play():
             self.selected_dirs = []
 
             root.title("Select Video Directories")
-            root.geometry("600x500")
+            root.geometry("800x650")
 
-            self.list_frame = tk.Frame(root)
-            self.list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            # Main content frame
+            main_frame = tk.Frame(root)
+            main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-            self.scrollbar = tk.Scrollbar(self.list_frame)
+            # Directory selection frame
+            self.list_frame = tk.Frame(main_frame)
+            self.list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+            tk.Label(self.list_frame, text="Selected Directories:", font=('Arial', 10, 'bold')).pack(anchor='w')
+
+            list_container = tk.Frame(self.list_frame)
+            list_container.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
+
+            self.scrollbar = tk.Scrollbar(list_container)
             self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-            self.dir_listbox = tk.Listbox(self.list_frame, selectmode=tk.MULTIPLE,
+            self.dir_listbox = tk.Listbox(list_container, selectmode=tk.MULTIPLE,
                                           yscrollcommand=self.scrollbar.set)
             self.dir_listbox.pack(fill=tk.BOTH, expand=True)
             self.scrollbar.config(command=self.dir_listbox.yview)
 
-            self.button_frame = tk.Frame(root)
-            self.button_frame.pack(fill=tk.X, padx=10, pady=10)
+            # Controls information frame
+            controls_frame = tk.Frame(main_frame)
+            controls_frame.pack(fill=tk.X, pady=(0, 10))
+
+            tk.Label(controls_frame, text="Video Player Controls:", font=('Arial', 10, 'bold')).pack(anchor='w')
+
+            controls_text = """
+Navigation:
+  • D/A: Next/Previous video
+  • E: Next directory
+  • Q: Previous directory
+
+Playback:
+  • Space: Play/Pause
+  • Right/Left Arrow: Fast forward/Rewind (10 seconds)
+  • F: Toggle fullscreen
+
+Audio & Display:
+  • W/S: Volume up/down
+  • 1/2: Switch to monitor 1/2
+
+System:
+  • Esc: Exit player
+            """
+
+            controls_label = tk.Label(controls_frame, text=controls_text.strip(),
+                                      font=('Courier', 9), justify=tk.LEFT,
+                                      relief=tk.SUNKEN, padx=10, pady=5)
+            controls_label.pack(fill=tk.X, pady=(5, 0))
+
+            # Button frame
+            self.button_frame = tk.Frame(main_frame)
+            self.button_frame.pack(fill=tk.X)
 
             self.add_button = tk.Button(self.button_frame, text="Add Directory",
                                         command=self.add_directory)
@@ -370,7 +411,7 @@ def select_multiple_folders_and_play():
             self.remove_button.pack(side=tk.LEFT, padx=5)
 
             self.play_button = tk.Button(self.button_frame, text="Play Videos",
-                                         command=self.play_videos)
+                                         command=self.play_videos, font=('Arial', 10, 'bold'))
             self.play_button.pack(side=tk.RIGHT, padx=5)
 
             self.cancel_button = tk.Button(self.button_frame, text="Cancel",
@@ -431,14 +472,14 @@ def select_multiple_folders_and_play():
     print(f"Total videos to play: {len(all_videos)}")
     print(f"Total directories: {len(all_directories)}")
     print("Controls:")
-    print("  Right/Left Arrow: Next/Previous video")
+    print("  D/A: Next/Previous video")
     print("  E: Next directory")
     print("  Q: Previous directory")
     print("  Space: Play/Pause")
     print("  F: Toggle fullscreen")
-    print("  Up/Down: Volume up/down")
+    print("  W/S: Volume up/down")
     print("  1/2: Switch to monitor 1/2")
-    print("  D/A: Fast forward/Rewind")
+    print("  Right/Left Arrow: Fast forward/Rewind")
     print("  Esc: Exit")
 
     controller = VLCPlayerController(all_videos, all_video_to_dir, all_directories)
