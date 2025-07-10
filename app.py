@@ -9,6 +9,7 @@ import threading
 import ctypes
 from screeninfo import get_monitors
 
+
 VIDEO_EXTENSIONS = ['*.mp4', '*.mkv', '*.avi', '*.mov', '*.wmv', '*.flv']
 
 def is_video(file_name):
@@ -31,11 +32,26 @@ def gather_videos(directory):
 def set_window_pos(hwnd, x, y, w, h):
     SWP_NOZORDER = 0x0004
     SWP_NOACTIVATE = 0x0010
-    ctypes.windll.user32.SetWindowPos(hwnd, 0, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE)
+    return ctypes.windll.user32.SetWindowPos(hwnd, 0, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE)
 
 class VLCPlayerController:
     def __init__(self, videos):
-        self.instance = vlc.Instance()
+        monitors = get_monitors()
+        if len(monitors) > 1:
+            mon = monitors[1]
+            print(f"Using second monitor: {mon.name} at ({mon.x}, {mon.y}), {mon.width}x{mon.height}")
+
+            self.monitor2_x = mon.x
+            self.monitor2_y = mon.y
+            self.monitor2_width = mon.width
+            self.monitor2_height = mon.height
+
+            self.instance = vlc.Instance(f'--video-x={mon.x}', f'--video-y={mon.y}')
+        else:
+            mon = monitors[0]
+            print(f"Only one monitor detected: {mon.name}")
+            self.instance = vlc.Instance()
+
         self.player = self.instance.media_player_new()
         self.videos = videos
         self.index = 0
@@ -44,25 +60,14 @@ class VLCPlayerController:
         self.running = True
         self.fullscreen_enabled = False
 
-        # Get monitors info dynamically
-        monitors = get_monitors()
-        if len(monitors) > 1:
-            mon = monitors[1]  # second monitor
-            print(f"Using second monitor: {mon.name} at ({mon.x}, {mon.y}), {mon.width}x{mon.height}")
-        else:
-            mon = monitors[0]
-            print(f"Only one monitor detected: {mon.name} at ({mon.x}, {mon.y}), {mon.width}x{mon.height}")
-
-        self.monitor2_x = mon.x
-        self.monitor2_y = mon.y
-        self.monitor2_width = mon.width
-        self.monitor2_height = mon.height
-
     def position_on_monitor2(self):
+        time.sleep(0.5)
         hwnd = self.player.get_hwnd()
         if hwnd:
-            set_window_pos(hwnd, self.monitor2_x, self.monitor2_y,
+            print(f"Window handle: {hwnd}")
+            result = set_window_pos(hwnd, self.monitor2_x, self.monitor2_y,
                           self.monitor2_width, self.monitor2_height)
+            print(f"SetWindowPos result: {result}")
 
     def play_video(self, index):
         with self.lock:
@@ -74,7 +79,6 @@ class VLCPlayerController:
             self.player.play()
             self.player.audio_set_volume(self.volume)
 
-            # Wait until playing
             state = self.player.get_state()
             while state != vlc.State.Playing and self.running:
                 time.sleep(0.1)
@@ -126,7 +130,8 @@ class VLCPlayerController:
             state = self.player.get_state()
             if state == vlc.State.Ended:
                 self.next_video()
-            time.sleep(0.5)
+
+
 
 def listen_keys(controller):
     keyboard.add_hotkey('right', lambda: controller.next_video())
