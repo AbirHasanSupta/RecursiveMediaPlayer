@@ -9,33 +9,60 @@ import threading
 import ctypes
 from screeninfo import get_monitors
 
-
 VIDEO_EXTENSIONS = ['*.mp4', '*.mkv', '*.avi', '*.mov', '*.wmv', '*.flv']
+
 
 def is_video(file_name):
     return any(fnmatch.fnmatch(file_name.lower(), ext) for ext in VIDEO_EXTENSIONS)
 
-def gather_videos(directory):
+
+def gather_videos_with_directories(directory):
+    """Gather videos and track which directory each video belongs to"""
     videos = []
-    for file in os.listdir(directory):
-        full_path = os.path.join(directory, file)
-        if os.path.isfile(full_path) and is_video(file):
-            videos.append(full_path)
+    video_to_dir = {}
+    directories = []
+
+    # First, gather all directories (including nested ones)
     for root, dirs, files in os.walk(directory):
-        if root == directory:
-            continue
-        for file in files:
-            if is_video(file):
-                videos.append(os.path.join(root, file))
+        if any(is_video(file) for file in files):
+            directories.append(root)
+
+    # Sort directories to ensure consistent ordering
+    directories.sort()
+
+    # Now gather videos from each directory
+    for dir_path in directories:
+        dir_videos = []
+        for file in os.listdir(dir_path):
+            full_path = os.path.join(dir_path, file)
+            if os.path.isfile(full_path) and is_video(file):
+                dir_videos.append(full_path)
+
+        # Sort videos within each directory
+        dir_videos.sort()
+
+        # Add to main list and track directory mapping
+        for video in dir_videos:
+            videos.append(video)
+            video_to_dir[video] = dir_path
+
+    return videos, video_to_dir, directories
+
+
+def gather_videos(directory):
+    """Legacy function for backward compatibility"""
+    videos, _, _ = gather_videos_with_directories(directory)
     return videos
+
 
 def set_window_pos(hwnd, x, y, w, h):
     SWP_NOZORDER = 0x0004
     SWP_NOACTIVATE = 0x0010
     return ctypes.windll.user32.SetWindowPos(hwnd, 0, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE)
 
+
 class VLCPlayerController:
-    def __init__(self, videos):
+    def __init__(self, videos, video_to_dir, directories):
         monitors = get_monitors()
 
         if len(monitors) >= 1:
@@ -72,12 +99,80 @@ class VLCPlayerController:
 
         self.player = self.instance.media_player_new()
         self.videos = videos
+        self.video_to_dir = video_to_dir
+        self.directories = directories
         self.index = 0
         self.volume = 100
         self.lock = threading.Lock()
         self.running = True
         self.fullscreen_enabled = False
         self.current_monitor = 2
+
+    def get_current_directory(self):
+        """Get the directory of the currently playing video"""
+        if self.index < len(self.videos):
+            return self.video_to_dir.get(self.videos[self.index])
+        return None
+
+    def find_next_directory_video(self):
+        """Find the first video in the next directory"""
+        current_dir = self.get_current_directory()
+        if not current_dir:
+            return None
+
+        try:
+            current_dir_index = self.directories.index(current_dir)
+            next_dir_index = (current_dir_index + 1) % len(self.directories)
+            next_dir = self.directories[next_dir_index]
+
+            # Find first video in the next directory
+            for i, video in enumerate(self.videos):
+                if self.video_to_dir[video] == next_dir:
+                    return i
+        except (ValueError, IndexError):
+            pass
+
+        return None
+
+    def find_prev_directory_video(self):
+        """Find the first video in the previous directory"""
+        current_dir = self.get_current_directory()
+        if not current_dir:
+            return None
+
+        try:
+            current_dir_index = self.directories.index(current_dir)
+            prev_dir_index = (current_dir_index - 1) % len(self.directories)
+            prev_dir = self.directories[prev_dir_index]
+
+            # Find first video in the previous directory
+            for i, video in enumerate(self.videos):
+                if self.video_to_dir[video] == prev_dir:
+                    return i
+        except (ValueError, IndexError):
+            pass
+
+        return None
+
+    def next_directory(self):
+        """Skip to the next directory"""
+        next_index = self.find_next_directory_video()
+        if next_index is not None:
+            next_dir = self.video_to_dir[self.videos[next_index]]
+            print(f"Skipping to next directory: {next_dir}")
+            self.play_video(next_index)
+        else:
+            print("No next directory found")
+
+    def prev_directory(self):
+        """Skip to the previous directory"""
+        prev_index = self.find_prev_directory_video()
+        if prev_index is not None:
+            prev_dir = self.video_to_dir[self.videos[prev_index]]
+            print(f"Skipping to previous directory: {prev_dir}")
+            self.play_video(prev_index)
+        else:
+            print("No previous directory found")
 
     def position_on_monitor1(self):
         time.sleep(0.5)
@@ -104,7 +199,11 @@ class VLCPlayerController:
             if index < 0 or index >= len(self.videos):
                 return False
             self.index = index
-            media = self.instance.media_new(self.videos[self.index])
+            current_video = self.videos[self.index]
+            current_dir = self.video_to_dir[current_video]
+            print(f"Playing: {os.path.basename(current_video)} from {current_dir}")
+
+            media = self.instance.media_new(current_video)
             self.player.set_media(media)
             self.player.play()
             self.player.audio_set_volume(self.volume)
@@ -169,19 +268,19 @@ class VLCPlayerController:
     def fast_forward(self):
         with self.lock:
             current_time = self.player.get_time()
-            new_time = current_time + 100
+            new_time = current_time + 200
             length = self.player.get_length()
             if length > 0 and new_time > length:
-                new_time = length - 10
+                new_time = length - 20
             self.player.set_time(new_time)
-            print(f"Fast forward to {new_time / 10:.1f}s")
+            print(f"Fast forward to {new_time / 20:.1f}s")
 
     def rewind(self):
         with self.lock:
             current_time = self.player.get_time()
-            new_time = max(0, current_time - 100)
+            new_time = max(0, current_time - 200)  # 10 seconds
             self.player.set_time(new_time)
-            print(f"Rewind to {new_time / 10:.1f}s")
+            print(f"Rewind to {new_time / 20:.1f}s")
 
     def run(self):
         self.play_video(self.index)
@@ -225,14 +324,17 @@ def listen_keys(controller):
     keyboard.add_hotkey('right', lambda: controller.next_video())
     keyboard.add_hotkey('left', lambda: controller.prev_video())
     keyboard.add_hotkey('esc', lambda: controller.stop())
-    keyboard.add_hotkey('up', lambda: controller.volume_up())
-    keyboard.add_hotkey('down', lambda: controller.volume_down())
+    keyboard.add_hotkey('w', lambda: controller.volume_up())
+    keyboard.add_hotkey('s', lambda: controller.volume_down())
     keyboard.add_hotkey('f', lambda: controller.toggle_fullscreen())
     keyboard.add_hotkey('space', lambda: controller.toggle_pause())
     keyboard.add_hotkey('1', lambda: controller.switch_to_monitor(1))
     keyboard.add_hotkey('2', lambda: controller.switch_to_monitor(2))
     keyboard.add_hotkey('d', lambda: controller.fast_forward())
     keyboard.add_hotkey('a', lambda: controller.rewind())
+    # New hotkeys for directory navigation
+    keyboard.add_hotkey('e', lambda: controller.next_directory())
+    keyboard.add_hotkey('q', lambda: controller.prev_directory())
     keyboard.wait('esc')
 
 
@@ -309,18 +411,37 @@ def select_multiple_folders_and_play():
         return
 
     all_videos = []
+    all_video_to_dir = {}
+    all_directories = []
+
     for directory in selector.result:
-        videos = gather_videos(directory)
+        videos, video_to_dir, directories = gather_videos_with_directories(directory)
         all_videos.extend(videos)
-        print(f"Found {len(videos)} videos in {directory}")
+        all_video_to_dir.update(video_to_dir)
+        all_directories.extend(directories)
+        print(f"Found {len(videos)} videos in {len(directories)} directories from {directory}")
+
+    # Remove duplicates from directories and sort
+    all_directories = sorted(list(set(all_directories)))
 
     if not all_videos:
         print("No videos found in the selected directories.")
         return
 
     print(f"Total videos to play: {len(all_videos)}")
+    print(f"Total directories: {len(all_directories)}")
+    print("Controls:")
+    print("  Right/Left Arrow: Next/Previous video")
+    print("  E: Next directory")
+    print("  Q: Previous directory")
+    print("  Space: Play/Pause")
+    print("  F: Toggle fullscreen")
+    print("  Up/Down: Volume up/down")
+    print("  1/2: Switch to monitor 1/2")
+    print("  D/A: Fast forward/Rewind")
+    print("  Esc: Exit")
 
-    controller = VLCPlayerController(all_videos)
+    controller = VLCPlayerController(all_videos, all_video_to_dir, all_directories)
     player_thread = threading.Thread(target=controller.run, daemon=True)
     player_thread.start()
 
