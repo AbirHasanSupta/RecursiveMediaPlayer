@@ -1,0 +1,3 @@
+python-vlc>=3.0.12118
+keyboard>=0.13.5
+screeninfo>=0.8.1

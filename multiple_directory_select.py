@@ -8,6 +8,7 @@ import keyboard
 import threading
 import ctypes
 from screeninfo import get_monitors
+from datetime import datetime
 
 VIDEO_EXTENSIONS = ['*.mp4', '*.mkv', '*.avi', '*.mov', '*.wmv', '*.flv']
 
@@ -163,6 +164,28 @@ class VLCPlayerController:
             self.play_video(next_index)
         else:
             print("No next directory found")
+
+    def take_screenshot(self):
+        """Take a screenshot using VLC's native screenshot capability"""
+        with self.lock:
+            try:
+                if not self.player.is_playing():
+                    print("Cannot take screenshot: No video is currently playing")
+                    return
+                
+                current_video = self.videos[self.index]
+                video_dir = os.path.dirname(current_video)
+                video_name = os.path.splitext(os.path.basename(current_video))[0]
+
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                screenshot_filename = f"{video_name}_screenshot_{timestamp}.png"
+                screenshot_path = os.path.join(video_dir, screenshot_filename)
+                
+                self.player.video_take_snapshot(0, screenshot_path, 0, 0)
+                print(f"Screenshot saved: {screenshot_path}")
+                
+            except Exception as e:
+                print(f"Error taking screenshot: {e}")
 
     def prev_directory(self):
         """Skip to the previous directory"""
@@ -333,6 +356,7 @@ def listen_keys(controller):
     keyboard.add_hotkey('left', lambda: controller.rewind())
     keyboard.add_hotkey('e', lambda: controller.next_directory())
     keyboard.add_hotkey('q', lambda: controller.prev_directory())
+    keyboard.add_hotkey('t', lambda: controller.take_screenshot())
     keyboard.wait('esc')
 
 
@@ -382,6 +406,7 @@ Playback:
   • Space: Play/Pause
   • Right/Left Arrow: Fast forward/Rewind (10 seconds)
   • F: Toggle fullscreen
+  • T: Take ScreenShot
 
 Audio & Display:
   • W/S: Volume up/down
@@ -475,6 +500,7 @@ System:
     print("  Q: Previous directory")
     print("  Space: Play/Pause")
     print("  F: Toggle fullscreen")
+    print("  T: Take ScreenShot")
     print("  W/S: Volume up/down")
     print("  1/2: Switch to monitor 1/2")
     print("  Right/Left Arrow: Fast forward/Rewind")
