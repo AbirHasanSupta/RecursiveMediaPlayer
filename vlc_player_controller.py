@@ -1,40 +1,13 @@
 import os
-import fnmatch
 import time
-import tkinter as tk
-from tkinter import filedialog
+
 import vlc
-import keyboard
 import threading
-import ctypes
 from screeninfo import get_monitors
+from datetime import datetime
 
 
-VIDEO_EXTENSIONS = ['*.mp4', '*.mkv', '*.avi', '*.mov', '*.wmv', '*.flv']
-
-def is_video(file_name):
-    return any(fnmatch.fnmatch(file_name.lower(), ext) for ext in VIDEO_EXTENSIONS)
-
-def gather_videos(directory):
-    videos = []
-    for file in os.listdir(directory):
-        full_path = os.path.join(directory, file)
-        if os.path.isfile(full_path) and is_video(file):
-            videos.append(full_path)
-    for root, dirs, files in os.walk(directory):
-        if root == directory:
-            continue
-        for file in files:
-            if is_video(file):
-                videos.append(os.path.join(root, file))
-    return videos
-
-def set_window_pos(hwnd, x, y, w, h):
-    SWP_NOZORDER = 0x0004
-    SWP_NOACTIVATE = 0x0010
-    return ctypes.windll.user32.SetWindowPos(hwnd, 0, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE)
-
-class VLCPlayerController:
+class BaseVLCPlayerController:
     def __init__(self, videos):
         monitors = get_monitors()
 
@@ -59,11 +32,9 @@ class VLCPlayerController:
             self.monitor2_y = mon2.y
             self.monitor2_width = mon2.width
             self.monitor2_height = mon2.height
-            # Use monitor 2 as default
             self.instance = vlc.Instance(f'--video-x={mon2.x}', f'--video-y={mon2.y}')
         else:
             print("Only one monitor detected, second monitor features disabled.")
-            # Set monitor 2 same as monitor 1 if not available
             self.monitor2_x = self.monitor1_x
             self.monitor2_y = self.monitor1_y
             self.monitor2_width = self.monitor1_width
@@ -73,31 +44,26 @@ class VLCPlayerController:
         self.player = self.instance.media_player_new()
         self.videos = videos
         self.index = 0
-        self.volume = 100
+        self.volume = 50
         self.lock = threading.Lock()
         self.running = True
         self.fullscreen_enabled = False
         self.current_monitor = 2
 
-    def position_on_monitor1(self):
-        time.sleep(0.5)
-        hwnd = self.player.get_hwnd()
-        if hwnd:
-            print(f"Window handle: {hwnd}")
-            result = set_window_pos(hwnd, self.monitor1_x, self.monitor1_y,
-                                    self.monitor1_width, self.monitor1_height)
-            print(f"SetWindowPos result on monitor 1: {result}")
-            self.current_monitor = 1
 
-    def position_on_monitor2(self):
-        time.sleep(0.5)
-        hwnd = self.player.get_hwnd()
-        if hwnd:
-            print(f"Window handle: {hwnd}")
-            result = set_window_pos(hwnd, self.monitor2_x, self.monitor2_y,
-                                    self.monitor2_width, self.monitor2_height)
-            print(f"SetWindowPos result on monitor 2: {result}")
-            self.current_monitor = 2
+    def _play_video(self, media):
+        self.player.set_media(media)
+        self.player.play()
+        self.player.audio_set_volume(self.volume)
+
+        state = self.player.get_state()
+        while state != vlc.State.Playing and self.running:
+            time.sleep(0.1)
+            state = self.player.get_state()
+
+        self.player.set_fullscreen(self.fullscreen_enabled)
+        return True
+
 
     def play_video(self, index):
         with self.lock:
@@ -105,34 +71,26 @@ class VLCPlayerController:
                 return False
             self.index = index
             media = self.instance.media_new(self.videos[self.index])
-            self.player.set_media(media)
-            self.player.play()
-            self.player.audio_set_volume(self.volume)
+            return self._play_video(media)
 
-            state = self.player.get_state()
-            while state != vlc.State.Playing and self.running:
-                time.sleep(0.1)
-                state = self.player.get_state()
-
-            self.position_on_monitor2()
-            self.player.set_fullscreen(self.fullscreen_enabled)
-
-            return True
 
     def next_video(self):
         with self.lock:
             next_index = (self.index + 1) % len(self.videos)
         self.play_video(next_index)
 
+
     def prev_video(self):
         with self.lock:
             prev_index = (self.index - 1) % len(self.videos)
         self.play_video(prev_index)
 
+
     def stop(self):
         with self.lock:
             self.running = False
             self.player.stop()
+
 
     def volume_up(self):
         with self.lock:
@@ -140,22 +98,21 @@ class VLCPlayerController:
             self.player.audio_set_volume(self.volume)
             print(f"Volume: {self.volume}")
 
+
     def volume_down(self):
         with self.lock:
             self.volume = max(0, self.volume - 10)
             self.player.audio_set_volume(self.volume)
             print(f"Volume: {self.volume}")
 
+
     def toggle_fullscreen(self):
         with self.lock:
             self.fullscreen_enabled = not self.fullscreen_enabled
             self.player.set_fullscreen(self.fullscreen_enabled)
-            if not self.fullscreen_enabled:
-                if self.current_monitor == 1:
-                    self.position_on_monitor1()
-                else:
-                    self.position_on_monitor2()
+
             print(f"Fullscreen set to {self.fullscreen_enabled}")
+
 
     def toggle_pause(self):
         with self.lock:
@@ -166,22 +123,25 @@ class VLCPlayerController:
                 self.player.play()
                 print("Resumed")
 
+
     def fast_forward(self):
         with self.lock:
             current_time = self.player.get_time()
-            new_time = current_time + 100
+            new_time = current_time + 200
             length = self.player.get_length()
-            if length > 0 and new_time > length:
-                new_time = length - 10
+            if 0 < length < new_time:
+                new_time = length - 20
             self.player.set_time(new_time)
-            print(f"Fast forward to {new_time / 10:.1f}s")
+            print(f"Fast forward to {new_time / 20:.1f}s")
+
 
     def rewind(self):
         with self.lock:
             current_time = self.player.get_time()
-            new_time = max(0, current_time - 100)
+            new_time = max(0, current_time - 200)
             self.player.set_time(new_time)
-            print(f"Rewind to {new_time / 10:.1f}s")
+            print(f"Rewind to {new_time / 20:.1f}s")
+
 
     def run(self):
         self.play_video(self.index)
@@ -189,6 +149,7 @@ class VLCPlayerController:
             state = self.player.get_state()
             if state == vlc.State.Ended:
                 self.next_video()
+
 
     def switch_to_monitor(self, monitor_number):
         with self.lock:
@@ -213,7 +174,6 @@ class VLCPlayerController:
                 self.player.set_media(current_media)
                 if was_playing:
                     self.player.play()
-                    time.sleep(0.5)
                     self.player.set_time(current_position)
                     if self.fullscreen_enabled:
                         self.player.set_fullscreen(True)
@@ -221,42 +181,109 @@ class VLCPlayerController:
             print(f"Switched to monitor {monitor_number}")
 
 
-def listen_keys(controller):
-    keyboard.add_hotkey('right', lambda: controller.next_video())
-    keyboard.add_hotkey('left', lambda: controller.prev_video())
-    keyboard.add_hotkey('esc', lambda: controller.stop())
-    keyboard.add_hotkey('up', lambda: controller.volume_up())
-    keyboard.add_hotkey('down', lambda: controller.volume_down())
-    keyboard.add_hotkey('f', lambda: controller.toggle_fullscreen())
-    keyboard.add_hotkey('space', lambda: controller.toggle_pause())
-    keyboard.add_hotkey('1', lambda: controller.switch_to_monitor(1))
-    keyboard.add_hotkey('2', lambda: controller.switch_to_monitor(2))
-    keyboard.add_hotkey('d', lambda: controller.fast_forward())
-    keyboard.add_hotkey('a', lambda: controller.rewind())
-    keyboard.wait('esc')
+    def take_screenshot(self):
+        """Take a screenshot using VLC's native screenshot capability"""
+        with self.lock:
+            try:
+                current_video = self.videos[self.index]
+                video_dir = os.path.dirname(current_video)
+                video_name = os.path.splitext(os.path.basename(current_video))[0]
+
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                screenshot_filename = f"{video_name}_screenshot_{timestamp}.png"
+                screenshot_path = os.path.join(video_dir, screenshot_filename)
+
+                self.player.video_take_snapshot(0, screenshot_path, 0, 0)
+                print(f"Screenshot saved: {screenshot_path}")
+
+            except Exception as e:
+                print(f"Error taking screenshot: {e}")
 
 
-def select_folder_and_play():
-    root = tk.Tk()
-    root.withdraw()
-    folder = filedialog.askdirectory(title="Select Folder Containing Videos")
-    if not folder:
-        print("No folder selected.")
-        return
 
-    videos = gather_videos(folder)
-    if not videos:
-        print("No videos found.")
-        return
 
-    controller = VLCPlayerController(videos)
+class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
+    def __init__(self, videos, video_to_dir, directories):
+        super(VLCPlayerControllerForMultipleDirectory, self).__init__(videos)
+        self.video_to_dir = video_to_dir
+        self.directories = directories
 
-    player_thread = threading.Thread(target=controller.run, daemon=True)
-    player_thread.start()
 
-    listen_keys(controller)
+    def get_current_directory(self):
+        """Get the directory of the currently playing video"""
+        if self.index < len(self.videos):
+            return self.video_to_dir.get(self.videos[self.index])
+        return None
 
-    print("Exiting player...")
 
-if __name__ == "__main__":
-    select_folder_and_play()
+    def find_next_directory_video(self):
+        """Find the first video in the next directory"""
+        current_dir = self.get_current_directory()
+        if not current_dir:
+            return None
+        try:
+            current_dir_index = self.directories.index(current_dir)
+            next_dir_index = (current_dir_index + 1) % len(self.directories)
+            next_dir = self.directories[next_dir_index]
+
+            for i, video in enumerate(self.videos):
+                if self.video_to_dir[video] == next_dir:
+                    return i
+        except (ValueError, IndexError):
+            pass
+        return None
+
+
+    def find_prev_directory_video(self):
+        """Find the first video in the previous directory"""
+        current_dir = self.get_current_directory()
+        if not current_dir:
+            return None
+        try:
+            current_dir_index = self.directories.index(current_dir)
+            prev_dir_index = (current_dir_index - 1) % len(self.directories)
+            prev_dir = self.directories[prev_dir_index]
+
+            for i, video in enumerate(self.videos):
+                if self.video_to_dir[video] == prev_dir:
+                    return i
+        except (ValueError, IndexError):
+            pass
+        return None
+
+
+    def next_directory(self):
+        """Skip to the next directory"""
+        next_index = self.find_next_directory_video()
+        if next_index is not None:
+            next_dir = self.video_to_dir[self.videos[next_index]]
+            print(f"Skipping to next directory: {next_dir}")
+            self.play_video(next_index)
+        else:
+            print("No next directory found")
+
+
+    def prev_directory(self):
+        """Skip to the previous directory"""
+        prev_index = self.find_prev_directory_video()
+        if prev_index is not None:
+            prev_dir = self.video_to_dir[self.videos[prev_index]]
+            print(f"Skipping to previous directory: {prev_dir}")
+            self.play_video(prev_index)
+        else:
+            print("No previous directory found")
+
+
+    def play_video(self, index):
+        with self.lock:
+            if index < 0 or index >= len(self.videos):
+                return False
+            self.index = index
+            current_video = self.videos[self.index]
+            current_dir = self.video_to_dir[current_video]
+            print(f"Playing: {os.path.basename(current_video)} from {current_dir}")
+
+            media = self.instance.media_new(current_video)
+            return self._play_video(media)
+
+
