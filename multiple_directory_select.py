@@ -492,19 +492,6 @@ System:
         print("No videos found in the selected directories.")
         return
 
-    print(f"Total videos to play: {len(all_videos)}")
-    print(f"Total directories: {len(all_directories)}")
-    print("Controls:")
-    print("  D/A: Next/Previous video")
-    print("  E: Next directory")
-    print("  Q: Previous directory")
-    print("  Space: Play/Pause")
-    print("  F: Toggle fullscreen")
-    print("  T: Take ScreenShot")
-    print("  W/S: Volume up/down")
-    print("  1/2: Switch to monitor 1/2")
-    print("  Right/Left Arrow: Fast forward/Rewind")
-    print("  Esc: Exit")
 
     controller = VLCPlayerController(all_videos, all_video_to_dir, all_directories)
     player_thread = threading.Thread(target=controller.run, daemon=True)
