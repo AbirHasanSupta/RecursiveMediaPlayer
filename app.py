@@ -383,11 +383,8 @@ def select_multiple_folders_and_play():
                 self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                 self.player_thread.start()
 
-                if self.keys_thread and self.keys_thread.is_alive():
-                    pass
-                else:
-                    self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
-                    self.keys_thread.start()
+                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
+                self.keys_thread.start()
             finally:
                 self.root.config(cursor="")
 
