@@ -2,7 +2,7 @@ import keyboard
 
 
 def listen_keys(controller, multi_directory=True):
-    keyboard.add_hotkey('esc', lambda: controller.stop())
+    keyboard.add_hotkey('esc', lambda: controller.stop_video())
     keyboard.add_hotkey('d', lambda: controller.next_video())
     keyboard.add_hotkey('a', lambda: controller.prev_video())
     keyboard.add_hotkey('w', lambda: controller.volume_up())
@@ -17,4 +17,5 @@ def listen_keys(controller, multi_directory=True):
     if multi_directory:
         keyboard.add_hotkey('e', lambda: controller.next_directory())
         keyboard.add_hotkey('q', lambda: controller.prev_directory())
-    keyboard.wait('esc')
+    else:
+        keyboard.wait('esc')

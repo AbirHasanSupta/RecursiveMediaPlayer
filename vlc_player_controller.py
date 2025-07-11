@@ -201,6 +201,12 @@ class BaseVLCPlayerController:
 
 
 
+    def stop_video(self):
+        """Stops only the current video without terminating the application"""
+        with self.lock:
+            self.player.stop()
+            print("Video stopped")
+
 
 class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
     def __init__(self, videos, video_to_dir, directories):

@@ -1,6 +1,5 @@
 import os
 import fnmatch
-import ctypes
 
 
 VIDEO_EXTENSIONS = ['*.mp4', '*.mkv', '*.avi', '*.mov', '*.wmv', '*.flv']

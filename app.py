@@ -1,5 +1,5 @@
 import threading
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 import tkinter as tk
 
 from key_press import listen_keys
@@ -12,9 +12,13 @@ def select_multiple_folders_and_play():
         def __init__(self, root):
             self.root = root
             self.selected_dirs = []
+            self.controller = None
+            self.player_thread = None
+            self.keys_thread = None
 
-            root.title("Select Video Directories")
+            root.title("Video Player")
             root.geometry("800x600")
+            root.protocol("WM_DELETE_WINDOW", self.cancel)
 
             main_frame = tk.Frame(root)
             main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -57,7 +61,7 @@ Audio & Display:
   • 1/2: Switch to monitor 1/2
 
 System:
-  • Esc: Exit player
+  • Esc: Stop current video
             """
 
             controls_label = tk.Label(controls_frame, text=controls_text.strip(),
@@ -83,8 +87,6 @@ System:
             self.cancel_button = tk.Button(self.button_frame, text="Cancel",
                                            command=self.cancel)
             self.cancel_button.pack(side=tk.RIGHT, padx=5)
-
-            self.result = None
 
             self.video_count = 0
             self.video_count_frame = tk.Frame(main_frame)
@@ -119,48 +121,55 @@ System:
                 self.video_count_label.config(text=f"Total Videos: {self.video_count}")
 
         def play_videos(self):
-            if self.selected_dirs:
-                self.result = self.selected_dirs.copy()
-                self.root.destroy()
-            else:
+            if not self.selected_dirs:
                 tk.messagebox.showwarning("No Directories", "Please select at least one directory.")
+                return
+
+            if self.controller:
+                self.controller.stop()
+                
+            all_videos = []
+            all_video_to_dir = {}
+            all_directories = []
+
+            for directory in self.selected_dirs:
+                videos, video_to_dir, directories = gather_videos_with_directories(directory)
+                all_videos.extend(videos)
+                all_video_to_dir.update(video_to_dir)
+                all_directories.extend(directories)
+                print(f"Found {len(videos)} videos in {len(directories)} directories from {directory}")
+
+            all_directories = sorted(list(set(all_directories)))
+
+            if not all_videos:
+                print("No videos found in the selected directories.")
+                tk.messagebox.showwarning("No Videos", "No videos found in the selected directories.")
+                return
+
+            self.controller = VLCPlayerControllerForMultipleDirectory(all_videos, all_video_to_dir, all_directories)
+            
+            if self.player_thread and self.player_thread.is_alive():
+                self.controller.running = False
+                self.player_thread.join(timeout=1.0)
+                
+            self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
+            self.player_thread.start()
+            
+            if self.keys_thread and self.keys_thread.is_alive():
+                pass
+            else:
+                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
+                self.keys_thread.start()
 
         def cancel(self):
+            if self.controller:
+                self.controller.stop()
+            self.root.quit()
             self.root.destroy()
 
     root = tk.Tk()
-    selector = DirectorySelector(root)
-
+    app = DirectorySelector(root)
     root.mainloop()
-
-    if not hasattr(selector, 'result') or not selector.result:
-        print("No directories selected.")
-        return
-
-    all_videos = []
-    all_video_to_dir = {}
-    all_directories = []
-
-    for directory in selector.result:
-        videos, video_to_dir, directories = gather_videos_with_directories(directory)
-        all_videos.extend(videos)
-        all_video_to_dir.update(video_to_dir)
-        all_directories.extend(directories)
-        print(f"Found {len(videos)} videos in {len(directories)} directories from {directory}")
-
-    all_directories = sorted(list(set(all_directories)))
-
-    if not all_videos:
-        print("No videos found in the selected directories.")
-        return
-
-    controller = VLCPlayerControllerForMultipleDirectory(all_videos, all_video_to_dir, all_directories)
-    player_thread = threading.Thread(target=controller.run, daemon=True)
-    player_thread.start()
-
-    listen_keys(controller)
-
-    print("Exiting player...")
 
 
 if __name__ == "__main__":
