@@ -7,39 +7,32 @@ from screeninfo import get_monitors
 from datetime import datetime
 
 
-class BaseVLCPlayerController:
-    def __init__(self, videos):
+
+class MonitorInfo:
+    def __init__(self):
         monitors = get_monitors()
 
         if len(monitors) >= 1:
             mon1 = monitors[0]
-            print(f"Monitor 1: {mon1.name} at ({mon1.x}, {mon1.y}), {mon1.width}x{mon1.height}")
-            self.monitor1_x = mon1.x
-            self.monitor1_y = mon1.y
-            self.monitor1_width = mon1.width
-            self.monitor1_height = mon1.height
+            self.monitor1 = (mon1.x, mon1.y, mon1.width, mon1.height)
         else:
-            print("No monitors detected!")
-            self.monitor1_x = 0
-            self.monitor1_y = 0
-            self.monitor1_width = 800
-            self.monitor1_height = 600
+            self.monitor1 = (0, 0, 800, 600)
 
         if len(monitors) >= 2:
             mon2 = monitors[1]
-            print(f"Monitor 2: {mon2.name} at ({mon2.x}, {mon2.y}), {mon2.width}x{mon2.height}")
-            self.monitor2_x = mon2.x
-            self.monitor2_y = mon2.y
-            self.monitor2_width = mon2.width
-            self.monitor2_height = mon2.height
-            self.instance = vlc.Instance(f'--video-x={mon2.x}', f'--video-y={mon2.y}')
+            self.monitor2 = (mon2.x, mon2.y, mon2.width, mon2.height)
         else:
-            print("Only one monitor detected, second monitor features disabled.")
-            self.monitor2_x = self.monitor1_x
-            self.monitor2_y = self.monitor1_y
-            self.monitor2_width = self.monitor1_width
-            self.monitor2_height = self.monitor1_height
-            self.instance = vlc.Instance()
+            self.monitor2 = self.monitor1
+
+
+
+class BaseVLCPlayerController:
+    def __init__(self, videos):
+        self.monitor_info = MonitorInfo()
+
+        x, y, width, height = self.monitor_info.monitor1
+
+        self.instance = vlc.Instance(f'--video-x={x}', f'--video-y={y}')
 
         self.player = self.instance.media_player_new()
         self.videos = videos
@@ -48,7 +41,7 @@ class BaseVLCPlayerController:
         self.lock = threading.Lock()
         self.running = True
         self.fullscreen_enabled = False
-        self.current_monitor = 2
+        self.current_monitor = 1
 
 
     def _play_video(self, media):
@@ -162,27 +155,30 @@ class BaseVLCPlayerController:
             self.player.stop()
 
             if monitor_number == 1:
-                self.instance = vlc.Instance(f'--video-x={self.monitor1_x}', f'--video-y={self.monitor1_y}')
-                self.current_monitor = 1
+                x, y, height, width = self.monitor_info.monitor1
             else:
-                self.instance = vlc.Instance(f'--video-x={self.monitor2_x}', f'--video-y={self.monitor2_y}')
-                self.current_monitor = 2
+                x, y, height, width = self.monitor_info.monitor2
 
+            self.instance = vlc.Instance(f'--video-x={x}', f'--video-y={y}')
             self.player = self.instance.media_player_new()
+            self.current_monitor = monitor_number
 
             if current_media:
                 self.player.set_media(current_media)
-                if was_playing:
-                    self.player.play()
-                    self.player.set_time(current_position)
-                    if self.fullscreen_enabled:
-                        self.player.set_fullscreen(True)
+                self.player.play()
+                self.player.set_time(current_position)
+
+                if self.fullscreen_enabled:
+                    self.player.set_fullscreen(True)
+
+                if not was_playing:
+                    time.sleep(0.02)
+                    self.player.pause()
 
             print(f"Switched to monitor {monitor_number}")
 
 
     def take_screenshot(self):
-        """Take a screenshot using VLC's native screenshot capability"""
         with self.lock:
             try:
                 current_video = self.videos[self.index]
@@ -202,7 +198,6 @@ class BaseVLCPlayerController:
 
 
     def stop_video(self):
-        """Stops only the current video without terminating the application"""
         with self.lock:
             self.player.stop()
             print("Video stopped")
@@ -216,14 +211,12 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
 
 
     def get_current_directory(self):
-        """Get the directory of the currently playing video"""
         if self.index < len(self.videos):
             return self.video_to_dir.get(self.videos[self.index])
         return None
 
 
     def find_next_directory_video(self):
-        """Find the first video in the next directory"""
         current_dir = self.get_current_directory()
         if not current_dir:
             return None
@@ -241,7 +234,6 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
 
 
     def find_prev_directory_video(self):
-        """Find the first video in the previous directory"""
         current_dir = self.get_current_directory()
         if not current_dir:
             return None
@@ -259,7 +251,6 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
 
 
     def next_directory(self):
-        """Skip to the next directory"""
         next_index = self.find_next_directory_video()
         if next_index is not None:
             next_dir = self.video_to_dir[self.videos[next_index]]
@@ -270,7 +261,6 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
 
 
     def prev_directory(self):
-        """Skip to the previous directory"""
         prev_index = self.find_prev_directory_video()
         if prev_index is not None:
             prev_dir = self.video_to_dir[self.videos[prev_index]]
