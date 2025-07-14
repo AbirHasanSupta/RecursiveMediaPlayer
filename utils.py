@@ -10,7 +10,6 @@ def is_video(file_name):
 
 
 def gather_videos_with_directories(directory):
-    """Gather videos and track which directory each video belongs to"""
     videos = []
     video_to_dir = {}
     directories = []
@@ -38,7 +37,6 @@ def gather_videos_with_directories(directory):
 
 
 def gather_videos(directory):
-    """Legacy function for backward compatibility"""
     videos, _, _ = gather_videos_with_directories(directory)
     return videos
 

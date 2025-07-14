@@ -260,7 +260,6 @@ def select_multiple_folders_and_play():
             self.clear_exclusions_button.pack(side=tk.LEFT)
 
         def get_current_selected_directory(self):
-            """Get the currently selected directory, using stored index if listbox has no selection"""
             selection = self.dir_listbox.curselection()
             if selection:
                 return self.selected_dirs[selection[0]]
@@ -270,10 +269,6 @@ def select_multiple_folders_and_play():
             return None
 
         def is_video_in_excluded_directory(self, video_path, excluded_subdirs):
-            """
-            Check if a video is in any of the excluded subdirectories.
-            Only exact directory matches or direct subdirectories should be excluded.
-            """
             video_dir = os.path.dirname(video_path)
 
             for excluded_subdir in excluded_subdirs:
@@ -302,7 +297,6 @@ def select_multiple_folders_and_play():
             return False
 
         def update_video_count(self):
-            """Update the video count considering excluded subdirectories"""
             total_videos = 0
             for directory in self.selected_dirs:
                 videos, _, _ = gather_videos_with_directories(directory)
@@ -389,7 +383,6 @@ def select_multiple_folders_and_play():
                 self.root.config(cursor="")
 
         def on_directory_select(self, event):
-            """Handle directory selection to show subdirectories"""
             selection = self.dir_listbox.curselection()
             if not selection:
                 if self.current_selected_dir_index is not None:
@@ -408,7 +401,6 @@ def select_multiple_folders_and_play():
             self.load_subdirectories(selected_dir)
 
         def get_all_subdirectories(self, directory, prefix="", max_depth=10, current_depth=0):
-            """Recursively get all subdirectories with their relative paths"""
             if current_depth >= max_depth:
                 return []
 
@@ -434,13 +426,11 @@ def select_multiple_folders_and_play():
             return subdirs
 
         def clear_exclusion_list(self):
-            """Clear the exclusion list when no directory is selected"""
             self.selected_dir_label.config(text="Select a directory to see its subdirectories")
             self.exclusion_listbox.delete(0, tk.END)
             self.current_subdirs_mapping = {}
 
         def exclude_subdirectories(self):
-            """Exclude selected subdirectories from video playback"""
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
                 messagebox.showinfo("Information", "Please select a directory first.")
@@ -469,7 +459,6 @@ def select_multiple_folders_and_play():
                 messagebox.showerror("Error", f"Error excluding subdirectories: {str(e)}")
 
         def include_subdirectories(self):
-            """Include previously excluded subdirectories back into video playback"""
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
                 messagebox.showinfo("Information", "Please select a directory first.")
@@ -501,19 +490,16 @@ def select_multiple_folders_and_play():
                 messagebox.showerror("Error", f"Error including subdirectories: {str(e)}")
 
         def expand_all_directories(self):
-            """Expand the view to show more nested directories"""
             selected_dir = self.get_current_selected_directory()
             if selected_dir:
                 self.load_subdirectories(selected_dir, max_depth=20)
 
         def collapse_all_directories(self):
-            """Collapse the view to show only immediate subdirectories"""
             selected_dir = self.get_current_selected_directory()
             if selected_dir:
                 self.load_subdirectories(selected_dir, max_depth=2)
 
         def clear_all_exclusions(self):
-            """Clear all exclusions for the currently selected directory"""
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
                 messagebox.showinfo("Information", "Please select a directory first.")
@@ -530,7 +516,6 @@ def select_multiple_folders_and_play():
                     self.update_video_count()
 
         def load_subdirectories(self, directory, max_depth=10):
-            """Load and display all subdirectories (including nested ones) of the selected directory"""
             self.selected_dir_label.config(text=f"All subdirectories in: {os.path.basename(directory)}")
             self.exclusion_listbox.delete(0, tk.END)
 
