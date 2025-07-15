@@ -205,7 +205,23 @@ def select_multiple_folders_and_play():
                 pady=5,
                 cursor="hand2"
             )
+            self.include_button.pack(side=tk.LEFT, padx=(0, 5))
 
+            self.exclude_all_button = tk.Button(
+                buttons_row1,
+                text="Exclude All",
+                command=self.exclude_all_subdirectories,
+                font=self.normal_font,
+                bg="#e67e22",
+                fg="white",
+                activebackground="#d35400",
+                activeforeground="white",
+                relief=tk.FLAT,
+                padx=10,
+                pady=5,
+                cursor="hand2"
+            )
+            self.exclude_all_button.pack(side=tk.LEFT)
 
             buttons_row2 = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
             buttons_row2.pack(fill=tk.X)
@@ -256,7 +272,6 @@ def select_multiple_folders_and_play():
                 pady=3,
                 cursor="hand2"
             )
-            self.include_button.pack(side=tk.LEFT)
             self.clear_exclusions_button.pack(side=tk.LEFT)
 
         def get_current_selected_directory(self):
@@ -430,6 +445,21 @@ def select_multiple_folders_and_play():
             self.exclusion_listbox.delete(0, tk.END)
             self.current_subdirs_mapping = {}
 
+        def exclude_all_subdirectories(self):
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                messagebox.showinfo("Information", "Please select a directory first.")
+                return
+
+            all_subdirs = self.get_all_subdirectories(selected_dir)
+            if not all_subdirs:
+                messagebox.showinfo("Information", "Please select a directory first.")
+
+            self.excluded_subdirs[selected_dir] = [path for path, _ in all_subdirs]
+            self.load_subdirectories(selected_dir)
+            self.update_video_count()
+            self.exclusion_listbox.selection_clear(0, tk.END)
+
         def exclude_subdirectories(self):
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
@@ -454,6 +484,7 @@ def select_multiple_folders_and_play():
 
                 self.load_subdirectories(selected_dir)
                 self.update_video_count()
+                self.exclusion_listbox.selection_clear(0, tk.END)
 
             except Exception as e:
                 messagebox.showerror("Error", f"Error excluding subdirectories: {str(e)}")
@@ -485,6 +516,7 @@ def select_multiple_folders_and_play():
 
                 self.load_subdirectories(selected_dir)
                 self.update_video_count()
+                self.exclusion_listbox.selection_clear(0, tk.END)
 
             except Exception as e:
                 messagebox.showerror("Error", f"Error including subdirectories: {str(e)}")
@@ -533,20 +565,14 @@ def select_multiple_folders_and_play():
                     indented_name = "  " * indent_level + display_name.split('/')[-1]
 
                     if subdir_path in excluded_set:
-                        indented_name += " [EXCLUDED]"
+                        indented_name += "🚫[EXCLUDED]"
 
                     self.exclusion_listbox.insert(tk.END, indented_name)
-
-                    if subdir_path in excluded_set:
-                        self.exclusion_listbox.selection_set(tk.END)
-
                 self.current_subdirs_mapping = {i: subdir_path for i, (subdir_path, _) in enumerate(all_subdirs)}
 
             except Exception as e:
                 self.exclusion_listbox.insert(tk.END, f"Error loading subdirectories: {str(e)}")
                 self.current_subdirs_mapping = {}
-
-
 
         def setup_controls_info(self):
             controls_header = tk.Label(self.main_frame, text="Keyboard Controls",
@@ -719,7 +745,6 @@ def select_multiple_folders_and_play():
 
             self.update_video_count()
             self.clear_exclusion_list()
-
 
         def cancel(self):
             if self.controller:
