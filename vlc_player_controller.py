@@ -26,7 +26,7 @@ class MonitorInfo:
 
 
 class BaseVLCPlayerController:
-    def __init__(self, videos):
+    def __init__(self, videos, logger=None):
         self.monitor_info = MonitorInfo()
         x, y, width, height = self.monitor_info.monitor1
 
@@ -39,6 +39,7 @@ class BaseVLCPlayerController:
         self.running = True
         self.fullscreen_enabled = False
         self.current_monitor = 1
+        self.logger = logger
 
 
     def _play_video(self, media):
@@ -81,14 +82,16 @@ class BaseVLCPlayerController:
         with self.lock:
             self.volume = min(100, self.volume + 10)
             self.player.audio_set_volume(self.volume)
-            print(f"Volume: {self.volume}")
+            if self.logger:
+                self.logger(f"Volume set to: {self.volume}")
 
 
     def volume_down(self):
         with self.lock:
             self.volume = max(0, self.volume - 10)
             self.player.audio_set_volume(self.volume)
-            print(f"Volume: {self.volume}")
+            if self.logger:
+                self.logger(f"Volume set to: {self.volume}")
 
 
     def toggle_fullscreen(self):
@@ -96,17 +99,20 @@ class BaseVLCPlayerController:
             self.fullscreen_enabled = not self.fullscreen_enabled
             self.player.set_fullscreen(self.fullscreen_enabled)
 
-            print(f"Fullscreen set to {self.fullscreen_enabled}")
+            if self.logger:
+                self.logger(f"Fullscreen Mode is {'On' if self.fullscreen_enabled else 'Off'}")
 
 
     def toggle_pause(self):
         with self.lock:
             if self.player.is_playing():
                 self.player.pause()
-                print("Paused")
+                if self.logger:
+                    self.logger("Video Paused")
             else:
                 self.player.play()
-                print("Resumed")
+                if self.logger:
+                    self.logger("Video Resumed")
 
 
     def fast_forward(self):
@@ -117,7 +123,8 @@ class BaseVLCPlayerController:
             if 0 < length < new_time:
                 new_time = length - 20
             self.player.set_time(new_time)
-            print(f"Fast forward to {new_time / 20:.1f}s")
+            if self.logger:
+                self.logger(f"Fast forward to {new_time / 1000:.1f}s")
 
 
     def rewind(self):
@@ -125,7 +132,8 @@ class BaseVLCPlayerController:
             current_time = self.player.get_time()
             new_time = max(0, current_time - 200)
             self.player.set_time(new_time)
-            print(f"Rewind to {new_time / 20:.1f}s")
+            if self.logger:
+                self.logger(f"Rewind to {new_time / 1000:.1f}s")
 
 
     def run(self):
@@ -137,8 +145,6 @@ class BaseVLCPlayerController:
 
     def switch_to_monitor(self, monitor_number):
         with self.lock:
-            print(f"Switching to monitor {monitor_number} by recreating player")
-
             current_position = self.player.get_time()
             current_media = self.player.get_media()
             was_playing = self.player.is_playing()
@@ -164,7 +170,8 @@ class BaseVLCPlayerController:
                     time.sleep(0.02)
                     self.player.pause()
 
-            print(f"Switched to monitor {monitor_number}")
+            if self.logger:
+                self.logger(f"Switched to monitor {monitor_number}")
 
     def take_screenshot(self):
         with self.lock:
@@ -178,20 +185,23 @@ class BaseVLCPlayerController:
                 screenshot_path = os.path.join(video_dir, screenshot_filename)
 
                 self.player.video_take_snapshot(0, screenshot_path, 0, 0)
-                print(f"Screenshot saved: {screenshot_path}")
+                if self.logger:
+                   self.logger(f"Screenshot saved: {screenshot_path}")
 
             except Exception as e:
-                print(f"Error taking screenshot: {e}")
+                if self.logger:
+                    self.logger(f"Error taking screenshot: {e}")
 
     def stop_video(self):
         with self.lock:
             self.player.stop()
-            print("Video stopped")
+            if self.logger:
+                self.logger("Video player stopped")
 
 
 class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
-    def __init__(self, videos, video_to_dir, directories):
-        super(VLCPlayerControllerForMultipleDirectory, self).__init__(videos)
+    def __init__(self, videos, video_to_dir, directories, logger=None):
+        super(VLCPlayerControllerForMultipleDirectory, self).__init__(videos, logger)
         self.video_to_dir = video_to_dir
         self.directories = directories
 
@@ -237,19 +247,23 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
         next_index = self.find_next_directory_video()
         if next_index is not None:
             next_dir = self.video_to_dir[self.videos[next_index]]
-            print(f"Skipping to next directory: {next_dir}")
+            if self.logger:
+                self.logger(f"Skipping to next directory: {next_dir}")
             self.play_video(next_index)
         else:
-            print("No next directory found")
+            if self.logger:
+                self.logger("No next directory found")
 
     def prev_directory(self):
         prev_index = self.find_prev_directory_video()
         if prev_index is not None:
             prev_dir = self.video_to_dir[self.videos[prev_index]]
-            print(f"Skipping to previous directory: {prev_dir}")
+            if self.logger:
+                self.logger(f"Skipping to previous directory: {prev_dir}")
             self.play_video(prev_index)
         else:
-            print("No previous directory found")
+            if self.logger:
+                self.logger("No previous directory found")
 
     def play_video(self, index):
         with self.lock:
@@ -258,7 +272,8 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
             self.index = index
             current_video = self.videos[self.index]
             current_dir = self.video_to_dir[current_video]
-            print(f"Playing: {os.path.basename(current_video)} from {current_dir}")
+            if self.logger:
+                self.logger(f"Playing: {os.path.basename(current_video)} from {current_dir}")
 
             media = self.instance.media_new(current_video)
             return self._play_video(media)

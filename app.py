@@ -1,5 +1,6 @@
 import threading
 import tkinter as tk
+from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
 from tkinter.font import Font
 import os
@@ -21,25 +22,20 @@ def select_multiple_folders_and_play():
             self.video_count = 0
             self.current_selected_dir_index = None
             self.current_subdirs_mapping = {}
-
             self.setup_theme()
 
-            root.title("Video Player")
-            root.geometry("1200x800")
+            root.title("Recursive Video Player")
+            root.geometry("1600x900")
             root.protocol("WM_DELETE_WINDOW", self.cancel)
             root.configure(bg=self.bg_color)
 
             self.setup_main_layout()
-
             self.setup_directory_section()
-
             self.setup_exclusion_section()
-
-            self.setup_controls_info()
-
-            self.setup_action_buttons()
-
             self.setup_status_section()
+            self.setup_console_section()
+            self.setup_controls_info()
+            self.setup_action_buttons()
 
         def setup_theme(self):
             self.bg_color = "#f5f5f5"
@@ -71,6 +67,85 @@ def select_multiple_folders_and_play():
 
             self.content_frame = tk.Frame(self.main_frame, bg=self.bg_color)
             self.content_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+
+
+        def setup_console_section(self):
+            console_section = tk.Frame(self.main_frame, bg=self.bg_color)
+            console_section.pack(fill=tk.X, pady=(0, 15))
+
+            console_header = tk.Label(console_section, text="Player Console",
+                                      font=self.header_font, bg=self.bg_color, fg=self.text_color)
+            console_header.pack(anchor='w', pady=(0, 10))
+
+            console_container = tk.Frame(console_section, bg=self.bg_color,
+                                         highlightbackground="#cccccc",
+                                         highlightthickness=1)
+            console_container.pack(fill=tk.X, pady=(0, 10))
+
+            console_frame = tk.Frame(console_container, bg=self.bg_color)
+            console_frame.pack(fill=tk.BOTH, expand=True)
+
+            self.console_scrollbar = tk.Scrollbar(console_frame)
+            self.console_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+            self.console_text = tk.Text(
+                console_frame,
+                height=8,
+                wrap=tk.WORD,
+                yscrollcommand=self.console_scrollbar.set,
+                font=self.mono_font,
+                bg="#2c3e50",
+                fg="#ecf0f1",
+                insertbackground="#ecf0f1",
+                selectbackground="#34495e",
+                selectforeground="#ecf0f1",
+                relief=tk.FLAT,
+                bd=0,
+                padx=10,
+                pady=10,
+                state=tk.DISABLED
+            )
+            self.console_text.pack(fill=tk.BOTH, expand=True)
+            self.console_scrollbar.config(command=self.console_text.yview)
+
+            console_button_frame = tk.Frame(console_section, bg=self.bg_color)
+            console_button_frame.pack(fill=tk.X)
+
+            self.clear_console_button = tk.Button(
+                console_button_frame,
+                text="Clear Console",
+                command=self.clear_console,
+                font=self.small_font,
+                bg="#34495e",
+                fg="white",
+                activebackground="#2c3e50",
+                activeforeground="white",
+                relief=tk.FLAT,
+                padx=10,
+                pady=3,
+                cursor="hand2"
+            )
+            self.clear_console_button.pack(side=tk.LEFT)
+
+            self.update_console("Video Player Console Ready")
+            self.update_console("Select directories and click 'Play Videos' to start")
+
+        def update_console(self, message):
+            def _update():
+                self.console_text.config(state=tk.NORMAL)
+                timestamp = datetime.now().strftime("%H:%M:%S")
+                formatted_message = f"[{timestamp}] {message}\n"
+                self.console_text.insert(tk.END, formatted_message)
+                self.console_text.see(tk.END)
+                self.console_text.config(state=tk.DISABLED)
+
+            self.root.after(0, _update)
+
+        def clear_console(self):
+            self.console_text.config(state=tk.NORMAL)
+            self.console_text.delete(1.0, tk.END)
+            self.console_text.config(state=tk.DISABLED)
+            self.update_console("Console cleared")
 
         def setup_directory_section(self):
             self.dir_section = tk.Frame(self.content_frame, bg=self.bg_color)
@@ -323,12 +398,14 @@ def select_multiple_folders_and_play():
                             subdir_path_norm.startswith(target_path_norm + os.sep)):
                         subdirs.append(subdir_path)
             except Exception as e:
-                print(f"Error getting subdirectories of {target_path}: {e}")
+                self.update_console(f"Error getting subdirectories of {target_path}: {e}")
 
             return subdirs
 
         def update_video_count(self):
             total_videos = 0
+            total_excluded = 0
+
             for directory in self.selected_dirs:
                 videos, _, _ = gather_videos_with_directories(directory)
 
@@ -345,6 +422,12 @@ def select_multiple_folders_and_play():
             self.video_count = total_videos
             self.video_count_label.config(text=f"Total Videos: {self.video_count}")
 
+            if total_excluded > 0:
+                self.update_console(
+                    f"Total: {total_videos} videos selected, {total_excluded} excluded from {len(self.selected_dirs)} directories")
+            else:
+                self.update_console(f"Total: {total_videos} videos selected from {len(self.selected_dirs)} directories")
+
         def play_videos(self):
             if not self.selected_dirs:
                 messagebox.showwarning("No Directories", "Please select at least one directory.")
@@ -360,6 +443,9 @@ def select_multiple_folders_and_play():
             self.root.config(cursor="wait")
             self.root.update()
 
+            self.update_console("=" * 100)
+            self.update_console("STARTING VIDEO PLAYBACK")
+            self.update_console("=" * 100)
             try:
                 for directory in self.selected_dirs:
                     videos, video_to_dir, directories = gather_videos_with_directories(directory)
@@ -387,19 +473,19 @@ def select_multiple_folders_and_play():
                         all_video_to_dir.update(video_to_dir)
                         all_directories.extend(directories)
 
-                    print(f"Found {len(videos)} videos in {len(directories)} directories from {directory}")
+                    self.update_console(f"Found {len(videos)} videos in {len(directories)} directories from {directory}")
                     if excluded_subdirs:
                         excluded_count = len(videos) - len(filtered_videos if excluded_subdirs else videos)
-                        print(f"Excluded {excluded_count} videos from {len(excluded_subdirs)} subdirectories")
+                        self.update_console(f"Excluded {excluded_count} videos from {len(excluded_subdirs)} subdirectories")
 
                 all_directories = sorted(list(set(all_directories)))
 
                 if not all_videos:
-                    print("No videos found in the selected directories.")
                     messagebox.showwarning("No Videos", "No videos found in the selected directories.")
                     return
 
-                self.controller = VLCPlayerControllerForMultipleDirectory(all_videos, all_video_to_dir, all_directories)
+                self.update_console(f"Playing from {len(all_directories)} directories")
+                self.controller = VLCPlayerControllerForMultipleDirectory(all_videos, all_video_to_dir, all_directories, self.update_console)
 
                 if self.player_thread and self.player_thread.is_alive():
                     self.controller.running = False
@@ -431,7 +517,7 @@ def select_multiple_folders_and_play():
             selected_dir = self.selected_dirs[selected_index]
             self.load_subdirectories(selected_dir)
 
-        def get_all_subdirectories(self, directory, prefix="", max_depth=10, current_depth=0):
+        def get_all_subdirectories(self, directory, prefix="", max_depth=20, current_depth=0):
             if current_depth >= max_depth:
                 return []
 
@@ -473,6 +559,9 @@ def select_multiple_folders_and_play():
                 return
 
             self.excluded_subdirs[selected_dir] = [path for path, _ in all_subdirs]
+            self.update_console(
+                f"Excluded ALL {len(all_subdirs)} subdirectories from '{os.path.basename(selected_dir)}'")
+
             self.load_subdirectories(selected_dir)
             self.update_video_count()
             self.exclusion_listbox.selection_clear(0, tk.END)
@@ -494,16 +583,24 @@ def select_multiple_folders_and_play():
 
             try:
                 dirs_to_exclude = set()
+                selected_names = []
 
                 for index in exclusion_selection:
                     if index in self.current_subdirs_mapping:
                         target_path = self.current_subdirs_mapping[index]
                         nested_dirs = self.get_all_subdirectories_of_path(selected_dir, target_path)
                         dirs_to_exclude.update(nested_dirs)
+                        selected_names.append(os.path.basename(target_path))
 
+                excluded_count = 0
                 for dir_path in dirs_to_exclude:
                     if dir_path not in self.excluded_subdirs[selected_dir]:
                         self.excluded_subdirs[selected_dir].append(dir_path)
+                        excluded_count += 1
+
+                if excluded_count > 0:
+                    self.update_console(
+                        f"Excluded {excluded_count} subdirectories from '{os.path.basename(selected_dir)}': {', '.join(selected_names)}")
 
                 self.load_subdirectories(selected_dir)
                 self.update_video_count()
@@ -529,16 +626,24 @@ def select_multiple_folders_and_play():
 
             try:
                 dirs_to_include = set()
+                selected_names = []
 
                 for index in exclusion_selection:
                     if index in self.current_subdirs_mapping:
                         target_path = self.current_subdirs_mapping[index]
                         nested_dirs = self.get_all_subdirectories_of_path(selected_dir, target_path)
                         dirs_to_include.update(nested_dirs)
+                        selected_names.append(os.path.basename(target_path))
 
+                included_count = 0
                 for dir_path in dirs_to_include:
                     if dir_path in self.excluded_subdirs[selected_dir]:
                         self.excluded_subdirs[selected_dir].remove(dir_path)
+                        included_count += 1
+
+                if included_count > 0:
+                    self.update_console(
+                        f"Included {included_count} subdirectories in '{os.path.basename(selected_dir)}': {', '.join(selected_names)}")
 
                 if not self.excluded_subdirs[selected_dir]:
                     del self.excluded_subdirs[selected_dir]
@@ -558,7 +663,7 @@ def select_multiple_folders_and_play():
         def collapse_all_directories(self):
             selected_dir = self.get_current_selected_directory()
             if selected_dir:
-                self.load_subdirectories(selected_dir, max_depth=2)
+                self.load_subdirectories(selected_dir, max_depth=1)
 
         def clear_all_exclusions(self):
             selected_dir = self.get_current_selected_directory()
@@ -567,16 +672,19 @@ def select_multiple_folders_and_play():
                 return
 
             if selected_dir in self.excluded_subdirs:
+                excluded_count = len(self.excluded_subdirs[selected_dir])
                 result = messagebox.askyesno(
                     "Confirm",
                     f"Clear all exclusions for {os.path.basename(selected_dir)}?"
                 )
                 if result:
                     del self.excluded_subdirs[selected_dir]
+                    self.update_console(
+                        f"Cleared all {excluded_count} exclusions for '{os.path.basename(selected_dir)}'")
                     self.load_subdirectories(selected_dir)
                     self.update_video_count()
 
-        def load_subdirectories(self, directory, max_depth=10):
+        def load_subdirectories(self, directory, max_depth=20):
             self.selected_dir_label.config(text=f"All subdirectories in: {os.path.basename(directory)}")
             self.exclusion_listbox.delete(0, tk.END)
 
@@ -751,6 +859,9 @@ def select_multiple_folders_and_play():
                     display_name = f".../{display_name}"
 
                 self.dir_listbox.insert(tk.END, display_name)
+                videos, _, _ = gather_videos_with_directories(directory)
+                self.update_console(f"Added directory: {directory}")
+                self.update_console(f"Found {len(videos)} videos in '{os.path.basename(directory)}'")
                 self.update_video_count()
 
         def remove_directory(self):
@@ -761,8 +872,11 @@ def select_multiple_folders_and_play():
 
             for i in sorted(selected_indices, reverse=True):
                 dir_to_remove = self.selected_dirs[i]
+                self.update_console(f"Removed directory: {os.path.basename(dir_to_remove)}")
 
                 if dir_to_remove in self.excluded_subdirs:
+                    excluded_count = len(self.excluded_subdirs[dir_to_remove])
+                    self.update_console(f"Cleared {excluded_count} exclusions for '{os.path.basename(dir_to_remove)}'")
                     del self.excluded_subdirs[dir_to_remove]
 
                 self.dir_listbox.delete(i)
