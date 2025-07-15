@@ -311,6 +311,22 @@ def select_multiple_folders_and_play():
 
             return False
 
+        def get_all_subdirectories_of_path(self, parent_path, target_path):
+            subdirs = []
+            try:
+                all_subdirs = self.get_all_subdirectories(parent_path)
+
+                target_path_norm = os.path.normpath(target_path)
+                for subdir_path, _ in all_subdirs:
+                    subdir_path_norm = os.path.normpath(subdir_path)
+                    if (subdir_path_norm == target_path_norm or
+                            subdir_path_norm.startswith(target_path_norm + os.sep)):
+                        subdirs.append(subdir_path)
+            except Exception as e:
+                print(f"Error getting subdirectories of {target_path}: {e}")
+
+            return subdirs
+
         def update_video_count(self):
             total_videos = 0
             for directory in self.selected_dirs:
@@ -453,7 +469,8 @@ def select_multiple_folders_and_play():
 
             all_subdirs = self.get_all_subdirectories(selected_dir)
             if not all_subdirs:
-                messagebox.showinfo("Information", "Please select a directory first.")
+                messagebox.showinfo("Information", "No subdirectories found in the selected directory.")
+                return
 
             self.excluded_subdirs[selected_dir] = [path for path, _ in all_subdirs]
             self.load_subdirectories(selected_dir)
@@ -476,11 +493,17 @@ def select_multiple_folders_and_play():
                 self.excluded_subdirs[selected_dir] = []
 
             try:
+                dirs_to_exclude = set()
+
                 for index in exclusion_selection:
                     if index in self.current_subdirs_mapping:
-                        subdir_path = self.current_subdirs_mapping[index]
-                        if subdir_path not in self.excluded_subdirs[selected_dir]:
-                            self.excluded_subdirs[selected_dir].append(subdir_path)
+                        target_path = self.current_subdirs_mapping[index]
+                        nested_dirs = self.get_all_subdirectories_of_path(selected_dir, target_path)
+                        dirs_to_exclude.update(nested_dirs)
+
+                for dir_path in dirs_to_exclude:
+                    if dir_path not in self.excluded_subdirs[selected_dir]:
+                        self.excluded_subdirs[selected_dir].append(dir_path)
 
                 self.load_subdirectories(selected_dir)
                 self.update_video_count()
@@ -505,11 +528,17 @@ def select_multiple_folders_and_play():
                 return
 
             try:
+                dirs_to_include = set()
+
                 for index in exclusion_selection:
                     if index in self.current_subdirs_mapping:
-                        subdir_path = self.current_subdirs_mapping[index]
-                        if subdir_path in self.excluded_subdirs[selected_dir]:
-                            self.excluded_subdirs[selected_dir].remove(subdir_path)
+                        target_path = self.current_subdirs_mapping[index]
+                        nested_dirs = self.get_all_subdirectories_of_path(selected_dir, target_path)
+                        dirs_to_include.update(nested_dirs)
+
+                for dir_path in dirs_to_include:
+                    if dir_path in self.excluded_subdirs[selected_dir]:
+                        self.excluded_subdirs[selected_dir].remove(dir_path)
 
                 if not self.excluded_subdirs[selected_dir]:
                     del self.excluded_subdirs[selected_dir]
