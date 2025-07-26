@@ -5,12 +5,7 @@ hotkey_refs = []
 def listen_keys(controller, multi_directory=True):
     global hotkey_refs
 
-    for ref in hotkey_refs:
-        try:
-            keyboard.remove_hotkey(ref)
-        except KeyError:
-            pass
-    hotkey_refs.clear()
+    cleanup_hotkeys()
 
     hotkey_refs.append(keyboard.add_hotkey('esc', lambda: controller.stop_video()))
     hotkey_refs.append(keyboard.add_hotkey('d', lambda: controller.next_video()))
@@ -28,3 +23,14 @@ def listen_keys(controller, multi_directory=True):
     if multi_directory:
         hotkey_refs.append(keyboard.add_hotkey('e', lambda: controller.next_directory()))
         hotkey_refs.append(keyboard.add_hotkey('q', lambda: controller.prev_directory()))
+
+
+def cleanup_hotkeys():
+    global hotkey_refs
+
+    for ref in hotkey_refs:
+        try:
+            keyboard.remove_hotkey(ref)
+        except (KeyError, ValueError):
+            pass
+    hotkey_refs.clear()

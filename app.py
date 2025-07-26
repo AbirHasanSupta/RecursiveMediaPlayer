@@ -5,7 +5,7 @@ from tkinter import filedialog, messagebox, ttk
 from tkinter.font import Font
 import os
 
-from key_press import listen_keys
+from key_press import listen_keys, cleanup_hotkeys
 from utils import gather_videos_with_directories
 from vlc_player_controller import VLCPlayerControllerForMultipleDirectory
 
@@ -435,6 +435,7 @@ def select_multiple_folders_and_play():
 
             if self.controller:
                 self.controller.stop()
+                cleanup_hotkeys()
 
             all_videos = []
             all_video_to_dir = {}
@@ -892,6 +893,7 @@ def select_multiple_folders_and_play():
         def cancel(self):
             if self.controller:
                 self.controller.stop()
+            cleanup_hotkeys()
             self.root.quit()
             self.root.destroy()
 

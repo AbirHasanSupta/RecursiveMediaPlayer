@@ -6,6 +6,7 @@ import threading
 from screeninfo import get_monitors
 from datetime import datetime
 
+from key_press import cleanup_hotkeys
 
 
 class MonitorInfo:
@@ -77,6 +78,7 @@ class BaseVLCPlayerController:
         with self.lock:
             self.running = False
             self.player.stop()
+            cleanup_hotkeys()
 
     def volume_up(self):
         with self.lock:
@@ -194,9 +196,11 @@ class BaseVLCPlayerController:
 
     def stop_video(self):
         with self.lock:
+            self.running = False
             self.player.stop()
             if self.logger:
                 self.logger("Video player stopped")
+            cleanup_hotkeys()
 
 
 class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
