@@ -1,7 +1,6 @@
 import os
 import fnmatch
 
-
 VIDEO_EXTENSIONS = ['*.mp4', '*.mkv', '*.avi', '*.mov', '*.wmv', '*.flv']
 
 
@@ -39,4 +38,3 @@ def gather_videos_with_directories(directory):
 def gather_videos(directory):
     videos, _, _ = gather_videos_with_directories(directory)
     return videos
-

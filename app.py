@@ -68,7 +68,6 @@ def select_multiple_folders_and_play():
             self.content_frame = tk.Frame(self.main_frame, bg=self.bg_color)
             self.content_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
 
-
         def setup_console_section(self):
             console_section = tk.Frame(self.main_frame, bg=self.bg_color)
             console_section.pack(fill=tk.X, pady=(0, 15))
@@ -474,10 +473,12 @@ def select_multiple_folders_and_play():
                         all_video_to_dir.update(video_to_dir)
                         all_directories.extend(directories)
 
-                    self.update_console(f"Found {len(videos)} videos in {len(directories)} directories from {directory}")
+                    self.update_console(
+                        f"Found {len(videos)} videos in {len(directories)} directories from {directory}")
                     if excluded_subdirs:
                         excluded_count = len(videos) - len(filtered_videos if excluded_subdirs else videos)
-                        self.update_console(f"Excluded {excluded_count} videos from {len(excluded_subdirs)} subdirectories")
+                        self.update_console(
+                            f"Excluded {excluded_count} videos from {len(excluded_subdirs)} subdirectories")
 
                 all_directories = sorted(list(set(all_directories)))
 
@@ -486,7 +487,8 @@ def select_multiple_folders_and_play():
                     return
 
                 self.update_console(f"Playing from {len(all_directories)} directories")
-                self.controller = VLCPlayerControllerForMultipleDirectory(all_videos, all_video_to_dir, all_directories, self.update_console)
+                self.controller = VLCPlayerControllerForMultipleDirectory(all_videos, all_video_to_dir, all_directories,
+                                                                          self.update_console)
 
                 if self.player_thread and self.player_thread.is_alive():
                     self.controller.running = False

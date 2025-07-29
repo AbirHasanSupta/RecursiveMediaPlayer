@@ -25,7 +25,6 @@ class MonitorInfo:
             self.monitor2 = self.monitor1
 
 
-
 class BaseVLCPlayerController:
     def __init__(self, videos, logger=None):
         self.monitor_info = MonitorInfo()
@@ -41,7 +40,6 @@ class BaseVLCPlayerController:
         self.fullscreen_enabled = False
         self.current_monitor = 1
         self.logger = logger
-
 
     def _play_video(self, media):
         self.player.set_media(media)
@@ -87,14 +85,12 @@ class BaseVLCPlayerController:
             if self.logger:
                 self.logger(f"Volume set to: {self.volume}")
 
-
     def volume_down(self):
         with self.lock:
             self.volume = max(0, self.volume - 10)
             self.player.audio_set_volume(self.volume)
             if self.logger:
                 self.logger(f"Volume set to: {self.volume}")
-
 
     def toggle_fullscreen(self):
         with self.lock:
@@ -103,7 +99,6 @@ class BaseVLCPlayerController:
 
             if self.logger:
                 self.logger(f"Fullscreen Mode is {'On' if self.fullscreen_enabled else 'Off'}")
-
 
     def toggle_pause(self):
         with self.lock:
@@ -116,7 +111,6 @@ class BaseVLCPlayerController:
                 if self.logger:
                     self.logger("Video Resumed")
 
-
     def fast_forward(self):
         with self.lock:
             current_time = self.player.get_time()
@@ -128,7 +122,6 @@ class BaseVLCPlayerController:
             if self.logger:
                 self.logger(f"Fast forward to {new_time / 1000:.1f}s")
 
-
     def rewind(self):
         with self.lock:
             current_time = self.player.get_time()
@@ -136,7 +129,6 @@ class BaseVLCPlayerController:
             self.player.set_time(new_time)
             if self.logger:
                 self.logger(f"Rewind to {new_time / 1000:.1f}s")
-
 
     def run(self):
         self.play_video(self.index)
@@ -188,7 +180,7 @@ class BaseVLCPlayerController:
 
                 self.player.video_take_snapshot(0, screenshot_path, 0, 0)
                 if self.logger:
-                   self.logger(f"Screenshot saved: {screenshot_path}")
+                    self.logger(f"Screenshot saved: {screenshot_path}")
 
             except Exception as e:
                 if self.logger:
@@ -208,7 +200,6 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
         super(VLCPlayerControllerForMultipleDirectory, self).__init__(videos, logger)
         self.video_to_dir = video_to_dir
         self.directories = directories
-
 
     def get_current_directory(self):
         if self.index < len(self.videos):
@@ -281,5 +272,3 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
 
             media = self.instance.media_new(current_video)
             return self._play_video(media)
-
-
