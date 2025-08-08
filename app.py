@@ -6,7 +6,7 @@ from tkinter.font import Font
 import os
 
 from key_press import listen_keys, cleanup_hotkeys
-from utils import gather_videos_with_directories
+from utils import gather_videos_with_directories, is_video
 from vlc_player_controller import VLCPlayerControllerForMultipleDirectory
 
 
@@ -529,7 +529,7 @@ def select_multiple_folders_and_play():
                 items = sorted(os.listdir(directory))
                 for item in items:
                     item_path = os.path.join(directory, item)
-                    if os.path.isdir(item_path):
+                    if os.path.isdir(item_path) or is_video(item_path):
                         display_name = prefix + item
                         subdirs.append((item_path, display_name))
 
@@ -701,8 +701,13 @@ def select_multiple_folders_and_play():
                 excluded_set = set(self.excluded_subdirs.get(directory, []))
 
                 for subdir_path, display_name in all_subdirs:
+
                     indent_level = display_name.count('/')
-                    indented_name = "  " * indent_level + display_name.split('/')[-1]
+                    indented_name = "  " * indent_level
+                    if os.path.isdir(subdir_path):
+                        indented_name += '📁' + display_name.split('/')[-1]
+                    else:
+                        indented_name += '▶' + display_name.split('/')[-1]
 
                     if subdir_path in excluded_set:
                         indented_name += "🚫[EXCLUDED]"
