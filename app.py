@@ -23,6 +23,8 @@ def select_multiple_folders_and_play():
             self.video_count = 0
             self.current_selected_dir_index = None
             self.current_subdirs_mapping = {}
+            self.show_videos = True
+            self.current_max_depth = 20
             self.setup_theme()
 
             root.title("Recursive Video Player")
@@ -332,6 +334,22 @@ def select_multiple_folders_and_play():
                 cursor="hand2"
             )
             self.collapse_all_button.pack(side=tk.LEFT, padx=(0, 5))
+
+            self.toggle_videos_button = tk.Button(
+                buttons_row2,
+                text="Hide Videos",
+                command=self.toggle_videos_visibility,
+                font=self.small_font,
+                bg="#95a5a6",
+                fg="white",
+                activebackground="#7f8c8d",
+                activeforeground="white",
+                relief=tk.FLAT,
+                padx=8,
+                pady=3,
+                cursor="hand2"
+            )
+            self.toggle_videos_button.pack(side=tk.LEFT, padx=(0, 5))
 
             self.clear_exclusions_button = tk.Button(
                 buttons_row2,
@@ -680,7 +698,7 @@ def select_multiple_folders_and_play():
                         selected_names.append(os.path.basename(target_path))
 
                 included_count = 0
-                # Remove directories
+
                 if selected_dir in self.excluded_subdirs:
                     for dir_path in list(dirs_to_include):
                         if dir_path in self.excluded_subdirs[selected_dir]:
@@ -718,6 +736,16 @@ def select_multiple_folders_and_play():
             if selected_dir:
                 self.load_subdirectories(selected_dir, max_depth=1)
 
+        def toggle_videos_visibility(self):
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                messagebox.showinfo("Information", "Please select a directory first.")
+                return
+            self.show_videos = not self.show_videos
+            if hasattr(self, 'toggle_videos_button'):
+                self.toggle_videos_button.config(text=("Hide Videos" if self.show_videos else "Show Videos"))
+            self.load_subdirectories(selected_dir, max_depth=self.current_max_depth)
+
         def clear_all_exclusions(self):
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
@@ -744,6 +772,7 @@ def select_multiple_folders_and_play():
                     self.update_video_count()
 
         def load_subdirectories(self, directory, max_depth=20):
+            self.current_max_depth = max_depth
             self.selected_dir_label.config(text=f"All items in: {os.path.basename(directory)}")
             self.exclusion_listbox.delete(0, tk.END)
 
@@ -752,12 +781,16 @@ def select_multiple_folders_and_play():
 
                 if not all_subdirs:
                     self.exclusion_listbox.insert(tk.END, "No items found")
+                    self.current_subdirs_mapping = {}
                     return
 
                 excluded_dir_set = set(self.excluded_subdirs.get(directory, []))
                 excluded_vid_set = set(self.excluded_videos.get(directory, []))
 
+                visible_items = []
                 for subdir_path, display_name in all_subdirs:
+                    if not self.show_videos and not os.path.isdir(subdir_path):
+                        continue
 
                     indent_level = display_name.count('/')
                     indented_name = "  " * indent_level
@@ -769,8 +802,12 @@ def select_multiple_folders_and_play():
                     if (subdir_path in excluded_dir_set) or (subdir_path in excluded_vid_set):
                         indented_name += "🚫[EXCLUDED]"
 
+                    visible_items.append((subdir_path, indented_name))
+
+                for _, indented_name in visible_items:
                     self.exclusion_listbox.insert(tk.END, indented_name)
-                self.current_subdirs_mapping = {i: subdir_path for i, (subdir_path, _) in enumerate(all_subdirs)}
+
+                self.current_subdirs_mapping = {i: path for i, (path, _) in enumerate(visible_items)}
 
             except Exception as e:
                 self.exclusion_listbox.insert(tk.END, f"Error loading subdirectories: {str(e)}")
