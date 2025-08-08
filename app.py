@@ -16,6 +16,7 @@ def select_multiple_folders_and_play():
             self.root = root
             self.selected_dirs = []
             self.excluded_subdirs = {}
+            self.excluded_videos = {}
             self.controller = None
             self.player_thread = None
             self.keys_thread = None
@@ -201,13 +202,13 @@ def select_multiple_folders_and_play():
             self.exclusion_section = tk.Frame(self.content_frame, bg=self.bg_color)
             self.exclusion_section.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(10, 0))
 
-            exclusion_header = tk.Label(self.exclusion_section, text="Exclude Subdirectories",
+            exclusion_header = tk.Label(self.exclusion_section, text="Exclude Subdirectories and Videos",
                                         font=self.header_font, bg=self.bg_color, fg=self.text_color)
             exclusion_header.pack(anchor='w', pady=(0, 10))
 
             self.selected_dir_label = tk.Label(
                 self.exclusion_section,
-                text="Select a directory to see its subdirectories",
+                text="Select a directory to see its folders and videos",
                 font=self.small_font,
                 bg=self.bg_color,
                 fg="#666666"
@@ -372,6 +373,13 @@ def select_multiple_folders_and_play():
 
             return False
 
+        def is_video_excluded(self, root_dir, video_path):
+            excluded_videos = self.excluded_videos.get(root_dir, [])
+            if video_path in excluded_videos:
+                return True
+            excluded_subdirs = self.excluded_subdirs.get(root_dir, [])
+            return self.is_video_in_excluded_directory(video_path, excluded_subdirs)
+
         def is_directory_excluded(self, directory_path, excluded_subdirs):
             for excluded_subdir in excluded_subdirs:
                 excluded_subdir = os.path.normpath(excluded_subdir)
@@ -409,10 +417,11 @@ def select_multiple_folders_and_play():
                 videos, _, _ = gather_videos_with_directories(directory)
 
                 excluded_subdirs = self.excluded_subdirs.get(directory, [])
-                if excluded_subdirs:
+                excluded_videos = self.excluded_videos.get(directory, [])
+                if excluded_subdirs or excluded_videos:
                     filtered_videos = []
                     for video in videos:
-                        if not self.is_video_in_excluded_directory(video, excluded_subdirs):
+                        if not self.is_video_excluded(directory, video):
                             filtered_videos.append(video)
                     total_videos += len(filtered_videos)
                 else:
@@ -451,13 +460,14 @@ def select_multiple_folders_and_play():
                     videos, video_to_dir, directories = gather_videos_with_directories(directory)
 
                     excluded_subdirs = self.excluded_subdirs.get(directory, [])
-                    if excluded_subdirs:
+                    excluded_videos = self.excluded_videos.get(directory, [])
+                    if excluded_subdirs or excluded_videos:
                         filtered_videos = []
                         filtered_video_to_dir = {}
                         filtered_directories = []
 
                         for video in videos:
-                            if not self.is_video_in_excluded_directory(video, excluded_subdirs):
+                            if not self.is_video_excluded(directory, video):
                                 filtered_videos.append(video)
                                 filtered_video_to_dir[video] = video_to_dir[video]
 
@@ -475,10 +485,10 @@ def select_multiple_folders_and_play():
 
                     self.update_console(
                         f"Found {len(videos)} videos in {len(directories)} directories from {directory}")
-                    if excluded_subdirs:
-                        excluded_count = len(videos) - len(filtered_videos if excluded_subdirs else videos)
+                    if excluded_subdirs or excluded_videos:
+                        excluded_count = len(videos) - len(filtered_videos if (excluded_subdirs or excluded_videos) else videos)
                         self.update_console(
-                            f"Excluded {excluded_count} videos from {len(excluded_subdirs)} subdirectories")
+                            f"Excluded {excluded_count} videos via exclusions")
 
                 all_directories = sorted(list(set(all_directories)))
 
@@ -546,7 +556,7 @@ def select_multiple_folders_and_play():
             return subdirs
 
         def clear_exclusion_list(self):
-            self.selected_dir_label.config(text="Select a directory to see its subdirectories")
+            self.selected_dir_label.config(text="Select a directory to see its folders and videos")
             self.exclusion_listbox.delete(0, tk.END)
             self.current_subdirs_mapping = {}
 
@@ -561,9 +571,26 @@ def select_multiple_folders_and_play():
                 messagebox.showinfo("Information", "No subdirectories found in the selected directory.")
                 return
 
-            self.excluded_subdirs[selected_dir] = [path for path, _ in all_subdirs]
+            dir_paths = []
+            file_paths = []
+            for path, _ in all_subdirs:
+                if os.path.isdir(path):
+                    dir_paths.append(path)
+                else:
+                    file_paths.append(path)
+
+            if dir_paths:
+                self.excluded_subdirs[selected_dir] = dir_paths
+            if file_paths:
+                if selected_dir not in self.excluded_videos:
+                    self.excluded_videos[selected_dir] = []
+
+                for fp in file_paths:
+                    if fp not in self.excluded_videos[selected_dir]:
+                        self.excluded_videos[selected_dir].append(fp)
+
             self.update_console(
-                f"Excluded ALL {len(all_subdirs)} subdirectories from '{os.path.basename(selected_dir)}'")
+                f"Excluded ALL {len(all_subdirs)} items from '{os.path.basename(selected_dir)}'")
 
             self.load_subdirectories(selected_dir)
             self.update_video_count()
@@ -578,21 +605,27 @@ def select_multiple_folders_and_play():
             exclusion_selection = self.exclusion_listbox.curselection()
 
             if not exclusion_selection:
-                messagebox.showinfo("Information", "Please select subdirectories to exclude.")
+                messagebox.showinfo("Information", "Please select items to exclude.")
                 return
 
             if selected_dir not in self.excluded_subdirs:
                 self.excluded_subdirs[selected_dir] = []
+            if selected_dir not in self.excluded_videos:
+                self.excluded_videos[selected_dir] = []
 
             try:
                 dirs_to_exclude = set()
+                vids_to_exclude = set()
                 selected_names = []
 
                 for index in exclusion_selection:
                     if index in self.current_subdirs_mapping:
                         target_path = self.current_subdirs_mapping[index]
-                        nested_dirs = self.get_all_subdirectories_of_path(selected_dir, target_path)
-                        dirs_to_exclude.update(nested_dirs)
+                        if os.path.isdir(target_path):
+                            nested_dirs = self.get_all_subdirectories_of_path(selected_dir, target_path)
+                            dirs_to_exclude.update(nested_dirs)
+                        else:
+                            vids_to_exclude.add(target_path)
                         selected_names.append(os.path.basename(target_path))
 
                 excluded_count = 0
@@ -600,17 +633,21 @@ def select_multiple_folders_and_play():
                     if dir_path not in self.excluded_subdirs[selected_dir]:
                         self.excluded_subdirs[selected_dir].append(dir_path)
                         excluded_count += 1
+                for vp in vids_to_exclude:
+                    if vp not in self.excluded_videos[selected_dir]:
+                        self.excluded_videos[selected_dir].append(vp)
+                        excluded_count += 1
 
                 if excluded_count > 0:
                     self.update_console(
-                        f"Excluded {excluded_count} subdirectories from '{os.path.basename(selected_dir)}': {', '.join(selected_names)}")
+                        f"Excluded {excluded_count} item(s) from '{os.path.basename(selected_dir)}': {', '.join(selected_names)}")
 
                 self.load_subdirectories(selected_dir)
                 self.update_video_count()
                 self.exclusion_listbox.selection_clear(0, tk.END)
 
             except Exception as e:
-                messagebox.showerror("Error", f"Error excluding subdirectories: {str(e)}")
+                messagebox.showerror("Error", f"Error excluding items: {str(e)}")
 
         def include_subdirectories(self):
             selected_dir = self.get_current_selected_directory()
@@ -621,42 +658,55 @@ def select_multiple_folders_and_play():
             exclusion_selection = self.exclusion_listbox.curselection()
 
             if not exclusion_selection:
-                messagebox.showinfo("Information", "Please select subdirectories to include.")
+                messagebox.showinfo("Information", "Please select items to include.")
                 return
 
-            if selected_dir not in self.excluded_subdirs:
+            if selected_dir not in self.excluded_subdirs and selected_dir not in self.excluded_videos:
                 return
 
             try:
                 dirs_to_include = set()
+                vids_to_include = set()
                 selected_names = []
 
                 for index in exclusion_selection:
                     if index in self.current_subdirs_mapping:
                         target_path = self.current_subdirs_mapping[index]
-                        nested_dirs = self.get_all_subdirectories_of_path(selected_dir, target_path)
-                        dirs_to_include.update(nested_dirs)
+                        if os.path.isdir(target_path):
+                            nested_dirs = self.get_all_subdirectories_of_path(selected_dir, target_path)
+                            dirs_to_include.update(nested_dirs)
+                        else:
+                            vids_to_include.add(target_path)
                         selected_names.append(os.path.basename(target_path))
 
                 included_count = 0
-                for dir_path in dirs_to_include:
-                    if dir_path in self.excluded_subdirs[selected_dir]:
-                        self.excluded_subdirs[selected_dir].remove(dir_path)
-                        included_count += 1
+                # Remove directories
+                if selected_dir in self.excluded_subdirs:
+                    for dir_path in list(dirs_to_include):
+                        if dir_path in self.excluded_subdirs[selected_dir]:
+                            self.excluded_subdirs[selected_dir].remove(dir_path)
+                            included_count += 1
+                    if not self.excluded_subdirs[selected_dir]:
+                        del self.excluded_subdirs[selected_dir]
+
+                if selected_dir in self.excluded_videos:
+                    for vp in list(vids_to_include):
+                        if vp in self.excluded_videos[selected_dir]:
+                            self.excluded_videos[selected_dir].remove(vp)
+                            included_count += 1
+                    if not self.excluded_videos[selected_dir]:
+                        del self.excluded_videos[selected_dir]
 
                 if included_count > 0:
                     self.update_console(
-                        f"Included {included_count} subdirectories in '{os.path.basename(selected_dir)}': {', '.join(selected_names)}")
-
-                if not self.excluded_subdirs[selected_dir]:
-                    del self.excluded_subdirs[selected_dir]
+                        f"Included {included_count} item(s) in '{os.path.basename(selected_dir)}': {', '.join(selected_names)}")
 
                 self.load_subdirectories(selected_dir)
                 self.update_video_count()
                 self.exclusion_listbox.selection_clear(0, tk.END)
 
             except Exception as e:
-                messagebox.showerror("Error", f"Error including subdirectories: {str(e)}")
+                messagebox.showerror("Error", f"Error including items: {str(e)}")
 
         def expand_all_directories(self):
             selected_dir = self.get_current_selected_directory()
@@ -674,31 +724,38 @@ def select_multiple_folders_and_play():
                 messagebox.showinfo("Information", "Please select a directory first.")
                 return
 
-            if selected_dir in self.excluded_subdirs:
-                excluded_count = len(self.excluded_subdirs[selected_dir])
+            had_subdir_excl = selected_dir in self.excluded_subdirs
+            had_video_excl = selected_dir in self.excluded_videos
+            if had_subdir_excl or had_video_excl:
+                excluded_count = (len(self.excluded_subdirs.get(selected_dir, [])) +
+                                  len(self.excluded_videos.get(selected_dir, [])))
                 result = messagebox.askyesno(
                     "Confirm",
                     f"Clear all exclusions for {os.path.basename(selected_dir)}?"
                 )
                 if result:
-                    del self.excluded_subdirs[selected_dir]
+                    if had_subdir_excl:
+                        del self.excluded_subdirs[selected_dir]
+                    if had_video_excl:
+                        del self.excluded_videos[selected_dir]
                     self.update_console(
                         f"Cleared all {excluded_count} exclusions for '{os.path.basename(selected_dir)}'")
                     self.load_subdirectories(selected_dir)
                     self.update_video_count()
 
         def load_subdirectories(self, directory, max_depth=20):
-            self.selected_dir_label.config(text=f"All subdirectories in: {os.path.basename(directory)}")
+            self.selected_dir_label.config(text=f"All items in: {os.path.basename(directory)}")
             self.exclusion_listbox.delete(0, tk.END)
 
             try:
                 all_subdirs = self.get_all_subdirectories(directory, max_depth=max_depth)
 
                 if not all_subdirs:
-                    self.exclusion_listbox.insert(tk.END, "No subdirectories found")
+                    self.exclusion_listbox.insert(tk.END, "No items found")
                     return
 
-                excluded_set = set(self.excluded_subdirs.get(directory, []))
+                excluded_dir_set = set(self.excluded_subdirs.get(directory, []))
+                excluded_vid_set = set(self.excluded_videos.get(directory, []))
 
                 for subdir_path, display_name in all_subdirs:
 
@@ -709,7 +766,7 @@ def select_multiple_folders_and_play():
                     else:
                         indented_name += '▶' + display_name.split('/')[-1]
 
-                    if subdir_path in excluded_set:
+                    if (subdir_path in excluded_dir_set) or (subdir_path in excluded_vid_set):
                         indented_name += "🚫[EXCLUDED]"
 
                     self.exclusion_listbox.insert(tk.END, indented_name)
@@ -882,10 +939,15 @@ def select_multiple_folders_and_play():
                 dir_to_remove = self.selected_dirs[i]
                 self.update_console(f"Removed directory: {os.path.basename(dir_to_remove)}")
 
+                total_cleared = 0
                 if dir_to_remove in self.excluded_subdirs:
-                    excluded_count = len(self.excluded_subdirs[dir_to_remove])
-                    self.update_console(f"Cleared {excluded_count} exclusions for '{os.path.basename(dir_to_remove)}'")
+                    total_cleared += len(self.excluded_subdirs[dir_to_remove])
                     del self.excluded_subdirs[dir_to_remove]
+                if dir_to_remove in self.excluded_videos:
+                    total_cleared += len(self.excluded_videos[dir_to_remove])
+                    del self.excluded_videos[dir_to_remove]
+                if total_cleared:
+                    self.update_console(f"Cleared {total_cleared} exclusions for '{os.path.basename(dir_to_remove)}'")
 
                 self.dir_listbox.delete(i)
                 self.selected_dirs.pop(i)
