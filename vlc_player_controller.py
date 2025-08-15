@@ -32,9 +32,14 @@ class BaseVLCPlayerController:
 
         self.instance = vlc.Instance(f'--video-x={x}', f'--video-y={y}')
         self.player = self.instance.media_player_new()
+        self.volume = 50
+        try:
+            self.player.audio_set_mute(False)
+            self.player.audio_set_volume(self.volume)
+        except Exception:
+            pass
         self.videos = videos
         self.index = 0
-        self.volume = 50
         self.lock = threading.Lock()
         self.running = True
         self.fullscreen_enabled = False
@@ -43,13 +48,34 @@ class BaseVLCPlayerController:
 
     def _play_video(self, media):
         self.player.set_media(media)
+        try:
+            self.player.audio_set_mute(False)
+        except Exception:
+            pass
         self.player.play()
-        self.player.audio_set_volume(self.volume)
+        try:
+            self.player.audio_set_volume(self.volume)
+        except Exception:
+            pass
 
         state = self.player.get_state()
         while state != vlc.State.Playing and self.running:
             time.sleep(0.1)
             state = self.player.get_state()
+
+        try:
+            self.player.audio_set_mute(False)
+            self.player.audio_set_volume(self.volume)
+            try:
+                track_count = self.player.audio_get_track_count()
+                if track_count and track_count > 0:
+                    current_track = self.player.audio_get_track()
+                    if current_track == -1:
+                        self.player.audio_set_track(1)
+            except Exception:
+                pass
+        except Exception:
+            pass
 
         self.player.set_fullscreen(self.fullscreen_enabled)
         return True
@@ -151,11 +177,21 @@ class BaseVLCPlayerController:
 
             self.instance = vlc.Instance(f'--video-x={x}', f'--video-y={y}')
             self.player = self.instance.media_player_new()
+            try:
+                self.player.audio_set_mute(False)
+                self.player.audio_set_volume(self.volume)
+            except Exception:
+                pass
             self.current_monitor = monitor_number
 
             if current_media:
                 self.player.set_media(current_media)
                 self.player.play()
+                try:
+                    self.player.audio_set_mute(False)
+                    self.player.audio_set_volume(self.volume)
+                except Exception:
+                    pass
                 self.player.set_time(current_position)
                 if self.fullscreen_enabled:
                     self.player.set_fullscreen(True)

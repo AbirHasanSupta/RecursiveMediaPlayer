@@ -1,11 +1,10 @@
 import os
-import fnmatch
 
-VIDEO_EXTENSIONS = ['*.mp4', '*.mkv', '*.avi', '*.mov', '*.wmv', '*.flv']
+VIDEO_SUFFIXES = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv')
 
 
-def is_video(file_name):
-    return any(fnmatch.fnmatch(file_name.lower(), ext) for ext in VIDEO_EXTENSIONS)
+def is_video(file_name: str) -> bool:
+    return file_name.lower().endswith(VIDEO_SUFFIXES)
 
 
 def gather_videos_with_directories(directory):
@@ -21,10 +20,13 @@ def gather_videos_with_directories(directory):
 
     for dir_path in directories:
         dir_videos = []
-        for file in os.listdir(dir_path):
-            full_path = os.path.join(dir_path, file)
-            if os.path.isfile(full_path) and is_video(file):
-                dir_videos.append(full_path)
+        try:
+            with os.scandir(dir_path) as it:
+                for entry in it:
+                    if entry.is_file() and is_video(entry.name):
+                        dir_videos.append(entry.path)
+        except PermissionError:
+            continue
 
         dir_videos.sort()
 
