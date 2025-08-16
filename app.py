@@ -26,6 +26,7 @@ def select_multiple_folders_and_play():
             self.current_selected_dir_index = None
             self.current_subdirs_mapping = {}
             self.show_videos = True
+            self.show_only_excluded = False
             self.current_max_depth = 20
             self.setup_theme()
 
@@ -65,12 +66,72 @@ def select_multiple_folders_and_play():
             self.mono_font = Font(family="Consolas", size=9)
 
         def create_custom_buttons(self):
-            self.button_bg = "#2980b9"
-            self.button_fg = "white"
-            self.button_active_bg = "#3498db"
-            self.accent_button_bg = "#e74c3c"
-            self.accent_button_fg = "white"
-            self.accent_button_active_bg = "#c0392b"
+            self.button_variants = {
+                "primary": {"bg": "#2d89ef", "fg": "white", "active": "#1e70cf"},
+                "success": {"bg": "#27ae60", "fg": "white", "active": "#229954"},
+                "danger":  {"bg": "#e74c3c", "fg": "white", "active": "#c0392b"},
+                "warning": {"bg": "#f39c12", "fg": "white", "active": "#e67e22"},
+                "secondary": {"bg": "#95a5a6", "fg": "white", "active": "#7f8c8d"},
+                "dark": {"bg": "#34495e", "fg": "white", "active": "#2c3e50"}
+            }
+
+            self.button_bg = self.button_variants["primary"]["bg"]
+            self.button_fg = self.button_variants["primary"]["fg"]
+            self.button_active_bg = self.button_variants["primary"]["active"]
+            self.accent_button_bg = self.button_variants["danger"]["bg"]
+            self.accent_button_fg = self.button_variants["danger"]["fg"]
+            self.accent_button_active_bg = self.button_variants["danger"]["active"]
+
+        def create_button(self, parent, text, command, variant="primary", size="md", font=None):
+            v = self.button_variants.get(variant, self.button_variants["primary"])
+            bg = v["bg"]
+            fg = v["fg"]
+            active_bg = v["active"]
+
+            if font is None:
+                if size == "sm":
+                    use_font = self.small_font
+                    padx, pady = 8, 3
+                elif size == "lg":
+                    use_font = Font(family=self.normal_font.actual().get("family", "Segoe UI"), size=self.normal_font.actual().get("size", 10) + 2, weight="bold")
+                    padx, pady = 12, 7
+                else:
+                    use_font = self.normal_font
+                    padx, pady = 10, 5
+            else:
+                use_font = font
+                if size == "sm":
+                    padx, pady = 8, 3
+                elif size == "lg":
+                    padx, pady = 12, 7
+                else:
+                    padx, pady = 10, 5
+
+            btn = tk.Button(
+                parent,
+                text=text,
+                command=command,
+                font=use_font,
+                bg=bg,
+                fg=fg,
+                activebackground=active_bg,
+                activeforeground=fg,
+                relief=tk.FLAT,
+                bd=0,
+                padx=padx,
+                pady=pady,
+                cursor="hand2",
+                highlightthickness=0
+            )
+
+            def on_enter(e):
+                btn.configure(bg=active_bg)
+            def on_leave(e):
+                btn.configure(bg=bg)
+            btn.bind("<Enter>", on_enter)
+            btn.bind("<Leave>", on_leave)
+
+            return btn
 
         def setup_main_layout(self):
             self.main_frame = tk.Frame(self.root, bg=self.bg_color, padx=20, pady=20)
@@ -121,19 +182,12 @@ def select_multiple_folders_and_play():
             console_button_frame = tk.Frame(console_section, bg=self.bg_color)
             console_button_frame.pack(fill=tk.X)
 
-            self.clear_console_button = tk.Button(
+            self.clear_console_button = self.create_button(
                 console_button_frame,
                 text="Clear Console",
                 command=self.clear_console,
-                font=self.small_font,
-                bg="#34495e",
-                fg="white",
-                activebackground="#2c3e50",
-                activeforeground="white",
-                relief=tk.FLAT,
-                padx=10,
-                pady=3,
-                cursor="hand2"
+                variant="dark",
+                size="sm"
             )
             self.clear_console_button.pack(side=tk.LEFT)
 
@@ -281,118 +335,78 @@ def select_multiple_folders_and_play():
             buttons_row1 = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
             buttons_row1.pack(fill=tk.X, pady=(0, 5))
 
-            self.exclude_button = tk.Button(
+            self.exclude_button = self.create_button(
                 buttons_row1,
                 text="Exclude Selected",
                 command=self.exclude_subdirectories,
-                font=self.normal_font,
-                bg="#e74c3c",
-                fg="white",
-                activebackground="#c0392b",
-                activeforeground="white",
-                relief=tk.FLAT,
-                padx=10,
-                pady=5,
-                cursor="hand2"
+                variant="danger",
+                size="md"
             )
             self.exclude_button.pack(side=tk.LEFT, padx=(0, 5))
 
-            self.include_button = tk.Button(
+            self.include_button = self.create_button(
                 buttons_row1,
                 text="Include Selected",
                 command=self.include_subdirectories,
-                font=self.normal_font,
-                bg="#27ae60",
-                fg="white",
-                activebackground="#229954",
-                activeforeground="white",
-                relief=tk.FLAT,
-                padx=10,
-                pady=5,
-                cursor="hand2"
+                variant="success",
+                size="md"
             )
             self.include_button.pack(side=tk.LEFT, padx=(0, 5))
 
-            self.exclude_all_button = tk.Button(
+            self.exclude_all_button = self.create_button(
                 buttons_row1,
                 text="Exclude All",
                 command=self.exclude_all_subdirectories,
-                font=self.normal_font,
-                bg="#e67e22",
-                fg="white",
-                activebackground="#d35400",
-                activeforeground="white",
-                relief=tk.FLAT,
-                padx=10,
-                pady=5,
-                cursor="hand2"
+                variant="warning",
+                size="md"
             )
             self.exclude_all_button.pack(side=tk.LEFT)
 
             buttons_row2 = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
             buttons_row2.pack(fill=tk.X)
 
-            self.expand_all_button = tk.Button(
+            self.expand_all_button = self.create_button(
                 buttons_row2,
                 text="Expand All",
                 command=self.expand_all_directories,
-                font=self.small_font,
-                bg="#95a5a6",
-                fg="white",
-                activebackground="#7f8c8d",
-                activeforeground="white",
-                relief=tk.FLAT,
-                padx=8,
-                pady=3,
-                cursor="hand2"
+                variant="secondary",
+                size="sm"
             )
             self.expand_all_button.pack(side=tk.LEFT, padx=(0, 5))
 
-            self.collapse_all_button = tk.Button(
+            self.collapse_all_button = self.create_button(
                 buttons_row2,
                 text="Collapse All",
                 command=self.collapse_all_directories,
-                font=self.small_font,
-                bg="#95a5a6",
-                fg="white",
-                activebackground="#7f8c8d",
-                activeforeground="white",
-                relief=tk.FLAT,
-                padx=8,
-                pady=3,
-                cursor="hand2"
+                variant="secondary",
+                size="sm"
             )
             self.collapse_all_button.pack(side=tk.LEFT, padx=(0, 5))
 
-            self.toggle_videos_button = tk.Button(
+            self.toggle_videos_button = self.create_button(
                 buttons_row2,
                 text="Hide Videos",
                 command=self.toggle_videos_visibility,
-                font=self.small_font,
-                bg="#95a5a6",
-                fg="white",
-                activebackground="#7f8c8d",
-                activeforeground="white",
-                relief=tk.FLAT,
-                padx=8,
-                pady=3,
-                cursor="hand2"
+                variant="secondary",
+                size="sm"
             )
             self.toggle_videos_button.pack(side=tk.LEFT, padx=(0, 5))
 
-            self.clear_exclusions_button = tk.Button(
+            self.toggle_excluded_only_button = self.create_button(
+                buttons_row2,
+                text="Excluded Only",
+                command=self.toggle_excluded_only,
+                variant="secondary",
+                size="sm"
+            )
+            self.toggle_excluded_only_button.pack(side=tk.LEFT, padx=(0, 5))
+
+            self.clear_exclusions_button = self.create_button(
                 buttons_row2,
                 text="Clear All Exclusions",
                 command=self.clear_all_exclusions,
-                font=self.small_font,
-                bg="#f39c12",
-                fg="white",
-                activebackground="#e67e22",
-                activeforeground="white",
-                relief=tk.FLAT,
-                padx=8,
-                pady=3,
-                cursor="hand2"
+                variant="warning",
+                size="sm"
             )
             self.clear_exclusions_button.pack(side=tk.LEFT)
 
@@ -861,6 +875,16 @@ def select_multiple_folders_and_play():
                 self.toggle_videos_button.config(text=("Hide Videos" if self.show_videos else "Show Videos"))
             self.load_subdirectories(selected_dir, max_depth=self.current_max_depth)
 
+        def toggle_excluded_only(self):
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                messagebox.showinfo("Information", "Please select a directory first.")
+                return
+            self.show_only_excluded = not self.show_only_excluded
+            if hasattr(self, 'toggle_excluded_only_button'):
+                self.toggle_excluded_only_button.config(text=("Show All" if self.show_only_excluded else "Excluded Only"))
+            self.load_subdirectories(selected_dir, max_depth=self.current_max_depth)
+
         def clear_all_exclusions(self):
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
@@ -888,7 +912,10 @@ def select_multiple_folders_and_play():
 
         def load_subdirectories(self, directory, max_depth=20):
             self.current_max_depth = max_depth
-            self.selected_dir_label.config(text=f"All items in: {os.path.basename(directory)}")
+            if self.show_only_excluded:
+                self.selected_dir_label.config(text=f"Excluded items in: {os.path.basename(directory)}")
+            else:
+                self.selected_dir_label.config(text=f"All items in: {os.path.basename(directory)}")
             self.exclusion_listbox.delete(0, tk.END)
             self.exclusion_listbox.insert(tk.END, "Loading...")
             self.current_subdirs_mapping = {}
@@ -901,6 +928,7 @@ def select_multiple_folders_and_play():
             excluded_dir_set = set(self.excluded_subdirs.get(directory, []))
             excluded_vid_set = set(self.excluded_videos.get(directory, []))
             show_videos = self.show_videos
+            only_excluded = self.show_only_excluded
 
             def build_and_post():
                 try:
@@ -917,21 +945,25 @@ def select_multiple_folders_and_play():
 
                         indent_level = 0 if rel == '.' else rel.count(base_sep) + 1
                         name = os.path.basename(root) if rel != '.' else os.path.basename(base)
-                        indented_name = ("  " * indent_level) + '📁' + name
-                        if root in excluded_dir_set:
-                            indented_name += "🚫[EXCLUDED]"
-                        items.append((root, indented_name))
+                        include_dir = (not only_excluded) or (root in excluded_dir_set)
+                        if include_dir:
+                            indented_name = ("  " * indent_level) + '📁' + name
+                            if root in excluded_dir_set:
+                                indented_name += "🚫[EXCLUDED]"
+                            items.append((root, indented_name))
 
                         if show_videos:
                             try:
                                 with os.scandir(root) as it:
                                     for entry in it:
                                         if entry.is_file() and is_video(entry.name):
-                                            v_name = ("  " * (indent_level + 1)) + '▶' + entry.name
                                             full_path = entry.path
-                                            if full_path in excluded_vid_set:
-                                                v_name += "🚫[EXCLUDED]"
-                                            items.append((full_path, v_name))
+                                            include_vid = (not only_excluded) or (full_path in excluded_vid_set)
+                                            if include_vid:
+                                                v_name = ("  " * (indent_level + 1)) + '▶' + entry.name
+                                                if full_path in excluded_vid_set:
+                                                    v_name += "🚫[EXCLUDED]"
+                                                items.append((full_path, v_name))
                             except PermissionError:
                                 pass
 
@@ -1031,70 +1063,43 @@ def select_multiple_folders_and_play():
             dir_buttons_frame = tk.Frame(self.button_frame, bg=self.bg_color)
             dir_buttons_frame.pack(side=tk.LEFT)
 
-            self.add_button = tk.Button(
+            self.add_button = self.create_button(
                 dir_buttons_frame,
                 text="Add Directory",
                 command=self.add_directory,
-                font=self.normal_font,
-                bg=self.button_bg,
-                fg=self.button_fg,
-                activebackground=self.button_active_bg,
-                activeforeground="white",
-                relief=tk.FLAT,
-                padx=10,
-                pady=5,
-                cursor="hand2"
+                variant="primary",
+                size="md"
             )
             self.add_button.pack(side=tk.LEFT, padx=(0, 5))
 
-            self.remove_button = tk.Button(
+            self.remove_button = self.create_button(
                 dir_buttons_frame,
                 text="Remove Selected",
                 command=self.remove_directory,
-                font=self.normal_font,
-                bg=self.button_bg,
-                fg=self.button_fg,
-                activebackground=self.button_active_bg,
-                activeforeground="white",
-                relief=tk.FLAT,
-                padx=10,
-                pady=5,
-                cursor="hand2"
+                variant="secondary",
+                size="md"
             )
             self.remove_button.pack(side=tk.LEFT)
 
             action_buttons_frame = tk.Frame(self.button_frame, bg=self.bg_color)
             action_buttons_frame.pack(side=tk.RIGHT)
 
-            self.cancel_button = tk.Button(
+            self.cancel_button = self.create_button(
                 action_buttons_frame,
                 text="Close",
                 command=self.cancel,
-                font=self.normal_font,
-                bg=self.button_bg,
-                fg=self.button_fg,
-                activebackground=self.button_active_bg,
-                activeforeground="white",
-                relief=tk.FLAT,
-                padx=10,
-                pady=5,
-                cursor="hand2"
+                variant="secondary",
+                size="md"
             )
             self.cancel_button.pack(side=tk.LEFT, padx=(0, 5))
 
-            self.play_button = tk.Button(
+            self.play_button = self.create_button(
                 action_buttons_frame,
                 text="▶ Play Videos",
                 command=self.play_videos,
-                font=(self.normal_font.name, self.normal_font.actual()['size'], 'bold'),
-                bg=self.accent_button_bg,
-                fg=self.accent_button_fg,
-                activebackground=self.accent_button_active_bg,
-                activeforeground="white",
-                relief=tk.FLAT,
-                padx=10,
-                pady=5,
-                cursor="hand2"
+                variant="danger",
+                size="lg",
+                font=(self.normal_font.name, self.normal_font.actual()['size'], 'bold')
             )
             self.play_button.pack(side=tk.LEFT)
 
