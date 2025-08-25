@@ -45,7 +45,7 @@ def select_multiple_folders_and_play():
 
             self.scan_cache = {}
             self.pending_scans = set()
-            max_workers = min(32, (os.cpu_count() or 4))
+            max_workers = min(8, (os.cpu_count() or 4))
             self.executor = ProcessPoolExecutor(max_workers=max_workers)
             self.update_console(f"Scanner ready (process workers: {max_workers})")
 
