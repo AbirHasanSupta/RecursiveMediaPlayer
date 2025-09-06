@@ -31,7 +31,7 @@ def select_multiple_folders_and_play():
             self.setup_theme()
 
             root.title("Recursive Video Player")
-            root.geometry("1600x900")
+            root.geometry("1200x800")
             root.protocol("WM_DELETE_WINDOW", self.cancel)
             root.configure(bg=self.bg_color)
 
@@ -40,7 +40,7 @@ def select_multiple_folders_and_play():
             self.setup_exclusion_section()
             self.setup_status_section()
             self.setup_console_section()
-            self.setup_controls_info()
+            # self.setup_controls_info()
             self.setup_action_buttons()
 
             self.scan_cache = {}
@@ -57,6 +57,18 @@ def select_multiple_folders_and_play():
             style = ttk.Style()
             style.configure("TFrame", background=self.bg_color)
             style.configure("TLabel", background=self.bg_color, foreground=self.text_color)
+            style.configure(
+                "Modern.TCheckbutton",
+                background=self.bg_color,
+                foreground=self.text_color,
+                font=("Segoe UI", 10),
+                padding=4
+            )
+            style.map(
+                "Modern.TCheckbutton",
+                foreground=[("active", self.text_color)],
+                background=[("active", self.bg_color)]
+            )
 
             self.create_custom_buttons()
 
@@ -365,41 +377,36 @@ def select_multiple_folders_and_play():
             buttons_row2 = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
             buttons_row2.pack(fill=tk.X)
 
-            self.expand_all_button = self.create_button(
+            self.show_videos_var = tk.BooleanVar(value=self.show_videos)
+            self.excluded_only_var = tk.BooleanVar(value=self.show_only_excluded)
+            self.expand_all_var = tk.BooleanVar(value=True)
+
+            self.toggle_videos_check = ttk.Checkbutton(
+                buttons_row2,
+                text="Show Videos",
+                style="Modern.TCheckbutton",
+                variable=self.show_videos_var,
+                command=self.toggle_videos_visibility
+            )
+            self.toggle_videos_check.pack(side=tk.LEFT, padx=(0, 5))
+
+            self.expand_all_check = ttk.Checkbutton(
                 buttons_row2,
                 text="Expand All",
-                command=self.expand_all_directories,
-                variant="secondary",
-                size="sm"
+                style="Modern.TCheckbutton",
+                variable=self.expand_all_var,
+                command=self.toggle_expand_all
             )
-            self.expand_all_button.pack(side=tk.LEFT, padx=(0, 5))
+            self.expand_all_check.pack(side=tk.LEFT, padx=(0, 5))
 
-            self.collapse_all_button = self.create_button(
-                buttons_row2,
-                text="Collapse All",
-                command=self.collapse_all_directories,
-                variant="secondary",
-                size="sm"
-            )
-            self.collapse_all_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.toggle_videos_button = self.create_button(
-                buttons_row2,
-                text="Hide Videos",
-                command=self.toggle_videos_visibility,
-                variant="secondary",
-                size="sm"
-            )
-            self.toggle_videos_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.toggle_excluded_only_button = self.create_button(
+            self.toggle_excluded_only_check = ttk.Checkbutton(
                 buttons_row2,
                 text="Excluded Only",
-                command=self.toggle_excluded_only,
-                variant="secondary",
-                size="sm"
+                style="Modern.TCheckbutton",
+                variable=self.excluded_only_var,
+                command=self.toggle_excluded_only
             )
-            self.toggle_excluded_only_button.pack(side=tk.LEFT, padx=(0, 5))
+            self.toggle_excluded_only_check.pack(side=tk.LEFT, padx=(0, 5))
 
             self.clear_exclusions_button = self.create_button(
                 buttons_row2,
@@ -865,14 +872,23 @@ def select_multiple_folders_and_play():
             if selected_dir:
                 self.load_subdirectories(selected_dir, max_depth=1)
 
+        def toggle_expand_all(self):
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                messagebox.showinfo("Information", "Please select a directory first.")
+                self.expand_all_var.set(False)
+                return
+            if self.expand_all_var.get():
+                self.load_subdirectories(selected_dir, max_depth=20)
+            else:
+                self.load_subdirectories(selected_dir, max_depth=1)
+
         def toggle_videos_visibility(self):
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
                 messagebox.showinfo("Information", "Please select a directory first.")
                 return
-            self.show_videos = not self.show_videos
-            if hasattr(self, 'toggle_videos_button'):
-                self.toggle_videos_button.config(text=("Hide Videos" if self.show_videos else "Show Videos"))
+            self.show_videos = bool(self.show_videos_var.get())
             self.load_subdirectories(selected_dir, max_depth=self.current_max_depth)
 
         def toggle_excluded_only(self):
@@ -880,9 +896,7 @@ def select_multiple_folders_and_play():
             if not selected_dir:
                 messagebox.showinfo("Information", "Please select a directory first.")
                 return
-            self.show_only_excluded = not self.show_only_excluded
-            if hasattr(self, 'toggle_excluded_only_button'):
-                self.toggle_excluded_only_button.config(text=("Show All" if self.show_only_excluded else "Excluded Only"))
+            self.show_only_excluded = bool(self.excluded_only_var.get())
             self.load_subdirectories(selected_dir, max_depth=self.current_max_depth)
 
         def clear_all_exclusions(self):
