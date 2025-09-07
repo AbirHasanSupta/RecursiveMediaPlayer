@@ -1,3 +1,4 @@
+from qt_app import run_qt_app
 import threading
 import tkinter as tk
 from datetime import datetime
@@ -1204,3 +1205,4 @@ def select_multiple_folders_and_play():
 if __name__ == "__main__":
     multiprocessing.freeze_support()
     select_multiple_folders_and_play()
+    # run_qt_app()
