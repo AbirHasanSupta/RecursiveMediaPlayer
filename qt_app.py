@@ -264,7 +264,7 @@ class QtDirectorySelector(QMainWindow):
                                     full = entry.path
                                     include_vid = (not only_excluded) or (full in excluded_vid_set)
                                     if include_vid:
-                                        vlabel = ("  " * (indent_level + 1)) + "▶ " + entry.name
+                                        vlabel = ("  " * (indent_level + 1)) + "🎬 " + entry.name
                                         if full in excluded_vid_set:
                                             vlabel += "  [EXCLUDED]"
                                         self.list_subdirs.addItem(vlabel)
