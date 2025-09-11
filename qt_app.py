@@ -13,6 +13,7 @@ from PyQt6.QtCore import Qt, QTimer, QCoreApplication
 from utils import gather_videos_with_directories, is_video
 from vlc_player_controller import VLCPlayerControllerForMultipleDirectory
 from key_press import listen_keys, cleanup_hotkeys
+from config_util import load_config, save_config
 
 
 class QtDirectorySelector(QMainWindow):
@@ -33,6 +34,8 @@ class QtDirectorySelector(QMainWindow):
         self.show_videos = True
         self.show_only_excluded = False
         self.current_max_depth = 20
+        self.config = load_config()
+        self.last_dir = self.config.get("last_dir", os.path.expanduser("~"))
 
         self._build_ui()
 
@@ -40,6 +43,26 @@ class QtDirectorySelector(QMainWindow):
         self.pending_scans = set()
 
         self.log(f"Scanner ready")
+
+    def switch_to_tk_gui(self):
+        config = load_config()
+        config["last_mode"] = "tk"
+        config["switch_requested"] = True
+        save_config(config)
+
+        self.close()
+
+    def closeEvent(self, event):
+        try:
+            if self.controller:
+                self.controller.stop()
+        except Exception:
+            pass
+        try:
+            cleanup_hotkeys()
+        except Exception:
+            pass
+        super().closeEvent(event)
 
     def _build_ui(self):
         central = QWidget()
@@ -61,6 +84,9 @@ class QtDirectorySelector(QMainWindow):
         bar_layout.addWidget(self.btn_remove_dir)
         bar_layout.addStretch(1)
         bar_layout.addWidget(self.btn_play)
+        self.btn_switch_to_tk = QPushButton("Light Mode")
+        bar_layout.addWidget(self.btn_switch_to_tk)
+        self.btn_switch_to_tk.clicked.connect(self.switch_to_tk_gui)
         root_layout.addWidget(top_bar)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -189,7 +215,7 @@ class QtDirectorySelector(QMainWindow):
         self.lbl_status.setText(text)
 
     def add_directory(self):
-        dlg = QFileDialog(self, "Select Directory")
+        dlg = QFileDialog(self, "Select Directory", self.last_dir)
         dlg.setFileMode(QFileDialog.FileMode.Directory)
         dlg.setOption(QFileDialog.Option.ShowDirsOnly, True)
         if dlg.exec():
@@ -199,6 +225,10 @@ class QtDirectorySelector(QMainWindow):
                     self.selected_dirs.append(d)
                     self.list_dirs.addItem(d)
                     self.load_subdirectories(d)
+                    self.last_dir = d
+                    config = load_config()
+                    config["last_dir"] = d
+                    save_config(config)
             self.update_video_count()
 
     def remove_directory(self):
@@ -345,18 +375,6 @@ class QtDirectorySelector(QMainWindow):
         self.keys_thread.start()
 
         self.log("Started playback. Use keyboard: A/D prev/next, Space pause, F fullscreen, arrows seek, 1/2 monitor, T screenshot, W/S volume, Q/E prev/next dir.")
-
-    def closeEvent(self, event):
-        try:
-            if self.controller:
-                self.controller.stop()
-        except Exception:
-            pass
-        try:
-            cleanup_hotkeys()
-        except Exception:
-            pass
-        super().closeEvent(event)
 
     def _get_current_base_dir(self):
         row = self.list_dirs.currentRow()

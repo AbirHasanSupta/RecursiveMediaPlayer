@@ -11,6 +11,7 @@ from concurrent.futures import ProcessPoolExecutor
 from key_press import listen_keys, cleanup_hotkeys
 from utils import gather_videos_with_directories, is_video
 from vlc_player_controller import VLCPlayerControllerForMultipleDirectory
+from config_util import load_config, save_config
 
 
 def select_multiple_folders_and_play():
@@ -30,6 +31,8 @@ def select_multiple_folders_and_play():
             self.show_only_excluded = False
             self.current_max_depth = 20
             self.setup_theme()
+            config = load_config()
+            self.last_dir = config.get("last_dir", os.path.expanduser("~"))
 
             root.title("Recursive Video Player")
             root.geometry("1200x800")
@@ -1098,6 +1101,14 @@ def select_multiple_folders_and_play():
 
             action_buttons_frame = tk.Frame(self.button_frame, bg=self.bg_color)
             action_buttons_frame.pack(side=tk.RIGHT)
+            self.switch_to_qt_button = self.create_button(
+                action_buttons_frame,
+                text="Dark Mode",
+                command=self.switch_to_qt_gui,
+                variant="primary",
+                size="md"
+            )
+            self.switch_to_qt_button.pack(side=tk.LEFT, padx=(0, 5))
 
             self.cancel_button = self.create_button(
                 action_buttons_frame,
@@ -1118,6 +1129,35 @@ def select_multiple_folders_and_play():
             )
             self.play_button.pack(side=tk.LEFT)
 
+        def switch_to_qt_gui(self):
+            config = load_config()
+            config["last_mode"] = "qt"
+            config["switch_requested"] = True
+            save_config(config)
+
+            try:
+                if hasattr(self, 'executor'):
+                    self.executor.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
+
+            self.cancel()
+
+        def cancel(self):
+            if self.controller:
+                self.controller.stop()
+            try:
+                cleanup_hotkeys()
+            except Exception:
+                pass
+            try:
+                if hasattr(self, 'executor'):
+                    self.executor.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
+            self.root.quit()
+            self.root.destroy()
+
         def setup_status_section(self):
             self.status_frame = tk.Frame(self.main_frame, bg=self.bg_color)
             self.status_frame.pack(fill=tk.X)
@@ -1132,9 +1172,13 @@ def select_multiple_folders_and_play():
             self.video_count_label.pack(side=tk.LEFT)
 
         def add_directory(self):
-            directory = filedialog.askdirectory(title="Select a Directory")
+            directory = filedialog.askdirectory(title="Select a Directory", initialdir=self.last_dir)
             if directory and directory not in self.selected_dirs:
                 self.selected_dirs.append(directory)
+                self.last_dir = directory
+                config = load_config()
+                config["last_dir"] = directory
+                save_config(config)
 
                 display_name = directory
                 if len(directory) > 60:
@@ -1185,17 +1229,6 @@ def select_multiple_folders_and_play():
             self.update_video_count()
             self.clear_exclusion_list()
 
-        def cancel(self):
-            if self.controller:
-                self.controller.stop()
-            cleanup_hotkeys()
-            try:
-                if hasattr(self, 'executor'):
-                    self.executor.shutdown(wait=False, cancel_futures=True)
-            except Exception:
-                pass
-            self.root.quit()
-            self.root.destroy()
 
     root = tk.Tk()
     app = DirectorySelector(root)
@@ -1204,5 +1237,8 @@ def select_multiple_folders_and_play():
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
-    select_multiple_folders_and_play()
-    # run_qt_app()
+    config = load_config()
+    if config.get("last_mode", "tk") == "qt":
+        run_qt_app()
+    else:
+        select_multiple_folders_and_play()
