@@ -447,6 +447,7 @@ def select_multiple_folders_and_play():
 
         def is_video_excluded(self, root_dir, video_path):
             excluded_videos = self.excluded_videos.get(root_dir, [])
+            video_path = os.path.normpath(video_path)
             if video_path in excluded_videos:
                 return True
             excluded_subdirs = self.excluded_subdirs.get(root_dir, [])
@@ -1237,8 +1238,4 @@ def select_multiple_folders_and_play():
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
-    config = load_config()
-    if config.get("last_mode", "tk") == "qt":
-        run_qt_app()
-    else:
-        select_multiple_folders_and_play()
+    select_multiple_folders_and_play()
