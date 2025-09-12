@@ -8,12 +8,13 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 
 from key_press import listen_keys, cleanup_hotkeys
+from theme import ThemeSelector
 from utils import gather_videos_with_directories, is_video
 from vlc_player_controller import VLCPlayerControllerForMultipleDirectory
 
 
 def select_multiple_folders_and_play():
-    class DirectorySelector:
+    class DirectorySelector(ThemeSelector):
         def __init__(self, root):
             self.root = root
             self.selected_dirs = []
@@ -28,6 +29,7 @@ def select_multiple_folders_and_play():
             self.show_videos = True
             self.show_only_excluded = False
             self.current_max_depth = 20
+            self.dark_mode = self.load_theme_preference()
             self.setup_theme()
 
             root.title("Recursive Video Player")
@@ -47,6 +49,7 @@ def select_multiple_folders_and_play():
             max_workers = min(8, (os.cpu_count() or 4))
             self.executor = ProcessPoolExecutor(max_workers=max_workers)
             self.update_console(f"Scanner ready (process workers: {max_workers})")
+            self.apply_theme()
 
         def setup_theme(self):
             self.bg_color = "#f5f5f5"
@@ -94,17 +97,18 @@ def select_multiple_folders_and_play():
             self.accent_button_active_bg = self.button_variants["danger"]["active"]
 
         def create_button(self, parent, text, command, variant="primary", size="md", font=None):
-            v = self.button_variants.get(variant, self.button_variants["primary"])
-            bg = v["bg"]
-            fg = v["fg"]
-            active_bg = v["active"]
+            colors = self.get_button_colors(variant)
+            bg = colors["bg"]
+            fg = colors["fg"]
+            active_bg = colors["active"]
 
             if font is None:
                 if size == "sm":
                     use_font = self.small_font
                     padx, pady = 8, 3
                 elif size == "lg":
-                    use_font = Font(family=self.normal_font.actual().get("family", "Segoe UI"), size=self.normal_font.actual().get("size", 10) + 2, weight="bold")
+                    use_font = Font(family=self.normal_font.actual().get("family", "Segoe UI"),
+                                    size=self.normal_font.actual().get("size", 10) + 2, weight="bold")
                     padx, pady = 12, 7
                 else:
                     use_font = self.normal_font
@@ -134,6 +138,8 @@ def select_multiple_folders_and_play():
                 cursor="hand2",
                 highlightthickness=0
             )
+
+            btn._variant = variant
 
             def on_enter(e):
                 btn.configure(bg=active_bg)
@@ -343,75 +349,75 @@ def select_multiple_folders_and_play():
             exclusion_buttons_frame = tk.Frame(self.exclusion_section, bg=self.bg_color)
             exclusion_buttons_frame.pack(fill=tk.X, pady=(10, 0))
 
-            buttons_row1 = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
-            buttons_row1.pack(fill=tk.X, pady=(0, 5))
-
-            self.exclude_button = self.create_button(
-                buttons_row1,
-                text="Exclude Selected",
-                command=self.exclude_subdirectories,
-                variant="danger",
-                size="md"
-            )
-            self.exclude_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.include_button = self.create_button(
-                buttons_row1,
-                text="Include Selected",
-                command=self.include_subdirectories,
-                variant="success",
-                size="md"
-            )
-            self.include_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.exclude_all_button = self.create_button(
-                buttons_row1,
-                text="Exclude All",
-                command=self.exclude_all_subdirectories,
-                variant="warning",
-                size="md"
-            )
-            self.exclude_all_button.pack(side=tk.LEFT)
-
-            buttons_row2 = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
-            buttons_row2.pack(fill=tk.X)
+            checkboxes_row = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
+            checkboxes_row.pack(fill=tk.X, pady=(0, 5))
 
             self.show_videos_var = tk.BooleanVar(value=self.show_videos)
             self.excluded_only_var = tk.BooleanVar(value=self.show_only_excluded)
             self.expand_all_var = tk.BooleanVar(value=True)
 
             self.toggle_videos_check = ttk.Checkbutton(
-                buttons_row2,
+                checkboxes_row,
                 text="Show Videos",
                 style="Modern.TCheckbutton",
                 variable=self.show_videos_var,
                 command=self.toggle_videos_visibility
             )
-            self.toggle_videos_check.pack(side=tk.LEFT, padx=(0, 5))
+            self.toggle_videos_check.pack(side=tk.LEFT, padx=(0, 10))
 
             self.expand_all_check = ttk.Checkbutton(
-                buttons_row2,
+                checkboxes_row,
                 text="Expand All",
                 style="Modern.TCheckbutton",
                 variable=self.expand_all_var,
                 command=self.toggle_expand_all
             )
-            self.expand_all_check.pack(side=tk.LEFT, padx=(0, 5))
+            self.expand_all_check.pack(side=tk.LEFT, padx=(0, 10))
 
             self.toggle_excluded_only_check = ttk.Checkbutton(
-                buttons_row2,
+                checkboxes_row,
                 text="Excluded Only",
                 style="Modern.TCheckbutton",
                 variable=self.excluded_only_var,
                 command=self.toggle_excluded_only
             )
-            self.toggle_excluded_only_check.pack(side=tk.LEFT, padx=(0, 5))
+            self.toggle_excluded_only_check.pack(side=tk.LEFT, padx=(0, 10))
+
+            buttons_row = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
+            buttons_row.pack(fill=tk.X, pady=(5, 0))
+
+            self.exclude_button = self.create_button(
+                buttons_row,
+                text="Exclude Selected",
+                command=self.exclude_subdirectories,
+                variant="danger",
+                size="sm"
+            )
+            self.exclude_button.pack(side=tk.LEFT, padx=(0, 5))
+
+            self.include_button = self.create_button(
+                buttons_row,
+                text="Include Selected",
+                command=self.include_subdirectories,
+                variant="success",
+                size="sm"
+            )
+            self.include_button.pack(side=tk.LEFT, padx=(0, 5))
+
+            self.exclude_all_button = self.create_button(
+                buttons_row,
+                text="Exclude All",
+                command=self.exclude_all_subdirectories,
+                variant="warning",
+                size="sm"
+            )
+            self.exclude_all_button.pack(side=tk.LEFT, padx=(0, 5))
 
             self.clear_exclusions_button = self.create_button(
-                buttons_row2,
+                buttons_row,
                 text="Clear All Exclusions",
                 command=self.clear_all_exclusions,
-                variant="warning",
+                variant="secondary",
                 size="sm"
             )
             self.clear_exclusions_button.pack(side=tk.LEFT)
@@ -1109,6 +1115,18 @@ def select_multiple_folders_and_play():
                 size="md"
             )
             self.remove_button.pack(side=tk.LEFT)
+
+            theme_frame = tk.Frame(self.button_frame, bg=self.bg_color)
+            theme_frame.pack(side=tk.LEFT, expand=True)
+
+            self.theme_button = self.create_button(
+                theme_frame,
+                text="Dark Mode" if not self.dark_mode else "Light Mode",
+                command=self.toggle_theme,
+                variant="secondary",
+                size="md"
+            )
+            self.theme_button.pack()
 
             action_buttons_frame = tk.Frame(self.button_frame, bg=self.bg_color)
             action_buttons_frame.pack(side=tk.RIGHT)

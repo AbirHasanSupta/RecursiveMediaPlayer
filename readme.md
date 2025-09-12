@@ -33,6 +33,8 @@ Keyboard Shortcuts (only when the app window is focused)
 - t: Take snapshot of current frame (saved next to current video)
 - 1 / 2: Move playback window to Monitor 1 / Monitor 2
 - q / e: Previous/Next directory (when multiple directories are scanned)
+- = / -: Control playback speed
+- 0: Reset playback speed
 
 Notes
 - The app uses python-vlc and spawns a VLC media player window positioned on the selected monitor.
