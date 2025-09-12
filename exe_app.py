@@ -10,7 +10,6 @@ from concurrent.futures import ProcessPoolExecutor
 from key_press import listen_keys, cleanup_hotkeys
 from utils import gather_videos_with_directories, is_video
 from vlc_player_controller import VLCPlayerControllerForMultipleDirectory
-from config_util import load_config, save_config
 
 
 def select_multiple_folders_and_play():
@@ -30,8 +29,6 @@ def select_multiple_folders_and_play():
             self.show_only_excluded = False
             self.current_max_depth = 20
             self.setup_theme()
-            config = load_config()
-            self.last_dir = config.get("last_dir", os.path.expanduser("~"))
 
             root.title("Recursive Video Player")
             root.geometry("1200x800")
@@ -43,7 +40,6 @@ def select_multiple_folders_and_play():
             self.setup_exclusion_section()
             self.setup_status_section()
             self.setup_console_section()
-            # self.setup_controls_info()
             self.setup_action_buttons()
 
             self.scan_cache = {}
@@ -1089,53 +1085,6 @@ def select_multiple_folders_and_play():
 
             threading.Thread(target=build_and_post, daemon=True).start()
 
-        def setup_controls_info(self):
-            controls_header = tk.Label(self.main_frame, text="Keyboard Controls",
-                                       font=self.header_font, bg=self.bg_color, fg=self.text_color)
-            controls_header.pack(anchor='w', pady=(0, 10))
-
-            controls_frame = tk.Frame(self.main_frame, bg=self.bg_color)
-            controls_frame.pack(fill=tk.X, pady=(0, 15))
-
-            nav_frame = tk.Frame(controls_frame, bg=self.bg_color)
-            nav_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
-
-            nav_label = tk.Label(nav_frame, text="Navigation", font=self.normal_font,
-                                 bg=self.bg_color, fg=self.text_color)
-            nav_label.pack(anchor='w', pady=(0, 5))
-
-            nav_controls = [
-                "D: Next video",
-                "A: Previous video",
-                "E: Next directory",
-                "Q: Previous directory",
-                "Esc: Stop current video"
-            ]
-
-            for control in nav_controls:
-                tk.Label(nav_frame, text=control, font=self.small_font,
-                         bg=self.bg_color, fg=self.text_color).pack(anchor='w', padx=10)
-
-            playback_frame = tk.Frame(controls_frame, bg=self.bg_color)
-            playback_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-            playback_label = tk.Label(playback_frame, text="Playback", font=self.normal_font,
-                                      bg=self.bg_color, fg=self.text_color)
-            playback_label.pack(anchor='w', pady=(0, 5))
-
-            playback_controls = [
-                "Space: Play/Pause",
-                "→/←: Fast forward/Rewind (10s)",
-                "F: Toggle fullscreen",
-                "W/S: Volume up/down",
-                "1/2: Switch to monitor 1/2",
-                "T: Take screenshot"
-            ]
-
-            for control in playback_controls:
-                tk.Label(playback_frame, text=control, font=self.small_font,
-                         bg=self.bg_color, fg=self.text_color).pack(anchor='w', padx=10)
-
         def setup_action_buttons(self):
             self.button_frame = tk.Frame(self.main_frame, bg=self.bg_color)
             self.button_frame.pack(fill=tk.X, pady=(0, 15))
@@ -1163,14 +1112,6 @@ def select_multiple_folders_and_play():
 
             action_buttons_frame = tk.Frame(self.button_frame, bg=self.bg_color)
             action_buttons_frame.pack(side=tk.RIGHT)
-            self.switch_to_qt_button = self.create_button(
-                action_buttons_frame,
-                text="Dark Mode",
-                command=self.switch_to_qt_gui,
-                variant="primary",
-                size="md"
-            )
-            self.switch_to_qt_button.pack(side=tk.LEFT, padx=(0, 5))
 
             self.cancel_button = self.create_button(
                 action_buttons_frame,
@@ -1191,35 +1132,6 @@ def select_multiple_folders_and_play():
             )
             self.play_button.pack(side=tk.LEFT)
 
-        def switch_to_qt_gui(self):
-            config = load_config()
-            config["last_mode"] = "qt"
-            config["switch_requested"] = True
-            save_config(config)
-
-            try:
-                if hasattr(self, 'executor'):
-                    self.executor.shutdown(wait=False, cancel_futures=True)
-            except Exception:
-                pass
-
-            self.cancel()
-
-        def cancel(self):
-            if self.controller:
-                self.controller.stop()
-            try:
-                cleanup_hotkeys()
-            except Exception:
-                pass
-            try:
-                if hasattr(self, 'executor'):
-                    self.executor.shutdown(wait=False, cancel_futures=True)
-            except Exception:
-                pass
-            self.root.quit()
-            self.root.destroy()
-
         def setup_status_section(self):
             self.status_frame = tk.Frame(self.main_frame, bg=self.bg_color)
             self.status_frame.pack(fill=tk.X)
@@ -1234,13 +1146,9 @@ def select_multiple_folders_and_play():
             self.video_count_label.pack(side=tk.LEFT)
 
         def add_directory(self):
-            directory = filedialog.askdirectory(title="Select a Directory", initialdir=self.last_dir)
+            directory = filedialog.askdirectory(title="Select a Directory")
             if directory and directory not in self.selected_dirs:
                 self.selected_dirs.append(directory)
-                self.last_dir = directory
-                config = load_config()
-                config["last_dir"] = directory
-                save_config(config)
 
                 display_name = directory
                 if len(directory) > 60:
@@ -1384,6 +1292,17 @@ def select_multiple_folders_and_play():
                 self.update_console("Playback speed reset to 1.0×")
             self.draw_slider()
 
+        def cancel(self):
+            if self.controller:
+                self.controller.stop()
+            cleanup_hotkeys()
+            try:
+                if hasattr(self, 'executor'):
+                    self.executor.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
+            self.root.quit()
+            self.root.destroy()
 
     root = tk.Tk()
     app = DirectorySelector(root)

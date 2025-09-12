@@ -61,6 +61,9 @@ def listen_keys(controller, multi_directory=True):
     hotkey_refs.append(keyboard.add_hotkey('t', _guarded(lambda: controller.take_screenshot())))
     hotkey_refs.append(keyboard.add_hotkey('1', _guarded(lambda: controller.switch_to_monitor(1))))
     hotkey_refs.append(keyboard.add_hotkey('2', _guarded(lambda: controller.switch_to_monitor(2))))
+    hotkey_refs.append(keyboard.add_hotkey('=', _guarded(lambda: controller.increase_speed())))
+    hotkey_refs.append(keyboard.add_hotkey('-', _guarded(lambda: controller.decrease_speed())))
+    hotkey_refs.append(keyboard.add_hotkey('0', _guarded(lambda: controller.reset_speed_hotkey())))
 
     if multi_directory:
         hotkey_refs.append(keyboard.add_hotkey('e', _guarded(lambda: controller.next_directory())))

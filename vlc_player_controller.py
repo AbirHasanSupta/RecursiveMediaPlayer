@@ -45,6 +45,10 @@ class BaseVLCPlayerController:
         self.fullscreen_enabled = False
         self.current_monitor = 1
         self.logger = logger
+        self.initial_playback_rate = 1.0
+
+    def set_initial_playback_rate(self, rate):
+        self.initial_playback_rate = rate
 
     def _play_video(self, media):
         self.player.set_media(media)
@@ -74,6 +78,10 @@ class BaseVLCPlayerController:
                         self.player.audio_set_track(1)
             except Exception:
                 pass
+
+            if hasattr(self, 'initial_playback_rate') and self.initial_playback_rate != 1.0:
+                self.player.set_rate(self.initial_playback_rate)
+
         except Exception:
             pass
 
@@ -155,6 +163,39 @@ class BaseVLCPlayerController:
             self.player.set_time(new_time)
             if self.logger:
                 self.logger(f"Rewind to {new_time / 1000:.1f}s")
+
+    def set_playback_rate(self, rate):
+        with self.lock:
+            try:
+                self.player.set_rate(rate)
+                self.initial_playback_rate = rate
+                if self.logger:
+                    self.logger(f"Playback rate set to {rate}x")
+            except Exception as e:
+                if self.logger:
+                    self.logger(f"Error setting playback rate: {e}")
+
+    def increase_speed(self):
+        with self.lock:
+            current_rate = self.player.get_rate()
+            new_rate = min(2.0, round((current_rate + 0.25) * 4) / 4)
+            self.player.set_rate(new_rate)
+            if self.logger:
+                self.logger(f"Speed increased to {new_rate}×")
+
+    def decrease_speed(self):
+        with self.lock:
+            current_rate = self.player.get_rate()
+            new_rate = max(0.25, round((current_rate - 0.25) * 4) / 4)
+            self.player.set_rate(new_rate)
+            if self.logger:
+                self.logger(f"Speed decreased to {new_rate}×")
+
+    def reset_speed_hotkey(self):
+        with self.lock:
+            self.player.set_rate(1.0)
+            if self.logger:
+                self.logger("Speed reset to 1.0×")
 
     def run(self):
         self.play_video(self.index)
