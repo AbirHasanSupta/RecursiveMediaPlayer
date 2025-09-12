@@ -29,7 +29,12 @@ def select_multiple_folders_and_play():
             self.show_videos = True
             self.show_only_excluded = False
             self.current_max_depth = 20
-            self.dark_mode = self.load_theme_preference()
+
+            preferences = self.load_preferences()
+            self.dark_mode = preferences['dark_mode']
+            self.show_videos = preferences['show_videos']
+            self.expand_all_default = preferences['expand_all']
+
             self.setup_theme()
 
             root.title("Recursive Video Player")
@@ -354,7 +359,7 @@ def select_multiple_folders_and_play():
 
             self.show_videos_var = tk.BooleanVar(value=self.show_videos)
             self.excluded_only_var = tk.BooleanVar(value=self.show_only_excluded)
-            self.expand_all_var = tk.BooleanVar(value=True)
+            self.expand_all_var = tk.BooleanVar(value=self.expand_all_default)
 
             self.toggle_videos_check = ttk.Checkbutton(
                 checkboxes_row,
@@ -676,7 +681,8 @@ def select_multiple_folders_and_play():
             if not selection:
                 if self.current_selected_dir_index is not None:
                     selected_dir = self.selected_dirs[self.current_selected_dir_index]
-                    self.load_subdirectories(selected_dir)
+                    max_depth = 20 if self.expand_all_var.get() else 1
+                    self.load_subdirectories(selected_dir, max_depth=max_depth)
                 else:
                     self.clear_exclusion_list()
                 return
@@ -687,7 +693,8 @@ def select_multiple_folders_and_play():
 
             self.current_selected_dir_index = selected_index
             selected_dir = self.selected_dirs[selected_index]
-            self.load_subdirectories(selected_dir)
+            max_depth = 20 if self.expand_all_var.get() else 1
+            self.load_subdirectories(selected_dir, max_depth=max_depth)
 
         def get_all_subdirectories(self, directory, prefix="", max_depth=20, current_depth=0):
             if current_depth >= max_depth:
@@ -944,8 +951,9 @@ def select_multiple_folders_and_play():
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
                 messagebox.showinfo("Information", "Please select a directory first.")
-                self.expand_all_var.set(False)
+                self.expand_all_var.set(self.expand_all_default)
                 return
+            self.save_preferences()
             if self.expand_all_var.get():
                 self.load_subdirectories(selected_dir, max_depth=20)
             else:
@@ -957,6 +965,7 @@ def select_multiple_folders_and_play():
                 messagebox.showinfo("Information", "Please select a directory first.")
                 return
             self.show_videos = bool(self.show_videos_var.get())
+            self.save_preferences()
             self.load_subdirectories(selected_dir, max_depth=self.current_max_depth)
 
         def toggle_excluded_only(self):
@@ -1123,7 +1132,7 @@ def select_multiple_folders_and_play():
                 theme_frame,
                 text="Dark Mode" if not self.dark_mode else "Light Mode",
                 command=self.toggle_theme,
-                variant="secondary",
+                variant="theme",
                 size="md"
             )
             self.theme_button.pack()

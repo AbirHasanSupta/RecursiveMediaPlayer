@@ -9,35 +9,38 @@ class ThemeSelector:
         documents_dir.mkdir(parents=True, exist_ok=True)
         return documents_dir / "config.json"
 
-    def load_theme_preference(self):
+    def load_preferences(self):
         try:
             config_path = self.get_config_path()
             if config_path.exists():
                 with open(config_path, 'r') as f:
                     config = json.load(f)
-                    return config.get('dark_mode', False)
+                    return {
+                    'dark_mode': config.get('dark_mode', False),
+                    'show_videos': config.get('show_videos', True),
+                    'expand_all': config.get('expand_all', True)
+                }
         except Exception as e:
             self.update_console(f"Error loading config: {e}")
-        return False
+        return {'dark_mode': False, 'show_videos': True, 'expand_all': True}
 
-    def save_theme_preference(self):
+    def save_preferences(self):
         try:
             config_path = self.get_config_path()
-            config = {}
-            if config_path.exists():
-                with open(config_path, 'r') as f:
-                    config = json.load(f)
-            config['dark_mode'] = self.dark_mode
+            config = {
+                'dark_mode': self.dark_mode,
+                'show_videos': self.show_videos,
+                'expand_all': self.expand_all_var.get() if hasattr(self, 'expand_all_var') else True
+            }
             with open(config_path, 'w') as f:
-                json.dump(config, f)
+                json.dump(config, f, indent=2)
         except Exception as e:
             self.update_console(f"Error saving config: {e}")
 
     def toggle_theme(self):
         self.dark_mode = not self.dark_mode
-        self.save_theme_preference()
+        self.save_preferences()
         self.apply_theme()
-        self.update_console(f"Switched to {'dark' if self.dark_mode else 'light'} mode")
 
     def apply_theme(self):
         if self.dark_mode:
@@ -202,8 +205,6 @@ class ThemeSelector:
         return variants.get(variant, variants["primary"])
 
     def update_container_borders(self):
-        containers = []
-
         if hasattr(self, 'dir_frame'):
             for child in self.dir_frame.winfo_children():
                 if isinstance(child, tk.Frame) and any(isinstance(x, tk.Listbox) for x in child.winfo_children()):
