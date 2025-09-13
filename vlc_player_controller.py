@@ -7,6 +7,9 @@ from screeninfo import get_monitors
 from datetime import datetime
 from pathlib import Path
 from key_press import cleanup_hotkeys
+import win32clipboard as wcb
+import win32con
+import struct
 
 
 class MonitorInfo:
@@ -264,6 +267,26 @@ class BaseVLCPlayerController:
             except Exception as e:
                 if self.logger:
                     self.logger(f"Error taking screenshot: {e}")
+
+    def copy_current_video(self):
+        with self.lock:
+            try:
+                current_video = self.videos[self.index]
+                file_struct = struct.pack("Iiiii", 20, 0, 0, 0, 1)
+                files = (current_video + "\0").encode("utf-16le") + b"\0\0"
+                data = file_struct + files
+
+                wcb.OpenClipboard()
+                wcb.EmptyClipboard()
+                wcb.SetClipboardData(win32con.CF_HDROP, data)
+                wcb.CloseClipboard()
+
+                if self.logger:
+                    self.logger(f"Copied to clipboard: {current_video}")
+
+            except Exception as e:
+                if self.logger:
+                    self.logger(f"Error copying video: {e}")
 
     def stop_video(self):
         with self.lock:

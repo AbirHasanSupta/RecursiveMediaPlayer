@@ -35,6 +35,7 @@ Keyboard Shortcuts (only when the app window is focused)
 - q / e: Previous/Next directory (when multiple directories are scanned)
 - = / -: Control playback speed
 - 0: Reset playback speed
+- ctrl + c: Copy current video
 
 Notes
 - The app uses python-vlc and spawns a VLC media player window positioned on the selected monitor.
