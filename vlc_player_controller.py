@@ -5,7 +5,7 @@ import vlc
 import threading
 from screeninfo import get_monitors
 from datetime import datetime
-
+from pathlib import Path
 from key_press import cleanup_hotkeys
 
 
@@ -248,14 +248,16 @@ class BaseVLCPlayerController:
         with self.lock:
             try:
                 current_video = self.videos[self.index]
-                video_dir = os.path.dirname(current_video)
+                video_dir = Path.home() / "Documents" / "Recursive Media Player" / "Screenshots"
+                video_dir.mkdir(parents=True, exist_ok=True)
+
                 video_name = os.path.splitext(os.path.basename(current_video))[0]
 
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 screenshot_filename = f"{video_name}_screenshot_{timestamp}.png"
-                screenshot_path = os.path.join(video_dir, screenshot_filename)
+                screenshot_path = video_dir / screenshot_filename
 
-                self.player.video_take_snapshot(0, screenshot_path, 0, 0)
+                self.player.video_take_snapshot(0, str(screenshot_path), 0, 0)
                 if self.logger:
                     self.logger(f"Screenshot saved: {screenshot_path}")
 
