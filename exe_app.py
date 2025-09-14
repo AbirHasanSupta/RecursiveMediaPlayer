@@ -34,6 +34,7 @@ def select_multiple_folders_and_play():
             self.dark_mode = preferences['dark_mode']
             self.show_videos = preferences['show_videos']
             self.expand_all_default = preferences['expand_all']
+            self.save_directories = preferences['save_directories']
 
             self.setup_theme()
 
@@ -55,6 +56,20 @@ def select_multiple_folders_and_play():
             self.executor = ProcessPoolExecutor(max_workers=max_workers)
             self.update_console(f"Scanner ready (process workers: {max_workers})")
             self.apply_theme()
+            if self.save_directories:
+                self.selected_dirs = preferences.get('selected_dirs', [])
+                for directory in self.selected_dirs:
+                    display_name = directory
+                    if len(directory) > 60:
+                        display_name = os.path.basename(directory)
+                        parent = os.path.dirname(directory)
+                        if parent:
+                            display_name = f"{os.path.basename(parent)}/{display_name}"
+                        display_name = f".../{display_name}"
+                    self.dir_listbox.insert(tk.END, display_name)
+                    self._submit_scan(directory)
+            else:
+                self.selected_dirs = []
 
         def setup_theme(self):
             self.bg_color = "#f5f5f5"
@@ -360,6 +375,7 @@ def select_multiple_folders_and_play():
             self.show_videos_var = tk.BooleanVar(value=self.show_videos)
             self.excluded_only_var = tk.BooleanVar(value=self.show_only_excluded)
             self.expand_all_var = tk.BooleanVar(value=self.expand_all_default)
+            self.save_directories_var = tk.BooleanVar(value=self.save_directories)
 
             self.toggle_videos_check = ttk.Checkbutton(
                 checkboxes_row,
@@ -387,6 +403,15 @@ def select_multiple_folders_and_play():
                 command=self.toggle_excluded_only
             )
             self.toggle_excluded_only_check.pack(side=tk.LEFT, padx=(0, 10))
+
+            self.save_directories_check = ttk.Checkbutton(
+                checkboxes_row,
+                text="Save Directories",
+                style="Modern.TCheckbutton",
+                variable=self.save_directories_var,
+                command=self.toggle_save_directories
+            )
+            self.save_directories_check.pack(side=tk.LEFT, padx=(0, 10))
 
             buttons_row = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
             buttons_row.pack(fill=tk.X, pady=(5, 0))
@@ -976,6 +1001,10 @@ def select_multiple_folders_and_play():
             self.show_only_excluded = bool(self.excluded_only_var.get())
             self.load_subdirectories(selected_dir, max_depth=self.current_max_depth)
 
+        def toggle_save_directories(self):
+            self.save_directories = bool(self.save_directories_var.get())
+            self.save_preferences()
+
         def clear_all_exclusions(self):
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
@@ -1190,6 +1219,7 @@ def select_multiple_folders_and_play():
                 self.update_console(f"Scanning '{os.path.basename(directory)}' for videos...")
                 self._submit_scan(directory)
                 self.update_video_count()
+                self.save_preferences()
 
         def remove_directory(self):
             selected_indices = self.dir_listbox.curselection()
@@ -1225,6 +1255,7 @@ def select_multiple_folders_and_play():
 
             self.update_video_count()
             self.clear_exclusion_list()
+            self.save_preferences()
 
         def draw_slider(self):
             if not hasattr(self, 'speed_canvas'):

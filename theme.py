@@ -18,11 +18,13 @@ class ThemeSelector:
                     return {
                     'dark_mode': config.get('dark_mode', False),
                     'show_videos': config.get('show_videos', True),
-                    'expand_all': config.get('expand_all', True)
+                    'expand_all': config.get('expand_all', True),
+                    'selected_dirs': config.get('selected_dirs', []),
+                    'save_directories': config.get('save_directories', False)
                 }
         except Exception as e:
             self.update_console(f"Error loading config: {e}")
-        return {'dark_mode': False, 'show_videos': True, 'expand_all': True}
+        return {'dark_mode': False, 'show_videos': True, 'expand_all': True, 'selected_dirs': [], 'save_directories': False}
 
     def save_preferences(self):
         try:
@@ -30,7 +32,9 @@ class ThemeSelector:
             config = {
                 'dark_mode': self.dark_mode,
                 'show_videos': self.show_videos,
-                'expand_all': self.expand_all_var.get() if hasattr(self, 'expand_all_var') else True
+                'expand_all': self.expand_all_var.get() if hasattr(self, 'expand_all_var') else True,
+                'selected_dirs': getattr(self, 'selected_dirs', []),
+                'save_directories': self.save_directories
             }
             with open(config_path, 'w') as f:
                 json.dump(config, f, indent=2)
