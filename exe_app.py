@@ -39,6 +39,8 @@ def select_multiple_folders_and_play():
             self.start_from_last_played = preferences['start_from_last_played']
             self.last_played_video_index = preferences['last_played_video_index']
             self.last_played_video_path = preferences['last_played_video_path']
+            self.excluded_subdirs = preferences.get('excluded_subdirs', {})
+            self.excluded_videos = preferences.get('excluded_videos', {})
 
             self.setup_theme()
 
@@ -835,6 +837,8 @@ def select_multiple_folders_and_play():
                     self.load_subdirectories(dir_path)
                     self.update_video_count()
                     self.exclusion_listbox.selection_clear(0, tk.END)
+                    if self.save_directories:
+                        self.save_preferences()
 
                 self.root.after(0, apply_and_refresh)
 
@@ -909,6 +913,8 @@ def select_multiple_folders_and_play():
                     self.load_subdirectories(dir_path)
                     self.update_video_count()
                     self.exclusion_listbox.selection_clear(0, tk.END)
+                    if self.save_directories:
+                        self.save_preferences()
                     for btn in [getattr(self, 'exclude_button', None), getattr(self, 'include_button', None), getattr(self, 'exclude_all_button', None), getattr(self, 'clear_exclusions_button', None)]:
                         if btn:
                             btn.config(state=tk.NORMAL)
@@ -994,6 +1000,8 @@ def select_multiple_folders_and_play():
                     self.load_subdirectories(dir_path)
                     self.update_video_count()
                     self.exclusion_listbox.selection_clear(0, tk.END)
+                    if self.save_directories:
+                        self.save_preferences()
                     for btn in [getattr(self, 'exclude_button', None), getattr(self, 'include_button', None), getattr(self, 'exclude_all_button', None), getattr(self, 'clear_exclusions_button', None)]:
                         if btn:
                             btn.config(state=tk.NORMAL)
@@ -1067,6 +1075,8 @@ def select_multiple_folders_and_play():
                         del self.excluded_videos[selected_dir]
                     self.update_console(
                         f"Cleared all {excluded_count} exclusions for '{os.path.basename(selected_dir)}'")
+                    if self.save_directories:
+                        self.save_preferences()
                     self.load_subdirectories(selected_dir)
                     self.update_video_count()
 

@@ -33,6 +33,38 @@ class ConfigHandler:
                     except Exception:
                         last_played_path = ''
 
+                    encoded_excluded_subdirs = config.get('excluded_subdirs', {})
+                    decoded_excluded_subdirs = {}
+                    for encoded_root, encoded_subdirs in encoded_excluded_subdirs.items():
+                        try:
+                            root_dir = base64.b64decode(encoded_root.encode()).decode()
+                            subdirs = []
+                            for encoded_subdir in encoded_subdirs:
+                                try:
+                                    subdirs.append(base64.b64decode(encoded_subdir.encode()).decode())
+                                except Exception:
+                                    pass
+                            if subdirs:
+                                decoded_excluded_subdirs[root_dir] = subdirs
+                        except Exception:
+                            pass
+
+                    encoded_excluded_videos = config.get('excluded_videos', {})
+                    decoded_excluded_videos = {}
+                    for encoded_root, encoded_videos in encoded_excluded_videos.items():
+                        try:
+                            root_dir = base64.b64decode(encoded_root.encode()).decode()
+                            videos = []
+                            for encoded_video in encoded_videos:
+                                try:
+                                    videos.append(base64.b64decode(encoded_video.encode()).decode())
+                                except Exception:
+                                    pass
+                            if videos:
+                                decoded_excluded_videos[root_dir] = videos
+                        except Exception:
+                            pass
+
                     return {
                         'dark_mode': config.get('dark_mode', False),
                         'show_videos': config.get('show_videos', True),
@@ -41,13 +73,16 @@ class ConfigHandler:
                         'save_directories': config.get('save_directories', False),
                         'start_from_last_played': config.get('start_from_last_played', False),
                         'last_played_video_index': config.get('last_played_video_index', 0),
-                        'last_played_video_path': last_played_path
+                        'last_played_video_path': last_played_path,
+                        'excluded_subdirs': decoded_excluded_subdirs,
+                        'excluded_videos': decoded_excluded_videos
                     }
         except Exception:
             pass
         return {'dark_mode': False, 'show_videos': True, 'expand_all': True, 'selected_dirs': [],
-                'save_directories': False, 'start_from_last_played':False,
-                'last_played_video_index':0, 'last_played_video_path': ''}
+                'save_directories': False, 'start_from_last_played': False,
+                'last_played_video_index': 0, 'last_played_video_path': '',
+                'excluded_subdirs': {}, 'excluded_videos': {}}
 
     def save(self, config_dict):
         try:
@@ -69,6 +104,18 @@ class ThemeSelector:
         self.config = ConfigHandler()
 
     def save_preferences(self):
+        encoded_excluded_subdirs = {}
+        for root_dir, subdirs in getattr(self, 'excluded_subdirs', {}).items():
+            encoded_root = base64.b64encode(root_dir.encode()).decode()
+            encoded_subdirs = [base64.b64encode(subdir.encode()).decode() for subdir in subdirs]
+            encoded_excluded_subdirs[encoded_root] = encoded_subdirs
+
+        encoded_excluded_videos = {}
+        for root_dir, videos in getattr(self, 'excluded_videos', {}).items():
+            encoded_root = base64.b64encode(root_dir.encode()).decode()
+            encoded_videos = [base64.b64encode(video.encode()).decode() for video in videos]
+            encoded_excluded_videos[encoded_root] = encoded_videos
+
         prefs = {
             'dark_mode': self.dark_mode,
             'show_videos': self.show_videos,
@@ -77,7 +124,9 @@ class ThemeSelector:
             'save_directories': getattr(self, 'save_directories', False),
             'start_from_last_played': getattr(self, 'start_from_last_played', False),
             'last_played_video_index': getattr(self, 'last_played_video_index', 0),
-            'last_played_video_path': getattr(self, 'last_played_video_path', '')
+            'last_played_video_path': getattr(self, 'last_played_video_path', ''),
+            'excluded_subdirs': encoded_excluded_subdirs,
+            'excluded_videos': encoded_excluded_videos
         }
         self.config.save(prefs)
 
