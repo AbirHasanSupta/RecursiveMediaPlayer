@@ -36,6 +36,9 @@ def select_multiple_folders_and_play():
             self.show_videos = preferences['show_videos']
             self.expand_all_default = preferences['expand_all']
             self.save_directories = preferences['save_directories']
+            self.start_from_last_played = preferences['start_from_last_played']
+            self.last_played_video_index = preferences['last_played_video_index']
+            self.last_played_video_path = preferences['last_played_video_path']
 
             self.setup_theme()
 
@@ -377,6 +380,7 @@ def select_multiple_folders_and_play():
             self.excluded_only_var = tk.BooleanVar(value=self.show_only_excluded)
             self.expand_all_var = tk.BooleanVar(value=self.expand_all_default)
             self.save_directories_var = tk.BooleanVar(value=self.save_directories)
+            self.start_from_last_played_var = tk.BooleanVar(value=self.start_from_last_played)
 
             self.toggle_videos_check = ttk.Checkbutton(
                 checkboxes_row,
@@ -413,6 +417,15 @@ def select_multiple_folders_and_play():
                 command=self.toggle_save_directories
             )
             self.save_directories_check.pack(side=tk.LEFT, padx=(0, 10))
+
+            self.start_from_last_played_check = ttk.Checkbutton(
+                checkboxes_row,
+                text="Resume Playback",
+                style="Modern.TCheckbutton",
+                variable=self.start_from_last_played_var,
+                command=self.toggle_start_from_last_played
+            )
+            self.start_from_last_played_check.pack(side=tk.LEFT)
 
             buttons_row = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
             buttons_row.pack(fill=tk.X, pady=(5, 0))
@@ -509,6 +522,10 @@ def select_multiple_folders_and_play():
             self.reset_speed_button.pack(side=tk.LEFT)
 
             self.root.after(100, self.draw_slider)
+
+        def toggle_start_from_last_played(self):
+            self.start_from_last_played = bool(self.start_from_last_played_var.get())
+            self.save_preferences()
 
         def get_current_selected_directory(self):
             selection = self.dir_listbox.curselection()
@@ -645,6 +662,8 @@ def select_multiple_folders_and_play():
                     if not cache:
                         continue
                     videos, video_to_dir, directories = cache
+                    videos = [os.path.normpath(v) for v in videos]
+                    video_to_dir = {os.path.normpath(k): v for k, v in video_to_dir.items()}
 
                     excluded_subdirs = self.excluded_subdirs.get(directory, [])
                     excluded_videos = self.excluded_videos.get(directory, [])
@@ -687,6 +706,20 @@ def select_multiple_folders_and_play():
                         self.controller.set_initial_playback_rate(initial_speed)
                         self.update_console(f"Initial playback speed set to {initial_speed}x")
 
+                    start_index = 0
+                    if self.start_from_last_played:
+                        if self.last_played_video_path and self.last_played_video_path in all_videos:
+                            start_index = all_videos.index(self.last_played_video_path)
+                            self.update_console(
+                                f"Starting from last played video: {os.path.basename(self.last_played_video_path)}")
+                        elif self.save_directories and self.last_played_video_index < len(all_videos):
+                            start_index = self.last_played_video_index
+                            self.update_console(f"Starting from last played index: {start_index}")
+
+                    self.controller.set_start_index(start_index)
+
+                    self.controller.set_video_change_callback(self.on_video_changed)
+
                     if self.player_thread and self.player_thread.is_alive():
                         self.controller.running = False
                         self.player_thread.join(timeout=1.0)
@@ -701,6 +734,12 @@ def select_multiple_folders_and_play():
                 self.root.after(0, _start_player)
 
             threading.Thread(target=_run, daemon=True).start()
+
+        def on_video_changed(self, video_index, video_path):
+            self.last_played_video_index = video_index
+            self.last_played_video_path = video_path
+            if self.start_from_last_played:
+                self.save_preferences()
 
         def on_directory_select(self, event):
             selection = self.dir_listbox.curselection()
@@ -1353,6 +1392,12 @@ def select_multiple_folders_and_play():
 
         def cancel(self):
             if self.controller:
+                if self.start_from_last_played and hasattr(self.controller, 'index'):
+                    self.last_played_video_index = self.controller.index
+                    if self.controller.index < len(self.controller.videos):
+                        self.last_played_video_path = self.controller.videos[self.controller.index]
+                    self.save_preferences()
+
                 self.controller.stop()
             cleanup_hotkeys()
             try:

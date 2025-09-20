@@ -49,6 +49,8 @@ class BaseVLCPlayerController:
         self.current_monitor = 1
         self.logger = logger
         self.initial_playback_rate = 1.0
+        self.start_index = 0
+        self.video_change_callback = None
 
     def set_initial_playback_rate(self, rate):
         self.initial_playback_rate = rate
@@ -97,7 +99,10 @@ class BaseVLCPlayerController:
                 return False
             self.index = index
             media = self.instance.media_new(self.videos[self.index])
-            return self._play_video(media)
+            result = self._play_video(media)
+            if result:
+                self._notify_video_change()
+            return result
 
     def next_video(self):
         with self.lock:
@@ -201,7 +206,7 @@ class BaseVLCPlayerController:
                 self.logger("Speed reset to 1.0×")
 
     def run(self):
-        self.play_video(self.index)
+        self.play_video(self.start_index)
         while self.running:
             state = self.player.get_state()
             if state == vlc.State.Ended:
@@ -288,6 +293,19 @@ class BaseVLCPlayerController:
                 if self.logger:
                     self.logger(f"Error copying video: {e}")
 
+    def set_start_index(self, index):
+        self.start_index = max(0, min(index, len(self.videos) - 1))
+
+    def set_video_change_callback(self, callback):
+        self.video_change_callback = callback
+
+    def _notify_video_change(self):
+        if self.video_change_callback:
+            try:
+                self.video_change_callback(self.index, self.videos[self.index])
+            except Exception:
+                pass
+
     def stop_video(self):
         with self.lock:
             self.running = False
@@ -373,4 +391,7 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
                 self.logger(f"Playing: {os.path.basename(current_video)} from {current_dir}")
 
             media = self.instance.media_new(current_video)
-            return self._play_video(media)
+            result = self._play_video(media)
+            if result:
+                self._notify_video_change()
+            return result

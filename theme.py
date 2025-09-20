@@ -1,4 +1,5 @@
 import json
+import os.path
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
@@ -26,23 +27,36 @@ class ConfigHandler:
                             decoded_dirs.append(base64.b64decode(ed.encode()).decode())
                         except Exception:
                             pass
+                    last_played_encoded = config.get('last_played_video_path', '')
+                    try:
+                        last_played_path = os.path.normpath(base64.b64decode(last_played_encoded.encode()).decode())
+                    except Exception:
+                        last_played_path = ''
+
                     return {
                         'dark_mode': config.get('dark_mode', False),
                         'show_videos': config.get('show_videos', True),
                         'expand_all': config.get('expand_all', True),
                         'selected_dirs': decoded_dirs,
-                        'save_directories': config.get('save_directories', False)
+                        'save_directories': config.get('save_directories', False),
+                        'start_from_last_played': config.get('start_from_last_played', False),
+                        'last_played_video_index': config.get('last_played_video_index', 0),
+                        'last_played_video_path': last_played_path
                     }
         except Exception:
             pass
         return {'dark_mode': False, 'show_videos': True, 'expand_all': True, 'selected_dirs': [],
-                'save_directories': False}
+                'save_directories': False, 'start_from_last_played':False,
+                'last_played_video_index':0, 'last_played_video_path': ''}
 
     def save(self, config_dict):
         try:
             encoded_dirs = [base64.b64encode(d.encode()).decode() for d in config_dict.get('selected_dirs', [])]
             config_dict = dict(config_dict)
             config_dict['selected_dirs'] = encoded_dirs
+
+            last_played_path = config_dict.get('last_played_video_path', '')
+            config_dict['last_played_video_path'] = base64.b64encode(last_played_path.encode()).decode()
 
             with open(self.config_path, 'w') as f:
                 json.dump(config_dict, f, indent=2)
@@ -60,7 +74,10 @@ class ThemeSelector:
             'show_videos': self.show_videos,
             'expand_all': self.expand_all_var.get() if hasattr(self, 'expand_all_var') else True,
             'selected_dirs': getattr(self, 'selected_dirs', []),
-            'save_directories': getattr(self, 'save_directories', False)
+            'save_directories': getattr(self, 'save_directories', False),
+            'start_from_last_played': getattr(self, 'start_from_last_played', False),
+            'last_played_video_index': getattr(self, 'last_played_video_index', 0),
+            'last_played_video_path': getattr(self, 'last_played_video_path', '')
         }
         self.config.save(prefs)
 
