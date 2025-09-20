@@ -16,6 +16,7 @@ from vlc_player_controller import VLCPlayerControllerForMultipleDirectory
 def select_multiple_folders_and_play():
     class DirectorySelector(ThemeSelector):
         def __init__(self, root):
+            super().__init__()
             self.root = root
             self.selected_dirs = []
             self.excluded_subdirs = {}
@@ -30,7 +31,7 @@ def select_multiple_folders_and_play():
             self.show_only_excluded = False
             self.current_max_depth = 20
 
-            preferences = self.load_preferences()
+            preferences = self.config.load_preferences()
             self.dark_mode = preferences['dark_mode']
             self.show_videos = preferences['show_videos']
             self.expand_all_default = preferences['expand_all']

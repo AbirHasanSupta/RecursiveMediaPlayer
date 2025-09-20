@@ -2,44 +2,67 @@ import json
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
+import base64
 
-class ThemeSelector:
-    def get_config_path(self):
+
+class ConfigHandler:
+
+    @property
+    def config_path(self):
         documents_dir = Path.home() / "Documents" / "Recursive Media Player"
         documents_dir.mkdir(parents=True, exist_ok=True)
         return documents_dir / "config.json"
 
     def load_preferences(self):
         try:
-            config_path = self.get_config_path()
-            if config_path.exists():
-                with open(config_path, 'r') as f:
+            if self.config_path.exists():
+                with open(self.config_path, 'r') as f:
                     config = json.load(f)
+
+                    encoded_dirs = config.get('selected_dirs', [])
+                    decoded_dirs = []
+                    for ed in encoded_dirs:
+                        try:
+                            decoded_dirs.append(base64.b64decode(ed.encode()).decode())
+                        except Exception:
+                            pass
                     return {
-                    'dark_mode': config.get('dark_mode', False),
-                    'show_videos': config.get('show_videos', True),
-                    'expand_all': config.get('expand_all', True),
-                    'selected_dirs': config.get('selected_dirs', []),
-                    'save_directories': config.get('save_directories', False)
-                }
+                        'dark_mode': config.get('dark_mode', False),
+                        'show_videos': config.get('show_videos', True),
+                        'expand_all': config.get('expand_all', True),
+                        'selected_dirs': decoded_dirs,
+                        'save_directories': config.get('save_directories', False)
+                    }
+        except Exception:
+            pass
+        return {'dark_mode': False, 'show_videos': True, 'expand_all': True, 'selected_dirs': [],
+                'save_directories': False}
+
+    def save(self, config_dict):
+        try:
+            encoded_dirs = [base64.b64encode(d.encode()).decode() for d in config_dict.get('selected_dirs', [])]
+            config_dict = dict(config_dict)
+            config_dict['selected_dirs'] = encoded_dirs
+
+            with open(self.config_path, 'w') as f:
+                json.dump(config_dict, f, indent=2)
         except Exception as e:
-            self.update_console(f"Error loading config: {e}")
-        return {'dark_mode': False, 'show_videos': True, 'expand_all': True, 'selected_dirs': [], 'save_directories': False}
+            pass
+
+
+class ThemeSelector:
+    def __init__(self):
+        self.config = ConfigHandler()
 
     def save_preferences(self):
-        try:
-            config_path = self.get_config_path()
-            config = {
-                'dark_mode': self.dark_mode,
-                'show_videos': self.show_videos,
-                'expand_all': self.expand_all_var.get() if hasattr(self, 'expand_all_var') else True,
-                'selected_dirs': getattr(self, 'selected_dirs', []),
-                'save_directories': self.save_directories
-            }
-            with open(config_path, 'w') as f:
-                json.dump(config, f, indent=2)
-        except Exception as e:
-            self.update_console(f"Error saving config: {e}")
+        prefs = {
+            'dark_mode': self.dark_mode,
+            'show_videos': self.show_videos,
+            'expand_all': self.expand_all_var.get() if hasattr(self, 'expand_all_var') else True,
+            'selected_dirs': getattr(self, 'selected_dirs', []),
+            'save_directories': getattr(self, 'save_directories', False)
+        }
+        self.config.save(prefs)
 
     def toggle_theme(self):
         self.dark_mode = not self.dark_mode
