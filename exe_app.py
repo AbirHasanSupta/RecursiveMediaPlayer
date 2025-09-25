@@ -324,7 +324,6 @@ def select_multiple_folders_and_play():
 
         def toggle_ai_mode(self):
             if self.ai_mode:
-                # Switching to normal mode - immediate
                 self.ai_mode = False
                 self.ai_button.config(text="AI Mode")
                 self.update_console("Normal mode enabled")
@@ -333,7 +332,6 @@ def select_multiple_folders_and_play():
                 self.save_preferences()
                 return
 
-            # Switching to AI mode - need to load models
             if not self.ai_index_path:
                 from tkinter import filedialog
                 self.ai_index_path = filedialog.askdirectory(
@@ -341,31 +339,29 @@ def select_multiple_folders_and_play():
                 if not self.ai_index_path:
                     return
 
-            # Start loading in background
             self.ai_button.config(text="Loading...", state=tk.DISABLED)
-            self.show_ai_loading_progress()  # Add this line
+            self.show_ai_loading_progress()
             self.update_console("Initializing AI models in background... UI remains responsive.")
 
             def load_ai_models():
                 try:
-                    from the_first_that_worked import UltraFastSearcher
+                    from search_model import UltraFastSearcher
                     index_path = os.path.join(self.ai_index_path, "frames.index")
                     meta_path = os.path.join(self.ai_index_path, "minimal_meta.pkl")
                     text_path = os.path.join(self.ai_index_path, "text_index.pkl")
 
                     if not all(os.path.exists(p) for p in [index_path, meta_path, text_path]):
-                        def show_error():
+                        def show_error_and_retry():
                             messagebox.showerror("Error",
                                                  "AI index files not found. Please ensure frames.index, minimal_meta.pkl, and text_index.pkl exist.")
                             self.ai_button.config(text="AI Mode", state=tk.NORMAL)
+                            self.ai_index_path = None
 
-                        self.root.after(0, show_error)
+                        self.root.after(0, show_error_and_retry)
                         return
 
-                    # This is the heavy operation that takes 8+ seconds
                     searcher = UltraFastSearcher(index_path, meta_path, text_path)
 
-                    # Once loaded, update UI on main thread
                     def finalize_ai_mode():
                         self.ai_searcher = searcher
                         self.ai_mode = True
@@ -380,6 +376,7 @@ def select_multiple_folders_and_play():
                     def show_import_error():
                         messagebox.showerror("Error", f"Missing dependencies for AI search: {e}")
                         self.ai_button.config(text="AI Mode", state=tk.NORMAL)
+                        self.ai_index_path = None
 
                     self.root.after(0, show_import_error)
 
@@ -387,10 +384,10 @@ def select_multiple_folders_and_play():
                     def show_general_error():
                         messagebox.showerror("Error", f"Failed to initialize AI searcher: {e}")
                         self.ai_button.config(text="AI Mode", state=tk.NORMAL)
+                        self.ai_index_path = None
 
                     self.root.after(0, show_general_error)
 
-            # Start loading in a daemon thread so it doesn't block UI
             threading.Thread(target=load_ai_models, daemon=True).start()
 
         def show_ai_loading_progress(self):
@@ -448,7 +445,6 @@ def select_multiple_folders_and_play():
                 messagebox.showwarning("Warning", "Please select a directory first")
                 return
 
-            # Disable search button during search
             self.ai_search_button.config(text="Searching...", state=tk.DISABLED)
             self.exclusion_listbox.delete(0, tk.END)
             self.exclusion_listbox.insert(tk.END, "Searching...")
@@ -457,7 +453,6 @@ def select_multiple_folders_and_play():
 
             def search_worker():
                 try:
-                    # Check if AI index has videos from this directory
                     if not self.ai_searcher.has_videos_from_directory(selected_dir):
                         def show_warning():
                             messagebox.showwarning("Warning",
@@ -471,7 +466,6 @@ def select_multiple_folders_and_play():
                     self.root.after(0, lambda: self.update_console(
                         f"Searching {total_videos} indexed videos from '{os.path.basename(selected_dir)}'..."))
 
-                    # Perform the search
                     filtered_results, counts, scores = self.ai_searcher.query_filtered_by_directory(
                         query, selected_dir, top_k=100
                     )
@@ -516,7 +510,6 @@ def select_multiple_folders_and_play():
 
                     self.root.after(0, show_error)
 
-            # Run search in background thread
             threading.Thread(target=search_worker, daemon=True).start()
 
         def on_directory_focus_out(self, event):
@@ -579,7 +572,6 @@ def select_multiple_folders_and_play():
             exclusion_buttons_frame = tk.Frame(self.exclusion_section, bg=self.bg_color)
             exclusion_buttons_frame.pack(fill=tk.X, pady=(10, 0))
 
-            # AI Search Frame (initially hidden)
             self.ai_search_frame = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
             self.ai_search_frame.pack(fill=tk.X, pady=(0, 10))
 
@@ -612,7 +604,6 @@ def select_multiple_folders_and_play():
             )
             self.ai_search_button.pack(side=tk.RIGHT)
 
-            # Normal mode checkboxes and buttons
             self.normal_mode_frame = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
             self.normal_mode_frame.pack(fill=tk.X)
 
