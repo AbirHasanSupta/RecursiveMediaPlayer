@@ -403,17 +403,30 @@ def select_multiple_folders_and_play():
                 self.ai_button.config(text=f"Loading{dots}")
                 self._ai_loading_dots += 1
 
-                # Schedule next update
                 self.root.after(500, self.show_ai_loading_progress)
 
         def update_ui_for_mode(self):
             if self.ai_mode:
                 self.ai_search_frame.pack(fill=tk.X, pady=(0, 10))
                 self.normal_mode_frame.pack_forget()
+
+                self.exclude_button.pack_forget()
+                self.include_button.pack_forget()
+                self.exclude_all_button.pack_forget()
+                self.clear_exclusions_button.pack_forget()
+                self.toggle_excluded_only_check.pack_forget()
+
                 self.selected_dir_label.config(text="AI Search Mode - Enter query to search videos")
             else:
                 self.ai_search_frame.pack_forget()
                 self.normal_mode_frame.pack(fill=tk.X)
+
+                self.exclude_button.pack(side=tk.LEFT, padx=(0, 5))
+                self.include_button.pack(side=tk.LEFT, padx=(0, 5))
+                self.exclude_all_button.pack(side=tk.LEFT, padx=(0, 5))
+                self.clear_exclusions_button.pack(side=tk.LEFT)
+                self.toggle_excluded_only_check.pack(side=tk.LEFT, padx=(0, 10))
+
                 selected_dir = self.get_current_selected_directory()
                 if selected_dir:
                     self.load_subdirectories(selected_dir)
@@ -872,6 +885,63 @@ def select_multiple_folders_and_play():
             self.update_console("=" * 100)
 
             def _run():
+                if self.ai_mode and self.current_subdirs_mapping:
+                    self.update_console("Using AI search results for playback order")
+
+                    ai_video_paths = []
+                    for i in range(len(self.current_subdirs_mapping)):
+                        if i in self.current_subdirs_mapping:
+                            path = self.current_subdirs_mapping[i]
+                            if os.path.isfile(path) and is_video(path):
+                                ai_video_paths.append(path)
+
+                    if not ai_video_paths:
+                        def _show_no_videos():
+                            messagebox.showwarning("No Videos", "No valid videos found in AI search results.")
+                            self.root.config(cursor="")
+
+                        self.root.after(0, _show_no_videos)
+                        return
+
+                    all_videos = ai_video_paths
+                    all_video_to_dir = {}
+                    selected_dir = self.get_current_selected_directory()
+
+                    for video_path in ai_video_paths:
+                        all_video_to_dir[video_path] = os.path.dirname(video_path)
+
+                    all_directories = list(set(all_video_to_dir.values()))
+                    all_directories.sort()
+
+                    def _start_ai_player():
+                        self.update_console(f"Playing {len(all_videos)} videos from AI search results")
+                        self.controller = VLCPlayerControllerForMultipleDirectory(
+                            all_videos, all_video_to_dir, all_directories, self.update_console
+                        )
+
+                        initial_speed = self.speed_var.get()
+                        if initial_speed != 1.0:
+                            self.controller.set_initial_playback_rate(initial_speed)
+                            self.update_console(f"Initial playback speed set to {initial_speed}x")
+
+                        start_index = 0
+                        self.controller.set_start_index(start_index)
+                        self.controller.set_video_change_callback(self.on_video_changed)
+
+                        if self.player_thread and self.player_thread.is_alive():
+                            self.controller.running = False
+                            self.player_thread.join(timeout=1.0)
+
+                        self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
+                        self.player_thread.start()
+
+                        self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
+                        self.keys_thread.start()
+                        self.root.config(cursor="")
+
+                    self.root.after(0, _start_ai_player)
+                    return
+
                 futures = {}
                 for directory in self.selected_dirs:
                     if directory not in self.scan_cache and directory not in self.pending_scans:
