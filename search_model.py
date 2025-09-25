@@ -501,11 +501,9 @@ class UltraFastSearcher:
     def has_videos_from_directory(self, directory_path):
         """Check if the index contains any videos from the specified directory"""
         directory_path = os.path.normpath(directory_path)
-        print("Dir Path", directory_path)
 
         for video_path in self.metadata['video_paths']:
             video_norm = os.path.normpath(video_path)
-            print("Vid path", video_path)
             if video_norm.startswith(directory_path + os.sep) or video_norm == directory_path:
                 return True
         return False
