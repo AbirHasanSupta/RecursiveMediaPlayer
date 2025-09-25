@@ -29,6 +29,9 @@ def select_multiple_folders_and_play():
             self.current_subdirs_mapping = {}
             self.show_videos = True
             self.show_only_excluded = False
+            self.ai_mode = False
+            self.ai_searcher = None
+            self.ai_index_path = None
             self.current_max_depth = 20
 
             preferences = self.config.load_preferences()
@@ -41,6 +44,8 @@ def select_multiple_folders_and_play():
             self.last_played_video_path = preferences['last_played_video_path']
             self.excluded_subdirs = preferences.get('excluded_subdirs', {})
             self.excluded_videos = preferences.get('excluded_videos', {})
+            self.ai_mode = preferences.get('ai_mode', False)
+            self.ai_index_path = preferences.get('ai_index_path', '')
 
             self.setup_theme()
 
@@ -76,6 +81,8 @@ def select_multiple_folders_and_play():
                     self._submit_scan(directory)
             else:
                 self.selected_dirs = []
+
+            self.update_ui_for_mode()
 
         def setup_theme(self):
             self.bg_color = "#f5f5f5"
@@ -294,6 +301,8 @@ def select_multiple_folders_and_play():
             self.scrollbar = tk.Scrollbar(list_container)
             self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
+
+
             self.dir_listbox = tk.Listbox(
                 list_container,
                 selectmode=tk.SINGLE,
@@ -314,6 +323,190 @@ def select_multiple_folders_and_play():
             self.dir_listbox.bind('<FocusOut>', self.on_directory_focus_out)
             self.dir_listbox.bind('<FocusIn>', self.on_directory_focus_in)
             self.scrollbar.config(command=self.dir_listbox.yview)
+
+        def toggle_ai_mode(self):
+            if self.ai_mode:
+                # Switching to normal mode - immediate
+                self.ai_mode = False
+                self.ai_button.config(text="AI Mode")
+                self.update_console("Normal mode enabled")
+                self.clear_exclusion_list()
+                self.update_ui_for_mode()
+                self.save_preferences()
+                return
+
+            # Switching to AI mode - need to load models
+            if not self.ai_index_path:
+                from tkinter import filedialog
+                self.ai_index_path = filedialog.askdirectory(
+                    title="Select AI Index Directory (containing frames.index, etc.)")
+                if not self.ai_index_path:
+                    return
+
+            # Start loading in background
+            self.ai_button.config(text="Loading...", state=tk.DISABLED)
+            self.show_ai_loading_progress()  # Add this line
+            self.update_console("Initializing AI models in background... UI remains responsive.")
+
+            def load_ai_models():
+                try:
+                    from the_first_that_worked import UltraFastSearcher
+                    index_path = os.path.join(self.ai_index_path, "frames.index")
+                    meta_path = os.path.join(self.ai_index_path, "minimal_meta.pkl")
+                    text_path = os.path.join(self.ai_index_path, "text_index.pkl")
+
+                    if not all(os.path.exists(p) for p in [index_path, meta_path, text_path]):
+                        def show_error():
+                            messagebox.showerror("Error",
+                                                 "AI index files not found. Please ensure frames.index, minimal_meta.pkl, and text_index.pkl exist.")
+                            self.ai_button.config(text="AI Mode", state=tk.NORMAL)
+
+                        self.root.after(0, show_error)
+                        return
+
+                    # This is the heavy operation that takes 8+ seconds
+                    searcher = UltraFastSearcher(index_path, meta_path, text_path)
+
+                    # Once loaded, update UI on main thread
+                    def finalize_ai_mode():
+                        self.ai_searcher = searcher
+                        self.ai_mode = True
+                        self.ai_button.config(text="Normal Mode", state=tk.NORMAL)
+                        self.update_console("AI Mode enabled - Search functionality ready")
+                        self.update_ui_for_mode()
+                        self.save_preferences()
+
+                    self.root.after(0, finalize_ai_mode)
+
+                except ImportError as e:
+                    def show_import_error():
+                        messagebox.showerror("Error", f"Missing dependencies for AI search: {e}")
+                        self.ai_button.config(text="AI Mode", state=tk.NORMAL)
+
+                    self.root.after(0, show_import_error)
+
+                except Exception as e:
+                    def show_general_error():
+                        messagebox.showerror("Error", f"Failed to initialize AI searcher: {e}")
+                        self.ai_button.config(text="AI Mode", state=tk.NORMAL)
+
+                    self.root.after(0, show_general_error)
+
+            # Start loading in a daemon thread so it doesn't block UI
+            threading.Thread(target=load_ai_models, daemon=True).start()
+
+        def show_ai_loading_progress(self):
+            """Show loading progress for AI model initialization"""
+            if not hasattr(self, '_ai_loading_dots'):
+                self._ai_loading_dots = 0
+
+            if hasattr(self, 'ai_button') and self.ai_button.cget('text') == "Loading...":
+                dots = "." * (self._ai_loading_dots % 4)
+                self.ai_button.config(text=f"Loading{dots}")
+                self._ai_loading_dots += 1
+
+                # Schedule next update
+                self.root.after(500, self.show_ai_loading_progress)
+
+        def update_ui_for_mode(self):
+            if self.ai_mode:
+                self.ai_search_frame.pack(fill=tk.X, pady=(0, 10))
+                self.normal_mode_frame.pack_forget()
+                self.selected_dir_label.config(text="AI Search Mode - Enter query to search videos")
+            else:
+                self.ai_search_frame.pack_forget()
+                self.normal_mode_frame.pack(fill=tk.X)
+                selected_dir = self.get_current_selected_directory()
+                if selected_dir:
+                    self.load_subdirectories(selected_dir)
+                else:
+                    self.clear_exclusion_list()
+
+        def perform_ai_search(self):
+            if not self.ai_searcher:
+                messagebox.showerror("Error", "AI searcher not initialized")
+                return
+
+            query = self.ai_search_entry.get().strip()
+            if not query:
+                messagebox.showwarning("Warning", "Please enter a search query")
+                return
+
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                messagebox.showwarning("Warning", "Please select a directory first")
+                return
+
+            # Disable search button during search
+            self.ai_search_button.config(text="Searching...", state=tk.DISABLED)
+            self.exclusion_listbox.delete(0, tk.END)
+            self.exclusion_listbox.insert(tk.END, "Searching...")
+
+            self.update_console(f"Searching for: '{query}' in background...")
+
+            def search_worker():
+                try:
+                    # Check if AI index has videos from this directory
+                    if not self.ai_searcher.has_videos_from_directory(selected_dir):
+                        def show_warning():
+                            messagebox.showwarning("Warning",
+                                                   f"No videos from '{os.path.basename(selected_dir)}' found in AI index")
+                            self.ai_search_button.config(text="Search", state=tk.NORMAL)
+
+                        self.root.after(0, show_warning)
+                        return
+
+                    total_videos = self.ai_searcher.get_video_count_for_directory(selected_dir)
+                    self.root.after(0, lambda: self.update_console(
+                        f"Searching {total_videos} indexed videos from '{os.path.basename(selected_dir)}'..."))
+
+                    # Perform the search
+                    filtered_results, counts, scores = self.ai_searcher.query_filtered_by_directory(
+                        query, selected_dir, top_k=100
+                    )
+
+                    def update_ui():
+                        self.ai_search_button.config(text="Search", state=tk.NORMAL)
+                        self.exclusion_listbox.delete(0, tk.END)
+                        self.current_subdirs_mapping = {}
+
+                        if not filtered_results:
+                            self.exclusion_listbox.insert(tk.END,
+                                                          f"No videos from '{os.path.basename(selected_dir)}' match '{query}'")
+                            self.exclusion_listbox.insert(tk.END,
+                                                          "Try a different search term or check if this directory was included in AI preprocessing")
+                            self.update_console("No matching videos found in selected directory")
+                            return
+
+                        self.selected_dir_label.config(text=f"AI Search: '{query}' - {len(filtered_results)} results")
+
+                        for idx, video_path in enumerate(filtered_results):
+                            try:
+                                rel_path = os.path.relpath(video_path, selected_dir)
+                            except ValueError:
+                                rel_path = os.path.basename(video_path)
+
+                            score = scores.get(video_path, 0)
+                            frame_count = counts.get(video_path, 0)
+                            display_name = f"▶ {rel_path} (score: {score:.3f}, frames: {frame_count})"
+                            self.exclusion_listbox.insert(tk.END, display_name)
+                            self.current_subdirs_mapping[idx] = video_path
+
+                        self.update_console(f"Found {len(filtered_results)} matching videos")
+
+                    self.root.after(0, update_ui)
+
+                except Exception as e:
+                    def show_error():
+                        self.ai_search_button.config(text="Search", state=tk.NORMAL)
+                        self.exclusion_listbox.delete(0, tk.END)
+                        self.exclusion_listbox.insert(tk.END, f"Search error: {e}")
+                        self.update_console(f"AI search error: {e}")
+
+                    self.root.after(0, show_error)
+
+            # Run search in background thread
+            threading.Thread(target=search_worker, daemon=True).start()
 
         def on_directory_focus_out(self, event):
             selection = self.dir_listbox.curselection()
@@ -374,6 +567,46 @@ def select_multiple_folders_and_play():
 
             exclusion_buttons_frame = tk.Frame(self.exclusion_section, bg=self.bg_color)
             exclusion_buttons_frame.pack(fill=tk.X, pady=(10, 0))
+
+            # AI Search Frame (initially hidden)
+            self.ai_search_frame = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
+            self.ai_search_frame.pack(fill=tk.X, pady=(0, 10))
+
+            search_label = tk.Label(self.ai_search_frame, text="AI Search:",
+                                    font=self.normal_font, bg=self.bg_color, fg=self.text_color)
+            search_label.pack(anchor='w', pady=(0, 5))
+
+            search_input_frame = tk.Frame(self.ai_search_frame, bg=self.bg_color)
+            search_input_frame.pack(fill=tk.X, pady=(0, 5))
+
+            self.ai_search_entry = tk.Entry(
+                search_input_frame,
+                font=self.normal_font,
+                bg="white",
+                fg=self.text_color,
+                relief=tk.FLAT,
+                bd=1,
+                highlightthickness=1,
+                highlightbackground="#e0e0e0"
+            )
+            self.ai_search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+            self.ai_search_entry.bind('<Return>', lambda e: self.perform_ai_search())
+
+            self.ai_search_button = self.create_button(
+                search_input_frame,
+                text="Search",
+                command=self.perform_ai_search,
+                variant="primary",
+                size="sm"
+            )
+            self.ai_search_button.pack(side=tk.RIGHT)
+
+            # Normal mode checkboxes and buttons
+            self.normal_mode_frame = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
+            self.normal_mode_frame.pack(fill=tk.X)
+
+            checkboxes_row = tk.Frame(self.normal_mode_frame, bg=self.bg_color)
+            checkboxes_row.pack(fill=tk.X, pady=(0, 5))
 
             checkboxes_row = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
             checkboxes_row.pack(fill=tk.X, pady=(0, 5))
@@ -1207,6 +1440,15 @@ def select_multiple_folders_and_play():
             theme_frame = tk.Frame(self.button_frame, bg=self.bg_color)
             theme_frame.pack(side=tk.LEFT, expand=True)
 
+            self.ai_button = self.create_button(
+                theme_frame,
+                text="AI Mode" if not self.ai_mode else "Normal Mode",
+                command=self.toggle_ai_mode,
+                variant="warning",
+                size="md"
+            )
+            self.ai_button.pack(side=tk.LEFT, padx=(0, 10))
+
             self.theme_button = self.create_button(
                 theme_frame,
                 text="Dark Mode" if not self.dark_mode else "Light Mode",
@@ -1214,7 +1456,7 @@ def select_multiple_folders_and_play():
                 variant="theme",
                 size="md"
             )
-            self.theme_button.pack()
+            self.theme_button.pack(side=tk.LEFT)
 
             action_buttons_frame = tk.Frame(self.button_frame, bg=self.bg_color)
             action_buttons_frame.pack(side=tk.RIGHT)

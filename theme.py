@@ -73,6 +73,8 @@ class ConfigHandler:
                         'save_directories': config.get('save_directories', False),
                         'start_from_last_played': config.get('start_from_last_played', False),
                         'last_played_video_index': config.get('last_played_video_index', 0),
+                        'ai_mode': config.get('ai_mode', False),
+                        'ai_index_path': config.get('ai_index_path', ''),
                         'last_played_video_path': last_played_path,
                         'excluded_subdirs': decoded_excluded_subdirs,
                         'excluded_videos': decoded_excluded_videos
@@ -125,6 +127,8 @@ class ThemeSelector:
             'start_from_last_played': getattr(self, 'start_from_last_played', False),
             'last_played_video_index': getattr(self, 'last_played_video_index', 0),
             'last_played_video_path': getattr(self, 'last_played_video_path', ''),
+            'ai_mode': getattr(self, 'ai_mode', False),
+            'ai_index_path': getattr(self, 'ai_index_path', ''),
             'excluded_subdirs': encoded_excluded_subdirs,
             'excluded_videos': encoded_excluded_videos
         }
