@@ -44,8 +44,6 @@ def select_multiple_folders_and_play():
             self.last_played_video_path = preferences['last_played_video_path']
             self.excluded_subdirs = preferences.get('excluded_subdirs', {})
             self.excluded_videos = preferences.get('excluded_videos', {})
-            self.ai_mode = preferences.get('ai_mode', False)
-            self.ai_index_path = preferences.get('ai_index_path', '')
 
             self.setup_theme()
 
