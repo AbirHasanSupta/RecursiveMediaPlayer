@@ -458,14 +458,43 @@ class HighAccuracyVideoIndexer:
     def process_video_folder(self, videos_dir: str, workers: int = 2, max_frames_per_video: int = 50):
         """Process videos with high accuracy but smart resource management"""
         videos_dir = Path(videos_dir)
-        video_files = [str(p) for p in sorted(videos_dir.glob("**/*"))
-                       if p.is_file() and p.suffix.lower() in ['.mp4', '.mov', '.mkv', '.avi', '.webm']]
 
-        print(f"Found {len(video_files)} video files")
+        video_extensions = ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.wmv', '.flv', '.m4v', '.3gp', '.ogv']
+        video_files = []
+
+        print(f"Recursively scanning {videos_dir} for video files...")
+
+        for ext in video_extensions:
+            pattern = f"**/*{ext}"
+            found_files = list(videos_dir.glob(pattern))
+            video_files.extend(found_files)
+
+            pattern_upper = f"**/*{ext.upper()}"
+            found_files_upper = list(videos_dir.glob(pattern_upper))
+            video_files.extend(found_files_upper)
+
+        video_files = list(set(str(p) for p in video_files if p.is_file()))
+        video_files.sort()
+
+        print(f"Found {len(video_files)} video files across all subdirectories")
         if not video_files:
+            print("No video files found in directory tree")
             return
 
-        # Smart worker allocation based on available resources
+        directories_found = set()
+        for video_file in video_files:
+            rel_dir = os.path.relpath(os.path.dirname(video_file), videos_dir)
+            if rel_dir != '.':
+                directories_found.add(rel_dir)
+
+        if directories_found:
+            print(f"Processing videos from {len(directories_found)} subdirectories:")
+            for directory in sorted(directories_found)[:10]:  # Show first 10
+                count = sum(1 for vf in video_files if os.path.dirname(vf).endswith(directory.replace('/', os.sep)))
+                print(f"  {directory}: {count} videos")
+            if len(directories_found) > 10:
+                print(f"  ... and {len(directories_found) - 10} more directories")
+
         mem_info = get_memory_info()
         print(f"Available RAM: {mem_info['ram_available_gb']:.2f}GB")
 
@@ -621,6 +650,40 @@ class HighAccuracyVideoIndexer:
             pickle.dump(metadata, f, protocol=pickle.HIGHEST_PROTOCOL)
 
         print("Comprehensive metadata saved")
+
+
+def get_directory_stats(video_files, base_dir):
+    """Get statistics about directory structure and video distribution"""
+    stats = {
+        'total_videos': len(video_files),
+        'directories': defaultdict(int),
+        'max_depth': 0,
+        'total_size': 0
+    }
+
+    base_path = Path(base_dir)
+
+    for video_file in video_files:
+        try:
+            video_path = Path(video_file)
+            rel_path = video_path.relative_to(base_path)
+            depth = len(rel_path.parts) - 1
+            stats['max_depth'] = max(stats['max_depth'], depth)
+
+            if depth == 0:
+                dir_key = "root"
+            else:
+                dir_key = str(rel_path.parent)
+            stats['directories'][dir_key] += 1
+
+            if os.path.exists(video_file):
+                stats['total_size'] += os.path.getsize(video_file)
+
+        except (ValueError, OSError):
+            continue
+
+    return stats
+
 
 
 class HighAccuracyVideoSearcher:
@@ -928,13 +991,46 @@ class HighAccuracyVideoSearcher:
         return video_paths, video_counts, video_scores
 
 
+def select_video_directory():
+    """Manually select video directory using file dialog"""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True)
+
+        print("Opening directory selection dialog...")
+        directory = filedialog.askdirectory(
+            title="Select Video Directory for Preprocessing",
+            initialdir=os.path.expanduser("~")
+        )
+
+        root.destroy()
+
+        if directory:
+            print(f"Selected directory: {directory}")
+            return directory
+        else:
+            print("No directory selected. Exiting...")
+            return None
+
+    except ImportError:
+        print("tkinter not available. Please provide --videos_dir argument.")
+        return None
+    except Exception as e:
+        print(f"Error in directory selection: {e}")
+        return None
+
 def main():
     parser = argparse.ArgumentParser(description="High-Accuracy Video Search with Resource Management")
     parser.add_argument("--mode", choices=["preprocess", "search"], required=True)
-    parser.add_argument("--videos_dir", default="./videos")
-    parser.add_argument("--out_dir", default="./index_data")
+    parser.add_argument("--videos_dir", default=None, help="Video directory (will prompt if not provided)")
+    parser.add_argument("--out_dir", default=r"C:\Users\Abir\Documents\Recursive Media Player\index_data",
+                        help="Output directory for index files")
     parser.add_argument("--workers", type=int, default=2, help="Number of workers (recommend 1-2 for high accuracy)")
     parser.add_argument("--max_frames", type=int, default=50, help="Max frames per video")
+    parser.add_argument("--recursive", action="store_true", default=True, help="Recursively process subdirectories (default: True)")
     parser.add_argument("--query", type=str)
     parser.add_argument("--top_k", type=int, default=20)
     parser.add_argument("--clip_weight", type=float, default=0.35)
@@ -944,16 +1040,54 @@ def main():
     args = parser.parse_args()
 
     if args.mode == "preprocess":
+        if args.videos_dir:
+            videos_dir_path = args.videos_dir
+        else:
+            print("No video directory specified. Opening directory selection dialog...")
+            videos_dir_path = select_video_directory()
+            if not videos_dir_path:
+                print("No directory selected. Cannot proceed with preprocessing.")
+                return
+
+        videos_dir = Path(videos_dir_path)
+        if not videos_dir.exists():
+            print(f"Error: Directory {videos_dir} does not exist")
+            return
+
         out_dir = Path(args.out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
+        print(f"Index data will be saved to: {out_dir}")
 
-        print("Starting high-accuracy video preprocessing...")
+        print("Starting high-accuracy recursive video preprocessing...")
+        print(f"Processing videos from: {videos_dir}")
+
         mem_info = get_memory_info()
         print(
             f"System memory: {mem_info['ram_available_gb']:.1f}GB available, {mem_info['gpu_used_gb']:.1f}GB GPU used")
 
+        print(f"Analyzing directory structure of: {videos_dir}")
+
+        video_extensions = ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.wmv', '.flv', '.m4v', '.3gp', '.ogv']
+        all_videos = []
+        for ext in video_extensions:
+            all_videos.extend(list(videos_dir.glob(f"**/*{ext}")))
+            all_videos.extend(list(videos_dir.glob(f"**/*{ext.upper()}")))
+
+        all_videos = [str(p) for p in set(all_videos) if p.is_file()]
+
+        if not all_videos:
+            print("No video files found in directory tree")
+            return
+
+        dir_stats = get_directory_stats(all_videos, str(videos_dir))
+        print(f"Directory Analysis:")
+        print(f"  Total videos: {dir_stats['total_videos']}")
+        print(f"  Max directory depth: {dir_stats['max_depth']}")
+        print(f"  Total size: {dir_stats['total_size'] / (1024 ** 3):.2f} GB")
+        print(f"  Videos distributed across {len(dir_stats['directories'])} directories")
+
         indexer = HighAccuracyVideoIndexer()
-        indexer.process_video_folder(args.videos_dir, args.workers, args.max_frames)
+        indexer.process_video_folder(str(videos_dir), args.workers, args.max_frames)
 
         print("Building high-accuracy indices...")
         indexer.build_high_accuracy_indices(
@@ -964,8 +1098,11 @@ def main():
         indexer.save_metadata(str(out_dir / "metadata.pkl"))
 
         final_mem = get_memory_info()
-        print(
-            f"Preprocessing complete! Final memory: {final_mem['ram_used_gb']:.1f}GB RAM, {final_mem['gpu_used_gb']:.1f}GB GPU")
+        print(f"Recursive preprocessing complete!")
+        print(f"Final memory: {final_mem['ram_used_gb']:.1f}GB RAM, {final_mem['gpu_used_gb']:.1f}GB GPU")
+        print(f"Processed {len(indexer.frame_metadata)} frames from {dir_stats['total_videos']} videos")
+        print(f"Index files saved to: {out_dir}")
+
 
 
     elif args.mode == "search":
@@ -973,10 +1110,22 @@ def main():
             print("Provide --query for search")
             return
 
-        clip_index_path = str(Path(args.out_dir) / "clip_index.faiss")
-        text_index_path = str(Path(args.out_dir) / "text_index.faiss")
-        metadata_path = str(Path(args.out_dir) / "metadata.pkl")
-        tfidf_path = str(Path(args.out_dir) / "tfidf_index.pkl")
+        default_out_dir = r"C:\Users\Abir\Documents\Recursive Media Player\index_data"
+        out_dir_to_use = args.out_dir if args.out_dir != "./index_data" else default_out_dir
+        clip_index_path = str(Path(out_dir_to_use) / "clip_index.faiss")
+        text_index_path = str(Path(out_dir_to_use) / "text_index.faiss")
+        metadata_path = str(Path(out_dir_to_use) / "metadata.pkl")
+        tfidf_path = str(Path(out_dir_to_use) / "tfidf_index.pkl")
+        required_files = [clip_index_path, text_index_path, metadata_path, tfidf_path]
+        missing_files = [f for f in required_files if not os.path.exists(f)]
+
+        if missing_files:
+            print(f"Error: Missing index files in {out_dir_to_use}:")
+            for f in missing_files:
+                print(f"  - {f}")
+            print("Please run preprocessing first.")
+            return
+
         searcher = HighAccuracyVideoSearcher(clip_index_path, text_index_path, metadata_path, tfidf_path)
 
         if args.keep_alive:
