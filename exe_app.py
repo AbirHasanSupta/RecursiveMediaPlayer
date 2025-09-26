@@ -345,22 +345,25 @@ def select_multiple_folders_and_play():
 
             def load_ai_models():
                 try:
-                    from search_model import UltraFastSearcher
-                    index_path = os.path.join(self.ai_index_path, "frames.index")
-                    meta_path = os.path.join(self.ai_index_path, "minimal_meta.pkl")
-                    text_path = os.path.join(self.ai_index_path, "text_index.pkl")
+                    from enhanced_model import HighAccuracyVideoSearcher
 
-                    if not all(os.path.exists(p) for p in [index_path, meta_path, text_path]):
+                    clip_index_path = os.path.join(self.ai_index_path, "clip_index.faiss")
+                    text_index_path = os.path.join(self.ai_index_path, "text_index.faiss")
+                    metadata_path = os.path.join(self.ai_index_path, "metadata.pkl")
+                    tfidf_path = os.path.join(self.ai_index_path, "tfidf_index.pkl")
+
+                    required_files = [clip_index_path, text_index_path, metadata_path, tfidf_path]
+                    if not all(os.path.exists(p) for p in required_files):
                         def show_error_and_retry():
                             messagebox.showerror("Error",
-                                                 "AI index files not found. Please ensure frames.index, minimal_meta.pkl, and text_index.pkl exist.")
+                                                 "AI index files not found. Please ensure clip_index.faiss, text_index.faiss, metadata.pkl, and tfidf_index.pkl exist.")
                             self.ai_button.config(text="AI Mode", state=tk.NORMAL)
                             self.ai_index_path = None
 
                         self.root.after(0, show_error_and_retry)
                         return
 
-                    searcher = UltraFastSearcher(index_path, meta_path, text_path)
+                    searcher = HighAccuracyVideoSearcher(clip_index_path, text_index_path, metadata_path, tfidf_path)
 
                     def finalize_ai_mode():
                         self.ai_searcher = searcher
@@ -466,8 +469,9 @@ def select_multiple_folders_and_play():
                     self.root.after(0, lambda: self.update_console(
                         f"Searching {total_videos} indexed videos from '{os.path.basename(selected_dir)}'..."))
 
-                    filtered_results, counts, scores = self.ai_searcher.query_filtered_by_directory(
-                        query, selected_dir, top_k=100
+                    filtered_results = self.ai_searcher.query_filtered_by_directory(
+                        query, selected_dir, top_k=100,
+                        clip_weight=0.35, text_weight=0.35, tfidf_weight=0.3
                     )
 
                     def update_ui():
@@ -485,14 +489,16 @@ def select_multiple_folders_and_play():
 
                         self.selected_dir_label.config(text=f"AI Search: '{query}' - {len(filtered_results)} results")
 
-                        for idx, video_path in enumerate(filtered_results):
+                        for idx, result in enumerate(filtered_results):
                             try:
+                                video_path = result['video_path']
                                 rel_path = os.path.relpath(video_path, selected_dir)
                             except ValueError:
+                                video_path = result['video_path']
                                 rel_path = os.path.basename(video_path)
 
-                            score = scores.get(video_path, 0)
-                            frame_count = counts.get(video_path, 0)
+                            score = result.get('score', 0)
+                            frame_count = result.get('frame_count', 0)
                             display_name = f"▶ {rel_path} (score: {score:.3f}, frames: {frame_count})"
                             self.exclusion_listbox.insert(tk.END, display_name)
                             self.current_subdirs_mapping[idx] = video_path
