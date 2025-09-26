@@ -464,16 +464,106 @@ def _process_video_high_accuracy(args: Tuple[str, int, int]) -> Tuple[np.ndarray
 
 
 class HighAccuracyVideoIndexer:
-    """High-accuracy indexer with smart resource management"""
+    """High-accuracy indexer with incremental preprocessing support"""
 
     def __init__(self):
         self.clip_embeddings: List[np.ndarray] = []
         self.text_embeddings: List[np.ndarray] = []
         self.frame_metadata: List[Dict[str, Any]] = []
+        self.next_id = 0  # Track next available ID
 
-    def process_video_folder(self, videos_dir: str, workers: int = 3, max_frames_per_video: int = 60):
-        """Process videos with high accuracy but smart resource management"""
+    def load_existing_indices(self, out_dir: Path) -> bool:
+        """Load existing indices if they exist"""
+        clip_index_path = out_dir / "clip_index.faiss"
+        text_index_path = out_dir / "text_index.faiss"
+        metadata_path = out_dir / "metadata.pkl"
+        tfidf_path = out_dir / "tfidf_index.pkl"
+
+        # Check if all required files exist
+        required_files = [clip_index_path, text_index_path, metadata_path, tfidf_path]
+        if not all(f.exists() for f in required_files):
+            print("No existing index found - starting fresh")
+            return False
+
+        try:
+            print("Loading existing indices...")
+
+            # Load metadata first to get existing data
+            with open(metadata_path, 'rb') as f:
+                existing_metadata = pickle.load(f)
+
+            # Extract existing embeddings and metadata
+            self.frame_metadata = []
+            for i, video_path in enumerate(existing_metadata['video_paths']):
+                self.frame_metadata.append({
+                    'id': existing_metadata['ids'][i],
+                    'video_path': video_path,
+                    'timestamp': existing_metadata['timestamps'][i],
+                    'caption': existing_metadata['captions'][i],
+                    'semantic_features': existing_metadata['semantic_features'][i],
+                    'mood': existing_metadata['moods'][i] if i < len(existing_metadata['moods']) else None
+                })
+
+            # Set next_id to continue from where we left off
+            if existing_metadata['ids'].size > 0:
+                self.next_id = int(existing_metadata['ids'].max()) + 1
+            else:
+                self.next_id = 0
+
+            print(f"Loaded existing index with {len(self.frame_metadata)} frames")
+            print(f"Next ID will be: {self.next_id}")
+
+            # Load existing FAISS indices to extract embeddings
+            clip_index = faiss.read_index(str(clip_index_path))
+            text_index = faiss.read_index(str(text_index_path))
+
+            # Extract embeddings from FAISS indices
+            # Note: This is a simplified approach - in production you might want to store embeddings separately
+            n_vectors = clip_index.ntotal
+            if n_vectors > 0:
+                # Reconstruct embeddings (this works for IndexFlatIP)
+                if hasattr(clip_index, 'index') and hasattr(clip_index.index, 'reconstruct_n'):
+                    # For IndexIDMap with IndexFlatIP
+                    clip_embeddings = clip_index.index.reconstruct_n(0, n_vectors)
+                    text_embeddings = text_index.index.reconstruct_n(0, n_vectors)
+                elif hasattr(clip_index, 'reconstruct_n'):
+                    # For direct IndexFlatIP
+                    clip_embeddings = clip_index.reconstruct_n(0, n_vectors)
+                    text_embeddings = text_index.reconstruct_n(0, n_vectors)
+                else:
+                    print("Warning: Cannot extract embeddings from existing index type")
+                    clip_embeddings = np.zeros((0, 512), dtype=np.float32)
+                    text_embeddings = np.zeros((0, 384), dtype=np.float32)
+
+                # Convert to list of individual embeddings
+                if clip_embeddings.size > 0:
+                    self.clip_embeddings = [clip_embeddings[i:i + 1] for i in range(clip_embeddings.shape[0])]
+                if text_embeddings.size > 0:
+                    self.text_embeddings = [text_embeddings[i:i + 1] for i in range(text_embeddings.shape[0])]
+
+            return True
+
+        except Exception as e:
+            print(f"Error loading existing indices: {e}")
+            print("Starting fresh...")
+            self.clip_embeddings = []
+            self.text_embeddings = []
+            self.frame_metadata = []
+            self.next_id = 0
+            return False
+
+    def get_existing_video_paths(self) -> set:
+        """Get set of video paths already processed"""
+        return set(os.path.abspath(meta['video_path']) for meta in self.frame_metadata)
+
+    def process_video_folder(self, videos_dir: str, workers: int = 3, max_frames_per_video: int = 60,
+                             out_dir: str = None, incremental: bool = True):
+        """Process videos with incremental support"""
         videos_dir = Path(videos_dir)
+
+        if out_dir and incremental:
+            out_dir_path = Path(out_dir)
+            self.load_existing_indices(out_dir_path)
 
         video_extensions = ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.wmv', '.flv', '.m4v', '.3gp', '.ogv']
         video_files = []
@@ -499,6 +589,23 @@ class HighAccuracyVideoIndexer:
         video_files = list(set(str(p) for p in video_files if p.is_file()))
         video_files.sort()
 
+        # Filter out already processed videos if incremental
+        if incremental:
+            existing_paths = self.get_existing_video_paths()
+            new_video_files = []
+            skipped_existing = 0
+
+            for video_file in video_files:
+                abs_path = os.path.abspath(video_file)
+                if abs_path not in existing_paths:
+                    new_video_files.append(video_file)
+                else:
+                    skipped_existing += 1
+
+            video_files = new_video_files
+            print(f"Incremental mode: Skipped {skipped_existing} already processed videos")
+
+        # Report skipped 'Raw' directories
         def count_all_videos_including_raw():
             """Count total videos including those in Raw directories"""
             all_videos = []
@@ -516,7 +623,8 @@ class HighAccuracyVideoIndexer:
             return raw_dirs
 
         total_videos_including_raw = count_all_videos_including_raw()
-        skipped_videos_count = total_videos_including_raw - len(video_files)
+        total_after_raw_filter = len(video_files) + (len(self.get_existing_video_paths()) if incremental else 0)
+        skipped_videos_count = total_videos_including_raw - total_after_raw_filter
         raw_directories = find_raw_directories()
 
         if skipped_videos_count > 0:
@@ -524,10 +632,12 @@ class HighAccuracyVideoIndexer:
             for raw_dir in sorted(raw_directories):
                 print(f"  - Skipped: {raw_dir}/")
 
-        print(f"Found {len(video_files)} video files across all subdirectories (after excluding Raw directories)")
+        print(f"Found {len(video_files)} new video files to process")
+        if incremental:
+            print(f"Total videos in index after processing: {len(self.get_existing_video_paths()) + len(video_files)}")
 
         if not video_files:
-            print("No video files found in directory tree")
+            print("No new video files to process")
             return
 
         directories_found = set()
@@ -537,8 +647,8 @@ class HighAccuracyVideoIndexer:
                 directories_found.add(rel_dir)
 
         if directories_found:
-            print(f"Processing videos from {len(directories_found)} subdirectories:")
-            for directory in sorted(directories_found)[:10]:  # Show first 10
+            print(f"Processing new videos from {len(directories_found)} subdirectories:")
+            for directory in sorted(directories_found)[:10]:
                 count = sum(1 for vf in video_files if os.path.dirname(vf).endswith(directory.replace('/', os.sep)))
                 print(f"  {directory}: {count} videos")
             if len(directories_found) > 10:
@@ -557,16 +667,15 @@ class HighAccuracyVideoIndexer:
         with concurrent.futures.ProcessPoolExecutor(
                 max_workers=max_safe_workers,
                 initializer=_init_high_accuracy_worker,
-                initargs=(0,)  # Primary worker gets worker_id 0
+                initargs=(0,)
         ) as executor:
-            global_id = 0
+            global_id = self.next_id
 
-            # Process videos with timeout
             futures = [executor.submit(_process_video_high_accuracy, task) for task in tasks]
 
             for i, future in enumerate(concurrent.futures.as_completed(futures, timeout=None)):
                 try:
-                    clip_arr, text_arr, meta_list = future.result(timeout=1800)  # 30 minute timeout per video
+                    clip_arr, text_arr, meta_list = future.result(timeout=1800)
 
                     if clip_arr.size > 0:
                         for j in range(clip_arr.shape[0]):
@@ -581,14 +690,18 @@ class HighAccuracyVideoIndexer:
                         self.frame_metadata.append(meta)
                         global_id += 1
 
-                    print(f"Completed video {i + 1}/{len(video_files)}, total frames indexed: {global_id}")
+                    print(
+                        f"Completed video {i + 1}/{len(video_files)}, total frames in index: {len(self.frame_metadata)}")
 
                 except Exception as e:
                     print(f"Video processing failed: {e}")
                     continue
 
+            # Update next_id for future incremental runs
+            self.next_id = global_id
+
     def build_high_accuracy_indices(self, clip_index_path: str, text_index_path: str):
-        """Build optimized indices for high accuracy"""
+        """Build optimized indices (now handles incremental data)"""
         if not self.clip_embeddings:
             print("No embeddings to index")
             return
@@ -604,7 +717,8 @@ class HighAccuracyVideoIndexer:
         n_vectors = clip_X.shape[0]
         ids = np.array([m['id'] for m in self.frame_metadata], dtype=np.int64)
 
-        print(f"Building high-accuracy indices for {n_vectors} vectors")
+        print(
+            f"Building indices for {n_vectors} total vectors ({n_vectors - (self.next_id - len(self.frame_metadata))} new)")
 
         # CLIP Index with accuracy-focused parameters
         if n_vectors > 5000:
@@ -612,7 +726,7 @@ class HighAccuracyVideoIndexer:
             quantizer = faiss.IndexFlatIP(clip_X.shape[1])
             clip_index = faiss.IndexIVFFlat(quantizer, clip_X.shape[1], nlist)
             clip_index.train(clip_X)
-            clip_index.nprobe = max(32, nlist // 4)  # Search more clusters for accuracy
+            clip_index.nprobe = max(32, nlist // 4)
         else:
             clip_index = faiss.IndexFlatIP(clip_X.shape[1])
 
@@ -634,21 +748,19 @@ class HighAccuracyVideoIndexer:
         text_id_map.add_with_ids(text_X, ids)
         faiss.write_index(text_id_map, text_index_path)
 
-        print("High-accuracy indices built successfully")
+        print("Incremental indices built successfully")
 
     def build_comprehensive_text_index(self, text_index_path: str):
-        """Build comprehensive text index for keyword search"""
+        """Build comprehensive text index (handles all data including existing)"""
         captions = [m.get("caption", "") for m in self.frame_metadata]
         semantic_features = [" ".join(m.get("semantic_features", [])) for m in self.frame_metadata]
 
-        # Combine captions with semantic features
         combined_texts = [f"{caption} {features}" for caption, features in zip(captions, semantic_features)]
 
-        # High-accuracy TF-IDF vectorizer
         vectorizer = TfidfVectorizer(
             max_features=15000,
             stop_words='english',
-            ngram_range=(1, 3),  # Include trigrams
+            ngram_range=(1, 3),
             min_df=1,
             max_df=0.9,
             strip_accents='ascii',
@@ -666,11 +778,10 @@ class HighAccuracyVideoIndexer:
                 'semantic_features': semantic_features
             }, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-        print("Comprehensive text index built")
+        print("Comprehensive text index built with all data")
 
     def save_metadata(self, metadata_path: str):
-        """Save comprehensive metadata"""
-        # Compute video-level statistics for better search
+        """Save comprehensive metadata (all data including existing)"""
         video_stats = defaultdict(lambda: {'captions': [], 'moods': [], 'semantic_features': []})
 
         for m in self.frame_metadata:
@@ -680,7 +791,6 @@ class HighAccuracyVideoIndexer:
                 video_stats[vp]['moods'].append(m['mood'])
             video_stats[vp]['semantic_features'].extend(m.get('semantic_features', []))
 
-        # Finalize video stats
         for vp, stats in video_stats.items():
             stats['dominant_mood'] = Counter(stats['moods']).most_common(1)[0][0] if stats['moods'] else None
             stats['unique_semantic_features'] = list(set(stats['semantic_features']))
@@ -692,13 +802,14 @@ class HighAccuracyVideoIndexer:
             'captions': [m.get('caption', '') for m in self.frame_metadata],
             'semantic_features': [m.get('semantic_features', []) for m in self.frame_metadata],
             'moods': [m.get('mood') for m in self.frame_metadata],
-            'video_stats': dict(video_stats)
+            'video_stats': dict(video_stats),
+            'next_id': self.next_id  # Save next_id for future incremental runs
         }
 
         with open(metadata_path, 'wb') as f:
             pickle.dump(metadata, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-        print("Comprehensive metadata saved")
+        print(f"Comprehensive metadata saved ({len(self.frame_metadata)} total frames)")
 
 
 def get_directory_stats(video_files, base_dir):
@@ -1079,7 +1190,10 @@ def main():
                         help="Output directory for index files")
     parser.add_argument("--workers", type=int, default=3, help="Number of workers (recommend 1-3 for high accuracy)")
     parser.add_argument("--max_frames", type=int, default=60, help="Max frames per video")
-    parser.add_argument("--recursive", action="store_true", default=True, help="Recursively process subdirectories (default: True)")
+    parser.add_argument("--recursive", action="store_true", default=True, help="Recursively process subdirectories")
+    parser.add_argument("--incremental", action="store_true", default=True,
+                        help="Incremental preprocessing (append to existing)")
+    parser.add_argument("--force_rebuild", action="store_true", help="Force complete rebuild (ignore existing indices)")
     parser.add_argument("--query", type=str)
     parser.add_argument("--top_k", type=int, default=20)
     parser.add_argument("--clip_weight", type=float, default=0.35)
@@ -1135,16 +1249,34 @@ def main():
         print(f"  Total size: {dir_stats['total_size'] / (1024 ** 3):.2f} GB")
         print(f"  Videos distributed across {len(dir_stats['directories'])} directories")
 
-        indexer = HighAccuracyVideoIndexer()
-        indexer.process_video_folder(str(videos_dir), args.workers, args.max_frames)
+        out_dir = Path(args.out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
 
-        print("Building high-accuracy indices...")
+        incremental_mode = args.incremental and not args.force_rebuild
+
+        if incremental_mode:
+            print("Starting incremental video preprocessing...")
+        else:
+            print("Starting complete video preprocessing...")
+
+        indexer = HighAccuracyVideoIndexer()
+        indexer.process_video_folder(
+            str(videos_dir),
+            args.workers,
+            args.max_frames,
+            out_dir=str(out_dir),
+            incremental=incremental_mode
+        )
+
+        print("Building indices...")
         indexer.build_high_accuracy_indices(
             str(out_dir / "clip_index.faiss"),
             str(out_dir / "text_index.faiss")
         )
         indexer.build_comprehensive_text_index(str(out_dir / "tfidf_index.pkl"))
         indexer.save_metadata(str(out_dir / "metadata.pkl"))
+
+        print(f"Preprocessing complete! Total frames in index: {len(indexer.frame_metadata)}")
 
         final_mem = get_memory_info()
         print(f"Recursive preprocessing complete!")
