@@ -480,19 +480,52 @@ class HighAccuracyVideoIndexer:
 
         print(f"Recursively scanning {videos_dir} for video files...")
 
+        def should_skip_path(path: Path) -> bool:
+            """Check if path contains any 'raw' directory (case insensitive)"""
+            for part in path.parts:
+                if part.lower() == 'raw':
+                    return True
+            return False
+
         for ext in video_extensions:
             pattern = f"**/*{ext}"
-            found_files = list(videos_dir.glob(pattern))
+            found_files = [f for f in videos_dir.glob(pattern) if not should_skip_path(f)]
             video_files.extend(found_files)
 
             pattern_upper = f"**/*{ext.upper()}"
-            found_files_upper = list(videos_dir.glob(pattern_upper))
+            found_files_upper = [f for f in videos_dir.glob(pattern_upper) if not should_skip_path(f)]
             video_files.extend(found_files_upper)
 
         video_files = list(set(str(p) for p in video_files if p.is_file()))
         video_files.sort()
 
-        print(f"Found {len(video_files)} video files across all subdirectories")
+        def count_all_videos_including_raw():
+            """Count total videos including those in Raw directories"""
+            all_videos = []
+            for ext in video_extensions:
+                all_videos.extend(list(videos_dir.glob(f"**/*{ext}")))
+                all_videos.extend(list(videos_dir.glob(f"**/*{ext.upper()}")))
+            return len(set(str(p) for p in all_videos if p.is_file()))
+
+        def find_raw_directories():
+            """Find all Raw directories that were skipped"""
+            raw_dirs = set()
+            for path in videos_dir.rglob("*"):
+                if path.is_dir() and path.name.lower() == 'raw':
+                    raw_dirs.add(str(path.relative_to(videos_dir)))
+            return raw_dirs
+
+        total_videos_including_raw = count_all_videos_including_raw()
+        skipped_videos_count = total_videos_including_raw - len(video_files)
+        raw_directories = find_raw_directories()
+
+        if skipped_videos_count > 0:
+            print(f"Skipped {skipped_videos_count} videos from {len(raw_directories)} 'Raw' directories:")
+            for raw_dir in sorted(raw_directories):
+                print(f"  - Skipped: {raw_dir}/")
+
+        print(f"Found {len(video_files)} video files across all subdirectories (after excluding Raw directories)")
+
         if not video_files:
             print("No video files found in directory tree")
             return
