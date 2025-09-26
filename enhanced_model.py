@@ -17,14 +17,10 @@ import os
 import json
 import pickle
 import gc
-import mmap
 from pathlib import Path
 from collections import Counter, defaultdict
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Tuple
 import concurrent.futures
-import multiprocessing
-import time
-import hashlib
 import re
 import psutil
 
@@ -39,8 +35,6 @@ from transformers import (
 )
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.decomposition import TruncatedSVD
-from scipy import sparse
 import nltk
 from nltk.corpus import wordnet
 from nltk.tokenize import word_tokenize
@@ -92,7 +86,7 @@ def norm_l2(v: np.ndarray) -> np.ndarray:
     return v / norms
 
 
-def adaptive_frame_sampling(video_path: str, base_interval: float = 1.0, max_frames: int = 50):
+def adaptive_frame_sampling(video_path: str, base_interval: float = 1.0, max_frames: int = 60):
     """Intelligent frame sampling based on video characteristics"""
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -104,13 +98,16 @@ def adaptive_frame_sampling(video_path: str, base_interval: float = 1.0, max_fra
 
     print(f"Video: {duration:.1f}s, {total_frames} frames, targeting {max_frames} samples")
 
-    # Adaptive strategy based on video length
-    if duration <= 10:  # Short video - sample more densely
+    if duration <= 5:  # Very short video - dense sampling
+        intervals = [0.25, 0.5]
+    elif duration <= 15:  # Short video - sample more densely
         intervals = [0.5, 1.0]
-    elif duration <= 30:  # Medium video
+    elif duration <= 45:  # Medium video
         intervals = [1.0, 2.0]
-    else:  # Long video - sample key moments
-        intervals = [2.0, 5.0]
+    elif duration <= 120:  # Long video
+        intervals = [2.0, 4.0]
+    else:  # Very long video - sample key moments
+        intervals = [3.0, 6.0]
 
     # Collect sampling points
     sample_points = set()
@@ -200,7 +197,7 @@ def extract_advanced_semantic_features(caption: str, lemmatizer: WordNetLemmatiz
         # Filter and lemmatize
         meaningful_words = []
         for word in words:
-            if len(word) > 2:  # Skip very short words
+            if len(word) > 2:
                 if lemmatizer:
                     try:
                         lemmatized = lemmatizer.lemmatize(word)
@@ -210,8 +207,27 @@ def extract_advanced_semantic_features(caption: str, lemmatizer: WordNetLemmatiz
                 else:
                     meaningful_words.append(word)
 
-        # Add synonym expansion for key visual terms
-        visual_terms = ['person', 'woman', 'man', 'clothing', 'dress', 'shirt', 'color', 'red', 'blue', 'green']
+
+        visual_terms = [
+            # People
+            'person', 'woman', 'man', 'girl', 'boy', 'female', 'male', 'dancer', 'performer',
+            # Clothing & Fashion
+            'clothing', 'outfit', 'dress', 'shirt', 'top', 'blouse', 'skirt', 'pants', 'jeans',
+            'shorts', 'leggings', 'hoodie', 'jacket', 'sweater', 'tank', 'crop', 'mini', 'maxi',
+            'bra', 'underwear', 'fishnet', 'panty', 'bikini', 'lingerie', 'swimwear', 'bodysuit',
+            # Colors
+            'color', 'red', 'blue', 'green', 'black', 'white', 'pink', 'purple', 'yellow',
+            'orange', 'brown', 'gray', 'grey', 'silver', 'gold', 'navy', 'maroon',
+            # Actions & Movement
+            'dancing', 'dance', 'moving', 'posing', 'standing', 'sitting', 'walking', 'jumping',
+            'spinning', 'twirling', 'gesture', 'motion', 'performance',
+            # Room & Environment
+            'room', 'bedroom', 'living', 'background', 'wall', 'floor', 'mirror', 'window',
+            'lighting', 'indoor', 'home', 'studio', 'space',
+            # Style & Appearance
+            'style', 'fashion', 'trendy', 'casual', 'formal', 'cute', 'pretty', 'elegant',
+            'sporty', 'vintage', 'modern', 'chic'
+        ]
         expanded_terms = set(meaningful_words)
 
         for word in meaningful_words[:15]:  # Limit expansion to prevent explosion
@@ -455,7 +471,7 @@ class HighAccuracyVideoIndexer:
         self.text_embeddings: List[np.ndarray] = []
         self.frame_metadata: List[Dict[str, Any]] = []
 
-    def process_video_folder(self, videos_dir: str, workers: int = 2, max_frames_per_video: int = 50):
+    def process_video_folder(self, videos_dir: str, workers: int = 3, max_frames_per_video: int = 60):
         """Process videos with high accuracy but smart resource management"""
         videos_dir = Path(videos_dir)
 
@@ -1028,8 +1044,8 @@ def main():
     parser.add_argument("--videos_dir", default=None, help="Video directory (will prompt if not provided)")
     parser.add_argument("--out_dir", default=r"C:\Users\Abir\Documents\Recursive Media Player\index_data",
                         help="Output directory for index files")
-    parser.add_argument("--workers", type=int, default=2, help="Number of workers (recommend 1-2 for high accuracy)")
-    parser.add_argument("--max_frames", type=int, default=50, help="Max frames per video")
+    parser.add_argument("--workers", type=int, default=3, help="Number of workers (recommend 1-3 for high accuracy)")
+    parser.add_argument("--max_frames", type=int, default=60, help="Max frames per video")
     parser.add_argument("--recursive", action="store_true", default=True, help="Recursively process subdirectories (default: True)")
     parser.add_argument("--query", type=str)
     parser.add_argument("--top_k", type=int, default=20)

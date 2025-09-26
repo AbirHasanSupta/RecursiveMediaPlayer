@@ -506,7 +506,17 @@ def select_multiple_folders_and_play():
 
                         self.selected_dir_label.config(text=f"AI Search: '{query}' - {len(filtered_results)} results")
 
-                        for idx, result in enumerate(filtered_results):
+                        high_score_results = [r for r in filtered_results if r.get('score', 0) >= 0.7]
+                        final_results = filtered_results
+
+                        if len(high_score_results) > 5:
+                            final_results = high_score_results
+                        elif len(high_score_results) <= 5 and len(high_score_results) > 0:
+                            final_results = filtered_results
+
+                        self.selected_dir_label.config(text=f"AI Search: '{query}' - {len(final_results)} results")
+
+                        for idx, result in enumerate(final_results):
                             try:
                                 video_path = result['video_path']
                                 rel_path = os.path.relpath(video_path, selected_dir)
@@ -520,7 +530,12 @@ def select_multiple_folders_and_play():
                             self.exclusion_listbox.insert(tk.END, display_name)
                             self.current_subdirs_mapping[idx] = video_path
 
-                        self.update_console(f"Found {len(filtered_results)} matching videos")
+                        high_count = len(high_score_results)
+                        if len(high_score_results) > 5:
+                            self.update_console(f"Found {len(final_results)} high-quality matches (score ≥ 0.7)")
+                        else:
+                            self.update_console(
+                                f"Found {len(final_results)} matching videos ({high_count} high-quality)")
 
                     self.root.after(0, update_ui)
 
