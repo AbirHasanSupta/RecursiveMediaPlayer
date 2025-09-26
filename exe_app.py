@@ -333,11 +333,28 @@ def select_multiple_folders_and_play():
                 return
 
             if not self.ai_index_path:
-                from tkinter import filedialog
-                self.ai_index_path = filedialog.askdirectory(
-                    title="Select AI Index Directory (containing frames.index, etc.)")
-                if not self.ai_index_path:
-                    return
+                default_index_path = r"C:\Users\Abir\Documents\Recursive Media Player\index_data"
+
+                required_files = ["clip_index.faiss", "text_index.faiss", "metadata.pkl", "tfidf_index.pkl"]
+                default_files_exist = all(os.path.exists(os.path.join(default_index_path, f)) for f in required_files)
+
+                if os.path.exists(default_index_path) and default_files_exist:
+                    self.ai_index_path = default_index_path
+                    self.update_console(f"Using default AI index directory: {default_index_path}")
+                else:
+                    if os.path.exists(default_index_path) and not default_files_exist:
+                        self.update_console(
+                            "Default index directory found but missing files. Please select correct directory.")
+                    else:
+                        self.update_console("Default index directory not found. Please select AI index directory.")
+
+                    self.ai_index_path = filedialog.askdirectory(
+                        title="Select AI Index Directory (containing enhanced model files)",
+                        initialdir=os.path.dirname(default_index_path) if os.path.exists(
+                            os.path.dirname(default_index_path)) else os.path.expanduser("~")
+                    )
+                    if not self.ai_index_path:
+                        return
 
             self.ai_button.config(text="Loading...", state=tk.DISABLED)
             self.show_ai_loading_progress()
