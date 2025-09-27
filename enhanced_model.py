@@ -472,38 +472,6 @@ class HighAccuracyVideoIndexer:
         self.frame_metadata: List[Dict[str, Any]] = []
         self.next_id = 0  # Track next available ID
 
-    def generate_thumbnails_during_processing(self, video_path, frame_rgb, timestamp):
-        """Generate thumbnail during video processing"""
-        if not hasattr(self, 'thumbnail_generator'):
-            from enhanced_features import ThumbnailGenerator
-            self.thumbnail_generator = ThumbnailGenerator()
-
-        # Generate thumbnail from current frame if at 10% mark
-        try:
-            cap = cv2.VideoCapture(video_path)
-            if cap.isOpened():
-                frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-                duration = frame_count / fps
-                cap.release()
-
-                # Check if this timestamp is around 10% of video
-                target_time = duration * 0.1
-                if abs(timestamp - target_time) < 2.0:  # Within 2 seconds
-                    # Save thumbnail
-                    video_name = Path(video_path).stem
-                    thumbnail_path = self.thumbnail_generator.thumbnail_dir / f"{video_name}_{hash(video_path) % 100000}.jpg"
-
-                    frame_resized = cv2.resize(frame_rgb, self.thumbnail_generator.thumbnail_size)
-                    frame_bgr = cv2.cvtColor(frame_resized, cv2.COLOR_RGB2BGR)
-                    cv2.imwrite(str(thumbnail_path), frame_bgr)
-
-                    return str(thumbnail_path)
-        except:
-            pass
-
-        return None
-
     def load_existing_indices(self, out_dir: Path) -> bool:
         """Load existing indices if they exist"""
         clip_index_path = out_dir / "clip_index.faiss"
