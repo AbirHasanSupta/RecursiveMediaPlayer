@@ -504,17 +504,20 @@ def select_multiple_folders_and_play():
                             self.update_console("No matching videos found in selected directory")
                             return
 
-                        self.selected_dir_label.config(text=f"AI Search: '{query}' - {len(filtered_results)} results")
+                        try:
+                            min_score = float(self.min_score_entry.get().strip())
+                        except (ValueError, AttributeError):
+                            min_score = 0.0
 
-                        high_score_results = [r for r in filtered_results if r.get('score', 0) >= 0.7]
-                        final_results = filtered_results
+                        final_results = [r for r in filtered_results if r.get('score', 0) >= min_score]
 
-                        if len(high_score_results) > 5:
-                            final_results = high_score_results
-                        elif len(high_score_results) <= 5 and len(high_score_results) > 0:
-                            final_results = filtered_results
+                        if not final_results:
+                            self.exclusion_listbox.insert(tk.END, f"No results with score >= {min_score}")
+                            self.update_console(f"No results found with minimum score {min_score}")
+                            return
 
-                        self.selected_dir_label.config(text=f"AI Search: '{query}' - {len(final_results)} results")
+                        self.selected_dir_label.config(
+                            text=f"AI Search: '{query}' - {len(final_results)} results (score >= {min_score})")
 
                         for idx, result in enumerate(final_results):
                             try:
@@ -530,12 +533,7 @@ def select_multiple_folders_and_play():
                             self.exclusion_listbox.insert(tk.END, display_name)
                             self.current_subdirs_mapping[idx] = video_path
 
-                        high_count = len(high_score_results)
-                        if len(high_score_results) > 5:
-                            self.update_console(f"Found {len(final_results)} high-quality matches (score ≥ 0.7)")
-                        else:
-                            self.update_console(
-                                f"Found {len(final_results)} matching videos ({high_count} high-quality)")
+                        self.update_console(f"Found {len(final_results)} videos with score >= {min_score}")
 
                     self.root.after(0, update_ui)
 
@@ -617,6 +615,7 @@ def select_multiple_folders_and_play():
                                     font=self.normal_font, bg=self.bg_color, fg=self.text_color)
             search_label.pack(anchor='w', pady=(0, 5))
 
+            # Replace the existing search_input_frame section with this:
             search_input_frame = tk.Frame(self.ai_search_frame, bg=self.bg_color)
             search_input_frame.pack(fill=tk.X, pady=(0, 5))
 
@@ -632,6 +631,25 @@ def select_multiple_folders_and_play():
             )
             self.ai_search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
             self.ai_search_entry.bind('<Return>', lambda e: self.perform_ai_search())
+
+            score_label = tk.Label(search_input_frame, text="Min Score:",
+                                   font=self.small_font, bg=self.bg_color, fg=self.text_color)
+            score_label.pack(side=tk.LEFT, padx=(0, 2))
+
+            self.min_score_entry = tk.Entry(
+                search_input_frame,
+                font=self.normal_font,
+                bg="white",
+                fg=self.text_color,
+                relief=tk.FLAT,
+                bd=1,
+                highlightthickness=1,
+                highlightbackground="#e0e0e0",
+                width=6
+            )
+            self.min_score_entry.pack(side=tk.LEFT, padx=(0, 5))
+            self.min_score_entry.insert(0, "0.0")  # Default value
+            self.min_score_entry.bind('<Return>', lambda e: self.perform_ai_search())
 
             self.ai_search_button = self.create_button(
                 search_input_frame,
