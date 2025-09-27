@@ -10,6 +10,10 @@ from key_press import cleanup_hotkeys
 import win32clipboard as wcb
 import win32con
 import struct
+import tkinter as tk
+from tkinter import messagebox
+import threading
+from enhanced_features import ResumePlaybackManager
 
 
 class MonitorInfo:
@@ -51,6 +55,9 @@ class BaseVLCPlayerController:
         self.initial_playback_rate = 1.0
         self.start_index = 0
         self.video_change_callback = None
+        self.resume_manager = ResumePlaybackManager()
+        self.position_save_thread = None
+        self.position_save_running = False
 
     def set_initial_playback_rate(self, rate):
         self.initial_playback_rate = rate
@@ -117,6 +124,21 @@ class BaseVLCPlayerController:
     def stop(self):
         with self.lock:
             self.running = False
+            self.stop_position_saving()  # ADD THIS LINE
+
+            # Clear resume position for completed videos
+            if hasattr(self, 'videos') and self.index < len(self.videos):
+                current_video = self.videos[self.index]
+                try:
+                    duration = self.player.get_length() / 1000.0
+                    current_time = self.player.get_time() / 1000.0
+
+                    # If we're near the end, clear the resume position
+                    if duration > 0 and current_time > (duration * 0.95):
+                        self.resume_manager.clear_resume_position(current_video)
+                except:
+                    pass
+
             self.player.stop()
             cleanup_hotkeys()
 
@@ -314,6 +336,47 @@ class BaseVLCPlayerController:
                 self.logger("Video player stopped")
             cleanup_hotkeys()
 
+    def start_position_saving(self, video_path):
+        """Start periodic position saving for resume functionality"""
+        # Stop previous position saving
+        self.position_save_running = False
+        if self.position_save_thread and self.position_save_thread.is_alive():
+            self.position_save_thread.join(timeout=1.0)
+
+        # Start new position saving
+        self.position_save_running = True
+
+        def save_position_periodically():
+            save_interval = 15  # Save every 15 seconds
+            last_save_time = 0
+
+            while self.position_save_running and self.running:
+                try:
+                    if self.player.is_playing():
+                        current_time = self.player.get_time() / 1000.0  # Convert to seconds
+                        duration = self.player.get_length() / 1000.0
+
+                        # Only save if position has changed significantly and after 30 seconds
+                        if (current_time > 30 and
+                                abs(current_time - last_save_time) > 10 and
+                                duration > 0):
+                            self.resume_manager.save_position(video_path, current_time, duration)
+                            last_save_time = current_time
+
+                    time.sleep(save_interval)
+
+                except Exception as e:
+                    if self.logger:
+                        self.logger(f"Error saving position: {e}")
+                    time.sleep(save_interval)
+
+        self.position_save_thread = threading.Thread(target=save_position_periodically, daemon=True)
+        self.position_save_thread.start()
+
+    def stop_position_saving(self):
+        """Stop position saving thread"""
+        self.position_save_running = False
+
 
 class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
     def __init__(self, videos, video_to_dir, directories, logger=None):
@@ -384,14 +447,59 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
         with self.lock:
             if index < 0 or index >= len(self.videos):
                 return False
+
             self.index = index
             current_video = self.videos[self.index]
-            current_dir = self.video_to_dir[current_video]
-            if self.logger:
-                self.logger(f"Playing: {os.path.basename(current_video)} from {current_dir}")
+
+            # Check for resume position
+            resume_position = self.resume_manager.get_resume_position(current_video)
 
             media = self.instance.media_new(current_video)
             result = self._play_video(media)
+
             if result:
+                # Handle resume playback
+                if resume_position:
+                    def show_resume_dialog():
+                        try:
+                            root = tk.Tk()
+                            root.withdraw()  # Hide the main window
+                            root.lift()
+                            root.attributes('-topmost', True)
+
+                            minutes = int(resume_position // 60)
+                            seconds = int(resume_position % 60)
+                            time_str = f"{minutes}:{seconds:02d}"
+
+                            result = messagebox.askyesno(
+                                "Resume Playback",
+                                f"Resume from {time_str}?",
+                                default='yes'
+                            )
+                            root.destroy()
+
+                            if result:
+                                # Wait for video to load then set position
+                                def set_position():
+                                    time.sleep(1.5)  # Wait for video to load
+                                    if self.running and self.player.is_playing():
+                                        self.player.set_time(int(resume_position * 1000))
+                                        if self.logger:
+                                            self.logger(f"Resumed from {time_str}")
+
+                                threading.Thread(target=set_position, daemon=True).start()
+                            else:
+                                self.resume_manager.clear_resume_position(current_video)
+
+                        except Exception as e:
+                            if self.logger:
+                                self.logger(f"Error showing resume dialog: {e}")
+
+                    # Show dialog in main thread
+                    threading.Thread(target=show_resume_dialog, daemon=True).start()
+
+                # Start position saving
+                self.start_position_saving(current_video)
                 self._notify_video_change()
+
             return result

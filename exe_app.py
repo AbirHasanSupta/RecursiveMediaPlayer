@@ -11,7 +11,10 @@ from key_press import listen_keys, cleanup_hotkeys
 from theme import ThemeSelector
 from utils import gather_videos_with_directories, is_video
 from vlc_player_controller import VLCPlayerControllerForMultipleDirectory
-
+from enhanced_features import (
+    VideoMetadata, ThumbnailGenerator, PlaylistManager,
+    ResumePlaybackManager, PreviewWindow, PlaylistDialog
+)
 
 def select_multiple_folders_and_play():
     class DirectorySelector(ThemeSelector):
@@ -33,6 +36,10 @@ def select_multiple_folders_and_play():
             self.ai_searcher = None
             self.ai_index_path = None
             self.current_max_depth = 20
+            self.video_metadata = VideoMetadata()
+            self.thumbnail_generator = ThumbnailGenerator()
+            self.playlist_manager = PlaylistManager()
+            self.resume_manager = ResumePlaybackManager()
 
             preferences = self.config.load_preferences()
             self.dark_mode = preferences['dark_mode']
@@ -81,6 +88,34 @@ def select_multiple_folders_and_play():
                 self.selected_dirs = []
 
             self.update_ui_for_mode()
+            self.preview_window = PreviewWindow(self.root, self.thumbnail_generator, self.video_metadata)
+            self.manage_playlists_button.pack(side=tk.LEFT)
+
+            # ADD HOVER EVENTS for preview functionality
+            def on_listbox_motion(event):
+                if not self.ai_mode:
+                    return
+                index = self.exclusion_listbox.nearest(event.y)
+                if index in self.current_subdirs_mapping:
+                    video_path = self.current_subdirs_mapping[index]
+                    if os.path.isfile(video_path):
+                        x = self.exclusion_listbox.winfo_rootx() + event.x
+                        y = self.exclusion_listbox.winfo_rooty() + event.y
+                        if self.preview_window:
+                            self.preview_window.show_preview(video_path, x, y)
+
+            def on_listbox_leave(event):
+                if self.preview_window:
+                    self.preview_window.hide_preview()
+
+            def on_listbox_click(event):
+                if self.preview_window:
+                    self.preview_window.hide_preview()
+
+            # Bind hover events to exclusion listbox
+            self.exclusion_listbox.bind('<Motion>', on_listbox_motion)
+            self.exclusion_listbox.bind('<Leave>', on_listbox_leave)
+            self.exclusion_listbox.bind('<Button-1>', on_listbox_click)
 
         def setup_theme(self):
             self.bg_color = "#f5f5f5"
@@ -761,6 +796,62 @@ def select_multiple_folders_and_play():
 
             buttons_row3 = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
             buttons_row3.pack(fill=tk.X, pady=(10, 0))
+
+            playlist_buttons_row = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
+            playlist_buttons_row.pack(fill=tk.X, pady=(5, 0))
+
+            self.create_playlist_button = self.create_button(
+                playlist_buttons_row,
+                text="Create Playlist",
+                command=self.create_playlist_from_selection,
+                variant="success",
+                size="sm"
+            )
+            self.create_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
+
+            self.add_to_playlist_button = self.create_button(
+                playlist_buttons_row,
+                text="Add to Playlist",
+                command=self.add_to_existing_playlist,
+                variant="primary",
+                size="sm"
+            )
+            self.add_to_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
+
+            self.manage_playlists_button = self.create_button(
+                playlist_buttons_row,
+                text="Manage Playlists",
+                command=self.show_playlist_manager,
+                variant="warning",
+                size="sm"
+            )
+            self.manage_playlists_button.pack(side=tk.LEFT)
+
+            # ADD HOVER EVENTS for preview functionality
+            def on_listbox_motion(event):
+                if not self.ai_mode:
+                    return
+                index = self.exclusion_listbox.nearest(event.y)
+                if index in self.current_subdirs_mapping:
+                    video_path = self.current_subdirs_mapping[index]
+                    if os.path.isfile(video_path):
+                        x = self.exclusion_listbox.winfo_rootx() + event.x
+                        y = self.exclusion_listbox.winfo_rooty() + event.y
+                        if self.preview_window:
+                            self.preview_window.show_preview(video_path, x, y)
+
+            def on_listbox_leave(event):
+                if self.preview_window:
+                    self.preview_window.hide_preview()
+
+            def on_listbox_click(event):
+                if self.preview_window:
+                    self.preview_window.hide_preview()
+
+            # Bind hover events to exclusion listbox
+            self.exclusion_listbox.bind('<Motion>', on_listbox_motion)
+            self.exclusion_listbox.bind('<Leave>', on_listbox_leave)
+            self.exclusion_listbox.bind('<Button-1>', on_listbox_click)
 
             speed_container = tk.Frame(buttons_row3, bg=self.bg_color, relief=tk.FLAT)
             speed_container.pack(fill=tk.X)
@@ -1747,6 +1838,223 @@ def select_multiple_folders_and_play():
                     self.update_console(f"Playback speed set to {new_value}×")
 
                 self.draw_slider()
+
+        def create_playlist_from_selection(self):
+            """Create new playlist from selected videos"""
+            if not self.ai_mode or not self.current_subdirs_mapping:
+                messagebox.showinfo("Info", "Please perform an AI search first")
+                return
+
+            selection = self.exclusion_listbox.curselection()
+            if not selection:
+                messagebox.showinfo("Info", "Please select videos to add to playlist")
+                return
+
+            selected_videos = []
+            for index in selection:
+                if index in self.current_subdirs_mapping:
+                    video_path = self.current_subdirs_mapping[index]
+                    if os.path.isfile(video_path):
+                        selected_videos.append(video_path)
+
+            if not selected_videos:
+                messagebox.showinfo("Info", "No valid videos selected")
+                return
+
+            # Simple input dialog for playlist name
+            playlist_name = tk.simpledialog.askstring(
+                "Create Playlist",
+                f"Enter name for playlist with {len(selected_videos)} videos:"
+            )
+
+            if playlist_name and playlist_name.strip():
+                if self.playlist_manager.create_playlist(playlist_name.strip(), selected_videos):
+                    self.update_console(f"Created playlist '{playlist_name}' with {len(selected_videos)} videos")
+                    messagebox.showinfo("Success", f"Playlist '{playlist_name}' created successfully!")
+                else:
+                    messagebox.showerror("Error", "Playlist already exists!")
+
+        def add_to_existing_playlist(self):
+            """Add selected videos to existing playlist"""
+            if not self.ai_mode or not self.current_subdirs_mapping:
+                messagebox.showinfo("Info", "Please perform an AI search first")
+                return
+
+            selection = self.exclusion_listbox.curselection()
+            if not selection:
+                messagebox.showinfo("Info", "Please select videos to add to playlist")
+                return
+
+            selected_videos = []
+            for index in selection:
+                if index in self.current_subdirs_mapping:
+                    video_path = self.current_subdirs_mapping[index]
+                    if os.path.isfile(video_path):
+                        selected_videos.append(video_path)
+
+            if not selected_videos:
+                messagebox.showinfo("Info", "No valid videos selected")
+                return
+
+            dialog = PlaylistDialog(self.root, self.playlist_manager)
+            result = dialog.show_playlist_selection(selected_videos)
+
+            if result:
+                self.update_console(f"Added {len(selected_videos)} videos to playlist '{result}'")
+                messagebox.showinfo("Success", f"Videos added to playlist '{result}'!")
+
+        def show_playlist_manager(self):
+            """Show playlist management window"""
+            self.create_playlist_management_window()
+
+        def create_playlist_management_window(self):
+            """Create playlist management window"""
+            playlist_window = tk.Toplevel(self.root)
+            playlist_window.title("Playlist Manager")
+            playlist_window.geometry("600x500")
+            playlist_window.transient(self.root)
+
+            # Center the window
+            playlist_window.update_idletasks()
+            x = (playlist_window.winfo_screenwidth() // 2) - (600 // 2)
+            y = (playlist_window.winfo_screenheight() // 2) - (500 // 2)
+            playlist_window.geometry(f"+{x}+{y}")
+
+            main_frame = tk.Frame(playlist_window, padx=20, pady=20)
+            main_frame.pack(fill=tk.BOTH, expand=True)
+
+            # Header
+            header_label = tk.Label(main_frame, text="Playlist Manager",
+                                    font=('Arial', 16, 'bold'))
+            header_label.pack(pady=(0, 20))
+
+            # Playlist list
+            list_frame = tk.Frame(main_frame)
+            list_frame.pack(fill=tk.BOTH, expand=True)
+
+            tk.Label(list_frame, text="Playlists:", font=('Arial', 12, 'bold')).pack(anchor='w')
+
+            # Listbox with scrollbar
+            listbox_frame = tk.Frame(list_frame)
+            listbox_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+
+            playlist_listbox = tk.Listbox(listbox_frame, font=('Arial', 10))
+            scrollbar = tk.Scrollbar(listbox_frame, orient="vertical")
+            playlist_listbox.config(yscrollcommand=scrollbar.set)
+            scrollbar.config(command=playlist_listbox.yview)
+
+            playlist_listbox.pack(side="left", fill="both", expand=True)
+            scrollbar.pack(side="right", fill="y")
+
+            # Populate playlist list
+            playlists = self.playlist_manager.get_all_playlists()
+            playlist_names = list(playlists.keys())
+
+            for name in sorted(playlist_names):
+                playlist = playlists[name]
+                video_count = len(playlist.get('videos', []))
+                created_date = playlist.get('created_date', '')[:10]  # Just date part
+                playlist_listbox.insert(tk.END, f"{name} ({video_count} videos) - Created: {created_date}")
+
+            # Buttons
+            button_frame = tk.Frame(main_frame)
+            button_frame.pack(fill=tk.X, pady=(20, 0))
+
+            def play_playlist():
+                selection = playlist_listbox.curselection()
+                if not selection:
+                    messagebox.showinfo("Info", "Please select a playlist")
+                    return
+
+                selected_text = playlist_listbox.get(selection[0])
+                playlist_name = selected_text.split(' (')[0]
+                playlist = self.playlist_manager.get_playlist(playlist_name)
+
+                if playlist and playlist['videos']:
+                    # Filter existing videos
+                    existing_videos = [v for v in playlist['videos'] if os.path.exists(v)]
+                    if existing_videos:
+                        self.play_playlist_videos(existing_videos)
+                        playlist_window.destroy()
+                    else:
+                        messagebox.showwarning("Warning", "No valid videos found in playlist")
+                else:
+                    messagebox.showinfo("Info", "Playlist is empty")
+
+            def delete_playlist():
+                selection = playlist_listbox.curselection()
+                if not selection:
+                    messagebox.showinfo("Info", "Please select a playlist")
+                    return
+
+                selected_text = playlist_listbox.get(selection[0])
+                playlist_name = selected_text.split(' (')[0]
+
+                result = messagebox.askyesno("Confirm Delete", f"Delete playlist '{playlist_name}'?")
+                if result:
+                    if self.playlist_manager.delete_playlist(playlist_name):
+                        playlist_listbox.delete(selection[0])
+                        messagebox.showinfo("Success", f"Playlist '{playlist_name}' deleted")
+
+            def close_window():
+                playlist_window.destroy()
+
+            tk.Button(button_frame, text="Play Playlist", command=play_playlist,
+                      bg='#4CAF50', fg='white', padx=20).pack(side=tk.LEFT)
+            tk.Button(button_frame, text="Delete", command=delete_playlist,
+                      bg='#f44336', fg='white', padx=20).pack(side=tk.LEFT, padx=(10, 0))
+            tk.Button(button_frame, text="Close", command=close_window,
+                      padx=20).pack(side=tk.RIGHT)
+
+        def play_playlist_videos(self, videos):
+            """Play videos from a playlist"""
+            if not videos:
+                return
+
+            # Stop current player if running
+            if self.controller:
+                self.controller.stop()
+
+            self.update_console(f"Playing playlist with {len(videos)} videos")
+
+            # Create video-to-directory mapping for playlist
+            video_to_dir = {}
+            directories = set()
+
+            for video in videos:
+                video_dir = os.path.dirname(video)
+                video_to_dir[video] = video_dir
+                directories.add(video_dir)
+
+            directories = sorted(list(directories))
+
+            # Start playlist playback
+            self.controller = VLCPlayerControllerForMultipleDirectory(
+                videos, video_to_dir, directories, self.update_console
+            )
+
+            # Set initial speed
+            initial_speed = getattr(self, 'speed_var', tk.DoubleVar(value=1.0)).get()
+            if initial_speed != 1.0:
+                self.controller.set_initial_playback_rate(initial_speed)
+
+            self.controller.set_video_change_callback(self.on_video_changed)
+
+            # Start playback thread
+            if hasattr(self, 'player_thread') and self.player_thread and self.player_thread.is_alive():
+                self.controller.running = False
+                self.player_thread.join(timeout=1.0)
+
+            self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
+            self.player_thread.start()
+
+            # Start key listener
+            from key_press import listen_keys
+            if hasattr(self, 'keys_thread') and self.keys_thread and self.keys_thread.is_alive():
+                pass  # Keys thread will handle new controller
+            else:
+                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
+                self.keys_thread.start()
 
         def reset_speed(self):
             self.slider_current = 1.0
