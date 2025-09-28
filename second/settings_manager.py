@@ -98,7 +98,6 @@ class PreprocessingRunner:
 
         def run_preprocessing():
             try:
-                # Build command
                 script_path = Path(__file__).parent / "enhanced_model.py"
                 if not script_path.exists():
                     self._log("Error: enhanced_model.py not found")
@@ -122,7 +121,6 @@ class PreprocessingRunner:
                 self._log(f"Starting AI preprocessing...")
                 self._log(f"Command: {' '.join(cmd)}")
 
-                # Start process
                 self.current_process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
@@ -132,13 +130,11 @@ class PreprocessingRunner:
                     universal_newlines=True
                 )
 
-                # Read output
                 while self.current_process.poll() is None:
                     line = self.current_process.stdout.readline()
                     if line:
                         self._log(line.strip())
 
-                # Get final return code
                 return_code = self.current_process.wait()
 
                 if return_code == 0:
@@ -191,7 +187,6 @@ class SettingsUI:
         self.settings_window = None
         self.preprocessing_runner = PreprocessingRunner(console_callback)
 
-        # UI variables
         self.ai_index_path_var = None
         self.workers_var = None
         self.max_frames_var = None
@@ -217,30 +212,24 @@ class SettingsUI:
 
     def _setup_settings_ui(self):
         """Setup the settings UI components"""
-        # Create notebook for tabbed interface
         notebook = ttk.Notebook(self.settings_window)
         notebook.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-        # AI Settings Tab
         ai_frame = self._create_ai_settings_tab(notebook)
         notebook.add(ai_frame, text="AI & Preprocessing")
 
-        # General Settings Tab
         general_frame = self._create_general_settings_tab(notebook)
         notebook.add(general_frame, text="General Settings")
 
-        # Action buttons at bottom
         self._create_action_buttons()
 
     def _create_ai_settings_tab(self, parent):
         """Create AI settings tab"""
         frame = ttk.Frame(parent)
 
-        # Main container
         main_container = tk.Frame(frame, bg=self.theme_provider.bg_color)
         main_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-        # AI Index Path Section
         path_section = tk.LabelFrame(
             main_container,
             text="AI Index Configuration",
@@ -283,7 +272,6 @@ class SettingsUI:
         )
         browse_btn.pack(side=tk.RIGHT)
 
-        # Index info
         self.index_info_label = tk.Label(
             path_section,
             text="",
@@ -293,7 +281,6 @@ class SettingsUI:
         )
         self.index_info_label.pack(anchor='w')
 
-        # Preprocessing Section
         prep_section = tk.LabelFrame(
             main_container,
             text="AI Preprocessing Settings",
@@ -305,7 +292,6 @@ class SettingsUI:
         )
         prep_section.pack(fill=tk.X, pady=(0, 20))
 
-        # Workers setting
         workers_frame = tk.Frame(prep_section, bg=self.theme_provider.bg_color)
         workers_frame.pack(fill=tk.X, pady=5)
 
@@ -339,7 +325,6 @@ class SettingsUI:
             fg="#666666"
         ).pack(side=tk.LEFT)
 
-        # Max frames setting
         frames_frame = tk.Frame(prep_section, bg=self.theme_provider.bg_color)
         frames_frame.pack(fill=tk.X, pady=5)
 
@@ -373,7 +358,6 @@ class SettingsUI:
             fg="#666666"
         ).pack(side=tk.LEFT)
 
-        # Checkboxes
         self.incremental_var = tk.BooleanVar(value=self.settings.incremental_preprocessing)
         incremental_check = ttk.Checkbutton(
             prep_section,
@@ -398,7 +382,6 @@ class SettingsUI:
         )
         skip_raw_check.pack(anchor='w', pady=2)
 
-        # Preprocessing Action Section
         action_section = tk.LabelFrame(
             main_container,
             text="Run AI Preprocessing",
@@ -433,9 +416,8 @@ class SettingsUI:
             self._stop_preprocessing, "danger", "md"
         )
         self.stop_preprocess_btn.pack(side=tk.LEFT)
-        self.stop_preprocess_btn.pack_forget()  # Initially hidden
+        self.stop_preprocess_btn.pack_forget()
 
-        # Update index info
         self._update_index_info()
 
         return frame
@@ -447,7 +429,36 @@ class SettingsUI:
         main_container = tk.Frame(frame, bg=self.theme_provider.bg_color)
         main_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-        # Cleanup Settings
+
+        thumbnail_section = tk.LabelFrame(
+            main_container,
+            text="Thumbnail Cache Management",
+            font=self.theme_provider.normal_font,
+            bg=self.theme_provider.bg_color,
+            fg=self.theme_provider.text_color,
+            padx=10,
+            pady=10
+        )
+        thumbnail_section.pack(fill=tk.X, pady=(0, 20))
+
+        thumbnail_btn_frame = tk.Frame(thumbnail_section, bg=self.theme_provider.bg_color)
+        thumbnail_btn_frame.pack(fill=tk.X, pady=10)
+
+        self.clear_thumbnails_btn = self.theme_provider.create_button(
+            thumbnail_btn_frame, "Clear Thumbnail Cache",
+            self._clear_thumbnail_cache, "warning", "sm"
+        )
+        self.clear_thumbnails_btn.pack(side=tk.LEFT)
+
+        self.thumbnail_info_label = tk.Label(
+            thumbnail_section,
+            text="",
+            font=self.theme_provider.small_font,
+            bg=self.theme_provider.bg_color,
+            fg="#666666"
+        )
+        self.thumbnail_info_label.pack(anchor='w', pady=(5, 0))
+
         cleanup_section = tk.LabelFrame(
             main_container,
             text="Data Cleanup Settings",
@@ -492,7 +503,6 @@ class SettingsUI:
             fg="#666666"
         ).pack(side=tk.LEFT)
 
-        # Manual cleanup buttons
         manual_cleanup_section = tk.LabelFrame(
             main_container,
             text="Manual Data Management",
@@ -526,13 +536,11 @@ class SettingsUI:
         button_frame = tk.Frame(self.settings_window, bg=self.theme_provider.bg_color)
         button_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=20, pady=20)
 
-        # Left side - Reset
         reset_btn = self.theme_provider.create_button(
             button_frame, "Reset to Defaults", self._reset_to_defaults, "warning", "md"
         )
         reset_btn.pack(side=tk.LEFT)
 
-        # Right side - Save/Cancel
         cancel_btn = self.theme_provider.create_button(
             button_frame, "Cancel", self.settings_window.destroy, "secondary", "md"
         )
@@ -568,7 +576,6 @@ class SettingsUI:
             existing_files = [f for f in required_files if os.path.exists(os.path.join(index_path, f))]
 
             if len(existing_files) == len(required_files):
-                # Try to get metadata info
                 try:
                     import pickle
                     metadata_path = os.path.join(index_path, "metadata.pkl")
@@ -587,10 +594,8 @@ class SettingsUI:
 
     def _start_preprocessing(self):
         """Start AI preprocessing"""
-        # First save current settings
         self._apply_current_settings()
 
-        # Select directory to preprocess
         directory = filedialog.askdirectory(
             title="Select Directory to Preprocess for AI Search"
         )
@@ -598,7 +603,6 @@ class SettingsUI:
         if not directory:
             return
 
-        # Confirm action
         result = messagebox.askyesno(
             "Confirm Preprocessing",
             f"Start AI preprocessing for:\n{directory}\n\n"
@@ -632,12 +636,14 @@ class SettingsUI:
             "Clean up old resume position data?\n\nThis will remove positions older than the configured cleanup period."
         )
         if result:
-            # This would be connected via callback from main app
             if hasattr(self, 'cleanup_resume_callback') and self.cleanup_resume_callback:
-                count = self.cleanup_resume_callback()
-                messagebox.showinfo("Cleanup Complete", f"Cleaned up {count} old resume entries")
+                try:
+                    count = self.cleanup_resume_callback()
+                    messagebox.showinfo("Cleanup Complete", f"Cleaned up {count} old resume entries")
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to cleanup resume data: {e}")
             else:
-                messagebox.showinfo("Info", "Resume cleanup not connected")
+                messagebox.showwarning("Warning", "Resume cleanup function not available")
 
     def _cleanup_watch_history(self):
         """Clean up old watch history"""
@@ -646,12 +652,46 @@ class SettingsUI:
             "Clean up old watch history data?\n\nThis will remove history older than the configured cleanup period."
         )
         if result:
-            # This would be connected via callback from main app
             if hasattr(self, 'cleanup_history_callback') and self.cleanup_history_callback:
-                count = self.cleanup_history_callback()
-                messagebox.showinfo("Cleanup Complete", f"Cleaned up {count} old history entries")
+                try:
+                    count = self.cleanup_history_callback()
+                    messagebox.showinfo("Cleanup Complete", f"Cleaned up {count} old history entries")
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to cleanup watch history: {e}")
             else:
-                messagebox.showinfo("Info", "History cleanup not connected")
+                messagebox.showwarning("Warning", "History cleanup function not available")
+
+    def _clear_thumbnail_cache(self):
+        """Clear video thumbnail cache"""
+        result = messagebox.askyesno(
+            "Confirm Clear Cache",
+            "Clear all cached video thumbnails?\n\nThis will remove all stored preview images."
+        )
+
+        if result:
+            if hasattr(self, 'clear_thumbnails_callback') and self.clear_thumbnails_callback:
+                self.clear_thumbnails_callback()
+                self._update_thumbnail_info()
+                messagebox.showinfo("Success", "Thumbnail cache cleared successfully")
+            else:
+                if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+                    self.video_preview_manager.clear_cache()
+                    self._update_thumbnail_info()
+                    messagebox.showinfo("Success", "Thumbnail cache cleared successfully")
+                else:
+                    messagebox.showwarning("Warning", "Thumbnail cache manager not available")
+
+    def _update_thumbnail_info(self):
+        """Update thumbnail cache information"""
+        try:
+            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+                stats = self.video_preview_manager.get_cache_stats()
+                info_text = f"Cache: {stats.get('total_thumbnails', 0)} thumbnails ({stats.get('cache_size_mb', 0):.1f}MB)"
+                self.thumbnail_info_label.config(text=info_text)
+            else:
+                self.thumbnail_info_label.config(text="Cache info unavailable")
+        except Exception as e:
+            self.thumbnail_info_label.config(text="Cache info unavailable")
 
     def _reset_to_defaults(self):
         """Reset settings to default values"""

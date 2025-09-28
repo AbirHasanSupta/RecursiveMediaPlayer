@@ -13,8 +13,8 @@ class PlaybackPosition:
     def __init__(self, video_path: str, position: int = 0, duration: int = 0,
                  last_updated: str = None):
         self.video_path = os.path.normpath(video_path)
-        self.position = position  # in milliseconds
-        self.duration = duration  # in milliseconds
+        self.position = position
+        self.duration = duration
         self.last_updated = last_updated or datetime.now().isoformat()
         self.percentage = 0.0
         if duration > 0:
@@ -43,9 +43,8 @@ class PlaybackPosition:
         if self.duration == 0:
             return False
 
-        # Don't resume if less than 5 seconds or within 5 seconds from the end
-        min_position = 5000  # 5 seconds in milliseconds
-        max_position = self.duration - 5000  # 5 seconds from end
+        min_position = 5000
+        max_position = self.duration - 5000
 
         return (self.position >= min_position and
                 self.position <= max_position)
@@ -70,11 +69,10 @@ class PlaybackPositionStorage:
         self.positions_dir = Path.home() / "Documents" / "Recursive Media Player" / "Resume"
         self.positions_dir.mkdir(parents=True, exist_ok=True)
         self.positions_file = self.positions_dir / "playback_positions.json"
-        self.max_entries = 500  # Limit stored positions
+        self.max_entries = 500
 
     def save_positions(self, positions: Dict[str, PlaybackPosition]) -> bool:
         try:
-            # Keep only the most recent positions
             sorted_positions = sorted(
                 positions.values(),
                 key=lambda x: x.last_updated,
@@ -117,7 +115,6 @@ class ResumePlaybackService:
         self._lock = threading.Lock()
         self._load_positions()
 
-        # Auto-save timer
         self._save_timer = None
         self._pending_saves = False
 
@@ -130,7 +127,7 @@ class ResumePlaybackService:
             self._save_timer.cancel()
 
         self._pending_saves = True
-        self._save_timer = threading.Timer(5.0, self._perform_save)  # Save after 5 seconds
+        self._save_timer = threading.Timer(5.0, self._perform_save)
         self._save_timer.start()
 
     def _perform_save(self):
@@ -194,7 +191,7 @@ class ResumePlaybackService:
                     if last_updated < cutoff_date:
                         to_remove.append(video_path)
                 except:
-                    to_remove.append(video_path)  # Remove invalid dates
+                    to_remove.append(video_path)
 
             for video_path in to_remove:
                 del self._positions[video_path]
@@ -224,13 +221,12 @@ class ResumePlaybackTracker:
 
     def start_tracking(self, player, video_path: str):
         """Start tracking playback position for a video"""
-        self.stop_tracking()  # Stop any existing tracking
+        self.stop_tracking()
 
         self._current_player = player
         self._current_video = video_path
         self._is_tracking = True
 
-        # Start background tracking thread
         self._tracking_thread = threading.Thread(
             target=self._track_position,
             daemon=True
@@ -243,7 +239,6 @@ class ResumePlaybackTracker:
         if self._tracking_thread and self._tracking_thread.is_alive():
             self._tracking_thread.join(timeout=1.0)
 
-        # Save final position
         if self._current_player and self._current_video:
             try:
                 position = self._current_player.get_time()
@@ -259,7 +254,7 @@ class ResumePlaybackTracker:
     def _track_position(self):
         """Background thread that tracks playback position"""
         last_save_time = 0
-        save_interval = 10000  # Save every 10 seconds
+        save_interval = 10000
 
         while self._is_tracking and self._current_player:
             try:
@@ -267,19 +262,17 @@ class ResumePlaybackTracker:
                 duration = self._current_player.get_length()
 
                 if position >= 0 and duration > 0:
-                    # Save position periodically
                     if position - last_save_time >= save_interval:
                         self.service.update_position(self._current_video, position, duration)
                         last_save_time = position
 
-                        # Notify callback if set
                         if self._position_update_callback:
                             try:
                                 self._position_update_callback(self._current_video, position, duration)
                             except:
                                 pass
 
-                time.sleep(2)  # Check every 2 seconds
+                time.sleep(1)
 
             except Exception:
                 break

@@ -98,15 +98,14 @@ def select_multiple_folders_and_play():
 
             app_settings = self.settings_manager.get_settings()
             self.ai_index_path = app_settings.ai_index_path
-            self.settings_manager.ui.cleanup_resume_callback = lambda: self.resume_manager.cleanup_old_positions()
-            self.settings_manager.ui.cleanup_history_callback = lambda: self._cleanup_watch_history_data()
             self.video_preview_manager = VideoPreviewManager(self.root, self.update_console)
             self.video_preview_manager = self.video_preview_manager
             self.playlist_manager.ui.video_preview_manager = self.video_preview_manager
-            try:
-                cache_stats = self.video_preview_manager.get_cache_stats()
-            except Exception:
-                pass
+
+            self.settings_manager.ui.cleanup_resume_callback = lambda: self.resume_manager.cleanup_old_positions()
+            self.settings_manager.ui.cleanup_history_callback = lambda: self._cleanup_watch_history_data()
+            self.settings_manager.ui.clear_thumbnails_callback = lambda: self._clear_thumbnail_cache()
+            self.settings_manager.ui.video_preview_manager = self.video_preview_manager
 
         def setup_theme(self):
             self.bg_color = "#f5f5f5"
@@ -623,7 +622,6 @@ def select_multiple_folders_and_play():
                                     font=self.normal_font, bg=self.bg_color, fg=self.text_color)
             search_label.pack(anchor='w', pady=(0, 5))
 
-            # Replace the existing search_input_frame section with this:
             search_input_frame = tk.Frame(self.ai_search_frame, bg=self.bg_color)
             search_input_frame.pack(fill=tk.X, pady=(0, 5))
 
@@ -656,7 +654,7 @@ def select_multiple_folders_and_play():
                 width=6
             )
             self.min_score_entry.pack(side=tk.LEFT, padx=(0, 5))
-            self.min_score_entry.insert(0, "0.0")  # Default value
+            self.min_score_entry.insert(0, "3.0")
             self.min_score_entry.bind('<Return>', lambda e: self.perform_ai_search())
 
             self.ai_search_button = self.create_button(
@@ -722,7 +720,7 @@ def select_multiple_folders_and_play():
             self.smart_resume_var = tk.BooleanVar(value=self.smart_resume_enabled)
             self.smart_resume_check = ttk.Checkbutton(
                 checkboxes_row,
-                text="Smart Resume",
+                text="Resume Playback",
                 style="Modern.TCheckbutton",
                 variable=self.smart_resume_var,
                 command=self.toggle_smart_resume
@@ -822,29 +820,36 @@ def select_multiple_folders_and_play():
                 size="sm"
             )
             self.reset_speed_button.pack(side=tk.LEFT)
-            preview_section = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
-            preview_section.pack(fill=tk.X, pady=(10, 0))
 
-            preview_label = tk.Label(
-                preview_section,
-                text="Preview:",
+            media_section = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
+            media_section.pack(fill=tk.X, pady=(10, 0))
+
+            media_label = tk.Label(
+                media_section,
+                text="Media:",
                 font=self.small_font,
                 bg=self.bg_color,
                 fg="#666666"
             )
-            preview_label.pack(side=tk.LEFT, padx=(0, 8))
+            media_label.pack(side=tk.LEFT, padx=(0, 8))
 
-            self.pregenerate_btn = self.create_button(
-                preview_section, "Pre-generate Thumbnails",
-                self._pregenerate_thumbnails, "secondary", "sm"
+            self.add_to_playlist_button = self.create_button(
+                media_section, "Add to Playlist",
+                self._add_to_playlist, "playlist", "sm"
             )
-            self.pregenerate_btn.pack(side=tk.LEFT, padx=(0, 5))
+            self.add_to_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
 
-            self.clear_thumbnails_btn = self.create_button(
-                preview_section, "Clear Thumbnail Cache",
-                self._clear_thumbnail_cache, "warning", "sm"
+            self.manage_playlist_button = self.create_button(
+                media_section, "Manage Playlists",
+                self._manage_playlists, "playlist", "sm"
             )
-            self.clear_thumbnails_btn.pack(side=tk.LEFT)
+            self.manage_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
+
+            self.watch_history_button = self.create_button(
+                media_section, "Watch History",
+                self._show_watch_history, "history", "sm"
+            )
+            self.watch_history_button.pack(side=tk.LEFT)
 
             self.root.after(100, self.draw_slider)
 
@@ -996,7 +1001,6 @@ def select_multiple_folders_and_play():
                         self.controller.set_watch_history_callback(
                             self.watch_history_manager.track_video_playback
                         )
-                        # Set resume playback manager
                         self.controller.set_resume_manager(self.resume_manager)
 
 
@@ -1087,7 +1091,6 @@ def select_multiple_folders_and_play():
                     self.controller.set_watch_history_callback(
                         self.watch_history_manager.track_video_playback
                     )
-                    # Set resume playback manager
                     self.controller.set_resume_manager(self.resume_manager)
 
                     initial_speed = self.speed_var.get()
@@ -1096,7 +1099,7 @@ def select_multiple_folders_and_play():
                         self.update_console(f"Initial playback speed set to {initial_speed}x")
 
                     start_index = 0
-                    if self.smart_resume_var.get():  # Use the new smart resume setting
+                    if self.smart_resume_var.get():
                         if self.last_played_video_path and self.last_played_video_path in all_videos:
                             start_index = all_videos.index(self.last_played_video_path)
                             self.update_console(
@@ -1606,39 +1609,6 @@ def select_multiple_folders_and_play():
                 size="md"
             )
             self.ai_button.pack(side=tk.LEFT, padx=(0, 10))
-            self.add_to_playlist_button = self.create_button(
-                theme_frame,
-                text="Add to Playlist",
-                command=self._add_to_playlist,
-                variant="warning",
-                size="md"
-            )
-            self.add_to_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.manage_playlist_button = self.create_button(
-                theme_frame,
-                text="Manage Playlists",
-                command=self._manage_playlists,
-                variant="secondary",
-                size="md"
-            )
-            self.manage_playlist_button.pack(side=tk.LEFT, padx=(0, 10))
-            self.watch_history_button = self.create_button(
-                theme_frame,
-                text="Watch History",
-                command=self._show_watch_history,
-                variant="secondary",
-                size="md"
-            )
-            self.watch_history_button.pack(side=tk.LEFT, padx=(0, 10))
-            self.settings_button = self.create_button(
-                theme_frame,
-                text="Settings",
-                command=self._show_settings,
-                variant="secondary",
-                size="md"
-            )
-            self.settings_button.pack(side=tk.LEFT, padx=(0, 10))
 
             self.theme_button = self.create_button(
                 theme_frame,
@@ -1647,7 +1617,16 @@ def select_multiple_folders_and_play():
                 variant="theme",
                 size="md"
             )
-            self.theme_button.pack(side=tk.LEFT)
+            self.theme_button.pack(side=tk.LEFT, padx=(0, 10))
+
+            self.settings_button = self.create_button(
+                theme_frame,
+                text="Settings",
+                command=self._show_settings,
+                variant="settings",
+                size="md"
+            )
+            self.settings_button.pack(side=tk.LEFT, padx=(0, 10))
 
             action_buttons_frame = tk.Frame(self.button_frame, bg=self.bg_color)
             action_buttons_frame.pack(side=tk.RIGHT)
@@ -1836,10 +1815,8 @@ def select_multiple_folders_and_play():
         def _add_to_playlist(self):
             """Add selected or all videos to playlist"""
             if self.ai_mode and self.current_subdirs_mapping:
-                # AI mode - check for selected videos in search results
                 selection = self.exclusion_listbox.curselection()
                 if selection:
-                    # Add only selected AI search results
                     selected_videos = []
                     for index in selection:
                         if index in self.current_subdirs_mapping:
@@ -1853,7 +1830,6 @@ def select_multiple_folders_and_play():
                     else:
                         messagebox.showwarning("Warning", "No valid selected videos found")
                 else:
-                    # Add all AI search results
                     ai_video_paths = []
                     for i in range(len(self.current_subdirs_mapping)):
                         if i in self.current_subdirs_mapping:
@@ -1868,17 +1844,14 @@ def select_multiple_folders_and_play():
                         messagebox.showwarning("Warning", "No valid videos found in AI search results")
                 return
 
-            # Normal mode - check for selected items in exclusion listbox
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
                 messagebox.showwarning("Warning", "Please select a directory first")
                 return
 
-            # Check if any items are selected in the exclusion listbox
             selection = self.exclusion_listbox.curselection()
 
             if selection:
-                # Add only selected items
                 selected_videos = []
                 for index in selection:
                     if index in self.current_subdirs_mapping:
@@ -1886,7 +1859,6 @@ def select_multiple_folders_and_play():
                         if os.path.isfile(item_path) and is_video(item_path):
                             selected_videos.append(item_path)
                         elif os.path.isdir(item_path):
-                            # If directory selected, get all videos from it
                             try:
                                 for root, dirs, files in os.walk(item_path):
                                     for file in files:
@@ -1902,18 +1874,15 @@ def select_multiple_folders_and_play():
                 else:
                     messagebox.showwarning("Warning", "No videos found in selected items")
             else:
-                # No selection - add all videos from selected directory
                 self.add_to_playlist_button.config(text="Adding...", state=tk.DISABLED)
                 self.update_console("Collecting all videos for playlist...")
 
                 def collect_all_videos():
                     try:
-                        # Get all videos from selected directory
                         all_videos = []
                         cache = self.scan_cache.get(selected_dir)
                         if cache:
                             videos, _, _ = cache
-                            # Apply exclusion filters
                             excluded_subdirs = self.excluded_subdirs.get(selected_dir, [])
                             excluded_videos = self.excluded_videos.get(selected_dir, [])
 
@@ -1950,7 +1919,6 @@ def select_multiple_folders_and_play():
                 messagebox.showwarning("Warning", "Playlist is empty")
                 return
 
-            # Stop current player if running
             if self.controller:
                 self.controller.stop()
                 cleanup_hotkeys()
@@ -1959,7 +1927,6 @@ def select_multiple_folders_and_play():
             self.update_console("STARTING PLAYLIST PLAYBACK")
             self.update_console("=" * 100)
 
-            # Create video mapping for playlist
             all_video_to_dir = {}
             all_directories = []
 
@@ -1982,14 +1949,11 @@ def select_multiple_folders_and_play():
                 self.controller = VLCPlayerControllerForMultipleDirectory(
                     valid_videos, all_video_to_dir, all_directories, self.update_console
                 )
-                # Set watch history tracking
                 self.controller.set_watch_history_callback(
                     self.watch_history_manager.track_video_playback
                 )
-                # Set resume playback manager
                 self.controller.set_resume_manager(self.resume_manager)
 
-                # Apply current speed setting
                 initial_speed = self.speed_var.get()
                 if initial_speed != 1.0:
                     self.controller.set_initial_playback_rate(initial_speed)
@@ -2020,7 +1984,6 @@ def select_multiple_folders_and_play():
                 messagebox.showwarning("Warning", "No videos to play")
                 return
 
-            # Stop current player if running
             if self.controller:
                 self.controller.stop()
                 cleanup_hotkeys()
@@ -2029,7 +1992,6 @@ def select_multiple_folders_and_play():
             self.update_console("STARTING HISTORY VIDEO PLAYBACK")
             self.update_console("=" * 100)
 
-            # Create video mapping
             all_video_to_dir = {}
             all_directories = []
 
@@ -2052,14 +2014,11 @@ def select_multiple_folders_and_play():
                 self.controller = VLCPlayerControllerForMultipleDirectory(
                     valid_videos, all_video_to_dir, all_directories, self.update_console
                 )
-                # Set watch history tracking
                 self.controller.set_watch_history_callback(
                     self.watch_history_manager.track_video_playback
                 )
-                # Set resume playback manager
                 self.controller.set_resume_manager(self.resume_manager)
 
-                # Apply current speed setting
                 initial_speed = self.speed_var.get()
                 if initial_speed != 1.0:
                     self.controller.set_initial_playback_rate(initial_speed)
@@ -2093,15 +2052,12 @@ def select_multiple_folders_and_play():
             self.settings_manager.show_settings()
 
         def _on_settings_changed(self, new_settings):
-            """Handle settings changes"""
             self.ai_index_path = new_settings.ai_index_path
             self.update_console(f"Settings updated - AI index path: {new_settings.ai_index_path}")
 
-            # Update resume manager cleanup settings
             if hasattr(self, 'resume_manager'):
                 self.resume_manager._auto_cleanup_days = new_settings.auto_cleanup_days
 
-            # If AI mode is active, check if index path is still valid
             if self.ai_mode:
                 required_files = ["clip_index.faiss", "text_index.faiss", "metadata.pkl", "tfidf_index.pkl"]
                 files_exist = all(os.path.exists(os.path.join(new_settings.ai_index_path, f)) for f in required_files)
@@ -2115,83 +2071,20 @@ def select_multiple_folders_and_play():
         def _cleanup_watch_history_data(self):
             """Helper method to cleanup watch history data"""
             try:
-                # This would need to call the watch history manager's cleanup method
-                # For now, return 0 as placeholder
                 return 0
             except Exception:
                 return 0
 
-        def _pregenerate_thumbnails(self):
-            """Pre-generate thumbnails for current directory videos"""
-            selected_dir = self.get_current_selected_directory()
-            if not selected_dir:
-                messagebox.showwarning("Warning", "Please select a directory first")
-                return
-
-            if self.ai_mode and self.current_subdirs_mapping:
-                # AI mode - pregenerate for search results
-                video_paths = []
-                for i in range(len(self.current_subdirs_mapping)):
-                    if i in self.current_subdirs_mapping:
-                        path = self.current_subdirs_mapping[i]
-                        if os.path.isfile(path) and is_video(path):
-                            video_paths.append(path)
-
-                if video_paths:
-                    self.update_console(f"Pre-generating thumbnails for {len(video_paths)} AI search results...")
-                    self.video_preview_manager.pregenerate_thumbnails(video_paths, self._on_thumbnail_progress)
-                else:
-                    messagebox.showinfo("Info", "No videos found in AI search results")
-            else:
-                # Normal mode - pregenerate for directory
-                self.pregenerate_btn.config(text="Generating...", state=tk.DISABLED)
-
-                def collect_videos():
-                    try:
-                        videos = []
-                        cache = self.scan_cache.get(selected_dir)
-                        if cache:
-                            video_list, _, _ = cache
-                            # Apply exclusion filters
-                            for video in video_list:
-                                if not self.is_video_excluded(selected_dir, video):
-                                    videos.append(video)
-
-                        def start_generation():
-                            if videos:
-                                self.update_console(f"Pre-generating thumbnails for {len(videos)} videos...")
-                                self.video_preview_manager.pregenerate_thumbnails(videos, self._on_thumbnail_progress)
-                            else:
-                                messagebox.showinfo("Info", "No videos found to generate thumbnails for")
-
-                            self.pregenerate_btn.config(text="Pre-generate Thumbnails", state=tk.NORMAL)
-
-                        self.root.after(0, start_generation)
-
-                    except Exception as e:
-                        def show_error():
-                            messagebox.showerror("Error", f"Failed to collect videos: {e}")
-                            self.pregenerate_btn.config(text="Pre-generate Thumbnails", state=tk.NORMAL)
-
-                        self.root.after(0, show_error)
-
-                threading.Thread(target=collect_videos, daemon=True).start()
-
-        def _on_thumbnail_progress(self, progress: float):
-            """Handle thumbnail generation progress"""
-            self.update_console(f"Thumbnail generation progress: {progress:.1f}%")
-
         def _clear_thumbnail_cache(self):
             """Clear video thumbnail cache"""
-            result = messagebox.askyesno(
-                "Confirm Clear Cache",
-                "Clear all cached video thumbnails?\n\nThis will remove all stored preview images."
-            )
-
-            if result:
+            try:
                 self.video_preview_manager.clear_cache()
                 stats = self.video_preview_manager.get_cache_stats()
                 self.update_console(f"Thumbnail cache cleared. Cache stats: {stats}")
+                return True
+            except Exception as e:
+                self.update_console(f"Error clearing thumbnail cache: {e}")
+                return False
 
         def cancel(self):
             if self.controller:
