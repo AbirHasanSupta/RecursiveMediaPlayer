@@ -387,23 +387,17 @@ class VideoPreviewManager:
 
         def generate():
             try:
-                if self.console_callback:
-                    self.console_callback(f"Generating thumbnail for {os.path.basename(video_path)}")
-
                 thumbnail_data = self.generator.generate_thumbnail(video_path)
 
                 if thumbnail_data:
-                    # Create thumbnail object
                     thumbnail = VideoThumbnail(video_path, thumbnail_data)
 
                     with self._lock:
                         self._thumbnails[video_path] = thumbnail
                         self._generation_queue.discard(video_path)
 
-                    # Save to cache
                     self._save_thumbnails()
 
-                    # Show preview if still relevant
                     if (self.right_clicked_item is not None and
                             self.current_mapping and
                             self.current_mapping.get(self.right_clicked_item) == video_path):
@@ -412,8 +406,6 @@ class VideoPreviewManager:
 
                         self.parent.after(0, show_preview)
 
-                    if self.console_callback:
-                        self.console_callback(f"Generated thumbnail for {os.path.basename(video_path)}")
                 else:
                     with self._lock:
                         self._generation_queue.discard(video_path)
@@ -483,7 +475,6 @@ class VideoPreviewManager:
             total_size = 0
             for thumbnail in self._thumbnails.values():
                 if thumbnail.thumbnail_data:
-                    # Approximate size (base64 is ~4/3 of original size)
                     total_size += len(thumbnail.thumbnail_data) * 3 // 4
 
             return {

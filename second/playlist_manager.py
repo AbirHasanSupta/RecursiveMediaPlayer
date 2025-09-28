@@ -793,7 +793,6 @@ class PlaylistManager:
 
             selected_playlist = playlists[selection[0]]
             self.service.add_videos_to_playlist(selected_playlist.id, videos)
-            messagebox.showinfo("Success", f"Added {len(videos)} videos to '{selected_playlist.name}'")
             dialog.destroy()
 
         new_btn = self.ui.theme_provider.create_button(

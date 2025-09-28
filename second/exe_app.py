@@ -2088,8 +2088,6 @@ def select_multiple_folders_and_play():
             self.smart_resume_enabled = enabled
             self.save_preferences()
 
-            status = "enabled" if enabled else "disabled"
-
         def _show_settings(self):
             """Open application settings window"""
             self.settings_manager.show_settings()

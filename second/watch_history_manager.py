@@ -478,7 +478,6 @@ class WatchHistoryUI:
             messagebox.showwarning("Warning", "Please select entries to remove")
             return
 
-        # Get entry IDs from selection
         entry_ids = []
         for item in selection:
             tags = self.history_tree.item(item, 'tags')
@@ -488,22 +487,14 @@ class WatchHistoryUI:
         if not entry_ids:
             return
 
-        result = messagebox.askyesno(
-            "Confirm Removal",
-            f"Are you sure you want to remove {len(entry_ids)} selected entries from watch history?"
-        )
-
-        if result:
-            removed_count = self.history_service.remove_entries(entry_ids)
-            if removed_count > 0:
-                messagebox.showinfo("Success", f"Removed {removed_count} entries from watch history")
-                self._refresh_history_list()
+        removed_count = self.history_service.remove_entries(entry_ids)
+        if removed_count > 0:
+            self._refresh_history_list()
 
     def _clear_all_history(self):
         """Clear all watch history"""
         total_entries = len(self.history_service.get_all_history())
         if total_entries == 0:
-            messagebox.showinfo("Info", "Watch history is already empty")
             return
 
         result = messagebox.askyesno(
