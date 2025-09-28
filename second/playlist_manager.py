@@ -297,6 +297,7 @@ class PlaylistUI:
         )
         self.video_listbox.pack(fill=tk.BOTH, expand=True)
         video_scrollbar.config(command=self.video_listbox.yview)
+        self.video_preview_manager = None
 
         # Video management buttons
         video_btn_frame = tk.Frame(right_panel, bg=self.theme_provider.bg_color)
@@ -361,18 +362,29 @@ class PlaylistUI:
             # Store current video selection
             current_selection = list(self.video_listbox.curselection())
 
+            # Detach preview from old mapping
+            if hasattr(self, 'video_preview_manager'):
+                self.video_preview_manager.detach_from_listbox(self.video_listbox)
+
             self.video_listbox.delete(0, tk.END)
 
             if not self.current_playlist:
                 return
 
+            # Create video mapping for preview
+            video_mapping = {}
             for i, video in enumerate(self.current_playlist.videos):
                 display_name = os.path.basename(video)
                 self.video_listbox.insert(tk.END, display_name)
+                video_mapping[i] = video
 
                 # Restore selection if it was previously selected
                 if i in current_selection:
                     self.video_listbox.selection_set(i)
+
+            # Attach preview with new mapping
+            if hasattr(self, 'video_preview_manager'):
+                self.video_preview_manager.attach_to_listbox(self.video_listbox, video_mapping)
 
         if threading.current_thread() is threading.main_thread():
             refresh()
@@ -669,6 +681,8 @@ class PlaylistManager:
         self.storage = PlaylistStorage()
         self.service = PlaylistService(self.storage)
         self.ui = PlaylistUI(parent, theme_provider, self.service, self._on_play_playlist)
+        if hasattr(theme_provider, 'video_preview_manager'):
+            self.ui.video_preview_manager = theme_provider.video_preview_manager
 
         self._play_callback = None
 

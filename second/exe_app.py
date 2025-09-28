@@ -15,6 +15,7 @@ from playlist_manager import PlaylistManager
 from watch_history_manager import WatchHistoryManager
 from resume_playback_manager import ResumePlaybackManager
 from settings_manager import SettingsManager
+from video_preview_manager import VideoPreviewManager
 
 
 def select_multiple_folders_and_play():
@@ -88,6 +89,7 @@ def select_multiple_folders_and_play():
             self.update_ui_for_mode()
             self.playlist_manager = PlaylistManager(self.root, self)
             self.playlist_manager.set_play_callback(self._play_playlist_videos)
+
             self.watch_history_manager = WatchHistoryManager(self.root, self)
             self.resume_manager = ResumePlaybackManager()
             self.resume_manager.set_resume_enabled(True)
@@ -98,6 +100,16 @@ def select_multiple_folders_and_play():
             self.ai_index_path = app_settings.ai_index_path
             self.settings_manager.ui.cleanup_resume_callback = lambda: self.resume_manager.cleanup_old_positions()
             self.settings_manager.ui.cleanup_history_callback = lambda: self._cleanup_watch_history_data()
+            self.video_preview_manager = VideoPreviewManager(self.root, self.update_console)
+            self.video_preview_manager = self.video_preview_manager
+            self.playlist_manager.ui.video_preview_manager = self.video_preview_manager
+            try:
+                cache_stats = self.video_preview_manager.get_cache_stats()
+                if cache_stats['total_thumbnails'] > 0:
+                    self.update_console(f"Thumbnail Cache: {cache_stats['total_thumbnails']} thumbnails "
+                                        f"({cache_stats['cache_size_mb']:.1f}MB)")
+            except Exception:
+                pass
 
         def setup_theme(self):
             self.bg_color = "#f5f5f5"
@@ -530,6 +542,10 @@ def select_multiple_folders_and_play():
                             self.current_subdirs_mapping[idx] = video_path
 
                         self.update_console(f"Found {len(final_results)} videos with score >= {min_score}")
+                        self.video_preview_manager.attach_to_listbox(
+                            self.exclusion_listbox,
+                            self.current_subdirs_mapping
+                        )
 
                     self.root.after(0, update_ui)
 
@@ -818,6 +834,29 @@ def select_multiple_folders_and_play():
                 size="sm"
             )
             self.reset_speed_button.pack(side=tk.LEFT)
+            preview_section = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
+            preview_section.pack(fill=tk.X, pady=(10, 0))
+
+            preview_label = tk.Label(
+                preview_section,
+                text="Preview:",
+                font=self.small_font,
+                bg=self.bg_color,
+                fg="#666666"
+            )
+            preview_label.pack(side=tk.LEFT, padx=(0, 8))
+
+            self.pregenerate_btn = self.create_button(
+                preview_section, "Pre-generate Thumbnails",
+                self._pregenerate_thumbnails, "secondary", "sm"
+            )
+            self.pregenerate_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+            self.clear_thumbnails_btn = self.create_button(
+                preview_section, "Clear Thumbnail Cache",
+                self._clear_thumbnail_cache, "warning", "sm"
+            )
+            self.clear_thumbnails_btn.pack(side=tk.LEFT)
 
             self.root.after(100, self.draw_slider)
 
@@ -1527,6 +1566,10 @@ def select_multiple_folders_and_play():
                                 self.root.after(1, lambda: insert_chunk(end))
                             else:
                                 self.current_subdirs_mapping = mapping
+                                self.video_preview_manager.attach_to_listbox(
+                                    self.exclusion_listbox,
+                                    self.current_subdirs_mapping
+                                )
 
                         insert_chunk(0)
 
@@ -2029,6 +2072,78 @@ def select_multiple_folders_and_play():
             except Exception:
                 return 0
 
+        def _pregenerate_thumbnails(self):
+            """Pre-generate thumbnails for current directory videos"""
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                messagebox.showwarning("Warning", "Please select a directory first")
+                return
+
+            if self.ai_mode and self.current_subdirs_mapping:
+                # AI mode - pregenerate for search results
+                video_paths = []
+                for i in range(len(self.current_subdirs_mapping)):
+                    if i in self.current_subdirs_mapping:
+                        path = self.current_subdirs_mapping[i]
+                        if os.path.isfile(path) and is_video(path):
+                            video_paths.append(path)
+
+                if video_paths:
+                    self.update_console(f"Pre-generating thumbnails for {len(video_paths)} AI search results...")
+                    self.video_preview_manager.pregenerate_thumbnails(video_paths, self._on_thumbnail_progress)
+                else:
+                    messagebox.showinfo("Info", "No videos found in AI search results")
+            else:
+                # Normal mode - pregenerate for directory
+                self.pregenerate_btn.config(text="Generating...", state=tk.DISABLED)
+
+                def collect_videos():
+                    try:
+                        videos = []
+                        cache = self.scan_cache.get(selected_dir)
+                        if cache:
+                            video_list, _, _ = cache
+                            # Apply exclusion filters
+                            for video in video_list:
+                                if not self.is_video_excluded(selected_dir, video):
+                                    videos.append(video)
+
+                        def start_generation():
+                            if videos:
+                                self.update_console(f"Pre-generating thumbnails for {len(videos)} videos...")
+                                self.video_preview_manager.pregenerate_thumbnails(videos, self._on_thumbnail_progress)
+                            else:
+                                messagebox.showinfo("Info", "No videos found to generate thumbnails for")
+
+                            self.pregenerate_btn.config(text="Pre-generate Thumbnails", state=tk.NORMAL)
+
+                        self.root.after(0, start_generation)
+
+                    except Exception as e:
+                        def show_error():
+                            messagebox.showerror("Error", f"Failed to collect videos: {e}")
+                            self.pregenerate_btn.config(text="Pre-generate Thumbnails", state=tk.NORMAL)
+
+                        self.root.after(0, show_error)
+
+                threading.Thread(target=collect_videos, daemon=True).start()
+
+        def _on_thumbnail_progress(self, progress: float):
+            """Handle thumbnail generation progress"""
+            self.update_console(f"Thumbnail generation progress: {progress:.1f}%")
+
+        def _clear_thumbnail_cache(self):
+            """Clear video thumbnail cache"""
+            result = messagebox.askyesno(
+                "Confirm Clear Cache",
+                "Clear all cached video thumbnails?\n\nThis will remove all stored preview images."
+            )
+
+            if result:
+                self.video_preview_manager.clear_cache()
+                stats = self.video_preview_manager.get_cache_stats()
+                self.update_console(f"Thumbnail cache cleared. Cache stats: {stats}")
+
         def cancel(self):
             if self.controller:
                 if self.start_from_last_played and hasattr(self.controller, 'index'):
@@ -2046,6 +2161,10 @@ def select_multiple_folders_and_play():
                 pass
             try:
                 self.resume_manager.force_save_positions()
+            except Exception:
+                pass
+            try:
+                self.video_preview_manager.tooltip.hide_preview()
             except Exception:
                 pass
             self.root.quit()
