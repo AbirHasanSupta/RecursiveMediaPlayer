@@ -75,14 +75,14 @@ class ConfigHandler:
                         'last_played_video_index': config.get('last_played_video_index', 0),
                         'last_played_video_path': last_played_path,
                         'excluded_subdirs': decoded_excluded_subdirs,
-                        'excluded_videos': decoded_excluded_videos
+                        'smart_resume_enabled': config.get('smart_resume_enabled', False),
                     }
         except Exception:
             pass
         return {'dark_mode': False, 'show_videos': True, 'expand_all': True, 'selected_dirs': [],
                 'save_directories': False, 'start_from_last_played': False,
                 'last_played_video_index': 0, 'last_played_video_path': '',
-                'excluded_subdirs': {}, 'excluded_videos': {}}
+                'excluded_subdirs': {}, 'excluded_videos': {}, 'smart_resume_enabled':False}
 
     def save(self, config_dict):
         try:
@@ -123,6 +123,7 @@ class ThemeSelector:
             'selected_dirs': getattr(self, 'selected_dirs', []),
             'save_directories': getattr(self, 'save_directories', False),
             'start_from_last_played': getattr(self, 'start_from_last_played', False),
+            'smart_resume_enabled': getattr(self, 'smart_resume_enabled', False),
             'last_played_video_index': getattr(self, 'last_played_video_index', 0),
             'last_played_video_path': getattr(self, 'last_played_video_path', ''),
             'excluded_subdirs': encoded_excluded_subdirs,
@@ -264,6 +265,12 @@ class ThemeSelector:
                             variant = 'danger'
                         elif 'add' in text:
                             variant = 'primary'
+                        elif 'playlist' in text.lower():
+                            variant = 'playlist'
+                        elif 'history' in text.lower():
+                            variant = 'history'
+                        elif 'settings' in text.lower():
+                            variant = 'settings'
                         else:
                             variant = 'secondary'
 
@@ -283,7 +290,10 @@ class ThemeSelector:
                 "warning": {"bg": "#CC7832", "fg": "white", "active": "#D68843"},
                 "secondary": {"bg": "#4C5052", "fg": "#A9B7C6", "active": "#5C6164"},
                 "dark": {"bg": "#3A3A3C", "fg": "#A9B7C6", "active": "#4A4A4C"},
-                "theme": {"bg": "#5C6164", "fg": "#FFFFFF", "active": "#6C7174"}
+                "theme": {"bg": "#5C6164", "fg": "#FFFFFF", "active": "#6C7174"},
+                "playlist": {"bg": "#9b59b6", "fg": "white", "active": "#8e44ad"},
+                "history": {"bg": "#5a6c7d", "fg": "white", "active": "#4a5a6b"},
+                "settings": {"bg": "#6c7b7c", "fg": "white", "active": "#5a6c6d"}
             }
         else:
             variants = {
@@ -293,7 +303,10 @@ class ThemeSelector:
                 "warning": {"bg": "#f39c12", "fg": "white", "active": "#e67e22"},
                 "secondary": {"bg": "#95a5a6", "fg": "white", "active": "#7f8c8d"},
                 "dark": {"bg": "#34495e", "fg": "white", "active": "#2c3e50"},
-                "theme": {"bg": "#34495e", "fg": "white", "active": "#2c3e50"}
+                "theme": {"bg": "#34495e", "fg": "white", "active": "#2c3e50"},
+                "playlist": {"bg": "#8e44ad", "fg": "white", "active": "#7d3c98"},
+                "history": {"bg": "#2c3e50", "fg": "white", "active": "#34495e"},
+                "settings": {"bg": "#7f8c8d", "fg": "white", "active": "#6c7b7c"}
             }
         return variants.get(variant, variants["primary"])
 

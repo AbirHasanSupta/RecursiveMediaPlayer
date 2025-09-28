@@ -7,11 +7,15 @@ import os
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 
-from enhanced_features import WatchHistory, PlaylistManager
 from key_press import listen_keys, cleanup_hotkeys
 from theme import ThemeSelector
 from utils import gather_videos_with_directories, is_video
 from vlc_player_controller import VLCPlayerControllerForMultipleDirectory
+from managers.playlist_manager import PlaylistManager
+from managers.watch_history_manager import WatchHistoryManager
+from managers.resume_playback_manager import ResumePlaybackManager
+from managers.settings_manager import SettingsManager
+from managers.video_preview_manager import VideoPreviewManager
 
 
 def select_multiple_folders_and_play():
@@ -34,14 +38,14 @@ def select_multiple_folders_and_play():
             self.ai_searcher = None
             self.ai_index_path = None
             self.current_max_depth = 20
-            self.playlist_manager = PlaylistManager()
 
             preferences = self.config.load_preferences()
             self.dark_mode = preferences['dark_mode']
             self.show_videos = preferences['show_videos']
             self.expand_all_default = preferences['expand_all']
             self.save_directories = preferences['save_directories']
-            self.start_from_last_played = preferences['start_from_last_played']
+            self.smart_resume_enabled = preferences['smart_resume_enabled']
+            self.start_from_last_played = self.smart_resume_enabled
             self.last_played_video_index = preferences['last_played_video_index']
             self.last_played_video_path = preferences['last_played_video_path']
             self.excluded_subdirs = preferences.get('excluded_subdirs', {})
@@ -60,13 +64,11 @@ def select_multiple_folders_and_play():
             self.setup_status_section()
             self.setup_console_section()
             self.setup_action_buttons()
-            self.watch_history = WatchHistory()
 
             self.scan_cache = {}
             self.pending_scans = set()
             max_workers = min(8, (os.cpu_count() or 4))
             self.executor = ProcessPoolExecutor(max_workers=max_workers)
-            self.update_console(f"Scanner ready (process workers: {max_workers})")
             self.apply_theme()
             if self.save_directories:
                 self.selected_dirs = preferences.get('selected_dirs', [])
@@ -84,17 +86,26 @@ def select_multiple_folders_and_play():
                 self.selected_dirs = []
 
             self.update_ui_for_mode()
+            self.playlist_manager = PlaylistManager(self.root, self)
+            self.playlist_manager.set_play_callback(self._play_playlist_videos)
 
-        def format_time(self, seconds):
-            """Format seconds to MM:SS or HH:MM:SS"""
-            hours = int(seconds // 3600)
-            minutes = int((seconds % 3600) // 60)
-            secs = int(seconds % 60)
+            self.watch_history_manager = WatchHistoryManager(self.root, self)
+            self.watch_history_manager.set_play_callback(self._play_history_videos)
+            self.resume_manager = ResumePlaybackManager()
+            self.resume_manager.set_resume_enabled(True)
+            self.settings_manager = SettingsManager(self.root, self, self.update_console)
+            self.settings_manager.add_settings_changed_callback(self._on_settings_changed)
 
-            if hours > 0:
-                return f"{hours}:{minutes:02d}:{secs:02d}"
-            else:
-                return f"{minutes}:{secs:02d}"
+            app_settings = self.settings_manager.get_settings()
+            self.ai_index_path = app_settings.ai_index_path
+            self.video_preview_manager = VideoPreviewManager(self.root, self.update_console)
+            self.video_preview_manager = self.video_preview_manager
+            self.playlist_manager.ui.video_preview_manager = self.video_preview_manager
+
+            self.settings_manager.ui.cleanup_resume_callback = lambda: self.resume_manager.cleanup_old_positions()
+            self.settings_manager.ui.cleanup_history_callback = lambda: self._cleanup_watch_history_data()
+            self.settings_manager.ui.clear_thumbnails_callback = lambda: self._clear_thumbnail_cache()
+            self.settings_manager.ui.video_preview_manager = self.video_preview_manager
 
         def setup_theme(self):
             self.bg_color = "#f5f5f5"
@@ -271,7 +282,6 @@ def select_multiple_folders_and_play():
             self.console_text.config(state=tk.NORMAL)
             self.console_text.delete(1.0, tk.END)
             self.console_text.config(state=tk.DISABLED)
-            self.update_console("Console cleared")
 
         def _submit_scan(self, directory):
             if directory in self.scan_cache or directory in self.pending_scans:
@@ -346,33 +356,25 @@ def select_multiple_folders_and_play():
                 self.save_preferences()
                 return
 
-            if not self.ai_index_path:
-                default_index_path = r"C:\Users\Abir\Documents\Recursive Media Player\index_data"
+            app_settings = self.settings_manager.get_settings()
+            self.ai_index_path = app_settings.ai_index_path
 
-                required_files = ["clip_index.faiss", "text_index.faiss", "metadata.pkl", "tfidf_index.pkl"]
-                default_files_exist = all(os.path.exists(os.path.join(default_index_path, f)) for f in required_files)
+            required_files = ["clip_index.faiss", "text_index.faiss", "metadata.pkl", "tfidf_index.pkl"]
+            files_exist = all(os.path.exists(os.path.join(self.ai_index_path, f)) for f in required_files)
 
-                if os.path.exists(default_index_path) and default_files_exist:
-                    self.ai_index_path = default_index_path
-                    self.update_console(f"Using default AI index directory: {default_index_path}")
-                else:
-                    if os.path.exists(default_index_path) and not default_files_exist:
-                        self.update_console(
-                            "Default index directory found but missing files. Please select correct directory.")
-                    else:
-                        self.update_console("Default index directory not found. Please select AI index directory.")
-
-                    self.ai_index_path = filedialog.askdirectory(
-                        title="Select AI Index Directory (containing enhanced model files)",
-                        initialdir=os.path.dirname(default_index_path) if os.path.exists(
-                            os.path.dirname(default_index_path)) else os.path.expanduser("~")
-                    )
-                    if not self.ai_index_path:
-                        return
+            if not os.path.exists(self.ai_index_path) or not files_exist:
+                result = messagebox.askyesno(
+                    "AI Index Not Found",
+                    f"AI index files not found in:\n{self.ai_index_path}\n\n"
+                    "Would you like to open Settings to configure the AI index path or run preprocessing?"
+                )
+                if result:
+                    self.settings_manager.show_settings()
+                return
 
             self.ai_button.config(text="Loading...", state=tk.DISABLED)
             self.show_ai_loading_progress()
-            self.update_console("Initializing AI models in background... UI remains responsive.")
+            self.update_console("Initializing AI models in background...")
 
             def load_ai_models():
                 try:
@@ -382,17 +384,6 @@ def select_multiple_folders_and_play():
                     text_index_path = os.path.join(self.ai_index_path, "text_index.faiss")
                     metadata_path = os.path.join(self.ai_index_path, "metadata.pkl")
                     tfidf_path = os.path.join(self.ai_index_path, "tfidf_index.pkl")
-
-                    required_files = [clip_index_path, text_index_path, metadata_path, tfidf_path]
-                    if not all(os.path.exists(p) for p in required_files):
-                        def show_error_and_retry():
-                            messagebox.showerror("Error",
-                                                 "AI index files not found. Please ensure clip_index.faiss, text_index.faiss, metadata.pkl, and tfidf_index.pkl exist.")
-                            self.ai_button.config(text="AI Mode", state=tk.NORMAL)
-                            self.ai_index_path = None
-
-                        self.root.after(0, show_error_and_retry)
-                        return
 
                     searcher = HighAccuracyVideoSearcher(clip_index_path, text_index_path, metadata_path, tfidf_path)
 
@@ -410,7 +401,6 @@ def select_multiple_folders_and_play():
                     def show_import_error():
                         messagebox.showerror("Error", f"Missing dependencies for AI search: {e}")
                         self.ai_button.config(text="AI Mode", state=tk.NORMAL)
-                        self.ai_index_path = None
 
                     self.root.after(0, show_import_error)
 
@@ -418,7 +408,6 @@ def select_multiple_folders_and_play():
                     def show_general_error():
                         messagebox.showerror("Error", f"Failed to initialize AI searcher: {e}")
                         self.ai_button.config(text="AI Mode", state=tk.NORMAL)
-                        self.ai_index_path = None
 
                     self.root.after(0, show_general_error)
 
@@ -548,6 +537,10 @@ def select_multiple_folders_and_play():
                             self.current_subdirs_mapping[idx] = video_path
 
                         self.update_console(f"Found {len(final_results)} videos with score >= {min_score}")
+                        self.video_preview_manager.attach_to_listbox(
+                            self.exclusion_listbox,
+                            self.current_subdirs_mapping
+                        )
 
                     self.root.after(0, update_ui)
 
@@ -629,7 +622,6 @@ def select_multiple_folders_and_play():
                                     font=self.normal_font, bg=self.bg_color, fg=self.text_color)
             search_label.pack(anchor='w', pady=(0, 5))
 
-            # Replace the existing search_input_frame section with this:
             search_input_frame = tk.Frame(self.ai_search_frame, bg=self.bg_color)
             search_input_frame.pack(fill=tk.X, pady=(0, 5))
 
@@ -662,7 +654,7 @@ def select_multiple_folders_and_play():
                 width=6
             )
             self.min_score_entry.pack(side=tk.LEFT, padx=(0, 5))
-            self.min_score_entry.insert(0, "0.0")  # Default value
+            self.min_score_entry.insert(0, "3.0")
             self.min_score_entry.bind('<Return>', lambda e: self.perform_ai_search())
 
             self.ai_search_button = self.create_button(
@@ -687,7 +679,7 @@ def select_multiple_folders_and_play():
             self.excluded_only_var = tk.BooleanVar(value=self.show_only_excluded)
             self.expand_all_var = tk.BooleanVar(value=self.expand_all_default)
             self.save_directories_var = tk.BooleanVar(value=self.save_directories)
-            self.start_from_last_played_var = tk.BooleanVar(value=self.start_from_last_played)
+
 
             self.toggle_videos_check = ttk.Checkbutton(
                 checkboxes_row,
@@ -725,45 +717,15 @@ def select_multiple_folders_and_play():
             )
             self.save_directories_check.pack(side=tk.LEFT, padx=(0, 10))
 
-            self.start_from_last_played_check = ttk.Checkbutton(
+            self.smart_resume_var = tk.BooleanVar(value=self.smart_resume_enabled)
+            self.smart_resume_check = ttk.Checkbutton(
                 checkboxes_row,
                 text="Resume Playback",
                 style="Modern.TCheckbutton",
-                variable=self.start_from_last_played_var,
-                command=self.toggle_start_from_last_played
+                variable=self.smart_resume_var,
+                command=self.toggle_smart_resume
             )
-            self.start_from_last_played_check.pack(side=tk.LEFT)
-
-            # Add this to the normal_mode_frame section after existing checkboxes
-            quick_actions_row = tk.Frame(self.normal_mode_frame, bg=self.bg_color)
-            quick_actions_row.pack(fill=tk.X, pady=(5, 0))
-
-            self.select_all_button = self.create_button(
-                quick_actions_row,
-                text="Select All",
-                command=self.select_all_items,
-                variant="secondary",
-                size="sm"
-            )
-            self.select_all_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.select_videos_only_button = self.create_button(
-                quick_actions_row,
-                text="Select Videos Only",
-                command=self.select_videos_only,
-                variant="secondary",
-                size="sm"
-            )
-            self.select_videos_only_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.invert_selection_button = self.create_button(
-                quick_actions_row,
-                text="Invert Selection",
-                command=self.invert_selection,
-                variant="secondary",
-                size="sm"
-            )
-            self.invert_selection_button.pack(side=tk.LEFT)
+            self.smart_resume_check.pack(side=tk.LEFT, padx=(15, 0))
 
             buttons_row = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
             buttons_row.pack(fill=tk.X, pady=(5, 0))
@@ -859,588 +821,38 @@ def select_multiple_folders_and_play():
             )
             self.reset_speed_button.pack(side=tk.LEFT)
 
-            self.root.after(100, self.draw_slider)
+            media_section = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
+            media_section.pack(fill=tk.X, pady=(10, 0))
 
-            playlist_buttons_row = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
-            playlist_buttons_row.pack(fill=tk.X, pady=(10, 0))
-
-            self.create_playlist_button = self.create_button(
-                playlist_buttons_row,
-                text="📋 New Playlist",
-                command=self.create_new_playlist,
-                variant="success",
-                size="sm"
+            media_label = tk.Label(
+                media_section,
+                text="Media:",
+                font=self.small_font,
+                bg=self.bg_color,
+                fg="#666666"
             )
-            self.create_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
+            media_label.pack(side=tk.LEFT, padx=(0, 8))
 
             self.add_to_playlist_button = self.create_button(
-                playlist_buttons_row,
-                text="➕ Add to Playlist",
-                command=self.add_videos_to_playlist,
-                variant="primary",
-                size="sm"
+                media_section, "Add to Playlist",
+                self._add_to_playlist, "playlist", "sm"
             )
             self.add_to_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
 
-            self.manage_playlists_button = self.create_button(
-                playlist_buttons_row,
-                text="🎵 Manage Playlists",
-                command=self.show_advanced_playlist_manager,
-                variant="warning",
-                size="sm"
+            self.manage_playlist_button = self.create_button(
+                media_section, "Manage Playlists",
+                self._manage_playlists, "playlist", "sm"
             )
-            self.manage_playlists_button.pack(side=tk.LEFT, padx=(0, 5))
+            self.manage_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
 
-            # Quick playlist from directory
-            self.quick_playlist_button = self.create_button(
-                playlist_buttons_row,
-                text="📁 Playlist from Folder",
-                command=self.create_playlist_from_directory,
-                variant="dark",
-                size="sm"
+            self.watch_history_button = self.create_button(
+                media_section, "Watch History",
+                self._show_watch_history, "history", "sm"
             )
-            self.quick_playlist_button.pack(side=tk.LEFT)
+            self.watch_history_button.pack(side=tk.LEFT)
 
-            self.history_button = self.create_button(
-                playlist_buttons_row,
-                text="Watch History",
-                command=self.show_watch_history,
-                variant="dark",
-                size="sm"
-            )
-            self.history_button.pack(side=tk.LEFT, padx=(5, 0))
+            self.root.after(100, self.draw_slider)
 
-        def select_all_items(self):
-            """Select all items in exclusion listbox"""
-            self.exclusion_listbox.selection_set(0, tk.END)
-
-        def select_videos_only(self):
-            """Select only video files in exclusion listbox"""
-            self.exclusion_listbox.selection_clear(0, tk.END)
-            for i in range(self.exclusion_listbox.size()):
-                item_text = self.exclusion_listbox.get(i)
-                if item_text.startswith(("  " * 2) + "▶"):  # Video files have this prefix
-                    self.exclusion_listbox.selection_set(i)
-
-        def invert_selection(self):
-            """Invert current selection in exclusion listbox"""
-            current_selection = set(self.exclusion_listbox.curselection())
-            self.exclusion_listbox.selection_clear(0, tk.END)
-
-            for i in range(self.exclusion_listbox.size()):
-                if i not in current_selection:
-                    self.exclusion_listbox.selection_set(i)
-
-        def create_new_playlist(self):
-            """Create new empty playlist or from selection"""
-            from enhanced_features import EnhancedPlaylistDialog
-
-            selected_videos = []
-
-            # Check if we have selected videos (AI mode or normal mode)
-            if self.ai_mode and self.current_subdirs_mapping:
-                selection = self.exclusion_listbox.curselection()
-                for index in selection:
-                    if index in self.current_subdirs_mapping:
-                        video_path = self.current_subdirs_mapping[index]
-                        if os.path.isfile(video_path):
-                            selected_videos.append(video_path)
-
-            dialog = EnhancedPlaylistDialog(self.root, self.playlist_manager)
-            result = dialog.show_create_playlist_dialog(selected_videos)
-
-            if result:
-                count = len(selected_videos)
-                self.update_console(f"Created playlist '{result}'" + (f" with {count} videos" if count > 0 else ""))
-
-        def add_videos_to_playlist(self):
-            """Add selected videos to existing playlist"""
-            if not self.ai_mode or not self.current_subdirs_mapping:
-                # For normal mode, create playlist from current directory
-                if not self.ai_mode:
-                    self.create_playlist_from_directory()
-                    return
-                tk.messagebox.showinfo("Info", "Please perform an AI search first or select a directory")
-                return
-
-            selection = self.exclusion_listbox.curselection()
-            if not selection:
-                tk.messagebox.showinfo("Info", "Please select videos to add to playlist")
-                return
-
-            selected_videos = []
-            for index in selection:
-                if index in self.current_subdirs_mapping:
-                    video_path = self.current_subdirs_mapping[index]
-                    if os.path.isfile(video_path):
-                        selected_videos.append(video_path)
-
-            if not selected_videos:
-                tk.messagebox.showinfo("Info", "No valid videos selected")
-                return
-
-            from enhanced_features import EnhancedPlaylistDialog
-            dialog = EnhancedPlaylistDialog(self.root, self.playlist_manager)
-            result = dialog.show_playlist_selection(selected_videos)
-
-            if result:
-                self.update_console(f"Added {len(selected_videos)} videos to playlist '{result}'")
-
-        def create_playlist_from_directory(self):
-            """Create playlist from current selected directory"""
-            selected_dir = self.get_current_selected_directory()
-            if not selected_dir:
-                tk.messagebox.showinfo("Info", "Please select a directory first")
-                return
-
-            # Get all videos from directory
-            try:
-                videos = []
-                for root, dirs, files in os.walk(selected_dir):
-                    for file in files:
-                        file_path = os.path.join(root, file)
-                        if self.is_video_file(file_path):
-                            videos.append(file_path)
-
-                videos.sort()
-
-                if not videos:
-                    tk.messagebox.showinfo("Info", "No videos found in selected directory")
-                    return
-
-                # Filter out excluded videos
-                excluded_subdirs = self.excluded_subdirs.get(selected_dir, [])
-                excluded_videos = self.excluded_videos.get(selected_dir, [])
-
-                filtered_videos = []
-                for video in videos:
-                    if not self.is_video_excluded(selected_dir, video):
-                        filtered_videos.append(video)
-
-                if not filtered_videos:
-                    tk.messagebox.showinfo("Info", "All videos in directory are excluded")
-                    return
-
-                # Create playlist
-                from enhanced_features import EnhancedPlaylistDialog
-                dialog = EnhancedPlaylistDialog(self.root, self.playlist_manager)
-
-                # Suggest playlist name
-                dir_name = os.path.basename(selected_dir)
-                result = dialog.show_create_playlist_dialog(filtered_videos)
-
-                if result:
-                    self.update_console(
-                        f"Created playlist '{result}' with {len(filtered_videos)} videos from '{dir_name}'")
-
-            except Exception as e:
-                tk.messagebox.showerror("Error", f"Error creating playlist from directory: {e}")
-
-        def is_video_file(self, file_path):
-            """Check if file is a video"""
-            video_extensions = ('.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp', '.ogv')
-            return file_path.lower().endswith(video_extensions)
-
-        def show_advanced_playlist_manager(self):
-            """Show advanced playlist management window"""
-            manager_window = tk.Toplevel(self.root)
-            manager_window.title("Advanced Playlist Manager")
-            manager_window.geometry("900x700")
-            manager_window.transient(self.root)
-
-            # Center window
-            manager_window.update_idletasks()
-            x = (manager_window.winfo_screenwidth() // 2) - (450)
-            y = (manager_window.winfo_screenheight() // 2) - (350)
-            manager_window.geometry(f"+{x}+{y}")
-
-            main_frame = tk.Frame(manager_window, padx=20, pady=20)
-            main_frame.pack(fill=tk.BOTH, expand=True)
-
-            # Header with search
-            header_frame = tk.Frame(main_frame)
-            header_frame.pack(fill=tk.X, pady=(0, 20))
-
-            tk.Label(header_frame, text="Playlist Manager",
-                     font=('Arial', 16, 'bold')).pack(side=tk.LEFT)
-
-            search_frame = tk.Frame(header_frame)
-            search_frame.pack(side=tk.RIGHT)
-            tk.Label(search_frame, text="Search:").pack(side=tk.LEFT)
-            search_entry = tk.Entry(search_frame, width=20)
-            search_entry.pack(side=tk.LEFT, padx=(5, 0))
-
-            # Main content with playlist list and details
-            content_frame = tk.Frame(main_frame)
-            content_frame.pack(fill=tk.BOTH, expand=True)
-
-            # Left panel - playlist list
-            left_frame = tk.Frame(content_frame)
-            left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 20))
-
-            tk.Label(left_frame, text="Playlists:", font=('Arial', 12, 'bold')).pack(anchor='w')
-
-            list_frame = tk.Frame(left_frame)
-            list_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
-
-            playlist_listbox = tk.Listbox(list_frame, width=40, font=('Arial', 10))
-            list_scrollbar = tk.Scrollbar(list_frame, orient="vertical")
-            playlist_listbox.config(yscrollcommand=list_scrollbar.set)
-            list_scrollbar.config(command=playlist_listbox.yview)
-
-            playlist_listbox.pack(side="left", fill="both", expand=True)
-            list_scrollbar.pack(side="right", fill="y")
-
-            # Right panel - playlist details and videos
-            right_frame = tk.Frame(content_frame)
-            right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-
-            details_frame = tk.Frame(right_frame)
-            details_frame.pack(fill=tk.X, pady=(0, 20))
-
-            playlist_name_var = tk.StringVar()
-            playlist_info_var = tk.StringVar()
-
-            tk.Label(details_frame, textvariable=playlist_name_var,
-                     font=('Arial', 14, 'bold')).pack(anchor='w')
-            tk.Label(details_frame, textvariable=playlist_info_var,
-                     fg='gray').pack(anchor='w')
-
-            # Video list for selected playlist
-            tk.Label(right_frame, text="Videos:", font=('Arial', 12, 'bold')).pack(anchor='w')
-
-            video_frame = tk.Frame(right_frame)
-            video_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
-
-            video_listbox = tk.Listbox(video_frame, font=('Arial', 9))
-            video_scrollbar = tk.Scrollbar(video_frame, orient="vertical")
-            video_listbox.config(yscrollcommand=video_scrollbar.set)
-            video_scrollbar.config(command=video_listbox.yview)
-
-            video_listbox.pack(side="left", fill="both", expand=True)
-            video_scrollbar.pack(side="right", fill="y")
-
-            def populate_playlists(filter_text=""):
-                playlist_listbox.delete(0, tk.END)
-                playlists = self.playlist_manager.get_all_playlists()
-
-                for name in sorted(playlists.keys()):
-                    if filter_text.lower() in name.lower():
-                        playlist = playlists[name]
-                        stats = self.playlist_manager.get_playlist_stats(name)
-                        display_text = f"{name} ({stats['existing_videos']} videos)"
-                        playlist_listbox.insert(tk.END, display_text)
-
-            def on_playlist_select(event):
-                selection = playlist_listbox.curselection()
-                if selection:
-                    display_text = playlist_listbox.get(selection[0])
-                    playlist_name = display_text.split(' (')[0]
-
-                    playlist = self.playlist_manager.get_playlist(playlist_name)
-                    if playlist:
-                        stats = self.playlist_manager.get_playlist_stats(playlist_name)
-
-                        playlist_name_var.set(playlist_name)
-
-                        info_lines = []
-                        info_lines.append(f"Videos: {stats['existing_videos']}/{stats['total_videos']}")
-                        info_lines.append(
-                            f"Duration: {stats['total_duration'] // 3600:.0f}h {(stats['total_duration'] % 3600) // 60:.0f}m")
-                        info_lines.append(f"Size: {stats['size_mb']:.1f} MB")
-                        info_lines.append(f"Play count: {stats['play_count']}")
-                        info_lines.append(f"Created: {stats['created_date'][:10]}")
-
-                        playlist_info_var.set(" | ".join(info_lines))
-
-                        # Populate video list
-                        video_listbox.delete(0, tk.END)
-                        for i, video_path in enumerate(playlist['videos']):
-                            video_name = os.path.basename(video_path)
-                            status = "✓" if os.path.exists(video_path) else "✗"
-                            video_listbox.insert(tk.END, f"{status} {video_name}")
-
-            def on_search(*args):
-                populate_playlists(search_entry.get())
-
-            playlist_listbox.bind('<<ListboxSelect>>', on_playlist_select)
-            search_entry.bind('<KeyRelease>', on_search)
-            populate_playlists()
-
-            # Buttons frame
-            button_frame = tk.Frame(main_frame)
-            button_frame.pack(fill=tk.X, pady=(20, 0))
-
-            # Left side buttons (playlist operations)
-            playlist_ops_frame = tk.Frame(button_frame)
-            playlist_ops_frame.pack(side=tk.LEFT)
-
-            def play_selected_playlist():
-                selection = playlist_listbox.curselection()
-                if selection:
-                    display_text = playlist_listbox.get(selection[0])
-                    playlist_name = display_text.split(' (')[0]
-                    playlist = self.playlist_manager.get_playlist(playlist_name)
-
-                    if playlist and playlist['videos']:
-                        existing_videos = [v for v in playlist['videos'] if os.path.exists(v)]
-                        if existing_videos:
-                            self.playlist_manager.increment_play_count(playlist_name)
-                            self.play_playlist_videos(existing_videos)
-                            manager_window.destroy()
-                        else:
-                            tk.messagebox.showwarning("Warning", "No valid videos found in playlist")
-                    else:
-                        tk.messagebox.showinfo("Info", "Playlist is empty")
-
-            def duplicate_playlist():
-                selection = playlist_listbox.curselection()
-                if selection:
-                    display_text = playlist_listbox.get(selection[0])
-                    playlist_name = display_text.split(' (')[0]
-
-                    new_name = tk.simpledialog.askstring("Duplicate Playlist",
-                                                         f"New name for copy of '{playlist_name}':")
-                    if new_name and new_name.strip():
-                        if self.playlist_manager.duplicate_playlist(playlist_name, new_name.strip()):
-                            populate_playlists()
-                            self.update_console(f"Duplicated playlist '{playlist_name}' as '{new_name.strip()}'")
-                        else:
-                            tk.messagebox.showerror("Error", "Failed to duplicate playlist (name may already exist)")
-
-            def edit_playlist_info():
-                selection = playlist_listbox.curselection()
-                if selection:
-                    display_text = playlist_listbox.get(selection[0])
-                    playlist_name = display_text.split(' (')[0]
-
-                    # Create edit dialog
-                    edit_dialog = tk.Toplevel(manager_window)
-                    edit_dialog.title(f"Edit Playlist: {playlist_name}")
-                    edit_dialog.geometry("400x300")
-                    edit_dialog.transient(manager_window)
-
-                    frame = tk.Frame(edit_dialog, padx=20, pady=20)
-                    frame.pack(fill=tk.BOTH, expand=True)
-
-                    playlist = self.playlist_manager.get_playlist(playlist_name)
-
-                    tk.Label(frame, text="Description:").pack(anchor='w')
-                    desc_text = tk.Text(frame, height=4)
-                    desc_text.pack(fill=tk.X, pady=(5, 15))
-                    desc_text.insert(1.0, playlist.get('description', ''))
-
-                    tk.Label(frame, text="Tags (comma-separated):").pack(anchor='w')
-                    tags_entry = tk.Entry(frame)
-                    tags_entry.pack(fill=tk.X, pady=(5, 15))
-                    tags_entry.insert(0, ', '.join(playlist.get('tags', [])))
-
-                    def save_changes():
-                        description = desc_text.get(1.0, tk.END).strip()
-                        tags = [tag.strip() for tag in tags_entry.get().split(',') if tag.strip()]
-
-                        self.playlist_manager.update_playlist_info(playlist_name, description, tags)
-                        edit_dialog.destroy()
-                        on_playlist_select(None)  # Refresh display
-
-                    btn_frame = tk.Frame(frame)
-                    btn_frame.pack(fill=tk.X, pady=(20, 0))
-
-                    tk.Button(btn_frame, text="Save", command=save_changes,
-                              bg='#4CAF50', fg='white').pack(side=tk.RIGHT)
-                    tk.Button(btn_frame, text="Cancel", command=edit_dialog.destroy).pack(side=tk.RIGHT, padx=(0, 10))
-
-            def export_playlist():
-                selection = playlist_listbox.curselection()
-                if selection:
-                    display_text = playlist_listbox.get(selection[0])
-                    playlist_name = display_text.split(' (')[0]
-
-                    from tkinter import filedialog
-                    export_path = filedialog.asksaveasfilename(
-                        title=f"Export {playlist_name}",
-                        defaultextension=".m3u",
-                        filetypes=[("M3U Playlist", "*.m3u"), ("Text File", "*.txt")]
-                    )
-
-                    if export_path:
-                        format_type = "m3u" if export_path.endswith('.m3u') else "txt"
-                        if self.playlist_manager.export_playlist(playlist_name, export_path, format_type):
-                            tk.messagebox.showinfo("Success", f"Playlist exported to {export_path}")
-                        else:
-                            tk.messagebox.showerror("Error", "Failed to export playlist")
-
-            def delete_selected_playlist():
-                selection = playlist_listbox.curselection()
-                if selection:
-                    display_text = playlist_listbox.get(selection[0])
-                    playlist_name = display_text.split(' (')[0]
-
-                    result = tk.messagebox.askyesno("Confirm Delete", f"Delete playlist '{playlist_name}'?")
-                    if result:
-                        if self.playlist_manager.delete_playlist(playlist_name):
-                            populate_playlists()
-                            playlist_name_var.set("")
-                            playlist_info_var.set("")
-                            video_listbox.delete(0, tk.END)
-                            self.update_console(f"Deleted playlist '{playlist_name}'")
-
-            # Playlist operation buttons
-            tk.Button(playlist_ops_frame, text="Play", command=play_selected_playlist,
-                      bg='#4CAF50', fg='white', width=8).pack(side=tk.LEFT, padx=(0, 5))
-            tk.Button(playlist_ops_frame, text="Edit Info", command=edit_playlist_info,
-                      bg='#2196F3', fg='white', width=8).pack(side=tk.LEFT, padx=(0, 5))
-            tk.Button(playlist_ops_frame, text="Duplicate", command=duplicate_playlist,
-                      bg='#FF9800', fg='white', width=8).pack(side=tk.LEFT, padx=(0, 5))
-            tk.Button(playlist_ops_frame, text="Export", command=export_playlist,
-                      bg='#9C27B0', fg='white', width=8).pack(side=tk.LEFT, padx=(0, 5))
-            tk.Button(playlist_ops_frame, text="Delete", command=delete_selected_playlist,
-                      bg='#f44336', fg='white', width=8).pack(side=tk.LEFT)
-
-            # Video operation buttons
-            video_ops_frame = tk.Frame(button_frame)
-            video_ops_frame.pack(side=tk.RIGHT)
-
-            def remove_selected_videos():
-                selection = playlist_listbox.curselection()
-                video_selection = video_listbox.curselection()
-
-                if selection and video_selection:
-                    display_text = playlist_listbox.get(selection[0])
-                    playlist_name = display_text.split(' (')[0]
-
-                    if tk.messagebox.askyesno("Confirm", f"Remove {len(video_selection)} video(s) from playlist?"):
-                        if self.playlist_manager.remove_videos_from_playlist(playlist_name, list(video_selection)):
-                            on_playlist_select(None)  # Refresh display
-                            populate_playlists()  # Update playlist list
-                            self.update_console(f"Removed {len(video_selection)} videos from '{playlist_name}'")
-
-            def move_video_up():
-                selection = playlist_listbox.curselection()
-                video_selection = video_listbox.curselection()
-
-                if selection and video_selection and len(video_selection) == 1:
-                    display_text = playlist_listbox.get(selection[0])
-                    playlist_name = display_text.split(' (')[0]
-                    old_index = video_selection[0]
-
-                    if old_index > 0:
-                        self.playlist_manager.reorder_playlist(playlist_name, old_index, old_index - 1)
-                        on_playlist_select(None)  # Refresh display
-                        video_listbox.selection_set(old_index - 1)  # Keep selection on moved item
-
-            def move_video_down():
-                selection = playlist_listbox.curselection()
-                video_selection = video_listbox.curselection()
-
-                if selection and video_selection and len(video_selection) == 1:
-                    display_text = playlist_listbox.get(selection[0])
-                    playlist_name = display_text.split(' (')[0]
-                    old_index = video_selection[0]
-
-                    playlist = self.playlist_manager.get_playlist(playlist_name)
-                    if playlist and old_index < len(playlist['videos']) - 1:
-                        self.playlist_manager.reorder_playlist(playlist_name, old_index, old_index + 1)
-                        on_playlist_select(None)  # Refresh display
-                        video_listbox.selection_set(old_index + 1)  # Keep selection on moved item
-
-            tk.Button(video_ops_frame, text="Remove Selected", command=remove_selected_videos,
-                      bg='#f44336', fg='white').pack(side=tk.RIGHT, padx=(5, 0))
-            tk.Button(video_ops_frame, text="Move Down", command=move_video_down,
-                      bg='#607D8B', fg='white').pack(side=tk.RIGHT, padx=(5, 0))
-            tk.Button(video_ops_frame, text="Move Up", command=move_video_up,
-                      bg='#607D8B', fg='white').pack(side=tk.RIGHT, padx=(5, 0))
-
-            # Close button
-            tk.Button(button_frame, text="Close", command=manager_window.destroy,
-                      padx=20).pack(side=tk.RIGHT, padx=(20, 0))
-
-        def show_watch_history(self):
-            """Show watch history window"""
-            history_window = tk.Toplevel(self.root)
-            history_window.title("Watch History")
-            history_window.geometry("700x600")
-            history_window.transient(self.root)
-
-            main_frame = tk.Frame(history_window, padx=20, pady=20)
-            main_frame.pack(fill=tk.BOTH, expand=True)
-
-            tk.Label(main_frame, text="Recently Watched Videos",
-                     font=('Arial', 16, 'bold')).pack(pady=(0, 20))
-
-            # History list with scrollbar
-            list_frame = tk.Frame(main_frame)
-            list_frame.pack(fill=tk.BOTH, expand=True)
-
-            history_listbox = tk.Listbox(list_frame, font=('Arial', 10))
-            scrollbar = tk.Scrollbar(list_frame, orient="vertical")
-            history_listbox.config(yscrollcommand=scrollbar.set)
-            scrollbar.config(command=history_listbox.yview)
-
-            history_listbox.pack(side="left", fill="both", expand=True)
-            scrollbar.pack(side="right", fill="y")
-
-            # Populate history
-            recent_videos = self.watch_history.get_recent_videos(100)
-            for entry in recent_videos:
-                video_name = os.path.basename(entry['video_path'])
-                timestamp = entry['timestamp'][:16].replace('T', ' ')  # Format datetime
-                completed = " ✓" if entry.get('completed', False) else ""
-                duration = f" ({entry['watch_duration']:.0f}s)" if entry.get('watch_duration') else ""
-
-                display_text = f"{timestamp} - {video_name}{completed}{duration}"
-                history_listbox.insert(tk.END, display_text)
-
-            # Buttons
-            button_frame = tk.Frame(main_frame)
-            button_frame.pack(fill=tk.X, pady=(20, 0))
-
-            def play_selected():
-                selection = history_listbox.curselection()
-                if selection and selection[0] < len(recent_videos):
-                    video_path = recent_videos[selection[0]]['video_path']
-                    if os.path.exists(video_path):
-                        self.play_single_video(video_path)
-                        history_window.destroy()
-                    else:
-                        messagebox.showwarning("Error", "Video file not found")
-
-            def clear_history():
-                if messagebox.askyesno("Confirm", "Clear all watch history?"):
-                    self.watch_history.clear_history()
-                    history_listbox.delete(0, tk.END)
-
-            tk.Button(button_frame, text="Play Selected", command=play_selected,
-                      bg='#4CAF50', fg='white').pack(side=tk.LEFT)
-            tk.Button(button_frame, text="Clear History", command=clear_history,
-                      bg='#f44336', fg='white').pack(side=tk.LEFT, padx=(10, 0))
-            tk.Button(button_frame, text="Close", command=history_window.destroy).pack(side=tk.RIGHT)
-
-        def play_single_video(self, video_path):
-            """Play a single video from history"""
-            if self.controller:
-                self.controller.stop()
-
-            video_dir = os.path.dirname(video_path)
-            self.controller = VLCPlayerControllerForMultipleDirectory(
-                [video_path], {video_path: video_dir}, [video_dir], self.update_console
-            )
-
-            self.controller.set_watch_history(self.watch_history)
-            initial_speed = self.speed_var.get()
-            if initial_speed != 1.0:
-                self.controller.set_initial_playback_rate(initial_speed)
-
-            self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
-            self.player_thread.start()
-
-            from key_press import listen_keys
-            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
-            self.keys_thread.start()
-
-        def toggle_start_from_last_played(self):
-            self.start_from_last_played = bool(self.start_from_last_played_var.get())
-            self.save_preferences()
 
         def get_current_selected_directory(self):
             selection = self.dir_listbox.curselection()
@@ -1555,7 +967,6 @@ def select_multiple_folders_and_play():
 
             def _run():
                 if self.ai_mode and self.current_subdirs_mapping:
-                    self.update_console("Using AI search results for playback order")
 
                     ai_video_paths = []
                     for i in range(len(self.current_subdirs_mapping)):
@@ -1587,6 +998,11 @@ def select_multiple_folders_and_play():
                         self.controller = VLCPlayerControllerForMultipleDirectory(
                             all_videos, all_video_to_dir, all_directories, self.update_console
                         )
+                        self.controller.set_watch_history_callback(
+                            self.watch_history_manager.track_video_playback
+                        )
+                        self.controller.set_resume_manager(self.resume_manager)
+
 
                         initial_speed = self.speed_var.get()
                         if initial_speed != 1.0:
@@ -1672,7 +1088,10 @@ def select_multiple_folders_and_play():
                     self.update_console(f"Playing from {len(all_directories)} directories")
                     self.controller = VLCPlayerControllerForMultipleDirectory(all_videos, all_video_to_dir,
                                                                               all_directories, self.update_console)
-                    self.controller.set_watch_history(self.watch_history)
+                    self.controller.set_watch_history_callback(
+                        self.watch_history_manager.track_video_playback
+                    )
+                    self.controller.set_resume_manager(self.resume_manager)
 
                     initial_speed = self.speed_var.get()
                     if initial_speed != 1.0:
@@ -1680,14 +1099,14 @@ def select_multiple_folders_and_play():
                         self.update_console(f"Initial playback speed set to {initial_speed}x")
 
                     start_index = 0
-                    if self.start_from_last_played:
+                    if self.smart_resume_var.get():
                         if self.last_played_video_path and self.last_played_video_path in all_videos:
                             start_index = all_videos.index(self.last_played_video_path)
                             self.update_console(
-                                f"Starting from last played video: {os.path.basename(self.last_played_video_path)}")
+                                f"Smart Resume: Starting from last played video: {os.path.basename(self.last_played_video_path)}")
                         elif self.save_directories and self.last_played_video_index < len(all_videos):
                             start_index = self.last_played_video_index
-                            self.update_console(f"Starting from last played index: {start_index}")
+                            self.update_console(f"Smart Resume: Starting from last played index: {start_index}")
 
                     self.controller.set_start_index(start_index)
 
@@ -1711,7 +1130,7 @@ def select_multiple_folders_and_play():
         def on_video_changed(self, video_index, video_path):
             self.last_played_video_index = video_index
             self.last_played_video_path = video_path
-            if self.start_from_last_played:
+            if self.smart_resume_var.get():
                 self.save_preferences()
 
         def on_directory_select(self, event):
@@ -2134,6 +1553,10 @@ def select_multiple_folders_and_play():
                                 self.root.after(1, lambda: insert_chunk(end))
                             else:
                                 self.current_subdirs_mapping = mapping
+                                self.video_preview_manager.attach_to_listbox(
+                                    self.exclusion_listbox,
+                                    self.current_subdirs_mapping
+                                )
 
                         insert_chunk(0)
 
@@ -2194,7 +1617,16 @@ def select_multiple_folders_and_play():
                 variant="theme",
                 size="md"
             )
-            self.theme_button.pack(side=tk.LEFT)
+            self.theme_button.pack(side=tk.LEFT, padx=(0, 10))
+
+            self.settings_button = self.create_button(
+                theme_frame,
+                text="Settings",
+                command=self._show_settings,
+                variant="settings",
+                size="md"
+            )
+            self.settings_button.pack(side=tk.LEFT, padx=(0, 10))
 
             action_buttons_frame = tk.Frame(self.button_frame, bg=self.bg_color)
             action_buttons_frame.pack(side=tk.RIGHT)
@@ -2380,6 +1812,280 @@ def select_multiple_folders_and_play():
                 self.update_console("Playback speed reset to 1.0×")
             self.draw_slider()
 
+        def _add_to_playlist(self):
+            """Add selected or all videos to playlist"""
+            if self.ai_mode and self.current_subdirs_mapping:
+                selection = self.exclusion_listbox.curselection()
+                if selection:
+                    selected_videos = []
+                    for index in selection:
+                        if index in self.current_subdirs_mapping:
+                            path = self.current_subdirs_mapping[index]
+                            if os.path.isfile(path) and is_video(path):
+                                selected_videos.append(path)
+
+                    if selected_videos:
+                        self.playlist_manager.add_videos_to_playlist([], selected_videos)
+                        self.update_console(f"Added {len(selected_videos)} selected AI search results to playlist")
+                    else:
+                        messagebox.showwarning("Warning", "No valid selected videos found")
+                else:
+                    ai_video_paths = []
+                    for i in range(len(self.current_subdirs_mapping)):
+                        if i in self.current_subdirs_mapping:
+                            path = self.current_subdirs_mapping[i]
+                            if os.path.isfile(path) and is_video(path):
+                                ai_video_paths.append(path)
+
+                    if ai_video_paths:
+                        self.playlist_manager.add_videos_to_playlist([], ai_video_paths)
+                        self.update_console(f"Added {len(ai_video_paths)} AI search results to playlist")
+                    else:
+                        messagebox.showwarning("Warning", "No valid videos found in AI search results")
+                return
+
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                messagebox.showwarning("Warning", "Please select a directory first")
+                return
+
+            selection = self.exclusion_listbox.curselection()
+
+            if selection:
+                selected_videos = []
+                for index in selection:
+                    if index in self.current_subdirs_mapping:
+                        item_path = self.current_subdirs_mapping[index]
+                        if os.path.isfile(item_path) and is_video(item_path):
+                            selected_videos.append(item_path)
+                        elif os.path.isdir(item_path):
+                            try:
+                                for root, dirs, files in os.walk(item_path):
+                                    for file in files:
+                                        full_path = os.path.join(root, file)
+                                        if is_video(full_path):
+                                            selected_videos.append(full_path)
+                            except Exception as e:
+                                self.update_console(f"Error reading directory {item_path}: {e}")
+
+                if selected_videos:
+                    self.playlist_manager.add_videos_to_playlist([], selected_videos)
+                    self.update_console(f"Added {len(selected_videos)} selected videos to playlist")
+                else:
+                    messagebox.showwarning("Warning", "No videos found in selected items")
+            else:
+                self.add_to_playlist_button.config(text="Adding...", state=tk.DISABLED)
+                self.update_console("Collecting all videos for playlist...")
+
+                def collect_all_videos():
+                    try:
+                        all_videos = []
+                        cache = self.scan_cache.get(selected_dir)
+                        if cache:
+                            videos, _, _ = cache
+                            excluded_subdirs = self.excluded_subdirs.get(selected_dir, [])
+                            excluded_videos = self.excluded_videos.get(selected_dir, [])
+
+                            for video in videos:
+                                if not self.is_video_excluded(selected_dir, video):
+                                    all_videos.append(video)
+
+                        def finish_collection():
+                            self.add_to_playlist_button.config(text="Add to Playlist", state=tk.NORMAL)
+                            if all_videos:
+                                self.playlist_manager.add_videos_to_playlist([], all_videos)
+                                self.update_console(f"Added all {len(all_videos)} videos to playlist")
+                            else:
+                                messagebox.showwarning("Warning", "No videos found to add to playlist")
+
+                        self.root.after(0, finish_collection)
+
+                    except Exception as e:
+                        def show_error():
+                            self.add_to_playlist_button.config(text="Add to Playlist", state=tk.NORMAL)
+                            messagebox.showerror("Error", f"Failed to collect videos: {e}")
+
+                        self.root.after(0, show_error)
+
+                threading.Thread(target=collect_all_videos, daemon=True).start()
+
+        def _manage_playlists(self):
+            """Open playlist manager window"""
+            self.playlist_manager.show_manager()
+
+        def _play_playlist_videos(self, videos):
+            """Play videos from playlist"""
+            if not videos:
+                messagebox.showwarning("Warning", "Playlist is empty")
+                return
+
+            if self.controller:
+                self.controller.stop()
+                cleanup_hotkeys()
+
+            self.update_console("=" * 100)
+            self.update_console("STARTING PLAYLIST PLAYBACK")
+            self.update_console("=" * 100)
+
+            all_video_to_dir = {}
+            all_directories = []
+
+            for video_path in videos:
+                if os.path.isfile(video_path):
+                    video_dir = os.path.dirname(video_path)
+                    all_video_to_dir[video_path] = video_dir
+                    if video_dir not in all_directories:
+                        all_directories.append(video_dir)
+
+            all_directories.sort()
+            valid_videos = list(all_video_to_dir.keys())
+
+            if not valid_videos:
+                messagebox.showwarning("Warning", "No valid videos found in playlist")
+                return
+
+            def start_playlist_player():
+                self.update_console(f"Playing playlist with {len(valid_videos)} videos")
+                self.controller = VLCPlayerControllerForMultipleDirectory(
+                    valid_videos, all_video_to_dir, all_directories, self.update_console
+                )
+                self.controller.set_watch_history_callback(
+                    self.watch_history_manager.track_video_playback
+                )
+                self.controller.set_resume_manager(self.resume_manager)
+
+                initial_speed = self.speed_var.get()
+                if initial_speed != 1.0:
+                    self.controller.set_initial_playback_rate(initial_speed)
+                    self.update_console(f"Initial playback speed set to {initial_speed}x")
+
+                self.controller.set_start_index(0)
+                self.controller.set_video_change_callback(self.on_video_changed)
+
+                if self.player_thread and self.player_thread.is_alive():
+                    self.controller.running = False
+                    self.player_thread.join(timeout=1.0)
+
+                self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
+                self.player_thread.start()
+
+                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
+                self.keys_thread.start()
+
+            threading.Thread(target=start_playlist_player, daemon=True).start()
+
+        def _show_watch_history(self):
+            """Open watch history manager window"""
+            self.watch_history_manager.show_manager()
+
+        def _play_history_videos(self, videos):
+            """Play videos from watch history"""
+            if not videos:
+                messagebox.showwarning("Warning", "No videos to play")
+                return
+
+            if self.controller:
+                self.controller.stop()
+                cleanup_hotkeys()
+
+            self.update_console("=" * 100)
+            self.update_console("STARTING HISTORY VIDEO PLAYBACK")
+            self.update_console("=" * 100)
+
+            all_video_to_dir = {}
+            all_directories = []
+
+            for video_path in videos:
+                if os.path.isfile(video_path):
+                    video_dir = os.path.dirname(video_path)
+                    all_video_to_dir[video_path] = video_dir
+                    if video_dir not in all_directories:
+                        all_directories.append(video_dir)
+
+            all_directories.sort()
+            valid_videos = list(all_video_to_dir.keys())
+
+            if not valid_videos:
+                messagebox.showwarning("Warning", "No valid videos found")
+                return
+
+            def start_history_player():
+                self.update_console(f"Playing {len(valid_videos)} videos from history")
+                self.controller = VLCPlayerControllerForMultipleDirectory(
+                    valid_videos, all_video_to_dir, all_directories, self.update_console
+                )
+                self.controller.set_watch_history_callback(
+                    self.watch_history_manager.track_video_playback
+                )
+                self.controller.set_resume_manager(self.resume_manager)
+
+                initial_speed = self.speed_var.get()
+                if initial_speed != 1.0:
+                    self.controller.set_initial_playback_rate(initial_speed)
+                    self.update_console(f"Initial playback speed set to {initial_speed}x")
+
+                self.controller.set_start_index(0)
+                self.controller.set_video_change_callback(self.on_video_changed)
+
+                if self.player_thread and self.player_thread.is_alive():
+                    self.controller.running = False
+                    self.player_thread.join(timeout=1.0)
+
+                self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
+                self.player_thread.start()
+
+                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
+                self.keys_thread.start()
+
+            threading.Thread(target=start_history_player, daemon=True).start()
+
+        def toggle_smart_resume(self):
+            """Toggle smart resume feature (last video + position)"""
+            enabled = bool(self.smart_resume_var.get())
+            self.resume_manager.set_resume_enabled(enabled)
+            self.start_from_last_played = enabled
+            self.smart_resume_enabled = enabled
+            self.save_preferences()
+
+        def _show_settings(self):
+            """Open application settings window"""
+            self.settings_manager.show_settings()
+
+        def _on_settings_changed(self, new_settings):
+            self.ai_index_path = new_settings.ai_index_path
+            self.update_console(f"Settings updated - AI index path: {new_settings.ai_index_path}")
+
+            if hasattr(self, 'resume_manager'):
+                self.resume_manager._auto_cleanup_days = new_settings.auto_cleanup_days
+
+            if self.ai_mode:
+                required_files = ["clip_index.faiss", "text_index.faiss", "metadata.pkl", "tfidf_index.pkl"]
+                files_exist = all(os.path.exists(os.path.join(new_settings.ai_index_path, f)) for f in required_files)
+
+                if not files_exist:
+                    self.ai_mode = False
+                    self.ai_button.config(text="AI Mode")
+                    self.update_console("AI mode disabled - index files not found at new path")
+                    self.update_ui_for_mode()
+
+        def _cleanup_watch_history_data(self):
+            """Helper method to cleanup watch history data"""
+            try:
+                return 0
+            except Exception:
+                return 0
+
+        def _clear_thumbnail_cache(self):
+            """Clear video thumbnail cache"""
+            try:
+                self.video_preview_manager.clear_cache()
+                stats = self.video_preview_manager.get_cache_stats()
+                self.update_console(f"Thumbnail cache cleared. Cache stats: {stats}")
+                return True
+            except Exception as e:
+                self.update_console(f"Error clearing thumbnail cache: {e}")
+                return False
+
         def cancel(self):
             if self.controller:
                 if self.start_from_last_played and hasattr(self.controller, 'index'):
@@ -2393,6 +2099,14 @@ def select_multiple_folders_and_play():
             try:
                 if hasattr(self, 'executor'):
                     self.executor.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
+            try:
+                self.resume_manager.force_save_positions()
+            except Exception:
+                pass
+            try:
+                self.video_preview_manager.tooltip.hide_preview()
             except Exception:
                 pass
             self.root.quit()

@@ -4,15 +4,14 @@ import threading
 from datetime import datetime
 
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QFileDialog, QListWidget, QListWidgetItem,
-    QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QSplitter, QCheckBox, QSpinBox,
-    QTextEdit, QMessageBox, QSizePolicy
+    QApplication, QMainWindow, QWidget, QFileDialog, QListWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QSplitter, QCheckBox, QSpinBox,
+    QTextEdit, QMessageBox
 )
-from PyQt6.QtCore import Qt, QTimer, QCoreApplication
+from PyQt6.QtCore import Qt, QCoreApplication
 
-from utils import gather_videos_with_directories, is_video
-from vlc_player_controller import VLCPlayerControllerForMultipleDirectory
-from key_press import listen_keys, cleanup_hotkeys
+from Previous_main.utils import gather_videos_with_directories, is_video
+from Previous_main.vlc_player_controller import VLCPlayerControllerForMultipleDirectory
+from Previous_main.key_press import listen_keys, cleanup_hotkeys
 from config_util import load_config, save_config
 
 

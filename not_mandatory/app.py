@@ -7,9 +7,9 @@ import os
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 
-from key_press import listen_keys, cleanup_hotkeys
-from utils import gather_videos_with_directories, is_video
-from vlc_player_controller import VLCPlayerControllerForMultipleDirectory
+from Previous_main.key_press import listen_keys, cleanup_hotkeys
+from Previous_main.utils import gather_videos_with_directories, is_video
+from Previous_main.vlc_player_controller import VLCPlayerControllerForMultipleDirectory
 from config_util import load_config, save_config
 
 
