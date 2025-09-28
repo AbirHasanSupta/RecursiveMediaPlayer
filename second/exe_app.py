@@ -44,8 +44,8 @@ def select_multiple_folders_and_play():
             self.show_videos = preferences['show_videos']
             self.expand_all_default = preferences['expand_all']
             self.save_directories = preferences['save_directories']
-            self.start_from_last_played = preferences['start_from_last_played']
-            self.resume_from_position = preferences.get('resume_from_position', True)
+            self.smart_resume_enabled = preferences.get('smart_resume_enabled', False)
+            self.start_from_last_played = self.smart_resume_enabled
             self.last_played_video_index = preferences['last_played_video_index']
             self.last_played_video_path = preferences['last_played_video_path']
             self.excluded_subdirs = preferences.get('excluded_subdirs', {})
@@ -685,7 +685,7 @@ def select_multiple_folders_and_play():
             self.excluded_only_var = tk.BooleanVar(value=self.show_only_excluded)
             self.expand_all_var = tk.BooleanVar(value=self.expand_all_default)
             self.save_directories_var = tk.BooleanVar(value=self.save_directories)
-            self.start_from_last_played_var = tk.BooleanVar(value=self.start_from_last_played)
+
 
             self.toggle_videos_check = ttk.Checkbutton(
                 checkboxes_row,
@@ -723,23 +723,15 @@ def select_multiple_folders_and_play():
             )
             self.save_directories_check.pack(side=tk.LEFT, padx=(0, 10))
 
-            self.start_from_last_played_check = ttk.Checkbutton(
+            self.smart_resume_var = tk.BooleanVar(value=self.smart_resume_enabled)
+            self.smart_resume_check = ttk.Checkbutton(
                 checkboxes_row,
-                text="Resume Playback",
+                text="Smart Resume (Last Video + Position)",
                 style="Modern.TCheckbutton",
-                variable=self.start_from_last_played_var,
-                command=self.toggle_start_from_last_played
+                variable=self.smart_resume_var,
+                command=self.toggle_smart_resume
             )
-            self.start_from_last_played_check.pack(side=tk.LEFT)
-            self.resume_playback_var = tk.BooleanVar(value=True)
-            self.resume_playback_check = ttk.Checkbutton(
-                checkboxes_row,
-                text="Resume from Last Position",
-                style="Modern.TCheckbutton",
-                variable=self.resume_playback_var,
-                command=self.toggle_resume_playback
-            )
-            self.resume_playback_check.pack(side=tk.LEFT, padx=(15, 0))
+            self.smart_resume_check.pack(side=tk.LEFT, padx=(15, 0))
 
             buttons_row = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
             buttons_row.pack(fill=tk.X, pady=(5, 0))
@@ -860,9 +852,6 @@ def select_multiple_folders_and_play():
 
             self.root.after(100, self.draw_slider)
 
-        def toggle_start_from_last_played(self):
-            self.start_from_last_played = bool(self.start_from_last_played_var.get())
-            self.save_preferences()
 
         def get_current_selected_directory(self):
             selection = self.dir_listbox.curselection()
@@ -1112,14 +1101,14 @@ def select_multiple_folders_and_play():
                         self.update_console(f"Initial playback speed set to {initial_speed}x")
 
                     start_index = 0
-                    if self.start_from_last_played:
+                    if self.smart_resume_var.get():  # Use the new smart resume setting
                         if self.last_played_video_path and self.last_played_video_path in all_videos:
                             start_index = all_videos.index(self.last_played_video_path)
                             self.update_console(
-                                f"Starting from last played video: {os.path.basename(self.last_played_video_path)}")
+                                f"Smart Resume: Starting from last played video: {os.path.basename(self.last_played_video_path)}")
                         elif self.save_directories and self.last_played_video_index < len(all_videos):
                             start_index = self.last_played_video_index
-                            self.update_console(f"Starting from last played index: {start_index}")
+                            self.update_console(f"Smart Resume: Starting from last played index: {start_index}")
 
                     self.controller.set_start_index(start_index)
 
@@ -1143,7 +1132,7 @@ def select_multiple_folders_and_play():
         def on_video_changed(self, video_index, video_path):
             self.last_played_video_index = video_index
             self.last_played_video_path = video_path
-            if self.start_from_last_played:
+            if self.smart_resume_var.get():
                 self.save_preferences()
 
         def on_directory_select(self, event):
@@ -2030,14 +2019,15 @@ def select_multiple_folders_and_play():
             """Open watch history manager window"""
             self.watch_history_manager.show_manager()
 
-        def toggle_resume_playback(self):
-            """Toggle resume from last position feature"""
-            enabled = bool(self.resume_playback_var.get())
+        def toggle_smart_resume(self):
+            """Toggle smart resume feature (last video + position)"""
+            enabled = bool(self.smart_resume_var.get())
             self.resume_manager.set_resume_enabled(enabled)
+            self.start_from_last_played = enabled  # Also control last video tracking
             self.save_preferences()
 
             status = "enabled" if enabled else "disabled"
-            self.update_console(f"Resume from last position {status}")
+            self.update_console(f"Smart resume (last video + position) {status}")
 
         def _show_settings(self):
             """Open application settings window"""

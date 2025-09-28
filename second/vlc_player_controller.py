@@ -210,20 +210,22 @@ class BaseVLCPlayerController:
         """Set the resume playback manager"""
         self.resume_manager = resume_manager
 
-    def check_resume_position(self, video_path: str) -> bool:
+    def check_resume_position(self, video_path: str) -> tuple:
         """Check if video should be resumed and apply position"""
         if not hasattr(self, 'resume_manager') or not self.resume_manager:
-            return False
+            return False, False
 
         position_data = self.resume_manager.should_resume_video(video_path)
         if position_data:
-            # Ask user if they want to resume
+            # Ask user if they want to resume from position
             try:
                 from tkinter import messagebox
                 result = messagebox.askyesno(
                     "Resume Playback",
                     f"Resume '{os.path.basename(video_path)}' from {position_data.get_position_formatted()}?\n"
-                    f"({position_data.percentage:.1f}% complete)"
+                    f"({position_data.percentage:.1f}% complete)\n\n"
+                    f"Yes: Resume from saved position\n"
+                    f"No: Play from beginning"
                 )
 
                 if result:
@@ -244,14 +246,15 @@ class BaseVLCPlayerController:
                             attempt += 1
 
                     threading.Thread(target=set_resume_position, daemon=True).start()
-                    return True
+                    return True, True  # Resume with position
                 else:
-                    # User chose not to resume, clear the position
+                    # User chose to play from beginning but keep this as last played video
                     self.resume_manager.clear_video_position(video_path)
+                    return True, False  # Resume video but from beginning
             except:
                 pass
 
-        return False
+        return False, False
 
     def start_position_tracking(self, video_path: str):
         """Start tracking position for resume functionality"""
@@ -471,8 +474,7 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
 
             media = self.instance.media_new(current_video)
 
-            # Check for resume position before playing
-            should_show_resume = self.check_resume_position(current_video)
+            resume_video, resume_position = self.check_resume_position(current_video)
 
             result = self._play_video(media)
             if result:

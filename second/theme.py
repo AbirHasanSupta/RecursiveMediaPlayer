@@ -75,14 +75,14 @@ class ConfigHandler:
                         'last_played_video_index': config.get('last_played_video_index', 0),
                         'last_played_video_path': last_played_path,
                         'excluded_subdirs': decoded_excluded_subdirs,
-                        'excluded_videos': decoded_excluded_videos
+                        'smart_resume_enabled': config.get('smart_resume_enabled', False),
                     }
         except Exception:
             pass
         return {'dark_mode': False, 'show_videos': True, 'expand_all': True, 'selected_dirs': [],
                 'save_directories': False, 'start_from_last_played': False,
                 'last_played_video_index': 0, 'last_played_video_path': '',
-                'excluded_subdirs': {}, 'excluded_videos': {}}
+                'excluded_subdirs': {}, 'excluded_videos': {}, 'smart_resume_enabled':False}
 
     def save(self, config_dict):
         try:
@@ -123,7 +123,7 @@ class ThemeSelector:
             'selected_dirs': getattr(self, 'selected_dirs', []),
             'save_directories': getattr(self, 'save_directories', False),
             'start_from_last_played': getattr(self, 'start_from_last_played', False),
-            'resume_from_position': getattr(self, 'resume_from_position', True),
+            'smart_resume_enabled': getattr(self, 'smart_resume_enabled', False),
             'last_played_video_index': getattr(self, 'last_played_video_index', 0),
             'last_played_video_path': getattr(self, 'last_played_video_path', ''),
             'excluded_subdirs': encoded_excluded_subdirs,

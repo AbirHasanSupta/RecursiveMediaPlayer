@@ -43,12 +43,12 @@ class PlaybackPosition:
         if self.duration == 0:
             return False
 
-        # Don't resume if less than 30 seconds or more than 95% complete
-        min_position = 30000  # 30 seconds in milliseconds
-        max_percentage = 95.0
+        # Don't resume if less than 5 seconds or within 5 seconds from the end
+        min_position = 5000  # 5 seconds in milliseconds
+        max_position = self.duration - 5000  # 5 seconds from end
 
         return (self.position >= min_position and
-                self.percentage < max_percentage)
+                self.position <= max_position)
 
     def get_position_formatted(self) -> str:
         """Get formatted position string"""

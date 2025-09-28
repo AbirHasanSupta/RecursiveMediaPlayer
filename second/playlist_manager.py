@@ -297,7 +297,6 @@ class PlaylistUI:
         )
         self.video_listbox.pack(fill=tk.BOTH, expand=True)
         video_scrollbar.config(command=self.video_listbox.yview)
-        self.video_preview_manager = None
 
         # Video management buttons
         video_btn_frame = tk.Frame(right_panel, bg=self.theme_provider.bg_color)
