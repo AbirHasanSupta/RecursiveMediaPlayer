@@ -350,6 +350,10 @@ class WatchHistoryUI:
             left_buttons, "Remove Selected", self._remove_selected, "danger", "md"
         )
         self.remove_selected_btn.pack(side=tk.LEFT, padx=(0, 5))
+        self.play_selected_btn = self.theme_provider.create_button(
+            left_buttons, "Play Selected", self._play_selected_video, "success", "md"
+        )
+        self.play_selected_btn.pack(side=tk.LEFT, padx=(0, 5))
 
         self.clear_all_btn = self.theme_provider.create_button(
             left_buttons, "Clear All History", self._clear_all_history, "warning", "md"
@@ -427,6 +431,46 @@ class WatchHistoryUI:
                 completion_text
             ), tags=(entry.id,))
 
+    def _play_selected_video(self):
+        """Play selected video from history"""
+        selection = self.history_tree.selection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a video to play")
+            return
+
+        if len(selection) > 1:
+            messagebox.showwarning("Warning", "Please select only one video to play")
+            return
+
+        # Get entry ID from selection
+        item = selection[0]
+        tags = self.history_tree.item(item, 'tags')
+        if not tags:
+            return
+
+        entry_id = tags[0]
+
+        # Find the entry
+        selected_entry = None
+        for entry in self.current_entries:
+            if entry.id == entry_id:
+                selected_entry = entry
+                break
+
+        if not selected_entry:
+            messagebox.showerror("Error", "Could not find selected video entry")
+            return
+
+        if not os.path.exists(selected_entry.video_path):
+            messagebox.showerror("Error", f"Video file not found:\n{selected_entry.video_path}")
+            return
+
+        # Call the play callback if it exists
+        if hasattr(self, 'play_callback') and self.play_callback:
+            self.play_callback([selected_entry.video_path])
+        else:
+            messagebox.showinfo("Info", f"Would play: {selected_entry.video_name}")
+
     def _remove_selected(self):
         """Remove selected history entries"""
         selection = self.history_tree.selection()
@@ -481,6 +525,7 @@ class WatchHistoryManager:
         self.storage = WatchHistoryStorage()
         self.service = WatchHistoryService(self.storage)
         self.ui = WatchHistoryUI(parent, theme_provider, self.service)
+        self.ui.play_callback = None
 
         self._last_video_path = None
         self._last_start_time = None
@@ -488,6 +533,10 @@ class WatchHistoryManager:
     def show_manager(self):
         """Show the watch history manager window"""
         self.ui.show_history_manager()
+
+    def set_play_callback(self, callback):
+        """Set callback for playing videos from history"""
+        self.ui.play_callback = callback
 
     def track_video_start(self, video_path: str):
         """Track when a video starts playing"""

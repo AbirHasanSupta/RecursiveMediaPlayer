@@ -44,7 +44,7 @@ def select_multiple_folders_and_play():
             self.show_videos = preferences['show_videos']
             self.expand_all_default = preferences['expand_all']
             self.save_directories = preferences['save_directories']
-            self.smart_resume_enabled = preferences.get('smart_resume_enabled', False)
+            self.smart_resume_enabled = preferences['smart_resume_enabled']
             self.start_from_last_played = self.smart_resume_enabled
             self.last_played_video_index = preferences['last_played_video_index']
             self.last_played_video_path = preferences['last_played_video_path']
@@ -69,7 +69,6 @@ def select_multiple_folders_and_play():
             self.pending_scans = set()
             max_workers = min(8, (os.cpu_count() or 4))
             self.executor = ProcessPoolExecutor(max_workers=max_workers)
-            self.update_console(f"Scanner ready (process workers: {max_workers})")
             self.apply_theme()
             if self.save_directories:
                 self.selected_dirs = preferences.get('selected_dirs', [])
@@ -91,6 +90,7 @@ def select_multiple_folders_and_play():
             self.playlist_manager.set_play_callback(self._play_playlist_videos)
 
             self.watch_history_manager = WatchHistoryManager(self.root, self)
+            self.watch_history_manager.set_play_callback(self._play_history_videos)
             self.resume_manager = ResumePlaybackManager()
             self.resume_manager.set_resume_enabled(True)
             self.settings_manager = SettingsManager(self.root, self, self.update_console)
@@ -105,9 +105,6 @@ def select_multiple_folders_and_play():
             self.playlist_manager.ui.video_preview_manager = self.video_preview_manager
             try:
                 cache_stats = self.video_preview_manager.get_cache_stats()
-                if cache_stats['total_thumbnails'] > 0:
-                    self.update_console(f"Thumbnail Cache: {cache_stats['total_thumbnails']} thumbnails "
-                                        f"({cache_stats['cache_size_mb']:.1f}MB)")
             except Exception:
                 pass
 
@@ -286,7 +283,6 @@ def select_multiple_folders_and_play():
             self.console_text.config(state=tk.NORMAL)
             self.console_text.delete(1.0, tk.END)
             self.console_text.config(state=tk.DISABLED)
-            self.update_console("Console cleared")
 
         def _submit_scan(self, directory):
             if directory in self.scan_cache or directory in self.pending_scans:
@@ -379,7 +375,7 @@ def select_multiple_folders_and_play():
 
             self.ai_button.config(text="Loading...", state=tk.DISABLED)
             self.show_ai_loading_progress()
-            self.update_console("Initializing AI models in background... UI remains responsive.")
+            self.update_console("Initializing AI models in background...")
 
             def load_ai_models():
                 try:
@@ -726,7 +722,7 @@ def select_multiple_folders_and_play():
             self.smart_resume_var = tk.BooleanVar(value=self.smart_resume_enabled)
             self.smart_resume_check = ttk.Checkbutton(
                 checkboxes_row,
-                text="Smart Resume (Last Video + Position)",
+                text="Smart Resume",
                 style="Modern.TCheckbutton",
                 variable=self.smart_resume_var,
                 command=self.toggle_smart_resume
@@ -966,7 +962,6 @@ def select_multiple_folders_and_play():
 
             def _run():
                 if self.ai_mode and self.current_subdirs_mapping:
-                    self.update_console("Using AI search results for playback order")
 
                     ai_video_paths = []
                     for i in range(len(self.current_subdirs_mapping)):
@@ -2019,15 +2014,81 @@ def select_multiple_folders_and_play():
             """Open watch history manager window"""
             self.watch_history_manager.show_manager()
 
+        def _play_history_videos(self, videos):
+            """Play videos from watch history"""
+            if not videos:
+                messagebox.showwarning("Warning", "No videos to play")
+                return
+
+            # Stop current player if running
+            if self.controller:
+                self.controller.stop()
+                cleanup_hotkeys()
+
+            self.update_console("=" * 100)
+            self.update_console("STARTING HISTORY VIDEO PLAYBACK")
+            self.update_console("=" * 100)
+
+            # Create video mapping
+            all_video_to_dir = {}
+            all_directories = []
+
+            for video_path in videos:
+                if os.path.isfile(video_path):
+                    video_dir = os.path.dirname(video_path)
+                    all_video_to_dir[video_path] = video_dir
+                    if video_dir not in all_directories:
+                        all_directories.append(video_dir)
+
+            all_directories.sort()
+            valid_videos = list(all_video_to_dir.keys())
+
+            if not valid_videos:
+                messagebox.showwarning("Warning", "No valid videos found")
+                return
+
+            def start_history_player():
+                self.update_console(f"Playing {len(valid_videos)} videos from history")
+                self.controller = VLCPlayerControllerForMultipleDirectory(
+                    valid_videos, all_video_to_dir, all_directories, self.update_console
+                )
+                # Set watch history tracking
+                self.controller.set_watch_history_callback(
+                    self.watch_history_manager.track_video_playback
+                )
+                # Set resume playback manager
+                self.controller.set_resume_manager(self.resume_manager)
+
+                # Apply current speed setting
+                initial_speed = self.speed_var.get()
+                if initial_speed != 1.0:
+                    self.controller.set_initial_playback_rate(initial_speed)
+                    self.update_console(f"Initial playback speed set to {initial_speed}x")
+
+                self.controller.set_start_index(0)
+                self.controller.set_video_change_callback(self.on_video_changed)
+
+                if self.player_thread and self.player_thread.is_alive():
+                    self.controller.running = False
+                    self.player_thread.join(timeout=1.0)
+
+                self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
+                self.player_thread.start()
+
+                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
+                self.keys_thread.start()
+
+            threading.Thread(target=start_history_player, daemon=True).start()
+
         def toggle_smart_resume(self):
             """Toggle smart resume feature (last video + position)"""
             enabled = bool(self.smart_resume_var.get())
             self.resume_manager.set_resume_enabled(enabled)
-            self.start_from_last_played = enabled  # Also control last video tracking
+            self.start_from_last_played = enabled
+            self.smart_resume_enabled = enabled
             self.save_preferences()
 
             status = "enabled" if enabled else "disabled"
-            self.update_console(f"Smart resume (last video + position) {status}")
 
         def _show_settings(self):
             """Open application settings window"""
