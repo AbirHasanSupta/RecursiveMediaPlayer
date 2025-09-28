@@ -321,15 +321,33 @@ class PlaylistUI:
         """Refresh the playlist list in UI thread"""
 
         def refresh():
+            # Store current selection
+            current_selection = self.playlist_listbox.curselection()
+            current_playlist_id = None
+            if current_selection and self.current_playlist:
+                current_playlist_id = self.current_playlist.id
+
             self.playlist_listbox.delete(0, tk.END)
             playlists = self.playlist_service.get_all_playlists()
 
-            for playlist in playlists:
+            selection_to_restore = None
+            for i, playlist in enumerate(playlists):
                 display_text = f"{playlist.name} ({len(playlist.videos)} videos)"
                 self.playlist_listbox.insert(tk.END, display_text)
 
+                # Check if this was the previously selected playlist
+                if current_playlist_id and playlist.id == current_playlist_id:
+                    selection_to_restore = i
+
             if not playlists:
                 self.playlist_listbox.insert(tk.END, "No playlists created yet")
+                self.current_playlist = None
+                self.playlist_info_label.config(text="Select a playlist to view videos")
+                self.edit_info_btn.pack_forget()
+            elif selection_to_restore is not None:
+                # Restore previous selection
+                self.playlist_listbox.selection_set(selection_to_restore)
+                self.playlist_listbox.activate(selection_to_restore)
 
         if threading.current_thread() is threading.main_thread():
             refresh()
@@ -340,14 +358,21 @@ class PlaylistUI:
         """Refresh the video list for current playlist"""
 
         def refresh():
+            # Store current video selection
+            current_selection = list(self.video_listbox.curselection())
+
             self.video_listbox.delete(0, tk.END)
 
             if not self.current_playlist:
                 return
 
-            for video in self.current_playlist.videos:
+            for i, video in enumerate(self.current_playlist.videos):
                 display_name = os.path.basename(video)
                 self.video_listbox.insert(tk.END, display_name)
+
+                # Restore selection if it was previously selected
+                if i in current_selection:
+                    self.video_listbox.selection_set(i)
 
         if threading.current_thread() is threading.main_thread():
             refresh()
@@ -355,28 +380,32 @@ class PlaylistUI:
             self.parent.after(0, refresh)
 
     def _on_playlist_select(self, event):
+        # Prevent recursive calls
+        if hasattr(self, '_selecting_playlist'):
+            return
+
         selection = self.playlist_listbox.curselection()
         if not selection:
-            self.current_playlist = None
-            self._refresh_video_list()
-            self.playlist_info_label.config(text="Select a playlist to view videos")
-            self.edit_info_btn.pack_forget()
             return
 
         playlists = self.playlist_service.get_all_playlists()
         if selection[0] >= len(playlists):
             return
 
-        self.current_playlist = playlists[selection[0]]
-        self._refresh_video_list()
+        self._selecting_playlist = True
+        try:
+            self.current_playlist = playlists[selection[0]]
+            self._refresh_video_list()
 
-        info_text = f"{self.current_playlist.name}"
-        if self.current_playlist.description:
-            info_text += f" - {self.current_playlist.description}"
-        info_text += f" ({len(self.current_playlist.videos)} videos)"
+            info_text = f"{self.current_playlist.name}"
+            if self.current_playlist.description:
+                info_text += f" - {self.current_playlist.description}"
+            info_text += f" ({len(self.current_playlist.videos)} videos)"
 
-        self.playlist_info_label.config(text=info_text)
-        self.edit_info_btn.pack(side=tk.RIGHT)
+            self.playlist_info_label.config(text=info_text)
+            self.edit_info_btn.pack(side=tk.RIGHT)
+        finally:
+            delattr(self, '_selecting_playlist')
 
     def _create_new_playlist(self):
         dialog = PlaylistInfoDialog(self.playlist_window, self.theme_provider)
@@ -447,8 +476,19 @@ class PlaylistUI:
             self.current_playlist.id,
             videos=self.current_playlist.videos
         )
+
         self._refresh_video_list()
-        self._refresh_playlist_list()
+
+        current_selection = self.playlist_listbox.curselection()
+        if current_selection:
+            playlists = self.playlist_service.get_all_playlists()
+            if current_selection[0] < len(playlists):
+                playlist = playlists[current_selection[0]]
+                new_display_text = f"{playlist.name} ({len(playlist.videos)} videos)"
+                self.playlist_listbox.delete(current_selection[0])
+                self.playlist_listbox.insert(current_selection[0], new_display_text)
+                self.playlist_listbox.selection_set(current_selection[0])
+                self.playlist_listbox.activate(current_selection[0])
 
     def _move_videos_up(self):
         if not self.current_playlist:

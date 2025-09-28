@@ -1809,63 +1809,109 @@ def select_multiple_folders_and_play():
         def _add_to_playlist(self):
             """Add selected or all videos to playlist"""
             if self.ai_mode and self.current_subdirs_mapping:
-                # AI mode - add search results
-                ai_video_paths = []
-                for i in range(len(self.current_subdirs_mapping)):
-                    if i in self.current_subdirs_mapping:
-                        path = self.current_subdirs_mapping[i]
-                        if os.path.isfile(path) and is_video(path):
-                            ai_video_paths.append(path)
+                # AI mode - check for selected videos in search results
+                selection = self.exclusion_listbox.curselection()
+                if selection:
+                    # Add only selected AI search results
+                    selected_videos = []
+                    for index in selection:
+                        if index in self.current_subdirs_mapping:
+                            path = self.current_subdirs_mapping[index]
+                            if os.path.isfile(path) and is_video(path):
+                                selected_videos.append(path)
 
-                if ai_video_paths:
-                    self.playlist_manager.add_videos_to_playlist([], ai_video_paths)
-                    self.update_console(f"Added {len(ai_video_paths)} AI search results to playlist")
+                    if selected_videos:
+                        self.playlist_manager.add_videos_to_playlist([], selected_videos)
+                        self.update_console(f"Added {len(selected_videos)} selected AI search results to playlist")
+                    else:
+                        messagebox.showwarning("Warning", "No valid selected videos found")
                 else:
-                    messagebox.showwarning("Warning", "No valid videos found in AI search results")
+                    # Add all AI search results
+                    ai_video_paths = []
+                    for i in range(len(self.current_subdirs_mapping)):
+                        if i in self.current_subdirs_mapping:
+                            path = self.current_subdirs_mapping[i]
+                            if os.path.isfile(path) and is_video(path):
+                                ai_video_paths.append(path)
+
+                    if ai_video_paths:
+                        self.playlist_manager.add_videos_to_playlist([], ai_video_paths)
+                        self.update_console(f"Added {len(ai_video_paths)} AI search results to playlist")
+                    else:
+                        messagebox.showwarning("Warning", "No valid videos found in AI search results")
                 return
 
-            # Normal mode - collect videos from selected directories
-            if not self.selected_dirs:
-                messagebox.showwarning("Warning", "Please select directories first")
+            # Normal mode - check for selected items in exclusion listbox
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                messagebox.showwarning("Warning", "Please select a directory first")
                 return
 
-            self.add_to_playlist_button.config(text="Adding...", state=tk.DISABLED)
-            self.update_console("Collecting videos for playlist...")
+            # Check if any items are selected in the exclusion listbox
+            selection = self.exclusion_listbox.curselection()
 
-            def collect_videos():
-                try:
-                    # Get all videos from selected directories
-                    all_videos = []
-                    for directory in self.selected_dirs:
-                        cache = self.scan_cache.get(directory)
+            if selection:
+                # Add only selected items
+                selected_videos = []
+                for index in selection:
+                    if index in self.current_subdirs_mapping:
+                        item_path = self.current_subdirs_mapping[index]
+                        if os.path.isfile(item_path) and is_video(item_path):
+                            selected_videos.append(item_path)
+                        elif os.path.isdir(item_path):
+                            # If directory selected, get all videos from it
+                            try:
+                                for root, dirs, files in os.walk(item_path):
+                                    for file in files:
+                                        full_path = os.path.join(root, file)
+                                        if is_video(full_path):
+                                            selected_videos.append(full_path)
+                            except Exception as e:
+                                self.update_console(f"Error reading directory {item_path}: {e}")
+
+                if selected_videos:
+                    self.playlist_manager.add_videos_to_playlist([], selected_videos)
+                    self.update_console(f"Added {len(selected_videos)} selected videos to playlist")
+                else:
+                    messagebox.showwarning("Warning", "No videos found in selected items")
+            else:
+                # No selection - add all videos from selected directory
+                self.add_to_playlist_button.config(text="Adding...", state=tk.DISABLED)
+                self.update_console("Collecting all videos for playlist...")
+
+                def collect_all_videos():
+                    try:
+                        # Get all videos from selected directory
+                        all_videos = []
+                        cache = self.scan_cache.get(selected_dir)
                         if cache:
                             videos, _, _ = cache
                             # Apply exclusion filters
-                            excluded_subdirs = self.excluded_subdirs.get(directory, [])
-                            excluded_videos = self.excluded_videos.get(directory, [])
+                            excluded_subdirs = self.excluded_subdirs.get(selected_dir, [])
+                            excluded_videos = self.excluded_videos.get(selected_dir, [])
 
                             for video in videos:
-                                if not self.is_video_excluded(directory, video):
+                                if not self.is_video_excluded(selected_dir, video):
                                     all_videos.append(video)
 
-                    def finish_collection():
-                        self.add_to_playlist_button.config(text="Add to Playlist", state=tk.NORMAL)
-                        if all_videos:
-                            self.playlist_manager.add_videos_to_playlist(all_videos)
-                            self.update_console(f"Processed {len(all_videos)} videos for playlist")
-                        else:
-                            messagebox.showwarning("Warning", "No videos found to add to playlist")
+                        def finish_collection():
+                            self.add_to_playlist_button.config(text="Add to Playlist", state=tk.NORMAL)
+                            if all_videos:
+                                self.playlist_manager.add_videos_to_playlist([], all_videos)
+                                self.update_console(f"Added all {len(all_videos)} videos to playlist")
+                            else:
+                                messagebox.showwarning("Warning", "No videos found to add to playlist")
 
-                    self.root.after(0, finish_collection)
+                        self.root.after(0, finish_collection)
 
-                except Exception as e:
-                    def show_error():
-                        self.add_to_playlist_button.config(text="Add to Playlist", state=tk.NORMAL)
-                        messagebox.showerror("Error", f"Failed to collect videos: {e}")
+                    except Exception as e:
+                        def show_error():
+                            self.add_to_playlist_button.config(text="Add to Playlist", state=tk.NORMAL)
+                            messagebox.showerror("Error", f"Failed to collect videos: {e}")
 
-                    self.root.after(0, show_error)
+                        self.root.after(0, show_error)
 
-            threading.Thread(target=collect_videos, daemon=True).start()
+                threading.Thread(target=collect_all_videos, daemon=True).start()
 
         def _manage_playlists(self):
             """Open playlist manager window"""
