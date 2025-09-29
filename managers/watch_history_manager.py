@@ -210,6 +210,28 @@ class WatchHistoryService:
             unique_paths = set(entry.video_path for entry in self._history)
             return len(unique_paths)
 
+    def cleanup_old_entries(self, days: int) -> int:
+        """Clean up history entries older than specified days"""
+        with self._lock:
+            cutoff_date = datetime.now() - timedelta(days=days)
+            entries_to_remove = []
+
+            for entry in self._history:
+                try:
+                    entry_date = datetime.fromisoformat(entry.watched_at)
+                    if entry_date < cutoff_date:
+                        entries_to_remove.append(entry)
+                except:
+                    entries_to_remove.append(entry)
+
+            for entry in entries_to_remove:
+                self._history.remove(entry)
+
+            if entries_to_remove:
+                self.storage.save_history(self._history)
+
+            return len(entries_to_remove)
+
 
 class WatchHistoryUI:
     """UI components for watch history management following Interface Segregation Principle"""

@@ -98,7 +98,7 @@ class PreprocessingRunner:
 
         def run_preprocessing():
             try:
-                script_path = Path(__file__).parent / "enhanced_model.py"
+                script_path = Path(__file__).parent.parent / "enhanced_model.py"
                 if not script_path.exists():
                     self._log("Error: enhanced_model.py not found")
                     return
@@ -195,6 +195,8 @@ class SettingsUI:
         self.incremental_var = None
         self.skip_raw_var = None
         self.batch_size_var = None
+        self.cleanup_resume_callback = None
+        self.cleanup_history_callback = None
 
     def show_settings_window(self):
         """Show the settings window"""
@@ -636,7 +638,7 @@ class SettingsUI:
             "Clean up old resume position data?\n\nThis will remove positions older than the configured cleanup period."
         )
         if result:
-            if hasattr(self, 'cleanup_resume_callback') and self.cleanup_resume_callback:
+            if self.cleanup_resume_callback:
                 try:
                     count = self.cleanup_resume_callback()
                     messagebox.showinfo("Cleanup Complete", f"Cleaned up {count} old resume entries")
@@ -652,7 +654,7 @@ class SettingsUI:
             "Clean up old watch history data?\n\nThis will remove history older than the configured cleanup period."
         )
         if result:
-            if hasattr(self, 'cleanup_history_callback') and self.cleanup_history_callback:
+            if self.cleanup_history_callback:
                 try:
                     count = self.cleanup_history_callback()
                     messagebox.showinfo("Cleanup Complete", f"Cleaned up {count} old history entries")
@@ -672,12 +674,10 @@ class SettingsUI:
             if hasattr(self, 'clear_thumbnails_callback') and self.clear_thumbnails_callback:
                 self.clear_thumbnails_callback()
                 self._update_thumbnail_info()
-                messagebox.showinfo("Success", "Thumbnail cache cleared successfully")
             else:
                 if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
                     self.video_preview_manager.clear_cache()
                     self._update_thumbnail_info()
-                    messagebox.showinfo("Success", "Thumbnail cache cleared successfully")
                 else:
                     messagebox.showwarning("Warning", "Thumbnail cache manager not available")
 
@@ -685,9 +685,7 @@ class SettingsUI:
         """Update thumbnail cache information"""
         try:
             if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
-                stats = self.video_preview_manager.get_cache_stats()
-                info_text = f"Cache: {stats.get('total_thumbnails', 0)} thumbnails ({stats.get('cache_size_mb', 0):.1f}MB)"
-                self.thumbnail_info_label.config(text=info_text)
+                self.thumbnail_info_label.config(text="Cache Cleared.")
             else:
                 self.thumbnail_info_label.config(text="Cache info unavailable")
         except Exception as e:

@@ -465,20 +465,3 @@ class VideoPreviewManager:
         with self._lock:
             self._thumbnails.clear()
         self._save_thumbnails()
-
-        if self.console_callback:
-            self.console_callback("Video thumbnail cache cleared")
-
-    def get_cache_stats(self) -> Dict:
-        """Get thumbnail cache statistics"""
-        with self._lock:
-            total_size = 0
-            for thumbnail in self._thumbnails.values():
-                if thumbnail.thumbnail_data:
-                    total_size += len(thumbnail.thumbnail_data) * 3 // 4
-
-            return {
-                'total_thumbnails': len(self._thumbnails),
-                'cache_size_mb': total_size / (1024 * 1024),
-                'generation_queue_size': len(self._generation_queue)
-            }

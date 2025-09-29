@@ -103,7 +103,8 @@ def select_multiple_folders_and_play():
             self.playlist_manager.ui.video_preview_manager = self.video_preview_manager
 
             self.settings_manager.ui.cleanup_resume_callback = lambda: self.resume_manager.cleanup_old_positions()
-            self.settings_manager.ui.cleanup_history_callback = lambda: self._cleanup_watch_history_data()
+            self.settings_manager.ui.cleanup_history_callback = lambda: self.watch_history_manager.service.cleanup_old_entries(
+                self.settings_manager.get_settings().auto_cleanup_days)
             self.settings_manager.ui.clear_thumbnails_callback = lambda: self._clear_thumbnail_cache()
             self.settings_manager.ui.video_preview_manager = self.video_preview_manager
 
@@ -2068,19 +2069,12 @@ def select_multiple_folders_and_play():
                     self.update_console("AI mode disabled - index files not found at new path")
                     self.update_ui_for_mode()
 
-        def _cleanup_watch_history_data(self):
-            """Helper method to cleanup watch history data"""
-            try:
-                return 0
-            except Exception:
-                return 0
 
         def _clear_thumbnail_cache(self):
             """Clear video thumbnail cache"""
             try:
                 self.video_preview_manager.clear_cache()
-                stats = self.video_preview_manager.get_cache_stats()
-                self.update_console(f"Thumbnail cache cleared. Cache stats: {stats}")
+                self.update_console(f"Thumbnail cache cleared.")
                 return True
             except Exception as e:
                 self.update_console(f"Error clearing thumbnail cache: {e}")
