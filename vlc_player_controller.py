@@ -114,9 +114,18 @@ class BaseVLCPlayerController:
             prev_index = (self.index - 1) % len(self.videos)
         self.play_video(prev_index)
 
+    def set_volume_save_callback(self, callback):
+        """Set callback to save volume when player stops"""
+        self._volume_save_callback = callback
+
     def stop(self):
         with self.lock:
             self.running = False
+            if hasattr(self, '_volume_save_callback') and self._volume_save_callback:
+                try:
+                    self._volume_save_callback(self.volume)
+                except Exception:
+                    pass
             self.player.stop()
             self.stop_position_tracking()
             cleanup_hotkeys()

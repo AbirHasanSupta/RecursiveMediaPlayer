@@ -50,6 +50,7 @@ def select_multiple_folders_and_play():
             self.last_played_video_path = preferences['last_played_video_path']
             self.excluded_subdirs = preferences.get('excluded_subdirs', {})
             self.excluded_videos = preferences.get('excluded_videos', {})
+            self.volume = preferences.get('volume', 50)
 
             self.setup_theme()
 
@@ -1001,6 +1002,9 @@ def select_multiple_folders_and_play():
                         self.controller = VLCPlayerControllerForMultipleDirectory(
                             all_videos, all_video_to_dir, all_directories, self.update_console
                         )
+                        self.controller.volume = self.volume
+                        self.controller.player.audio_set_volume(self.volume)
+                        self.controller.set_volume_save_callback(self._save_volume_callback)
                         self.controller.set_watch_history_callback(
                             self.watch_history_manager.track_video_playback
                         )
@@ -1091,6 +1095,9 @@ def select_multiple_folders_and_play():
                     self.update_console(f"Playing from {len(all_directories)} directories")
                     self.controller = VLCPlayerControllerForMultipleDirectory(all_videos, all_video_to_dir,
                                                                               all_directories, self.update_console)
+                    self.controller.volume = self.volume
+                    self.controller.player.audio_set_volume(self.volume)
+                    self.controller.set_volume_save_callback(self._save_volume_callback)
                     self.controller.set_watch_history_callback(
                         self.watch_history_manager.track_video_playback
                     )
@@ -1952,6 +1959,9 @@ def select_multiple_folders_and_play():
                 self.controller = VLCPlayerControllerForMultipleDirectory(
                     valid_videos, all_video_to_dir, all_directories, self.update_console
                 )
+                self.controller.volume = self.volume
+                self.controller.player.audio_set_volume(self.volume)
+                self.controller.set_volume_save_callback(self._save_volume_callback)
                 self.controller.set_watch_history_callback(
                     self.watch_history_manager.track_video_playback
                 )
@@ -2017,6 +2027,9 @@ def select_multiple_folders_and_play():
                 self.controller = VLCPlayerControllerForMultipleDirectory(
                     valid_videos, all_video_to_dir, all_directories, self.update_console
                 )
+                self.controller.volume = self.volume
+                self.controller.player.audio_set_volume(self.volume)
+                self.controller.set_volume_save_callback(self._save_volume_callback)
                 self.controller.set_watch_history_callback(
                     self.watch_history_manager.track_video_playback
                 )
@@ -2053,6 +2066,11 @@ def select_multiple_folders_and_play():
         def _show_settings(self):
             """Open application settings window"""
             self.settings_manager.show_settings()
+
+        def _save_volume_callback(self, volume):
+            """Callback to save volume when video player stops"""
+            self.volume = volume
+            self.save_preferences()
 
         def _on_settings_changed(self, new_settings):
             self.ai_index_path = new_settings.ai_index_path

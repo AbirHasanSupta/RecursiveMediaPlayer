@@ -76,13 +76,14 @@ class ConfigHandler:
                         'last_played_video_path': last_played_path,
                         'excluded_subdirs': decoded_excluded_subdirs,
                         'smart_resume_enabled': config.get('smart_resume_enabled', False),
+                        'volume': config.get('volume', 50),
                     }
         except Exception:
             pass
         return {'dark_mode': False, 'show_videos': True, 'expand_all': True, 'selected_dirs': [],
                 'save_directories': False, 'start_from_last_played': False,
                 'last_played_video_index': 0, 'last_played_video_path': '',
-                'excluded_subdirs': {}, 'excluded_videos': {}, 'smart_resume_enabled':False}
+                'excluded_subdirs': {}, 'excluded_videos': {}, 'smart_resume_enabled':False, 'volume':50}
 
     def save(self, config_dict):
         try:
@@ -127,7 +128,8 @@ class ThemeSelector:
             'last_played_video_index': getattr(self, 'last_played_video_index', 0),
             'last_played_video_path': getattr(self, 'last_played_video_path', ''),
             'excluded_subdirs': encoded_excluded_subdirs,
-            'excluded_videos': encoded_excluded_videos
+            'excluded_videos': encoded_excluded_videos,
+            'volume': getattr(self, 'volume', 50)
         }
         self.config.save(prefs)
 
