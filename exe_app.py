@@ -107,6 +107,8 @@ def select_multiple_folders_and_play():
                 self.settings_manager.get_settings().auto_cleanup_days)
             self.settings_manager.ui.clear_thumbnails_callback = lambda: self._clear_thumbnail_cache()
             self.settings_manager.ui.video_preview_manager = self.video_preview_manager
+            self.video_preview_manager.set_preview_duration(5)
+            self.video_preview_manager.set_video_preview_enabled(False)
 
         def setup_theme(self):
             self.bg_color = "#f5f5f5"
@@ -2055,6 +2057,10 @@ def select_multiple_folders_and_play():
         def _on_settings_changed(self, new_settings):
             self.ai_index_path = new_settings.ai_index_path
             self.update_console(f"Settings updated - AI index path: {new_settings.ai_index_path}")
+
+            if hasattr(self, 'video_preview_manager'):
+                self.video_preview_manager.set_preview_duration(new_settings.preview_duration)
+                self.video_preview_manager.set_video_preview_enabled(new_settings.use_video_preview)
 
             if hasattr(self, 'resume_manager'):
                 self.resume_manager._auto_cleanup_days = new_settings.auto_cleanup_days

@@ -22,6 +22,8 @@ class SettingsData:
         self.incremental_preprocessing = True
         self.skip_raw_directories = True
         self.preprocessing_batch_size = 10
+        self.preview_duration = 3
+        self.use_video_preview = True
 
     def to_dict(self) -> dict:
         return {
@@ -32,7 +34,9 @@ class SettingsData:
             'enable_gpu_acceleration': self.enable_gpu_acceleration,
             'incremental_preprocessing': self.incremental_preprocessing,
             'skip_raw_directories': self.skip_raw_directories,
-            'preprocessing_batch_size': self.preprocessing_batch_size
+            'preprocessing_batch_size': self.preprocessing_batch_size,
+            'preview_duration': self.preview_duration,
+            'use_video_preview': self.use_video_preview
         }
 
     @classmethod
@@ -46,6 +50,8 @@ class SettingsData:
         settings.incremental_preprocessing = data.get('incremental_preprocessing', settings.incremental_preprocessing)
         settings.skip_raw_directories = data.get('skip_raw_directories', settings.skip_raw_directories)
         settings.preprocessing_batch_size = data.get('preprocessing_batch_size', settings.preprocessing_batch_size)
+        settings.preview_duration = data.get('preview_duration', settings.preview_duration)
+        settings.use_video_preview = data.get('use_video_preview', settings.use_video_preview)
         return settings
 
 
@@ -217,11 +223,11 @@ class SettingsUI:
         notebook = ttk.Notebook(self.settings_window)
         notebook.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-        ai_frame = self._create_ai_settings_tab(notebook)
-        notebook.add(ai_frame, text="AI & Preprocessing")
-
         general_frame = self._create_general_settings_tab(notebook)
         notebook.add(general_frame, text="General Settings")
+
+        ai_frame = self._create_ai_settings_tab(notebook)
+        notebook.add(ai_frame, text="AI & Preprocessing")
 
         self._create_action_buttons()
 
@@ -431,29 +437,69 @@ class SettingsUI:
         main_container = tk.Frame(frame, bg=self.theme_provider.bg_color)
         main_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-
-        thumbnail_section = tk.LabelFrame(
+        preview_section = tk.LabelFrame(
             main_container,
-            text="Thumbnail Cache Management",
+            text="Video Preview Settings",
             font=self.theme_provider.normal_font,
             bg=self.theme_provider.bg_color,
             fg=self.theme_provider.text_color,
             padx=10,
             pady=10
         )
-        thumbnail_section.pack(fill=tk.X, pady=(0, 20))
+        preview_section.pack(fill=tk.X, pady=(0, 20))
 
-        thumbnail_btn_frame = tk.Frame(thumbnail_section, bg=self.theme_provider.bg_color)
+        duration_frame = tk.Frame(preview_section, bg=self.theme_provider.bg_color)
+        duration_frame.pack(fill=tk.X, pady=5)
+
+        tk.Label(
+            duration_frame,
+            text="Preview Duration (sec):",
+            font=self.theme_provider.normal_font,
+            bg=self.theme_provider.bg_color,
+            fg=self.theme_provider.text_color,
+            width=20,
+            anchor='w'
+        ).pack(side=tk.LEFT)
+
+        self.preview_duration_var = tk.IntVar(value=self.settings.preview_duration)
+        duration_spin = tk.Spinbox(
+            duration_frame,
+            from_=1,
+            to=10,
+            textvariable=self.preview_duration_var,
+            font=self.theme_provider.normal_font,
+            width=10,
+            bg="white"
+        )
+        duration_spin.pack(side=tk.LEFT, padx=(0, 5))
+
+        tk.Label(
+            duration_frame,
+            text="(1-10 seconds)",
+            font=self.theme_provider.small_font,
+            bg=self.theme_provider.bg_color,
+            fg="#666666"
+        ).pack(side=tk.LEFT)
+
+        self.use_video_preview_var = tk.BooleanVar(value=self.settings.use_video_preview)
+        video_preview_check = ttk.Checkbutton(
+            preview_section,
+            text="Use Video Previews (disable for static thumbnails only)",
+            variable=self.use_video_preview_var
+        )
+        video_preview_check.pack(anchor='w', pady=2)
+
+        thumbnail_btn_frame = tk.Frame(preview_section, bg=self.theme_provider.bg_color)
         thumbnail_btn_frame.pack(fill=tk.X, pady=10)
 
         self.clear_thumbnails_btn = self.theme_provider.create_button(
-            thumbnail_btn_frame, "Clear Thumbnail Cache",
+            thumbnail_btn_frame, "Clear Preview Cache",
             self._clear_thumbnail_cache, "warning", "sm"
         )
         self.clear_thumbnails_btn.pack(side=tk.LEFT)
 
         self.thumbnail_info_label = tk.Label(
-            thumbnail_section,
+            preview_section,
             text="",
             font=self.theme_provider.small_font,
             bg=self.theme_provider.bg_color,
@@ -707,6 +753,8 @@ class SettingsUI:
         self.gpu_acceleration_var.set(settings.enable_gpu_acceleration)
         self.incremental_var.set(settings.incremental_preprocessing)
         self.skip_raw_var.set(settings.skip_raw_directories)
+        self.preview_duration_var.set(settings.preview_duration)
+        self.use_video_preview_var.set(settings.use_video_preview)
         self._update_index_info()
 
     def _apply_current_settings(self):
@@ -718,6 +766,8 @@ class SettingsUI:
         self.settings.enable_gpu_acceleration = self.gpu_acceleration_var.get()
         self.settings.incremental_preprocessing = self.incremental_var.get()
         self.settings.skip_raw_directories = self.skip_raw_var.get()
+        self.settings.preview_duration = self.preview_duration_var.get()
+        self.settings.use_video_preview = self.use_video_preview_var.get()
 
     def _save_settings(self):
         """Save current settings"""

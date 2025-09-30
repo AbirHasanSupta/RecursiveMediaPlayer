@@ -63,7 +63,7 @@ class ThumbnailStorage:
         self.thumbnails_dir = Path.home() / "Documents" / "Recursive Media Player" / "Thumbnails"
         self.thumbnails_dir.mkdir(parents=True, exist_ok=True)
         self.thumbnails_file = self.thumbnails_dir / "thumbnails_cache.json"
-        self.max_cache_size = 1000  # Limit number of cached thumbnails
+        self.max_cache_size = 1000
 
     def save_thumbnails(self, thumbnails: Dict[str, VideoThumbnail]) -> bool:
         try:
@@ -104,61 +104,101 @@ class ThumbnailStorage:
 
 
 class ThumbnailGenerator:
-    """Generates video thumbnails using OpenCV"""
+    """Generates video thumbnails and preview clips using OpenCV"""
 
     def __init__(self):
         self.thumbnail_size = (180, 320)  # 16:9 aspect ratio
         self.quality = 85
+        self.preview_duration = 3
+        self.use_video_preview = True
+        self.fallback_to_static = True
 
     def generate_thumbnail(self, video_path: str) -> Optional[str]:
-        """Generate thumbnail and return as base64 string"""
+        """Generate video preview or static thumbnail and return as base64 string"""
+        if self.use_video_preview:
+            result = self._generate_video_preview(video_path)
+            if result:
+                return result
+            elif self.fallback_to_static:
+                return self._generate_static_thumbnail(video_path)
+            else:
+                return None
+        else:
+            return self._generate_static_thumbnail(video_path)
+
+    def _generate_video_preview(self, video_path: str) -> Optional[str]:
+        """Generate a short video preview clip"""
         try:
-            # Open video
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
                 return None
 
-            # Get video properties
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             fps = cap.get(cv2.CAP_PROP_FPS) or 25
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-            # Seek to 10% into the video, or frame 30 (whichever is later)
-            target_frame = max(30, int(total_frames * 0.1))
-            cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
-
-            # Read frame
-            ret, frame = cap.read()
-            cap.release()
-
-            if not ret or frame is None:
+            if width == 0 or height == 0:
+                cap.release()
                 return None
 
-            # Resize frame
-            frame_resized = cv2.resize(frame, self.thumbnail_size)
+            target_width = 320
+            target_height = int(height * (target_width / width))
 
-            # Convert BGR to RGB
-            frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+            start_frame = max(30, int(total_frames * 0.1))
+            frames_to_capture = int(fps * self.preview_duration)
 
-            # Convert to PIL Image
-            pil_image = Image.fromarray(frame_rgb)
+            if start_frame + frames_to_capture > total_frames:
+                frames_to_capture = max(1, total_frames - start_frame - 1)
 
-            # Save to temporary file to get base64
-            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
-                pil_image.save(temp_file.name, 'JPEG', quality=self.quality)
-                temp_path = temp_file.name
+            cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
-            # Read file and encode to base64
+            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_video:
+                temp_path = temp_video.name
+
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(temp_path, fourcc, fps, (target_width, target_height))
+
+            if not out.isOpened():
+                cap.release()
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
+                return None
+
+            captured = 0
+            while captured < frames_to_capture:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                resized = cv2.resize(frame, (target_width, target_height))
+                out.write(resized)
+                captured += 1
+
+            cap.release()
+            out.release()
+
+            if captured < 10:
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
+                return None
+
             try:
                 with open(temp_path, 'rb') as f:
-                    image_data = f.read()
-                base64_data = base64.b64encode(image_data).decode('utf-8')
+                    video_data = f.read()
 
-                # Clean up temp file
+                if len(video_data) > 5 * 1024 * 1024:
+                    os.unlink(temp_path)
+                    return None
+
+                base64_data = f"VIDEO:{base64.b64encode(video_data).decode('utf-8')}"
                 os.unlink(temp_path)
-
                 return base64_data
             except Exception:
-                # Clean up temp file on error
                 try:
                     os.unlink(temp_path)
                 except:
@@ -166,8 +206,58 @@ class ThumbnailGenerator:
                 return None
 
         except Exception as e:
-            print(f"Error generating thumbnail for {video_path}: {e}")
+            print(f"Error generating video preview for {video_path}: {e}")
             return None
+
+    def _generate_static_thumbnail(self, video_path: str) -> Optional[str]:
+        """Generate static thumbnail image"""
+        try:
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                return None
+
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            target_frame = max(30, int(total_frames * 0.1))
+            cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+
+            ret, frame = cap.read()
+            cap.release()
+
+            if not ret or frame is None:
+                return None
+
+            frame_resized = cv2.resize(frame, self.thumbnail_size)
+            frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+            pil_image = Image.fromarray(frame_rgb)
+
+            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
+                pil_image.save(temp_file.name, 'JPEG', quality=self.quality)
+                temp_path = temp_file.name
+
+            try:
+                with open(temp_path, 'rb') as f:
+                    image_data = f.read()
+                base64_data = f"IMAGE:{base64.b64encode(image_data).decode('utf-8')}"
+                os.unlink(temp_path)
+                return base64_data
+            except Exception:
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
+                return None
+
+        except Exception as e:
+            print(f"Error generating static thumbnail for {video_path}: {e}")
+            return None
+
+    def set_preview_duration(self, seconds: int):
+        """Set video preview duration in seconds"""
+        self.preview_duration = max(1, min(10, seconds))  # Clamp between 1-10 seconds
+
+    def set_use_video_preview(self, enabled: bool):
+        """Enable or disable video previews"""
+        self.use_video_preview = enabled
 
 
 class VideoPreviewTooltip:
@@ -179,35 +269,38 @@ class VideoPreviewTooltip:
         self.is_visible = False
 
     def show_preview(self, video_path: str, thumbnail_data: str, x: int, y: int):
-        """Show preview tooltip at specified coordinates"""
+        """Show video preview or static image tooltip at specified coordinates"""
         if self.tooltip_window:
             self.hide_preview()
 
         try:
-            # Decode base64 image
-            image_data = base64.b64decode(thumbnail_data)
+            is_video = thumbnail_data.startswith("VIDEO:")
 
-            # Create temporary file
-            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
-                temp_file.write(image_data)
-                temp_path = temp_file.name
+            if is_video:
+                video_b64 = thumbnail_data[6:]
+                video_data = base64.b64decode(video_b64)
+            else:
+                image_b64 = thumbnail_data[6:] if thumbnail_data.startswith("IMAGE:") else thumbnail_data
+                image_data = base64.b64decode(image_b64)
 
-            # Load image with PIL
-            pil_image = Image.open(temp_path)
-            photo = ImageTk.PhotoImage(pil_image)
+            if is_video:
+                with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_file:
+                    temp_file.write(video_data)
+                    temp_path = temp_file.name
+            else:
+                with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
+                    temp_file.write(image_data)
+                    temp_path = temp_file.name
 
-            # Create tooltip window
             self.tooltip_window = tk.Toplevel(self.parent)
             self.tooltip_window.wm_overrideredirect(True)
             self.tooltip_window.configure(bg='black', relief='solid', bd=1)
 
-            # Position tooltip
             screen_width = self.parent.winfo_screenwidth()
             screen_height = self.parent.winfo_screenheight()
 
-            # Adjust position to keep tooltip on screen
-            tooltip_width = pil_image.width + 20
-            tooltip_height = pil_image.height + 40
+            tooltip_width = 340
+            tooltip_height = 240
 
             if x + tooltip_width > screen_width:
                 x = screen_width - tooltip_width - 10
@@ -216,16 +309,61 @@ class VideoPreviewTooltip:
 
             self.tooltip_window.geometry(f"+{x + 10}+{y + 10}")
 
-            # Create content frame
             content_frame = tk.Frame(self.tooltip_window, bg='black', padx=5, pady=5)
             content_frame.pack()
 
-            # Add image
-            image_label = tk.Label(content_frame, image=photo, bg='black')
-            image_label.image = photo  # Keep a reference
-            image_label.pack()
+            if is_video:
+                try:
+                    import vlc
 
-            # Add video name
+                    instance = vlc.Instance('--no-xlib', '--quiet', '--no-audio')
+                    player = instance.media_player_new()
+
+                    player.audio_set_mute(True)
+                    player.audio_set_volume(0)
+
+                    video_frame = tk.Frame(content_frame, bg='black', width=320, height=180)
+                    video_frame.pack()
+                    video_frame.pack_propagate(False)
+
+                    if os.name == 'nt':
+                        player.set_hwnd(video_frame.winfo_id())
+                    else:
+                        player.set_xwindow(video_frame.winfo_id())
+
+                    media = instance.media_new(temp_path)
+                    player.set_media(media)
+                    player.play()
+
+                    def check_and_loop():
+                        if self.tooltip_window and player.get_state() == vlc.State.Ended:
+                            player.stop()
+                            player.play()
+                            self.tooltip_window.after(100, check_and_loop)
+                        elif self.tooltip_window:
+                            self.tooltip_window.after(100, check_and_loop)
+
+                    self.tooltip_window.after(100, check_and_loop)
+
+                    self.tooltip_window._player = player
+                    self.tooltip_window._instance = instance
+                    self.tooltip_window._temp_path = temp_path
+
+                except ImportError:
+                    os.unlink(temp_path)
+                    msg = tk.Label(content_frame, text="VLC not available\nVideo preview disabled",
+                                   bg='black', fg='yellow', font=('Arial', 10))
+                    msg.pack()
+            else:
+                pil_image = Image.open(temp_path)
+                photo = ImageTk.PhotoImage(pil_image)
+
+                image_label = tk.Label(content_frame, image=photo, bg='black')
+                image_label.image = photo
+                image_label.pack()
+
+                self.tooltip_window._temp_path = temp_path
+
             video_name = os.path.basename(video_path)
             if len(video_name) > 40:
                 video_name = video_name[:37] + "..."
@@ -241,12 +379,6 @@ class VideoPreviewTooltip:
             name_label.pack(pady=(5, 0))
 
             self.is_visible = True
-
-            # Clean up temp file
-            try:
-                os.unlink(temp_path)
-            except:
-                pass
 
         except Exception as e:
             print(f"Error showing preview: {e}")
@@ -274,17 +406,32 @@ class VideoPreviewManager:
         self.generator = ThumbnailGenerator()
         self.tooltip = VideoPreviewTooltip(parent)
 
+        self.generator.set_preview_duration(3)
+        self.generator.set_use_video_preview(True)
+        self.generator.fallback_to_static = True
+
         self._thumbnails: Dict[str, VideoThumbnail] = {}
         self._generation_queue = set()
         self._lock = threading.Lock()
 
-        # Load cached thumbnails
         self._load_thumbnails()
 
-        # Current preview state
         self.current_listbox = None
         self.current_mapping = None
         self.right_clicked_item = None
+
+    def set_preview_duration(self, seconds: int):
+        """Set video preview duration (1-10 seconds)"""
+        self.generator.set_preview_duration(seconds)
+        if self.console_callback:
+            self.console_callback(f"Video preview duration set to {seconds} seconds")
+
+    def set_video_preview_enabled(self, enabled: bool):
+        """Enable or disable video previews (use static thumbnails if disabled)"""
+        self.generator.set_use_video_preview(enabled)
+        mode = "video previews" if enabled else "static thumbnails"
+        if self.console_callback:
+            self.console_callback(f"Preview mode: {mode}")
 
     def _load_thumbnails(self):
         """Load cached thumbnails"""
