@@ -97,7 +97,7 @@ def select_multiple_folders_and_play():
             self.watch_history_manager = WatchHistoryManager(self.root, self)
             self.watch_history_manager.set_play_callback(self._play_history_videos)
             self.resume_manager = ResumePlaybackManager()
-            self.resume_manager.set_resume_enabled(True)
+            self.resume_manager.set_resume_enabled(self.smart_resume_enabled)
             self.settings_manager = SettingsManager(self.root, self, self.update_console)
             self.settings_manager.add_settings_changed_callback(self._on_settings_changed)
 
