@@ -423,21 +423,14 @@ class VideoPreviewManager:
     def set_preview_duration(self, seconds: int):
         """Set video preview duration (1-10 seconds)"""
         self.generator.set_preview_duration(seconds)
-        if self.console_callback:
-            self.console_callback(f"Video preview duration set to {seconds} seconds")
 
     def set_video_preview_enabled(self, enabled: bool):
         """Enable or disable video previews (use static thumbnails if disabled)"""
         self.generator.set_use_video_preview(enabled)
-        mode = "video previews" if enabled else "static thumbnails"
-        if self.console_callback:
-            self.console_callback(f"Preview mode: {mode}")
 
     def _load_thumbnails(self):
         """Load cached thumbnails"""
         self._thumbnails = self.storage.load_thumbnails()
-        if self.console_callback:
-            self.console_callback(f"Loaded {len(self._thumbnails)} cached video thumbnails")
 
     def _save_thumbnails(self):
         """Save thumbnails to cache"""
@@ -450,9 +443,9 @@ class VideoPreviewManager:
         self.current_mapping = video_mapping
 
         # Bind events
-        listbox.bind("<Button-3>", self._on_right_click)  # Right click
-        listbox.bind("<Motion>", self._on_mouse_motion)  # Mouse motion
-        listbox.bind("<Leave>", self._on_mouse_leave)  # Mouse leaves listbox
+        listbox.bind("<Button-3>", self._on_right_click)
+        listbox.bind("<Motion>", self._on_mouse_motion)
+        listbox.bind("<Leave>", self._on_mouse_leave)
 
     def detach_from_listbox(self, listbox: tk.Listbox):
         """Detach preview functionality from a listbox"""

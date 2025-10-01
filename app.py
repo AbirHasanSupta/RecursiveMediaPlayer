@@ -100,16 +100,16 @@ def select_multiple_folders_and_play():
             app_settings = self.settings_manager.get_settings()
             self.ai_index_path = app_settings.ai_index_path
             self.video_preview_manager = VideoPreviewManager(self.root, self.update_console)
-            self.video_preview_manager = self.video_preview_manager
             self.playlist_manager.ui.video_preview_manager = self.video_preview_manager
+
+            self.video_preview_manager.set_preview_duration(app_settings.preview_duration)
+            self.video_preview_manager.set_video_preview_enabled(app_settings.use_video_preview)
 
             self.settings_manager.ui.cleanup_resume_callback = lambda: self.resume_manager.cleanup_old_positions()
             self.settings_manager.ui.cleanup_history_callback = lambda: self.watch_history_manager.service.cleanup_old_entries(
                 self.settings_manager.get_settings().auto_cleanup_days)
             self.settings_manager.ui.clear_thumbnails_callback = lambda: self._clear_thumbnail_cache()
             self.settings_manager.ui.video_preview_manager = self.video_preview_manager
-            self.video_preview_manager.set_preview_duration(5)
-            self.video_preview_manager.set_video_preview_enabled(False)
 
         def setup_theme(self):
             self.bg_color = "#f5f5f5"
@@ -269,7 +269,6 @@ def select_multiple_folders_and_play():
             self.clear_console_button.pack(side=tk.LEFT)
 
             self.update_console("Video Player Console Ready")
-            self.update_console("Select directories and click 'Play Videos' to start")
 
         def update_console(self, message):
             def _update():
@@ -2074,7 +2073,7 @@ def select_multiple_folders_and_play():
 
         def _on_settings_changed(self, new_settings):
             self.ai_index_path = new_settings.ai_index_path
-            self.update_console(f"Settings updated - AI index path: {new_settings.ai_index_path}")
+            self.update_console(f"Settings updated")
 
             if hasattr(self, 'video_preview_manager'):
                 self.video_preview_manager.set_preview_duration(new_settings.preview_duration)
