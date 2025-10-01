@@ -167,11 +167,9 @@ class PlaylistUI:
         self._refresh_playlist_list()
 
     def _setup_playlist_manager_ui(self):
-        # Main container
         main_frame = tk.Frame(self.playlist_window, bg=self.theme_provider.bg_color)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-        # Header
         header_frame = tk.Frame(main_frame, bg=self.theme_provider.bg_color)
         header_frame.pack(fill=tk.X, pady=(0, 20))
 
@@ -184,11 +182,9 @@ class PlaylistUI:
         )
         title_label.pack(side=tk.LEFT)
 
-        # Content frame with two panels
         content_frame = tk.Frame(main_frame, bg=self.theme_provider.bg_color)
         content_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Left panel - Playlists
         left_panel = tk.Frame(content_frame, bg=self.theme_provider.bg_color)
         left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
 
@@ -201,7 +197,6 @@ class PlaylistUI:
         )
         playlist_label.pack(anchor='w', pady=(0, 10))
 
-        # Playlist listbox with scrollbar
         playlist_container = tk.Frame(
             left_panel,
             bg=self.theme_provider.bg_color,
@@ -228,7 +223,6 @@ class PlaylistUI:
         self.playlist_listbox.bind('<<ListboxSelect>>', self._on_playlist_select)
         playlist_scrollbar.config(command=self.playlist_listbox.yview)
 
-        # Playlist buttons
         playlist_btn_frame = tk.Frame(left_panel, bg=self.theme_provider.bg_color)
         playlist_btn_frame.pack(fill=tk.X)
 
@@ -247,11 +241,9 @@ class PlaylistUI:
         )
         self.play_playlist_btn.pack(side=tk.RIGHT)
 
-        # Right panel - Videos
         right_panel = tk.Frame(content_frame, bg=self.theme_provider.bg_color)
         right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(10, 0))
 
-        # Playlist info frame
         info_frame = tk.Frame(right_panel, bg=self.theme_provider.bg_color)
         info_frame.pack(fill=tk.X, pady=(0, 10))
 
@@ -264,14 +256,12 @@ class PlaylistUI:
         )
         self.playlist_info_label.pack(anchor='w')
 
-        # Edit playlist info button
         self.edit_info_btn = self.theme_provider.create_button(
             info_frame, "Edit Info", self._edit_playlist_info, "secondary", "sm"
         )
         self.edit_info_btn.pack(side=tk.RIGHT)
-        self.edit_info_btn.pack_forget()  # Initially hidden
+        self.edit_info_btn.pack_forget()
 
-        # Videos listbox with scrollbar
         video_container = tk.Frame(
             right_panel,
             bg=self.theme_provider.bg_color,
@@ -298,7 +288,6 @@ class PlaylistUI:
         self.video_listbox.pack(fill=tk.BOTH, expand=True)
         video_scrollbar.config(command=self.video_listbox.yview)
 
-        # Video management buttons
         video_btn_frame = tk.Frame(right_panel, bg=self.theme_provider.bg_color)
         video_btn_frame.pack(fill=tk.X)
 
@@ -316,6 +305,15 @@ class PlaylistUI:
             video_btn_frame, "Move Down", self._move_videos_down, "secondary", "sm"
         )
         self.move_down_btn.pack(side=tk.LEFT)
+
+        close_btn = self.theme_provider.create_button(
+            video_btn_frame,
+            text="Close",
+            command=self.playlist_window.destroy,
+            variant="secondary",
+            size="sm"
+        )
+        close_btn.pack(side=tk.RIGHT)
 
     def _refresh_playlist_list(self):
         """Refresh the playlist list in UI thread"""
