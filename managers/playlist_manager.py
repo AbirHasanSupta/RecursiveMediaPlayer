@@ -447,16 +447,17 @@ class PlaylistUI:
             self.current_playlist.name = name
             self.current_playlist.description = description
             self._refresh_playlist_list()
-            self._on_playlist_select(None)  # Refresh info display
+            self._on_playlist_select(None)
 
     def _delete_playlist(self):
         if not self.current_playlist:
-            messagebox.showwarning("Warning", "Please select a playlist to delete")
+            messagebox.showwarning("Warning", "Please select a playlist to delete", parent=self.playlist_window)
             return
 
         result = messagebox.askyesno(
             "Confirm Deletion",
-            f"Are you sure you want to delete playlist '{self.current_playlist.name}'?"
+            f"Are you sure you want to delete playlist '{self.current_playlist.name}'?",
+            parent=self.playlist_window
         )
 
         if result:
@@ -473,10 +474,9 @@ class PlaylistUI:
 
         selection = self.video_listbox.curselection()
         if not selection:
-            messagebox.showwarning("Warning", "Please select videos to remove")
+            messagebox.showwarning("Warning", "Please select videos to remove", parent=self.playlist_window)
             return
 
-        # Remove in reverse order to maintain indices
         for index in reversed(selection):
             if 0 <= index < len(self.current_playlist.videos):
                 self.current_playlist.videos.pop(index)
@@ -549,7 +549,7 @@ class PlaylistUI:
 
     def _play_playlist(self):
         if not self.current_playlist or not self.current_playlist.videos:
-            messagebox.showwarning("Warning", "Playlist is empty or not selected")
+            messagebox.showwarning("Warning", "Playlist is empty or not selected", parent=self.playlist_window)
             return
 
         if self.on_play_callback:
@@ -655,7 +655,7 @@ class PlaylistInfoDialog:
     def _ok(self):
         name = self.name_entry.get().strip()
         if not name:
-            messagebox.showwarning("Warning", "Please enter a playlist name")
+            messagebox.showwarning("Warning", "Please enter a playlist name", parent=self.dialog)
             return
 
         description = self.description_entry.get("1.0", tk.END).strip()
@@ -694,7 +694,7 @@ class PlaylistManager:
     def add_videos_to_playlist(self, videos: List[str], selected_videos: List[str] = None):
         """Add videos to playlist with selection dialog"""
         if not videos and not selected_videos:
-            messagebox.showwarning("Warning", "No videos to add to playlist")
+            messagebox.showwarning("Warning", "No videos to add to playlist", parent=self.ui.parent)
             return
 
         videos_to_add = selected_videos if selected_videos else videos
@@ -702,16 +702,15 @@ class PlaylistManager:
         playlists = self.service.get_all_playlists()
 
         if not playlists:
-            # No existing playlists, create new one
             dialog = PlaylistInfoDialog(self.ui.parent, self.ui.theme_provider)
             result = dialog.show()
 
             if result:
                 name, description = result
                 self.service.create_playlist(name, description, videos_to_add)
-                messagebox.showinfo("Success", f"Created playlist '{name}' with {len(videos_to_add)} videos")
+                messagebox.showinfo("Success", f"Created playlist '{name}' with {len(videos_to_add)} videos",
+                                    parent=self.ui.parent)
         else:
-            # Show selection dialog for existing playlists
             self._show_add_to_playlist_dialog(videos_to_add, playlists)
 
     def _show_add_to_playlist_dialog(self, videos: List[str], playlists: List[PlaylistData]):
@@ -786,11 +785,12 @@ class PlaylistManager:
         def add_to_existing():
             selection = playlist_listbox.curselection()
             if not selection:
-                messagebox.showwarning("Warning", "Please select a playlist")
+                messagebox.showwarning("Warning", "Please select a playlist", parent=dialog)
                 return
 
             selected_playlist = playlists[selection[0]]
             self.service.add_videos_to_playlist(selected_playlist.id, videos)
+            messagebox.showinfo("Success", f"Added {len(videos)} videos to '{selected_playlist.name}'", parent=dialog)
             dialog.destroy()
 
         new_btn = self.ui.theme_provider.create_button(

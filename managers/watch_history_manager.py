@@ -201,9 +201,9 @@ class WatchHistoryService:
 
     def get_history_by_date_range(self, days: int) -> List[WatchHistoryEntry]:
         with self._lock:
-            cutoff_date = datetime.now() - timedelta(days=days)
+            cutoff_date = (datetime.now() - timedelta(days=days)).date()
             return [entry for entry in self._history
-                    if datetime.fromisoformat(entry.watched_at) >= cutoff_date]
+                    if datetime.fromisoformat(entry.watched_at).date() >= cutoff_date]
 
     def get_unique_videos_count(self) -> int:
         with self._lock:
@@ -430,7 +430,7 @@ class WatchHistoryUI:
         if filter_value == "all":
             self.current_entries = self.history_service.get_all_history()
         elif filter_value == "today":
-            self.current_entries = self.history_service.get_history_by_date_range(1)
+            self.current_entries = self.history_service.get_history_by_date_range(0)
         elif filter_value == "week":
             self.current_entries = self.history_service.get_history_by_date_range(7)
         elif filter_value == "month":
@@ -579,7 +579,7 @@ class WatchHistoryManager:
         return {
             'total_entries': len(all_history),
             'unique_videos': unique_videos,
-            'today_count': len(self.service.get_history_by_date_range(1)),
+            'today_count': len(self.service.get_history_by_date_range(0)),
             'week_count': len(self.service.get_history_by_date_range(7)),
             'month_count': len(self.service.get_history_by_date_range(30))
         }

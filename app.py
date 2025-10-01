@@ -982,7 +982,6 @@ def select_multiple_folders_and_play():
 
             if selected_videos:
                 self.playlist_manager.add_videos_to_playlist([], selected_videos)
-                self.update_console(f"Added {len(selected_videos)} video(s) to playlist")
 
         def _context_copy_path(self, file_path):
             try:
