@@ -969,14 +969,114 @@ def select_multiple_folders_and_play():
             self.update_console("=" * 100)
 
             def _run():
+                exclusion_selection = self.exclusion_listbox.curselection()
+                if exclusion_selection and not self.ai_mode:
+                    selected_dir = self.get_current_selected_directory()
+                    if selected_dir:
+                        self.update_console("Playing selected items only...")
+
+                        selected_videos = []
+                        selected_folders = []
+
+                        for index in exclusion_selection:
+                            item_path = self.current_subdirs_mapping.get(index)
+                            if not item_path:
+                                continue
+
+                            if os.path.isfile(item_path) and is_video(item_path):
+                                if not self.is_video_excluded(selected_dir, item_path):
+                                    selected_videos.append(item_path)
+                            elif os.path.isdir(item_path):
+                                selected_folders.append(item_path)
+
+                        for folder in selected_folders:
+                            try:
+                                for root, dirs, files in os.walk(folder):
+                                    for f in files:
+                                        full_path = os.path.join(root, f)
+                                        if is_video(full_path):
+                                            if not self.is_video_excluded(selected_dir, full_path):
+                                                selected_videos.append(full_path)
+                            except Exception as e:
+                                self.update_console(f"Error reading folder {folder}: {e}")
+
+                        seen = set()
+                        final_videos = []
+                        for v in selected_videos:
+                            v_norm = os.path.normpath(v)
+                            if v_norm not in seen:
+                                seen.add(v_norm)
+                                final_videos.append(v_norm)
+
+                        if not final_videos:
+                            def _show_no_videos():
+                                messagebox.showwarning("No Videos", "No valid non-excluded videos found in selection.")
+                                self.root.config(cursor="")
+
+                            self.root.after(0, _show_no_videos)
+                            return
+
+                        all_video_to_dir = {}
+                        for video_path in final_videos:
+                            all_video_to_dir[video_path] = os.path.dirname(video_path)
+
+                        all_directories = sorted(list(set(all_video_to_dir.values())))
+
+                        def _start_selected_player():
+                            self.update_console(
+                                f"Playing {len(final_videos)} selected videos ({len(selected_folders)} folders, {len([v for v in selected_videos if v in final_videos])} direct videos)")
+                            self.controller = VLCPlayerControllerForMultipleDirectory(
+                                final_videos, all_video_to_dir, all_directories, self.update_console
+                            )
+                            self.controller.volume = self.volume
+                            self.controller.player.audio_set_volume(self.volume)
+                            self.controller.set_volume_save_callback(self._save_volume_callback)
+                            self.controller.set_watch_history_callback(
+                                self.watch_history_manager.track_video_playback
+                            )
+                            self.controller.set_resume_manager(self.resume_manager)
+
+                            initial_speed = self.speed_var.get()
+                            if initial_speed != 1.0:
+                                self.controller.set_initial_playback_rate(initial_speed)
+                                self.update_console(f"Initial playback speed set to {initial_speed}x")
+
+                            self.controller.set_start_index(0)
+                            self.controller.set_video_change_callback(self.on_video_changed)
+
+                            if self.player_thread and self.player_thread.is_alive():
+                                self.controller.running = False
+                                self.player_thread.join(timeout=1.0)
+
+                            self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
+                            self.player_thread.start()
+
+                            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller),
+                                                                daemon=True)
+                            self.keys_thread.start()
+                            self.root.config(cursor="")
+
+                        self.root.after(0, _start_selected_player)
+                        return
+
                 if self.ai_mode and self.current_subdirs_mapping:
+                    exclusion_selection = self.exclusion_listbox.curselection()
 
                     ai_video_paths = []
-                    for i in range(len(self.current_subdirs_mapping)):
-                        if i in self.current_subdirs_mapping:
-                            path = self.current_subdirs_mapping[i]
-                            if os.path.isfile(path) and is_video(path):
-                                ai_video_paths.append(path)
+
+                    if exclusion_selection:
+                        self.update_console("Playing selected AI search results...")
+                        for index in exclusion_selection:
+                            if index in self.current_subdirs_mapping:
+                                path = self.current_subdirs_mapping[index]
+                                if os.path.isfile(path) and is_video(path):
+                                    ai_video_paths.append(path)
+                    else:
+                        for i in range(len(self.current_subdirs_mapping)):
+                            if i in self.current_subdirs_mapping:
+                                path = self.current_subdirs_mapping[i]
+                                if os.path.isfile(path) and is_video(path):
+                                    ai_video_paths.append(path)
 
                     if not ai_video_paths:
                         def _show_no_videos():
@@ -1206,7 +1306,6 @@ def select_multiple_folders_and_play():
                 file_paths = []
                 try:
                     base = os.path.normpath(dir_path)
-                    dir_paths.append(base)
                     for root, dirs, files in os.walk(base):
                         for d in dirs:
                             dir_paths.append(os.path.join(root, d))
