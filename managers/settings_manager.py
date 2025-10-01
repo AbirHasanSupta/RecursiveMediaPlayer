@@ -217,6 +217,8 @@ class SettingsUI:
         self.settings_window.resizable(True, True)
 
         self._setup_settings_ui()
+        self.settings_window.transient(self.parent)
+        self.settings_window.grab_set()
 
     def _setup_settings_ui(self):
         """Setup the settings UI components"""
@@ -534,7 +536,7 @@ class SettingsUI:
         self.cleanup_days_var = tk.IntVar(value=self.settings.auto_cleanup_days)
         cleanup_spin = tk.Spinbox(
             cleanup_frame,
-            from_=1,
+            from_=0,
             to=365,
             textvariable=self.cleanup_days_var,
             font=self.theme_provider.normal_font,
@@ -686,8 +688,11 @@ class SettingsUI:
         if result:
             if self.cleanup_resume_callback:
                 try:
+                    self._apply_current_settings()
                     count = self.cleanup_resume_callback()
                     messagebox.showinfo("Cleanup Complete", f"Cleaned up {count} old resume entries")
+                    if self.console_callback:
+                        self.console_callback(f"Cleaned up {count} old resume position entries")
                 except Exception as e:
                     messagebox.showerror("Error", f"Failed to cleanup resume data: {e}")
             else:

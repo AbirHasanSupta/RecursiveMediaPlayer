@@ -109,7 +109,8 @@ def select_multiple_folders_and_play():
             self.video_preview_manager.set_preview_duration(app_settings.preview_duration)
             self.video_preview_manager.set_video_preview_enabled(app_settings.use_video_preview)
 
-            self.settings_manager.ui.cleanup_resume_callback = lambda: self.resume_manager.cleanup_old_positions()
+            self.settings_manager.ui.cleanup_resume_callback = lambda: self.resume_manager.service.cleanup_old_positions(
+                self.settings_manager.get_settings().auto_cleanup_days)
             self.settings_manager.ui.cleanup_history_callback = lambda: self.watch_history_manager.service.cleanup_old_entries(
                 self.settings_manager.get_settings().auto_cleanup_days)
             self.settings_manager.ui.clear_thumbnails_callback = lambda: self._clear_thumbnail_cache()

@@ -182,13 +182,13 @@ class ResumePlaybackService:
     def cleanup_old_positions(self, days: int = 30):
         """Clean up positions older than specified days"""
         with self._lock:
-            cutoff_date = datetime.now() - timedelta(days=days)
+            cutoff_date = (datetime.now() - timedelta(days=days)).date()
             to_remove = []
 
             for video_path, position in self._positions.items():
                 try:
-                    last_updated = datetime.fromisoformat(position.last_updated)
-                    if last_updated < cutoff_date:
+                    last_updated = datetime.fromisoformat(position.last_updated).date()
+                    if last_updated <= cutoff_date:
                         to_remove.append(video_path)
                 except:
                     to_remove.append(video_path)
