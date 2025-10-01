@@ -1,3 +1,4 @@
+import sys
 import threading
 import tkinter as tk
 from datetime import datetime
@@ -16,6 +17,9 @@ from managers.watch_history_manager import WatchHistoryManager
 from managers.resume_playback_manager import ResumePlaybackManager
 from managers.settings_manager import SettingsManager
 from managers.video_preview_manager import VideoPreviewManager
+import win32clipboard as wcb
+import win32con
+import struct
 
 
 def select_multiple_folders_and_play():
@@ -615,6 +619,11 @@ def select_multiple_folders_and_play():
             self.exclusion_listbox.pack(fill=tk.BOTH, expand=True)
             self.exclusion_scrollbar.config(command=self.exclusion_listbox.yview)
 
+            self.exclusion_listbox.bind("<Button-3>", self._show_context_menu)
+            self.exclusion_listbox.bind("<Button-1>", self._on_left_click)
+            self.exclusion_listbox.bind("<Double-Button-1>", self._on_double_click)
+            self._create_context_menu()
+
             exclusion_buttons_frame = tk.Frame(self.exclusion_section, bg=self.bg_color)
             exclusion_buttons_frame.pack(fill=tk.X, pady=(10, 0))
 
@@ -855,6 +864,207 @@ def select_multiple_folders_and_play():
             self.watch_history_button.pack(side=tk.LEFT)
 
             self.root.after(100, self.draw_slider)
+
+        def _create_context_menu(self):
+            self.context_menu = tk.Menu(self.root, tearoff=0)
+
+        def _on_left_click(self, event):
+            pass
+
+        def _show_context_menu(self, event):
+            listbox = event.widget
+            index = listbox.nearest(event.y)
+            selection = listbox.curselection()
+
+            if not selection and index >= 0 and index < listbox.size():
+                video_path = self.current_subdirs_mapping.get(index)
+                if video_path and os.path.isfile(video_path):
+                    self.video_preview_manager.right_clicked_item = index
+                    self.video_preview_manager._show_video_preview(video_path, event.x_root, event.y_root)
+                return
+
+            if not selection:
+                return
+
+            self.context_menu.delete(0, tk.END)
+
+            first_index = selection[0]
+            first_path = self.current_subdirs_mapping.get(first_index)
+
+            self.context_menu.add_command(
+                label="Play Selected",
+                command=self.play_videos
+            )
+            self.context_menu.add_separator()
+
+            self.context_menu.add_command(
+                label="Exclude Selected",
+                command=self.exclude_subdirectories
+            )
+            self.context_menu.add_command(
+                label="Include Selected",
+                command=self.include_subdirectories
+            )
+            self.context_menu.add_separator()
+
+            self.context_menu.add_command(
+                label=f"Copy ({len(selection)} item{'s' if len(selection) > 1 else ''})",
+                command=lambda: self._context_copy_selected(selection)
+            )
+
+            if len(selection) == 1 and first_path and os.path.isfile(first_path):
+                self.context_menu.add_command(
+                    label="Copy Path",
+                    command=lambda: self._context_copy_path(first_path)
+                )
+                self.context_menu.add_command(
+                    label="Open File Location",
+                    command=lambda: self._context_open_location(first_path)
+                )
+                self.context_menu.add_command(
+                    label="Properties",
+                    command=lambda: self._context_show_properties(first_path)
+                )
+
+            self.context_menu.add_separator()
+            self.context_menu.add_command(
+                label="Add to Playlist",
+                command=lambda: self._context_add_to_playlist(selection)
+            )
+
+            try:
+                self.context_menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                self.context_menu.grab_release()
+
+        def _context_copy_selected(self, selection):
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                return
+
+            paths_to_copy = []
+            for index in selection:
+                item_path = self.current_subdirs_mapping.get(index)
+                if item_path:
+                    paths_to_copy.append(item_path)
+
+            if paths_to_copy:
+                file_list = "\0".join(paths_to_copy) + "\0"
+                file_struct = struct.pack("Iiiii", 20, 0, 0, 0, len(paths_to_copy))
+                files_encoded = file_list.encode("utf-16le") + b"\0\0"
+                data = file_struct + files_encoded
+
+                try:
+                    wcb.OpenClipboard()
+                    wcb.EmptyClipboard()
+                    wcb.SetClipboardData(win32con.CF_HDROP, data)
+                    wcb.CloseClipboard()
+                    self.update_console(f"Copied {len(paths_to_copy)} item(s) to clipboard")
+                except Exception as e:
+                    self.update_console(f"Error copying to clipboard: {e}")
+
+        def _context_add_to_playlist(self, selection):
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                return
+
+            selected_videos = []
+            for index in selection:
+                item_path = self.current_subdirs_mapping.get(index)
+                if item_path and os.path.isfile(item_path) and is_video(item_path):
+                    selected_videos.append(item_path)
+                elif item_path and os.path.isdir(item_path):
+                    for root, dirs, files in os.walk(item_path):
+                        for file in files:
+                            full_path = os.path.join(root, file)
+                            if is_video(full_path):
+                                selected_videos.append(full_path)
+
+            if selected_videos:
+                self.playlist_manager.add_videos_to_playlist([], selected_videos)
+                self.update_console(f"Added {len(selected_videos)} video(s) to playlist")
+
+        def _context_copy_path(self, file_path):
+            try:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(file_path)
+                self.update_console(f"Copied path: {file_path}")
+            except Exception as e:
+                self.update_console(f"Error copying path: {e}")
+
+        def _context_open_location(self, file_path):
+            try:
+                import subprocess
+                if os.name == 'nt':
+                    subprocess.Popen(f'explorer /select,"{file_path}"')
+                elif os.name == 'posix':
+                    if sys.platform == 'darwin':
+                        subprocess.Popen(['open', '-R', file_path])
+                    else:
+                        subprocess.Popen(['xdg-open', os.path.dirname(file_path)])
+                self.update_console(f"Opened location: {os.path.dirname(file_path)}")
+            except Exception as e:
+                self.update_console(f"Error opening location: {e}")
+                messagebox.showerror("Error", f"Could not open file location: {e}")
+
+        def _context_show_properties(self, file_path):
+            try:
+                stat_info = os.stat(file_path)
+                size_mb = stat_info.st_size / (1024 * 1024)
+                modified = datetime.fromtimestamp(stat_info.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+
+                info = f"File: {os.path.basename(file_path)}\n\n"
+                info += f"Path: {file_path}\n\n"
+                info += f"Size: {size_mb:.2f} MB ({stat_info.st_size:,} bytes)\n\n"
+                info += f"Modified: {modified}\n\n"
+
+                try:
+                    import cv2
+                    cap = cv2.VideoCapture(file_path)
+                    if cap.isOpened():
+                        fps = cap.get(cv2.CAP_PROP_FPS)
+                        frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                        duration = frame_count / fps if fps > 0 else 0
+                        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+                        info += f"Duration: {int(duration // 60)}:{int(duration % 60):02d}\n"
+                        info += f"Resolution: {width}x{height}\n"
+                        info += f"FPS: {fps:.2f}\n"
+                        cap.release()
+                except:
+                    pass
+
+                messagebox.showinfo("Properties", info)
+                self.update_console(f"Showing properties for: {os.path.basename(file_path)}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not retrieve properties: {e}")
+
+        def _on_double_click(self, event):
+            if not self.current_subdirs_mapping:
+                return
+
+            listbox = event.widget
+            index = listbox.nearest(event.y)
+            if index < 0 or index >= listbox.size():
+                return
+
+            video_path = self.current_subdirs_mapping.get(index)
+            if not video_path:
+                return
+
+            if not os.path.isfile(video_path) or not is_video(video_path):
+                return
+
+            was_selected = index in listbox.curselection()
+
+            listbox.selection_clear(0, tk.END)
+            listbox.selection_set(index)
+            listbox.activate(index)
+
+            self.root.after(100, self.play_videos)
+
+            return "break"
 
 
         def get_current_selected_directory(self):

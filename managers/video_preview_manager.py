@@ -442,8 +442,6 @@ class VideoPreviewManager:
         self.current_listbox = listbox
         self.current_mapping = video_mapping
 
-        # Bind events
-        listbox.bind("<Button-3>", self._on_right_click)
         listbox.bind("<Motion>", self._on_mouse_motion)
         listbox.bind("<Leave>", self._on_mouse_leave)
 
@@ -463,34 +461,30 @@ class VideoPreviewManager:
         self.tooltip.hide_preview()
 
     def _on_right_click(self, event):
-        """Handle right click on listbox item"""
         if not self.current_mapping:
             return
 
-        # Get clicked item
         listbox = event.widget
         index = listbox.nearest(event.y)
 
         if index < 0 or index >= listbox.size():
             return
 
-        # Get video path from mapping
         video_path = self.current_mapping.get(index)
         if not video_path or not os.path.isfile(video_path):
             return
 
-        # Store the right-clicked item
-        self.right_clicked_item = index
+        selection = listbox.curselection()
 
-        # Show preview
-        self._show_video_preview(video_path, event.x_root, event.y_root)
+        if not selection:
+            self.right_clicked_item = index
+            self._show_video_preview(video_path, event.x_root, event.y_root)
 
     def _on_mouse_motion(self, event):
         """Handle mouse motion over listbox"""
         if not self.tooltip.is_visible:
             return
 
-        # Check if mouse moved to a different item
         listbox = event.widget
         current_index = listbox.nearest(event.y)
 
