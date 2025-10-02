@@ -43,6 +43,8 @@ def select_multiple_folders_and_play():
             self.ai_index_path = None
             self.current_max_depth = 20
             self.search_query = ""
+            self.expanded_paths = set()
+            self.collapsed_paths = set()
 
             preferences = self.config.load_preferences()
             self.dark_mode = preferences['dark_mode']
@@ -1089,14 +1091,32 @@ def select_multiple_folders_and_play():
             if index < 0 or index >= listbox.size():
                 return
 
-            video_path = self.current_subdirs_mapping.get(index)
-            if not video_path:
+            target_path = self.current_subdirs_mapping.get(index)
+            if not target_path:
                 return
 
-            if not os.path.isfile(video_path) or not is_video(video_path):
-                return
+            if os.path.isdir(target_path):
+                selected_dir = self.get_current_selected_directory()
+                if not selected_dir:
+                    return
 
-            was_selected = index in listbox.curselection()
+                norm_target = os.path.normpath(target_path)
+                if self.expand_all_var.get():
+                    if norm_target in self.collapsed_paths:
+                        self.collapsed_paths.remove(norm_target)
+                    else:
+                        self.collapsed_paths.add(norm_target)
+                else:
+                    if norm_target in self.expanded_paths:
+                        self.expanded_paths.remove(norm_target)
+                    else:
+                        self.expanded_paths.add(norm_target)
+
+                self.load_subdirectories(selected_dir, max_depth=20)
+                return "break"
+
+            if not os.path.isfile(target_path) or not is_video(target_path):
+                return
 
             listbox.selection_clear(0, tk.END)
             listbox.selection_set(index)
@@ -1497,8 +1517,7 @@ def select_multiple_folders_and_play():
             if not selection:
                 if self.current_selected_dir_index is not None:
                     selected_dir = self.selected_dirs[self.current_selected_dir_index]
-                    max_depth = 20 if self.expand_all_var.get() else 1
-                    self.load_subdirectories(selected_dir, max_depth=max_depth)
+                    self.load_subdirectories(selected_dir, max_depth=20)
                 else:
                     self.clear_exclusion_list()
                 return
@@ -1509,8 +1528,9 @@ def select_multiple_folders_and_play():
 
             self.current_selected_dir_index = selected_index
             selected_dir = self.selected_dirs[selected_index]
-            max_depth = 20 if self.expand_all_var.get() else 1
-            self.load_subdirectories(selected_dir, max_depth=max_depth)
+            self.expanded_paths.clear()
+            self.collapsed_paths.clear()
+            self.load_subdirectories(selected_dir, max_depth=20)
 
         def get_all_subdirectories(self, directory, prefix="", max_depth=20, current_depth=0):
             if current_depth >= max_depth:
@@ -1776,9 +1796,13 @@ def select_multiple_folders_and_play():
                 return
             self.save_preferences()
             if self.expand_all_var.get():
+                self.expanded_paths.clear()
+                self.collapsed_paths.clear()
                 self.load_subdirectories(selected_dir, max_depth=20)
             else:
-                self.load_subdirectories(selected_dir, max_depth=1)
+                self.expanded_paths.clear()
+                self.collapsed_paths.clear()
+                self.load_subdirectories(selected_dir, max_depth=20)
 
         def toggle_videos_visibility(self):
             selected_dir = self.get_current_selected_directory()
@@ -1861,6 +1885,19 @@ def select_multiple_folders_and_play():
                             dirs[:] = []
                             continue
 
+                        norm_root = os.path.normpath(root)
+                        norm_base = os.path.normpath(base)
+
+                        if self.expand_all_var.get():
+                            if norm_root in self.collapsed_paths:
+                                dirs[:] = []
+                            can_show_children = norm_root not in self.collapsed_paths
+                        else:
+                            is_expanded_here = (norm_root == norm_base) or (norm_root in self.expanded_paths)
+                            if not is_expanded_here:
+                                dirs[:] = []
+                            can_show_children = is_expanded_here
+
                         dir_name_matches = not self.search_query or self.search_query in os.path.basename(root).lower()
                         is_child_of_match = self.is_child_of_matching_parent(root, base, self.search_query)
                         dir_has_matching_children = self.matches_search(root,
@@ -1878,7 +1915,7 @@ def select_multiple_folders_and_play():
                                 indented_name += "🚫[EXCLUDED]"
                             items.append((root, indented_name))
 
-                        if show_videos:
+                        if show_videos and can_show_children:
                             try:
                                 with os.scandir(root) as it:
                                     for entry in it:

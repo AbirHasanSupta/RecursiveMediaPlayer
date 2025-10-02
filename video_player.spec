@@ -58,7 +58,7 @@ hidden_imports = [
 ]
 
 a = Analysis(
-    ['exe_app.py'],
+    ['build_app.py'],
     pathex=[],
     binaries=[],
     datas=[
