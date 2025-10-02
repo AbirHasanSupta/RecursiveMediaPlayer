@@ -42,6 +42,7 @@ def select_multiple_folders_and_play():
             self.ai_searcher = None
             self.ai_index_path = None
             self.current_max_depth = 20
+            self.search_query = ""
 
             preferences = self.config.load_preferences()
             self.dark_mode = preferences['dark_mode']
@@ -436,6 +437,8 @@ def select_multiple_folders_and_play():
         def update_ui_for_mode(self):
             if self.ai_mode:
                 self.ai_search_frame.pack(fill=tk.X, pady=(0, 10))
+                if hasattr(self, 'search_frame'):
+                    self.search_frame.pack_forget()
                 self.normal_mode_frame.pack_forget()
 
                 self.exclude_button.pack_forget()
@@ -447,7 +450,16 @@ def select_multiple_folders_and_play():
                 self.selected_dir_label.config(text="AI Search Mode - Enter query to search videos")
             else:
                 self.ai_search_frame.pack_forget()
+                if hasattr(self, 'search_frame'):
+                    self.search_frame.pack_forget()
+                    self.search_frame.pack(fill=tk.X, pady=(0, 10))
+
+                self.normal_mode_frame.pack_forget()
                 self.normal_mode_frame.pack(fill=tk.X)
+
+                if hasattr(self, 'exclusion_buttons_row'):
+                    self.exclusion_buttons_row.pack_forget()
+                    self.exclusion_buttons_row.pack(fill=tk.X, pady=(5, 0))
 
                 self.exclude_button.pack(side=tk.LEFT, padx=(0, 5))
                 self.include_button.pack(side=tk.LEFT, padx=(0, 5))
@@ -590,6 +602,34 @@ def select_multiple_folders_and_play():
                 fg="#666666"
             )
             self.selected_dir_label.pack(anchor='w', pady=(0, 10))
+            self.search_frame = tk.Frame(self.exclusion_section, bg=self.bg_color)
+            self.search_frame.pack(fill=tk.X, pady=(0, 10))
+
+            search_label = tk.Label(self.search_frame, text="Search:",
+                                    font=self.small_font, bg=self.bg_color, fg=self.text_color)
+            search_label.pack(side=tk.LEFT, padx=(0, 5))
+
+            self.search_entry = tk.Entry(
+                self.search_frame,
+                font=self.normal_font,
+                bg="white",
+                fg=self.text_color,
+                relief=tk.FLAT,
+                bd=1,
+                highlightthickness=1,
+                highlightbackground="#e0e0e0"
+            )
+            self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+            self.search_entry.bind('<KeyRelease>', self.on_search_changed)
+
+            clear_search_btn = self.create_button(
+                self.search_frame,
+                text="Clear",
+                command=self.clear_search,
+                variant="secondary",
+                size="sm"
+            )
+            clear_search_btn.pack(side=tk.LEFT)
 
             self.exclusion_frame = tk.Frame(self.exclusion_section, bg=self.bg_color)
             self.exclusion_frame.pack(fill=tk.BOTH, expand=True)
@@ -631,8 +671,8 @@ def select_multiple_folders_and_play():
             self.ai_search_frame = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
             self.ai_search_frame.pack(fill=tk.X, pady=(0, 10))
 
-            search_label = tk.Label(self.ai_search_frame, text="AI Search:",
-                                    font=self.normal_font, bg=self.bg_color, fg=self.text_color)
+            search_label = tk.Label(self.ai_search_frame, text="",
+                                    font=self.small_font, bg=self.bg_color, fg=self.text_color)
             search_label.pack(anchor='w', pady=(0, 5))
 
             search_input_frame = tk.Frame(self.ai_search_frame, bg=self.bg_color)
@@ -1821,10 +1861,18 @@ def select_multiple_folders_and_play():
                             dirs[:] = []
                             continue
 
+                        dir_name_matches = not self.search_query or self.search_query in os.path.basename(root).lower()
+                        is_child_of_match = self.is_child_of_matching_parent(root, base, self.search_query)
+                        dir_has_matching_children = self.matches_search(root,
+                                                                        self.search_query) if self.search_query else True
+
+                        show_this_dir = not self.search_query or dir_name_matches or is_child_of_match or dir_has_matching_children
+
                         indent_level = 0 if rel == '.' else rel.count(base_sep) + 1
                         name = os.path.basename(root) if rel != '.' else os.path.basename(base)
                         include_dir = (not only_excluded) or (root in excluded_dir_set)
-                        if include_dir:
+
+                        if include_dir and show_this_dir:
                             indented_name = ("  " * indent_level) + '📁' + name
                             if root in excluded_dir_set:
                                 indented_name += "🚫[EXCLUDED]"
@@ -1837,7 +1885,11 @@ def select_multiple_folders_and_play():
                                         if entry.is_file() and is_video(entry.name):
                                             full_path = entry.path
                                             include_vid = (not only_excluded) or (full_path in excluded_vid_set)
-                                            if include_vid:
+
+                                            video_name_matches = not self.search_query or self.search_query in entry.name.lower()
+                                            show_this_video = video_name_matches or dir_name_matches or is_child_of_match
+
+                                            if include_vid and show_this_video and show_this_dir:
                                                 v_name = ("  " * (indent_level + 1)) + '▶' + entry.name
                                                 if full_path in excluded_vid_set:
                                                     v_name += "🚫[EXCLUDED]"
@@ -1890,6 +1942,55 @@ def select_multiple_folders_and_play():
                     self.root.after(0, post_error)
 
             threading.Thread(target=build_and_post, daemon=True).start()
+
+        def on_search_changed(self, event=None):
+            """Handle search query changes"""
+            self.search_query = self.search_entry.get().strip().lower()
+            selected_dir = self.get_current_selected_directory()
+            if selected_dir:
+                self.load_subdirectories(selected_dir, max_depth=self.current_max_depth)
+
+        def clear_search(self):
+            """Clear search and reload"""
+            self.search_entry.delete(0, tk.END)
+            self.search_query = ""
+            selected_dir = self.get_current_selected_directory()
+            if selected_dir:
+                self.load_subdirectories(selected_dir, max_depth=self.current_max_depth)
+
+        def matches_search(self, path, search_query):
+            if not search_query:
+                return True
+
+            basename = os.path.basename(path).lower()
+            if search_query in basename:
+                return True
+
+            if os.path.isdir(path):
+                try:
+                    for root, dirs, files in os.walk(path):
+                        for d in dirs:
+                            if search_query in d.lower():
+                                return True
+                        for f in files:
+                            if is_video(f) and search_query in f.lower():
+                                return True
+                except (PermissionError, OSError):
+                    pass
+
+            return False
+
+        def is_child_of_matching_parent(self, path, base, search_query):
+            """Check if this path is a descendant of any matching parent directory"""
+            if not search_query:
+                return False
+
+            current = os.path.dirname(path)
+            while current != base and len(current) > len(base):
+                if search_query in os.path.basename(current).lower():
+                    return True
+                current = os.path.dirname(current)
+            return False
 
         def setup_action_buttons(self):
             self.button_frame = tk.Frame(self.main_frame, bg=self.bg_color)
