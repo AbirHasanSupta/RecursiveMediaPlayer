@@ -274,7 +274,58 @@ def select_multiple_folders_and_play():
                 variant="dark",
                 size="sm"
             )
-            self.clear_console_button.pack(side=tk.LEFT)
+            self.clear_console_button.pack(side=tk.LEFT, padx=(0, 10))
+
+            speed_label = tk.Label(console_button_frame, text="Playback Speed:",
+                                   font=self.small_font, bg=self.bg_color, fg="#666666")
+            speed_label.pack(side=tk.LEFT, padx=(0, 8))
+
+            slider_frame = tk.Frame(console_button_frame, bg=self.bg_color, height=30)
+            slider_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+            slider_frame.pack_propagate(False)
+
+            self.speed_var = tk.DoubleVar(value=1.0)
+            self.speed_canvas = tk.Canvas(
+                slider_frame,
+                height=6,
+                bg=self.bg_color,
+                highlightthickness=0,
+                relief=tk.FLAT
+            )
+            self.speed_canvas.pack(fill=tk.X, pady=12)
+
+            self.slider_width = 200
+            self.slider_min = 0.25
+            self.slider_max = 2.0
+            self.slider_current = 1.0
+            self.dragging = False
+
+            self.speed_canvas.bind("<Button-1>", self.on_slider_click)
+            self.speed_canvas.bind("<B1-Motion>", self.on_slider_drag)
+            self.speed_canvas.bind("<ButtonRelease-1>", self.on_slider_release)
+            self.speed_canvas.bind("<Configure>", self.on_slider_configure)
+
+            self.speed_display = tk.Label(
+                console_button_frame,
+                text="1.0×",
+                font=Font(family=self.small_font.actual().get("family", "Segoe UI"),
+                          size=self.small_font.actual().get("size", 9), weight="bold"),
+                bg=self.bg_color,
+                fg=self.accent_color,
+                width=5
+            )
+            self.speed_display.pack(side=tk.LEFT, padx=(0, 8))
+
+            self.reset_speed_button = self.create_button(
+                console_button_frame,
+                text="1×",
+                command=self.reset_speed,
+                variant="secondary",
+                size="sm"
+            )
+            self.reset_speed_button.pack(side=tk.LEFT)
+
+            self.root.after(100, self.draw_slider)
 
             self.update_console("Video Player Console Ready")
 
@@ -356,6 +407,36 @@ def select_multiple_folders_and_play():
             self.dir_listbox.bind('<FocusOut>', self.on_directory_focus_out)
             self.dir_listbox.bind('<FocusIn>', self.on_directory_focus_in)
             self.scrollbar.config(command=self.dir_listbox.yview)
+
+            media_section = tk.Frame(self.dir_section, bg=self.bg_color)
+            media_section.pack(fill=tk.X, pady=(10, 0))
+
+            media_label = tk.Label(
+                media_section,
+                text="Media:",
+                font=self.small_font,
+                bg=self.bg_color,
+                fg="#666666"
+            )
+            media_label.pack(side=tk.LEFT, padx=(0, 8))
+
+            self.add_to_playlist_button = self.create_button(
+                media_section, "Add to Playlist",
+                self._add_to_playlist, "playlist", "sm"
+            )
+            self.add_to_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
+
+            self.manage_playlist_button = self.create_button(
+                media_section, "Manage Playlists",
+                self._manage_playlists, "playlist", "sm"
+            )
+            self.manage_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
+
+            self.watch_history_button = self.create_button(
+                media_section, "Watch History",
+                self._show_watch_history, "history", "sm"
+            )
+            self.watch_history_button.pack(side=tk.LEFT)
 
         def toggle_ai_mode(self):
             if self.ai_mode:
@@ -592,9 +673,21 @@ def select_multiple_folders_and_play():
             self.exclusion_section = tk.Frame(self.content_frame, bg=self.bg_color)
             self.exclusion_section.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(10, 0))
 
-            exclusion_header = tk.Label(self.exclusion_section, text="Exclude Subdirectories and Videos",
+            header_row = tk.Frame(self.exclusion_section, bg=self.bg_color)
+            header_row.pack(fill=tk.X, pady=(0, 10))
+
+            exclusion_header = tk.Label(header_row, text="Subdirectories and Videos",
                                         font=self.header_font, bg=self.bg_color, fg=self.text_color)
-            exclusion_header.pack(anchor='w', pady=(0, 10))
+            exclusion_header.pack(side=tk.LEFT, anchor='w')
+
+            self.video_count_label = tk.Label(
+                header_row,
+                text="Total Videos: 0",
+                font=self.small_font,
+                bg=self.bg_color,
+                fg=self.text_color
+            )
+            self.video_count_label.pack(side=tk.LEFT, padx=(10, 0))
 
             self.selected_dir_label = tk.Label(
                 self.exclusion_section,
@@ -780,19 +873,10 @@ def select_multiple_folders_and_play():
                 variable=self.smart_resume_var,
                 command=self.toggle_smart_resume
             )
-            self.smart_resume_check.pack(side=tk.LEFT, padx=(15, 0))
+            self.smart_resume_check.pack(side=tk.LEFT, padx=(10, 0))
 
             buttons_row = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
             buttons_row.pack(fill=tk.X, pady=(5, 0))
-
-            self.exclude_button = self.create_button(
-                buttons_row,
-                text="Exclude Selected",
-                command=self.exclude_subdirectories,
-                variant="danger",
-                size="sm"
-            )
-            self.exclude_button.pack(side=tk.LEFT, padx=(0, 5))
 
             self.include_button = self.create_button(
                 buttons_row,
@@ -802,6 +886,15 @@ def select_multiple_folders_and_play():
                 size="sm"
             )
             self.include_button.pack(side=tk.LEFT, padx=(0, 5))
+
+            self.exclude_button = self.create_button(
+                buttons_row,
+                text="Exclude Selected",
+                command=self.exclude_subdirectories,
+                variant="danger",
+                size="sm"
+            )
+            self.exclude_button.pack(side=tk.LEFT, padx=(0, 5))
 
             self.exclude_all_button = self.create_button(
                 buttons_row,
@@ -823,90 +916,6 @@ def select_multiple_folders_and_play():
 
             buttons_row3 = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
             buttons_row3.pack(fill=tk.X, pady=(10, 0))
-
-            speed_container = tk.Frame(buttons_row3, bg=self.bg_color, relief=tk.FLAT)
-            speed_container.pack(fill=tk.X)
-
-            speed_label = tk.Label(speed_container, text="Speed:",
-                                   font=self.small_font, bg=self.bg_color, fg="#666666")
-            speed_label.pack(side=tk.LEFT, padx=(0, 8))
-
-            slider_frame = tk.Frame(speed_container, bg=self.bg_color, height=30)
-            slider_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
-            slider_frame.pack_propagate(False)
-
-            self.speed_var = tk.DoubleVar(value=1.0)
-            self.speed_canvas = tk.Canvas(
-                slider_frame,
-                height=6,
-                bg=self.bg_color,
-                highlightthickness=0,
-                relief=tk.FLAT
-            )
-            self.speed_canvas.pack(fill=tk.X, pady=12)
-
-            self.slider_width = 200
-            self.slider_min = 0.25
-            self.slider_max = 2.0
-            self.slider_current = 1.0
-            self.dragging = False
-
-            self.speed_canvas.bind("<Button-1>", self.on_slider_click)
-            self.speed_canvas.bind("<B1-Motion>", self.on_slider_drag)
-            self.speed_canvas.bind("<ButtonRelease-1>", self.on_slider_release)
-            self.speed_canvas.bind("<Configure>", self.on_slider_configure)
-
-            self.speed_display = tk.Label(
-                speed_container,
-                text="1.0×",
-                font=Font(family=self.small_font.actual().get("family", "Segoe UI"),
-                          size=self.small_font.actual().get("size", 9), weight="bold"),
-                bg=self.bg_color,
-                fg=self.accent_color,
-                width=5
-            )
-            self.speed_display.pack(side=tk.LEFT, padx=(0, 8))
-
-            self.reset_speed_button = self.create_button(
-                speed_container,
-                text="1×",
-                command=self.reset_speed,
-                variant="secondary",
-                size="sm"
-            )
-            self.reset_speed_button.pack(side=tk.LEFT)
-
-            media_section = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
-            media_section.pack(fill=tk.X, pady=(10, 0))
-
-            media_label = tk.Label(
-                media_section,
-                text="Media:",
-                font=self.small_font,
-                bg=self.bg_color,
-                fg="#666666"
-            )
-            media_label.pack(side=tk.LEFT, padx=(0, 8))
-
-            self.add_to_playlist_button = self.create_button(
-                media_section, "Add to Playlist",
-                self._add_to_playlist, "playlist", "sm"
-            )
-            self.add_to_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.manage_playlist_button = self.create_button(
-                media_section, "Manage Playlists",
-                self._manage_playlists, "playlist", "sm"
-            )
-            self.manage_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.watch_history_button = self.create_button(
-                media_section, "Watch History",
-                self._show_watch_history, "history", "sm"
-            )
-            self.watch_history_button.pack(side=tk.LEFT)
-
-            self.root.after(100, self.draw_slider)
 
         def _create_context_menu(self):
             self.context_menu = tk.Menu(self.root, tearoff=0)
@@ -2109,15 +2118,6 @@ def select_multiple_folders_and_play():
         def setup_status_section(self):
             self.status_frame = tk.Frame(self.main_frame, bg=self.bg_color)
             self.status_frame.pack(fill=tk.X)
-
-            self.video_count_label = tk.Label(
-                self.status_frame,
-                text="Total Videos: 0",
-                font=self.normal_font,
-                bg=self.bg_color,
-                fg=self.text_color
-            )
-            self.video_count_label.pack(side=tk.LEFT)
 
         def add_directory(self):
             directory = filedialog.askdirectory(title="Select a Directory")
