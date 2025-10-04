@@ -1835,7 +1835,7 @@ def select_multiple_folders_and_play():
                 action_buttons_frame,
                 text=self._get_loop_icon(),
                 command=self.toggle_loop_mode,
-                variant="secondary",
+                variant="danger",
                 size="lg",
                 font=(self.normal_font.name, self.normal_font.actual()['size'], 'bold')
             )
@@ -2057,20 +2057,32 @@ def select_multiple_folders_and_play():
                     messagebox.showwarning("Warning", "No videos found in selected items")
             else:
                 self.add_to_playlist_button.config(text="Adding...", state=tk.DISABLED)
-                self.update_console("Collecting all videos for playlist...")
+                search_active = hasattr(self, 'search_query') and self.search_query
+                if search_active:
+                    self.update_console("Collecting all search results for playlist...")
+                else:
+                    self.update_console("Collecting all videos for playlist...")
 
                 def collect_all_videos():
                     try:
                         all_videos = []
-                        cache = self.scan_cache.get(selected_dir)
-                        if cache:
-                            videos, _, _ = cache
-                            excluded_subdirs = self.excluded_subdirs.get(selected_dir, [])
-                            excluded_videos = self.excluded_videos.get(selected_dir, [])
 
-                            for video in videos:
-                                if not self.is_video_excluded(selected_dir, video):
-                                    all_videos.append(video)
+                        if search_active and self.current_subdirs_mapping:
+                            for i in range(len(self.current_subdirs_mapping)):
+                                if i in self.current_subdirs_mapping:
+                                    path = self.current_subdirs_mapping[i]
+                                    if os.path.isfile(path) and is_video(path):
+                                        all_videos.append(path)
+                        else:
+                            cache = self.scan_cache.get(selected_dir)
+                            if cache:
+                                videos, _, _ = cache
+                                excluded_subdirs = self.excluded_subdirs.get(selected_dir, [])
+                                excluded_videos = self.excluded_videos.get(selected_dir, [])
+
+                                for video in videos:
+                                    if not self.is_video_excluded(selected_dir, video):
+                                        all_videos.append(video)
 
                         def finish_collection():
                             self.add_to_playlist_button.config(text="Add to Playlist", state=tk.NORMAL)

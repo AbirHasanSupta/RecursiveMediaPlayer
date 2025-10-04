@@ -2084,14 +2084,12 @@ def select_multiple_folders_and_play():
             threading.Thread(target=build_and_post, daemon=True).start()
 
         def on_search_changed(self, event=None):
-            """Handle search query changes"""
             self.search_query = self.search_entry.get().strip().lower()
             selected_dir = self.get_current_selected_directory()
             if selected_dir:
                 self.load_subdirectories(selected_dir, max_depth=self.current_max_depth)
 
         def clear_search(self):
-            """Clear search and reload"""
             self.search_entry.delete(0, tk.END)
             self.search_query = ""
             selected_dir = self.get_current_selected_directory()
@@ -2121,7 +2119,6 @@ def select_multiple_folders_and_play():
             return False
 
         def is_child_of_matching_parent(self, path, base, search_query):
-            """Check if this path is a descendant of any matching parent directory"""
             if not search_query:
                 return False
 
@@ -2203,7 +2200,7 @@ def select_multiple_folders_and_play():
                 action_buttons_frame,
                 text=self._get_loop_icon(),
                 command=self.toggle_loop_mode,
-                variant="secondary",
+                variant="danger",
                 size="lg",
                 font=(self.normal_font.name, self.normal_font.actual()['size'], 'bold')
             )
@@ -2449,20 +2446,32 @@ def select_multiple_folders_and_play():
                     messagebox.showwarning("Warning", "No videos found in selected items")
             else:
                 self.add_to_playlist_button.config(text="Adding...", state=tk.DISABLED)
-                self.update_console("Collecting all videos for playlist...")
+                search_active = hasattr(self, 'search_query') and self.search_query
+                if search_active:
+                    self.update_console("Collecting all search results for playlist...")
+                else:
+                    self.update_console("Collecting all videos for playlist...")
 
                 def collect_all_videos():
                     try:
                         all_videos = []
-                        cache = self.scan_cache.get(selected_dir)
-                        if cache:
-                            videos, _, _ = cache
-                            excluded_subdirs = self.excluded_subdirs.get(selected_dir, [])
-                            excluded_videos = self.excluded_videos.get(selected_dir, [])
 
-                            for video in videos:
-                                if not self.is_video_excluded(selected_dir, video):
-                                    all_videos.append(video)
+                        if search_active and self.current_subdirs_mapping:
+                            for i in range(len(self.current_subdirs_mapping)):
+                                if i in self.current_subdirs_mapping:
+                                    path = self.current_subdirs_mapping[i]
+                                    if os.path.isfile(path) and is_video(path):
+                                        all_videos.append(path)
+                        else:
+                            cache = self.scan_cache.get(selected_dir)
+                            if cache:
+                                videos, _, _ = cache
+                                excluded_subdirs = self.excluded_subdirs.get(selected_dir, [])
+                                excluded_videos = self.excluded_videos.get(selected_dir, [])
+
+                                for video in videos:
+                                    if not self.is_video_excluded(selected_dir, video):
+                                        all_videos.append(video)
 
                         def finish_collection():
                             self.add_to_playlist_button.config(text="Add to Playlist", state=tk.NORMAL)
@@ -2484,11 +2493,9 @@ def select_multiple_folders_and_play():
                 threading.Thread(target=collect_all_videos, daemon=True).start()
 
         def _manage_playlists(self):
-            """Open playlist manager window"""
             self.playlist_manager.show_manager()
 
         def _play_playlist_videos(self, videos):
-            """Play videos from playlist"""
             if not videos:
                 messagebox.showwarning("Warning", "Playlist is empty")
                 return
@@ -2553,11 +2560,9 @@ def select_multiple_folders_and_play():
             threading.Thread(target=start_playlist_player, daemon=True).start()
 
         def _show_watch_history(self):
-            """Open watch history manager window"""
             self.watch_history_manager.show_manager()
 
         def _play_history_videos(self, videos):
-            """Play videos from watch history"""
             if not videos:
                 messagebox.showwarning("Warning", "No videos to play")
                 return
@@ -2622,7 +2627,6 @@ def select_multiple_folders_and_play():
             threading.Thread(target=start_history_player, daemon=True).start()
 
         def toggle_smart_resume(self):
-            """Toggle smart resume feature (last video + position)"""
             enabled = bool(self.smart_resume_var.get())
             self.resume_manager.set_resume_enabled(enabled)
             self.start_from_last_played = enabled
@@ -2630,11 +2634,9 @@ def select_multiple_folders_and_play():
             self.save_preferences()
 
         def _show_settings(self):
-            """Open application settings window"""
             self.settings_manager.show_settings()
 
         def _save_volume_callback(self, volume):
-            """Callback to save volume when video player stops"""
             self.volume = volume
             self.save_preferences()
 
@@ -2661,7 +2663,6 @@ def select_multiple_folders_and_play():
 
 
         def _clear_thumbnail_cache(self):
-            """Clear video thumbnail cache"""
             try:
                 self.video_preview_manager.clear_cache()
                 self.update_console(f"Thumbnail cache cleared.")
