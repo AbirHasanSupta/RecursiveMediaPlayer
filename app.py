@@ -1121,7 +1121,9 @@ def select_multiple_folders_and_play():
                     else:
                         self.expanded_paths.add(norm_target)
 
-                self.load_subdirectories(selected_dir, max_depth=20)
+                scroll_pos = listbox.yview()
+                self.load_subdirectories(selected_dir, max_depth=20, restore_path=norm_target,
+                                         restore_scroll=scroll_pos)
                 return "break"
 
             if not os.path.isfile(target_path) or not is_video(target_path):
@@ -1687,12 +1689,18 @@ def select_multiple_folders_and_play():
                         self.update_console(
                             f"Excluded {excluded_count} item(s) from '{os.path.basename(dir_path)}': {', '.join(selected_names)}")
 
-                    self.load_subdirectories(dir_path)
+                    first_index = indices[0] if indices else None
+                    first_path = self.current_subdirs_mapping.get(first_index) if first_index is not None else None
+                    scroll_pos = self.exclusion_listbox.yview()
+
+                    self.load_subdirectories(dir_path, restore_path=first_path, restore_scroll=scroll_pos)
                     self.update_video_count()
-                    self.exclusion_listbox.selection_clear(0, tk.END)
                     if self.save_directories:
                         self.save_preferences()
-                    for btn in [getattr(self, 'exclude_button', None), getattr(self, 'include_button', None), getattr(self, 'exclude_all_button', None), getattr(self, 'clear_exclusions_button', None)]:
+
+                    for btn in [getattr(self, 'exclude_button', None), getattr(self, 'include_button', None),
+                                getattr(self, 'exclude_all_button', None),
+                                getattr(self, 'clear_exclusions_button', None)]:
                         if btn:
                             btn.config(state=tk.NORMAL)
 
@@ -1774,12 +1782,19 @@ def select_multiple_folders_and_play():
                         self.update_console(
                             f"Included {included_count} item(s) in '{os.path.basename(dir_path)}': {', '.join(selected_names)}")
 
-                    self.load_subdirectories(dir_path)
+                    first_index = indices[0] if indices else None
+                    first_path = self.current_subdirs_mapping.get(first_index) if first_index is not None else None
+                    scroll_pos = self.exclusion_listbox.yview()
+
+                    self.load_subdirectories(dir_path, restore_path=first_path, restore_scroll=scroll_pos)
                     self.update_video_count()
-                    self.exclusion_listbox.selection_clear(0, tk.END)
+
                     if self.save_directories:
                         self.save_preferences()
-                    for btn in [getattr(self, 'exclude_button', None), getattr(self, 'include_button', None), getattr(self, 'exclude_all_button', None), getattr(self, 'clear_exclusions_button', None)]:
+
+                    for btn in [getattr(self, 'exclude_button', None), getattr(self, 'include_button', None),
+                                getattr(self, 'exclude_all_button', None),
+                                getattr(self, 'clear_exclusions_button', None)]:
                         if btn:
                             btn.config(state=tk.NORMAL)
 
@@ -1861,7 +1876,7 @@ def select_multiple_folders_and_play():
                     self.load_subdirectories(selected_dir)
                     self.update_video_count()
 
-        def load_subdirectories(self, directory, max_depth=20):
+        def load_subdirectories(self, directory, max_depth=20, restore_path=None, restore_scroll=None):
             self.current_max_depth = max_depth
             if self.show_only_excluded:
                 self.selected_dir_label.config(text=f"Excluded items in: {os.path.basename(directory)}")
@@ -1907,12 +1922,15 @@ def select_multiple_folders_and_play():
                                 dirs[:] = []
                             can_show_children = is_expanded_here
 
-                        dir_name_matches = not self.search_query or self.search_query in os.path.basename(root).lower()
-                        is_child_of_match = self.is_child_of_matching_parent(root, base, self.search_query)
+                        dir_name_matches = (not getattr(self, 'search_query', None)) or (
+                                    self.search_query in os.path.basename(root).lower())
+                        is_child_of_match = self.is_child_of_matching_parent(root, base,
+                                                                             getattr(self, 'search_query', None))
                         dir_has_matching_children = self.matches_search(root,
-                                                                        self.search_query) if self.search_query else True
-
-                        show_this_dir = not self.search_query or dir_name_matches or is_child_of_match or dir_has_matching_children
+                                                                        getattr(self, 'search_query', None)) if getattr(
+                            self, 'search_query', None) else True
+                        show_this_dir = (not getattr(self, 'search_query',
+                                                     None)) or dir_name_matches or is_child_of_match or dir_has_matching_children
 
                         indent_level = 0 if rel == '.' else rel.count(base_sep) + 1
                         name = os.path.basename(root) if rel != '.' else os.path.basename(base)
@@ -1932,7 +1950,8 @@ def select_multiple_folders_and_play():
                                             full_path = entry.path
                                             include_vid = (not only_excluded) or (full_path in excluded_vid_set)
 
-                                            video_name_matches = not self.search_query or self.search_query in entry.name.lower()
+                                            video_name_matches = (not getattr(self, 'search_query', None)) or (
+                                                        self.search_query in entry.name.lower())
                                             show_this_video = video_name_matches or dir_name_matches or is_child_of_match
 
                                             if include_vid and show_this_video and show_this_dir:
@@ -1955,6 +1974,13 @@ def select_multiple_folders_and_play():
                         chunk_size = 500
                         total = len(items)
                         mapping = {}
+                        target_index = None
+
+                        if restore_path:
+                            for idx, (path, _) in enumerate(items):
+                                if os.path.normpath(path) == restore_path:
+                                    target_index = idx
+                                    break
 
                         def insert_chunk(start):
                             if self._subdir_load_token is not token:
@@ -1973,6 +1999,15 @@ def select_multiple_folders_and_play():
                                     self.exclusion_listbox,
                                     self.current_subdirs_mapping
                                 )
+
+                                if target_index is not None:
+                                    self.exclusion_listbox.selection_clear(0, tk.END)
+                                    self.exclusion_listbox.selection_set(target_index)
+                                    self.exclusion_listbox.activate(target_index)
+                                    self.exclusion_listbox.see(target_index)
+
+                                if restore_scroll:
+                                    self.exclusion_listbox.yview_moveto(restore_scroll[0])
 
                         insert_chunk(0)
 
