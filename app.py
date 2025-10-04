@@ -45,6 +45,7 @@ def select_multiple_folders_and_play():
             self.search_query = ""
             self.expanded_paths = set()
             self.collapsed_paths = set()
+            self.loop_mode = "loop_on"
 
             preferences = self.config.load_preferences()
             self.dark_mode = preferences['dark_mode']
@@ -58,6 +59,7 @@ def select_multiple_folders_and_play():
             self.excluded_subdirs = preferences.get('excluded_subdirs', {})
             self.excluded_videos = preferences.get('excluded_videos', {})
             self.volume = preferences.get('volume', 50)
+            self.loop_mode = preferences.get('loop_mode', 'loop_on')
 
             self.setup_theme()
 
@@ -1309,6 +1311,7 @@ def select_multiple_folders_and_play():
                             self.controller = VLCPlayerControllerForMultipleDirectory(
                                 final_videos, all_video_to_dir, all_directories, self.update_console
                             )
+                            self.controller.set_loop_mode(self.loop_mode)
                             self.controller.volume = self.volume
                             self.controller.player.audio_set_volume(self.volume)
                             self.controller.set_volume_save_callback(self._save_volume_callback)
@@ -1382,6 +1385,7 @@ def select_multiple_folders_and_play():
                         self.controller = VLCPlayerControllerForMultipleDirectory(
                             all_videos, all_video_to_dir, all_directories, self.update_console
                         )
+                        self.controller.set_loop_mode(self.loop_mode)
                         self.controller.volume = self.volume
                         self.controller.player.audio_set_volume(self.volume)
                         self.controller.set_volume_save_callback(self._save_volume_callback)
@@ -1475,6 +1479,7 @@ def select_multiple_folders_and_play():
                     self.update_console(f"Playing from {len(all_directories)} directories")
                     self.controller = VLCPlayerControllerForMultipleDirectory(all_videos, all_video_to_dir,
                                                                               all_directories, self.update_console)
+                    self.controller.set_loop_mode(self.loop_mode)
                     self.controller.volume = self.volume
                     self.controller.player.audio_set_volume(self.volume)
                     self.controller.set_volume_save_callback(self._save_volume_callback)
@@ -1585,15 +1590,25 @@ def select_multiple_folders_and_play():
             def worker(dir_path=selected_dir):
                 dir_paths = []
                 file_paths = []
+
+                displayed_items = set()
+                if hasattr(self, 'search_query') and self.search_query:
+                    for idx in range(len(self.current_subdirs_mapping)):
+                        if idx in self.current_subdirs_mapping:
+                            displayed_items.add(self.current_subdirs_mapping[idx])
+
                 try:
                     base = os.path.normpath(dir_path)
                     for root, dirs, files in os.walk(base):
                         for d in dirs:
-                            dir_paths.append(os.path.join(root, d))
+                            subdir_path = os.path.join(root, d)
+                            if not displayed_items or subdir_path in displayed_items:
+                                dir_paths.append(subdir_path)
                         for f in files:
                             full = os.path.join(root, f)
                             if is_video(full):
-                                file_paths.append(full)
+                                if not displayed_items or full in displayed_items:
+                                    file_paths.append(full)
                 except Exception as e:
                     self.root.after(0, lambda: self.update_console(f"Error during Exclude All: {e}"))
                     self.root.after(0, lambda: [self.exclusion_listbox.delete(0, tk.END),
@@ -1602,7 +1617,13 @@ def select_multiple_folders_and_play():
 
                 def apply_and_refresh():
                     if dir_paths:
-                        self.excluded_subdirs[dir_path] = dir_paths
+                        if dir_path not in self.excluded_subdirs:
+                            self.excluded_subdirs[dir_path] = []
+                        existing = set(self.excluded_subdirs[dir_path])
+                        for dp in dir_paths:
+                            if dp not in existing:
+                                self.excluded_subdirs[dir_path].append(dp)
+
                     if file_paths:
                         if dir_path not in self.excluded_videos:
                             self.excluded_videos[dir_path] = []
@@ -1610,10 +1631,15 @@ def select_multiple_folders_and_play():
                         for fp in file_paths:
                             if fp not in existing:
                                 self.excluded_videos[dir_path].append(fp)
+
                     total = len(dir_paths) + len(file_paths)
+                    filter_msg = " (matching search filter)" if displayed_items else ""
                     self.update_console(
-                        f"Excluded ALL {total} items from '{os.path.basename(dir_path)}'")
-                    self.load_subdirectories(dir_path)
+                        f"Excluded {total} items from '{os.path.basename(dir_path)}'{filter_msg}")
+
+                    scroll_pos = self.exclusion_listbox.yview()
+
+                    self.load_subdirectories(dir_path, restore_scroll=scroll_pos)
                     self.update_video_count()
                     self.exclusion_listbox.selection_clear(0, tk.END)
                     if self.save_directories:
@@ -1644,6 +1670,17 @@ def select_multiple_folders_and_play():
                 dirs_to_exclude = set()
                 vids_to_exclude = set()
                 selected_names = []
+
+                displayed_items = set()
+                if hasattr(self, 'search_query') and self.search_query:
+                    def get_displayed():
+                        return self.get_displayed_items()
+
+                    displayed = self.root.after(0, get_displayed)
+                    for idx in range(len(self.current_subdirs_mapping)):
+                        if idx in self.current_subdirs_mapping:
+                            displayed_items.add(self.current_subdirs_mapping[idx])
+
                 try:
                     for index in indices:
                         target_path = self.current_subdirs_mapping.get(index)
@@ -1654,17 +1691,24 @@ def select_multiple_folders_and_play():
                             dirs_to_exclude.add(base)
                             for root, dirs, files in os.walk(base):
                                 for d in dirs:
-                                    dirs_to_exclude.add(os.path.join(root, d))
+                                    subdir_path = os.path.join(root, d)
+                                    if not displayed_items or subdir_path in displayed_items:
+                                        dirs_to_exclude.add(subdir_path)
                                 for f in files:
                                     full = os.path.join(root, f)
                                     if is_video(full):
-                                        vids_to_exclude.add(full)
+                                        if not displayed_items or full in displayed_items:
+                                            vids_to_exclude.add(full)
                         else:
                             vids_to_exclude.add(target_path)
                         selected_names.append(os.path.basename(target_path))
                 except Exception as e:
                     self.root.after(0, lambda: messagebox.showerror("Error", f"Error excluding items: {e}"))
-                    self.root.after(0, lambda: [btn.config(state=tk.NORMAL) for btn in [getattr(self, 'exclude_button', None), getattr(self, 'include_button', None), getattr(self, 'exclude_all_button', None), getattr(self, 'clear_exclusions_button', None)] if btn])
+                    self.root.after(0, lambda: [btn.config(state=tk.NORMAL) for btn in
+                                                [getattr(self, 'exclude_button', None),
+                                                 getattr(self, 'include_button', None),
+                                                 getattr(self, 'exclude_all_button', None),
+                                                 getattr(self, 'clear_exclusions_button', None)] if btn])
                     return
 
                 def apply_and_refresh():
@@ -1695,6 +1739,7 @@ def select_multiple_folders_and_play():
 
                     self.load_subdirectories(dir_path, restore_path=first_path, restore_scroll=scroll_pos)
                     self.update_video_count()
+
                     if self.save_directories:
                         self.save_preferences()
 
@@ -1732,6 +1777,13 @@ def select_multiple_folders_and_play():
                 dirs_to_include = set()
                 vids_to_include = set()
                 selected_names = []
+
+                displayed_items = set()
+                if hasattr(self, 'search_query') and self.search_query:
+                    for idx in range(len(self.current_subdirs_mapping)):
+                        if idx in self.current_subdirs_mapping:
+                            displayed_items.add(self.current_subdirs_mapping[idx])
+
                 try:
                     for index in indices:
                         target_path = self.current_subdirs_mapping.get(index)
@@ -1742,17 +1794,24 @@ def select_multiple_folders_and_play():
                             dirs_to_include.add(base)
                             for root, dirs, files in os.walk(base):
                                 for d in dirs:
-                                    dirs_to_include.add(os.path.join(root, d))
+                                    subdir_path = os.path.join(root, d)
+                                    if not displayed_items or subdir_path in displayed_items:
+                                        dirs_to_include.add(subdir_path)
                                 for f in files:
                                     full = os.path.join(root, f)
                                     if is_video(full):
-                                        vids_to_include.add(full)
+                                        if not displayed_items or full in displayed_items:
+                                            vids_to_include.add(full)
                         else:
                             vids_to_include.add(target_path)
                         selected_names.append(os.path.basename(target_path))
                 except Exception as e:
                     self.root.after(0, lambda: messagebox.showerror("Error", f"Error including items: {e}"))
-                    self.root.after(0, lambda: [btn.config(state=tk.NORMAL) for btn in [getattr(self, 'exclude_button', None), getattr(self, 'include_button', None), getattr(self, 'exclude_all_button', None), getattr(self, 'clear_exclusions_button', None)] if btn])
+                    self.root.after(0, lambda: [btn.config(state=tk.NORMAL) for btn in
+                                                [getattr(self, 'exclude_button', None),
+                                                 getattr(self, 'include_button', None),
+                                                 getattr(self, 'exclude_all_button', None),
+                                                 getattr(self, 'clear_exclusions_button', None)] if btn])
                     return
 
                 def apply_and_refresh():
@@ -2140,6 +2199,16 @@ def select_multiple_folders_and_play():
             )
             self.cancel_button.pack(side=tk.LEFT, padx=(0, 5))
 
+            self.loop_toggle_button = self.create_button(
+                action_buttons_frame,
+                text=self._get_loop_icon(),
+                command=self.toggle_loop_mode,
+                variant="secondary",
+                size="lg",
+                font=(self.normal_font.name, self.normal_font.actual()['size'], 'bold')
+            )
+            self.loop_toggle_button.pack(side=tk.LEFT, padx=(0, 5))
+
             self.play_button = self.create_button(
                 action_buttons_frame,
                 text="▶ Play Videos",
@@ -2209,6 +2278,18 @@ def select_multiple_folders_and_play():
             self.update_video_count()
             self.clear_exclusion_list()
             self.save_preferences()
+
+        def get_displayed_items(self):
+            if not self.current_subdirs_mapping:
+                return []
+
+            displayed_items = []
+            for idx in sorted(self.current_subdirs_mapping.keys()):
+                path = self.current_subdirs_mapping.get(idx)
+                if path:
+                    displayed_items.append(path)
+
+            return displayed_items
 
         def draw_slider(self):
             if not hasattr(self, 'speed_canvas'):
@@ -2304,10 +2385,12 @@ def select_multiple_folders_and_play():
             self.draw_slider()
 
         def _add_to_playlist(self):
-            """Add selected or all videos to playlist"""
             if self.ai_mode and self.current_subdirs_mapping:
                 selection = self.exclusion_listbox.curselection()
                 if selection:
+                    search_active = hasattr(self, 'search_query') and self.search_query
+                    filter_msg = " from search results" if search_active else ""
+
                     selected_videos = []
                     for index in selection:
                         if index in self.current_subdirs_mapping:
@@ -2317,7 +2400,7 @@ def select_multiple_folders_and_play():
 
                     if selected_videos:
                         self.playlist_manager.add_videos_to_playlist([], selected_videos)
-                        self.update_console(f"Added {len(selected_videos)} selected AI search results to playlist")
+                        self.update_console(f"Added {len(selected_videos)} selected videos{filter_msg} to playlist")
                     else:
                         messagebox.showwarning("Warning", "No valid selected videos found")
                 else:
@@ -2440,6 +2523,7 @@ def select_multiple_folders_and_play():
                 self.controller = VLCPlayerControllerForMultipleDirectory(
                     valid_videos, all_video_to_dir, all_directories, self.update_console
                 )
+                self.controller.set_loop_mode(self.loop_mode)
                 self.controller.volume = self.volume
                 self.controller.player.audio_set_volume(self.volume)
                 self.controller.set_volume_save_callback(self._save_volume_callback)
@@ -2508,6 +2592,7 @@ def select_multiple_folders_and_play():
                 self.controller = VLCPlayerControllerForMultipleDirectory(
                     valid_videos, all_video_to_dir, all_directories, self.update_console
                 )
+                self.controller.set_loop_mode(self.loop_mode)
                 self.controller.volume = self.volume
                 self.controller.player.audio_set_volume(self.volume)
                 self.controller.set_volume_save_callback(self._save_volume_callback)

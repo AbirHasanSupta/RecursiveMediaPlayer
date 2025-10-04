@@ -1,6 +1,6 @@
 import os
 import time
-
+import random
 import vlc
 import threading
 from screeninfo import get_monitors
@@ -391,6 +391,9 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
         self.video_to_dir = video_to_dir
         self.directories = directories
         self.watch_history_callback = None
+        self.loop_mode = "loop_on"
+        self.original_video_order = videos.copy()
+        self.played_indices = set()
 
     def set_watch_history_callback(self, callback):
         """Set callback for tracking watch history"""
@@ -468,7 +471,6 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
             if index < 0 or index >= len(self.videos):
                 return False
 
-            # Stop tracking previous video
             self.stop_position_tracking()
 
             self.index = index
@@ -478,7 +480,6 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
             if self.logger:
                 self.logger(f"Playing: {os.path.basename(current_video)} from {current_dir}")
 
-            # Track in watch history
             self._track_video_playback(current_video)
 
             media = self.instance.media_new(current_video)
@@ -487,7 +488,53 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
 
             result = self._play_video(media)
             if result:
-                # Start position tracking for current video
                 self.start_position_tracking(current_video)
                 self._notify_video_change()
             return result
+
+
+    def set_loop_mode(self, mode):
+        self.loop_mode = mode
+        if mode == "shuffle" and not hasattr(self, 'played_indices'):
+            self.played_indices = set()
+
+
+    def next_video(self):
+        if self.loop_mode == "shuffle":
+            self._next_video_shuffle()
+        elif self.loop_mode == "loop_off":
+            self._next_video_no_loop()
+        else:
+            self._next_video_loop()
+
+    def _next_video_loop(self):
+        self.index = (self.index + 1) % len(self.videos)
+        self.play_video(self.index)
+
+    def _next_video_no_loop(self):
+        if self.index < len(self.videos) - 1:
+            self.index += 1
+            self.play_video(self.index)
+        else:
+            self.player.pause()
+
+
+    def _next_video_shuffle(self):
+        self.played_indices.add(self.index)
+
+        unplayed = [i for i in range(len(self.videos)) if i not in self.played_indices]
+
+        if not unplayed:
+            self.played_indices.clear()
+            self.player.pause()
+            return
+
+        self.index = random.choice(unplayed)
+        self.play_video(self.index)
+
+    def previous_video(self):
+        if self.loop_mode == "shuffle":
+            self._next_video_shuffle()
+        else:
+            self.index = (self.index - 1) % len(self.videos)
+            self.play_video(self.index)

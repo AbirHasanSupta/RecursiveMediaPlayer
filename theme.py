@@ -77,13 +77,15 @@ class ConfigHandler:
                         'excluded_subdirs': decoded_excluded_subdirs,
                         'smart_resume_enabled': config.get('smart_resume_enabled', False),
                         'volume': config.get('volume', 50),
+                        'loop_mode': config.get('loop_mode', 'loop_on'),
                     }
         except Exception:
             pass
         return {'dark_mode': False, 'show_videos': True, 'expand_all': True, 'selected_dirs': [],
                 'save_directories': False, 'start_from_last_played': False,
                 'last_played_video_index': 0, 'last_played_video_path': '',
-                'excluded_subdirs': {}, 'excluded_videos': {}, 'smart_resume_enabled':False, 'volume':50}
+                'excluded_subdirs': {}, 'excluded_videos': {}, 'smart_resume_enabled':False, 'volume':50,
+                'loop_mode':'loop_on'}
 
     def save(self, config_dict):
         try:
@@ -129,7 +131,8 @@ class ThemeSelector:
             'last_played_video_path': getattr(self, 'last_played_video_path', ''),
             'excluded_subdirs': encoded_excluded_subdirs,
             'excluded_videos': encoded_excluded_videos,
-            'volume': getattr(self, 'volume', 50)
+            'volume': getattr(self, 'volume', 50),
+            'loop_mode': getattr(self, 'loop_mode', 'loop_on'),
         }
         self.config.save(prefs)
 
@@ -247,6 +250,42 @@ class ThemeSelector:
 
         self.update_all_buttons()
         self.update_frames_recursive(self.root)
+
+    def _get_loop_icon(self):
+        icons = {
+            "loop_on": "⟳  ON",
+            "loop_off": "→ OFF",
+            "shuffle": "⤨ RND"
+        }
+        return icons.get(self.loop_mode, "⟳  ON")
+
+    def _get_loop_tooltip(self):
+        tooltips = {
+            "loop_on": "Loop: ON - Videos will repeat",
+            "loop_off": "Loop: OFF - Play once then stop",
+            "shuffle": "Shuffle: ON - Random playback"
+        }
+        return tooltips.get(self.loop_mode, "")
+
+    def toggle_loop_mode(self):
+        modes = ["loop_on", "loop_off", "shuffle"]
+        current_index = modes.index(self.loop_mode)
+        next_index = (current_index + 1) % len(modes)
+        self.loop_mode = modes[next_index]
+
+        self.loop_toggle_button.config(text=self._get_loop_icon())
+
+        if self.controller:
+            self.controller.set_loop_mode(self.loop_mode)
+
+        mode_names = {
+            "loop_on": "Loop ON",
+            "loop_off": "Loop OFF",
+            "shuffle": "Shuffle ON"
+        }
+        self.update_console(f"Playback mode: {mode_names[self.loop_mode]}")
+
+        self.save_preferences()
 
     def update_all_buttons(self):
         for attr_name in dir(self):
