@@ -9,6 +9,7 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 
 from key_press import listen_keys, cleanup_hotkeys
+from managers.grid_view_manager import GridViewManager
 from theme import ThemeSelector
 from utils import gather_videos_with_directories, is_video
 from vlc_player_controller import VLCPlayerControllerForMultipleDirectory
@@ -120,6 +121,9 @@ def select_multiple_folders_and_play():
                 self.settings_manager.get_settings().auto_cleanup_days)
             self.settings_manager.ui.clear_thumbnails_callback = lambda: self._clear_thumbnail_cache()
             self.settings_manager.ui.video_preview_manager = self.video_preview_manager
+
+            self.grid_view_manager = GridViewManager(self.root, self, self.update_console)
+            self.grid_view_manager.set_play_callback(self._play_grid_videos)
 
         def setup_theme(self):
             self.bg_color = "#f5f5f5"
@@ -439,6 +443,120 @@ def select_multiple_folders_and_play():
                 self._show_watch_history, "history", "sm"
             )
             self.watch_history_button.pack(side=tk.LEFT)
+
+            self.grid_view_button = self.create_button(
+                media_section, "Grid View",
+                self._show_grid_view, "primary", "sm"
+            )
+            self.grid_view_button.pack(side=tk.LEFT, padx=(5, 0))
+
+        def _show_grid_view(self):
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                messagebox.showwarning("Warning", "Please select a directory first")
+                return
+
+            exclusion_selection = self.exclusion_listbox.curselection()
+
+            if exclusion_selection:
+                self.update_console("Loading grid view for selected items...")
+
+                def collect_selected_videos():
+                    selected_videos = []
+                    selected_folders = []
+
+                    for index in exclusion_selection:
+                        item_path = self.current_subdirs_mapping.get(index)
+                        if not item_path:
+                            continue
+
+                        if os.path.isfile(item_path) and is_video(item_path):
+                            if not self.is_video_excluded(selected_dir, item_path):
+                                selected_videos.append(item_path)
+                        elif os.path.isdir(item_path):
+                            selected_folders.append(item_path)
+
+                    for folder in selected_folders:
+                        try:
+                            for root, dirs, files in os.walk(folder):
+                                for f in files:
+                                    full_path = os.path.join(root, f)
+                                    if is_video(full_path):
+                                        if not self.is_video_excluded(selected_dir, full_path):
+                                            selected_videos.append(full_path)
+                        except Exception as e:
+                            self.update_console(f"Error reading folder {folder}: {e}")
+
+                    seen = set()
+                    final_videos = []
+                    for v in selected_videos:
+                        v_norm = os.path.normpath(v)
+                        if v_norm not in seen:
+                            seen.add(v_norm)
+                            final_videos.append(v_norm)
+
+                    if final_videos:
+                        self.root.after(0, lambda: self._open_grid_view(final_videos))
+                    else:
+                        self.root.after(0, lambda: messagebox.showwarning("Warning", "No videos found in selection"))
+
+                threading.Thread(target=collect_selected_videos, daemon=True).start()
+            else:
+                self.update_console("Loading grid view for entire directory...")
+
+                def collect_all_videos():
+                    cache = self.scan_cache.get(selected_dir)
+                    if cache:
+                        videos, _, _ = cache
+                        filtered = [v for v in videos if not self.is_video_excluded(selected_dir, v)]
+                        self.root.after(0, lambda: self._open_grid_view(filtered))
+                    else:
+                        self.root.after(0, lambda: messagebox.showwarning("Warning", "No videos found"))
+
+                threading.Thread(target=collect_all_videos, daemon=True).start()
+
+        def _play_grid_videos(self, videos):
+            if not videos:
+                return
+
+            if self.controller:
+                self.controller.stop()
+                cleanup_hotkeys()
+
+            all_video_to_dir = {v: os.path.dirname(v) for v in videos}
+            all_directories = sorted(list(set(all_video_to_dir.values())))
+
+            self.update_console(f"Playing {len(videos)} videos from grid selection")
+
+            self.controller = VLCPlayerControllerForMultipleDirectory(
+                videos, all_video_to_dir, all_directories, self.update_console
+            )
+            self.controller.set_loop_mode(self.loop_mode)
+            self.controller.volume = self.volume
+            self.controller.player.audio_set_volume(self.volume)
+            self.controller.set_volume_save_callback(self._save_volume_callback)
+            self.controller.set_watch_history_callback(self.watch_history_manager.track_video_playback)
+            self.controller.set_resume_manager(self.resume_manager)
+            self.controller.set_start_index(0)
+            self.controller.set_video_change_callback(self.on_video_changed)
+
+            if self.player_thread and self.player_thread.is_alive():
+                self.controller.running = False
+                self.player_thread.join(timeout=1.0)
+
+            self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
+            self.player_thread.start()
+
+            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
+            self.keys_thread.start()
+
+        def _open_grid_view(self, videos):
+            if not videos:
+                messagebox.showwarning("Warning", "No videos to display")
+                return
+
+            self.grid_view_manager.video_preview_manager = self.video_preview_manager
+            self.grid_view_manager.show_grid_view(videos, self.video_preview_manager)
 
         def toggle_ai_mode(self):
             if self.ai_mode:
@@ -986,10 +1104,27 @@ def select_multiple_folders_and_play():
                 command=lambda: self._context_add_to_playlist(selection)
             )
 
+            self.context_menu.add_separator()
+            self.context_menu.add_command(
+                label="Open in Grid View",
+                command=lambda: self._context_open_grid_view(selection)
+            )
+
             try:
                 self.context_menu.tk_popup(event.x_root, event.y_root)
             finally:
                 self.context_menu.grab_release()
+
+        def _context_open_grid_view(self, selection):
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                return
+
+            self.exclusion_listbox.selection_clear(0, tk.END)
+            for idx in selection:
+                self.exclusion_listbox.selection_set(idx)
+
+            self._show_grid_view()
 
         def _context_copy_selected(self, selection):
             selected_dir = self.get_current_selected_directory()
