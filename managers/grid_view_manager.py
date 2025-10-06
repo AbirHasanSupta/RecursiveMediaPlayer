@@ -128,7 +128,7 @@ class GridViewManager:
             left_toolbar,
             "Select All",
             self._select_all,
-            "secondary",
+            "success",
             "sm"
         )
         select_all_btn.pack(side=tk.LEFT, padx=(0, 5))
@@ -137,7 +137,7 @@ class GridViewManager:
             left_toolbar,
             "Clear Selection",
             self._clear_selection,
-            "secondary",
+            "warning",
             "sm"
         )
         clear_btn.pack(side=tk.LEFT)
@@ -150,7 +150,7 @@ class GridViewManager:
             "▶ Play Selected",
             self._play_selected,
             "danger",
-            "lg"
+            "md"
         )
         play_btn.pack(side=tk.RIGHT)
 
@@ -318,23 +318,28 @@ class GridViewManager:
                 label_frame = tk.Frame(header, bg=self.theme_provider.bg_color)
                 label_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-                tk.Label(
+                dir_label = tk.Label(
                     label_frame,
                     text=f"📁 {item_data['name']}",
                     font=(self.theme_provider.normal_font.actual()['family'], 11, 'bold'),
                     bg=self.theme_provider.bg_color,
                     fg=self.theme_provider.accent_color,
-                    anchor='w'
-                ).pack(side=tk.LEFT)
+                    anchor='w',
+                    cursor="hand2"
+                )
+                dir_label.pack(side=tk.LEFT)
 
-                tk.Label(
+                count_label = tk.Label(
                     label_frame,
                     text=f"  •  {item_data.get('video_count', 0)} video{'s' if item_data.get('video_count', 0) != 1 else ''}",
                     font=self.theme_provider.small_font,
                     bg=self.theme_provider.bg_color,
                     fg="#888888",
                     anchor='w'
-                ).pack(side=tk.LEFT)
+                )
+                count_label.pack(side=tk.LEFT)
+                dir_label.bind("<Button-1>", lambda e, dir_path=item_data['path']: self._toggle_select_directory(dir_path))
+
 
                 separator = tk.Frame(
                     header,
@@ -419,6 +424,26 @@ class GridViewManager:
 
         for i in range(cols):
             self.grid_frame.columnconfigure(i, weight=1, uniform="col")
+
+        self._update_selection_label()
+
+    def _toggle_select_directory(self, dir_path):
+        video_paths_in_dir = [item_data['path'] for item_data in self.items
+                              if item_data['type'] == 'video' and os.path.dirname(item_data['path']) == dir_path]
+
+        if not video_paths_in_dir:
+            return
+
+        all_selected = all(vp in self.selected_items for vp in video_paths_in_dir)
+
+        if all_selected:
+            for vp in video_paths_in_dir:
+                self.selected_items.discard(vp)
+                self._update_card_selection(vp)
+        else:
+            for vp in video_paths_in_dir:
+                self.selected_items.add(vp)
+                self._update_card_selection(vp)
 
         self._update_selection_label()
 
