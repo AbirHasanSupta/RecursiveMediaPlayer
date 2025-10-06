@@ -244,6 +244,8 @@ class GridViewManager:
             for video in sorted(dir_groups[dir_path]):
                 self.items.append({'type': 'video', 'path': video, 'video_item': GridViewItem(video)})
 
+        self.all_items = self.items.copy()
+
         self.root.after(0, self._rebuild_grid)
 
     def _filter_directories(self):
