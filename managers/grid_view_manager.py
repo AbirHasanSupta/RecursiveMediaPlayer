@@ -2,6 +2,8 @@ import tkinter as tk
 from PIL import Image, ImageTk
 import os
 import threading
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+import multiprocessing
 
 class GridViewItem:
     def __init__(self, video_path, thumbnail_path=None):
@@ -15,9 +17,12 @@ class GridViewManager:
         self.root = root
         self.theme_provider = theme_provider
         self.console_callback = console_callback
+        max_workers = min(8, (multiprocessing.cpu_count() or 4))
+        self.thumbnail_executor = ThreadPoolExecutor(max_workers=max_workers)
         self.grid_window = None
         self.items = []
         self.selected_items = set()
+        self.card_widgets = {}
         self.play_callback = None
 
     def set_play_callback(self, callback):
@@ -41,7 +46,7 @@ class GridViewManager:
 
         title_label = tk.Label(
             header_frame,
-            text="Video Gallery",
+            text="🎬 Video Gallery",
             font=self.theme_provider.header_font,
             bg=self.theme_provider.bg_color,
             fg=self.theme_provider.text_color
@@ -88,6 +93,36 @@ class GridViewManager:
             highlightbackground="#e0e0e0"
         )
         size_spin.pack(side=tk.LEFT, padx=(0, 20))
+
+        tk.Label(
+            left_toolbar,
+            text="Filter:",
+            bg=self.theme_provider.bg_color,
+            fg=self.theme_provider.text_color,
+            font=self.theme_provider.normal_font
+        ).pack(side=tk.LEFT, padx=(20, 8))
+
+        self.search_var = tk.StringVar()
+        self.search_var.trace('w', lambda *args: self._filter_directories())
+
+        search_entry = tk.Entry(
+            left_toolbar,
+            textvariable=self.search_var,
+            font=self.theme_provider.normal_font,
+            width=20,
+            bg="white",
+            fg=self.theme_provider.text_color
+        )
+        search_entry.pack(side=tk.LEFT, padx=(0, 5))
+
+        clear_search_btn = self.theme_provider.create_button(
+            left_toolbar,
+            "Clear",
+            lambda: self.search_var.set(""),
+            "secondary",
+            "sm"
+        )
+        clear_search_btn.pack(side=tk.LEFT, padx=(0, 5))
 
         select_all_btn = self.theme_provider.create_button(
             left_toolbar,
@@ -169,6 +204,8 @@ class GridViewManager:
         self.grid_window.bind("<Return>", lambda e: self._play_selected())
 
         def on_closing():
+            if hasattr(self, 'thumbnail_executor'):
+                self.thumbnail_executor.shutdown(wait=False, cancel_futures=True)
             self.grid_window.destroy()
             self.grid_window = None
 
@@ -180,9 +217,58 @@ class GridViewManager:
         threading.Thread(target=self._load_videos, args=(videos,), daemon=True).start()
 
     def _load_videos(self, videos):
+        from collections import defaultdict
+        dir_groups = defaultdict(list)
         for video in videos:
-            item = GridViewItem(video)
-            self.items.append(item)
+            dir_path = os.path.dirname(video)
+            dir_groups[dir_path].append(video)
+
+        self.items = []
+        for dir_path in sorted(dir_groups.keys()):
+            video_count = len(dir_groups[dir_path])
+            self.items.append({
+                'type': 'header',
+                'path': dir_path,
+                'name': os.path.basename(dir_path) or dir_path,
+                'video_count': video_count
+            })
+            for video in sorted(dir_groups[dir_path]):
+                self.items.append({'type': 'video', 'path': video, 'video_item': GridViewItem(video)})
+
+        self.root.after(0, self._rebuild_grid)
+
+    def _filter_directories(self):
+        search_term = self.search_var.get().lower()
+
+        if not hasattr(self, 'all_items'):
+            self.all_items = self.items.copy()
+
+        if not search_term:
+            self.items = self.all_items.copy()
+        else:
+            self.items = []
+            current_dir_items = []
+            current_header = None
+
+            for item_data in self.all_items:
+                if item_data['type'] == 'header':
+                    if current_header and current_dir_items:
+                        self.items.append(current_header)
+                        self.items.extend(current_dir_items)
+
+                    current_header = item_data.copy()
+                    current_dir_items = []
+
+                    if search_term in item_data['name'].lower():
+                        current_header['matches'] = True
+                elif item_data['type'] == 'video':
+                    if (current_header and current_header.get('matches')) or \
+                            search_term in os.path.basename(item_data['path']).lower():
+                        current_dir_items.append(item_data)
+
+            if current_header and current_dir_items:
+                self.items.append(current_header)
+                self.items.extend(current_dir_items)
 
         self.root.after(0, self._rebuild_grid)
 
@@ -190,6 +276,7 @@ class GridViewManager:
         for widget in self.grid_frame.winfo_children():
             widget.destroy()
 
+        self.card_widgets.clear()
         cols = self.grid_size_var.get()
 
         if not self.items:
@@ -203,25 +290,74 @@ class GridViewManager:
             no_videos_label.pack(pady=50)
             return
 
-        for idx, item in enumerate(self.items):
-            row = idx // cols
-            col = idx % cols
+        grid_row = -1
+        video_col = 0
+
+        for idx, item_data in enumerate(self.items):
+            if item_data['type'] == 'header':
+                grid_row += 1
+                video_col = 0
+
+                header = tk.Frame(
+                    self.grid_frame,
+                    bg=self.theme_provider.bg_color
+                )
+                header.grid(row=grid_row, column=0, columnspan=cols, sticky='ew', padx=10, pady=(20, 10))
+
+                label_frame = tk.Frame(header, bg=self.theme_provider.bg_color)
+                label_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+                tk.Label(
+                    label_frame,
+                    text=f"📁 {item_data['name']}",
+                    font=(self.theme_provider.normal_font.actual()['family'], 11, 'bold'),
+                    bg=self.theme_provider.bg_color,
+                    fg=self.theme_provider.accent_color,
+                    anchor='w'
+                ).pack(side=tk.LEFT)
+
+                tk.Label(
+                    label_frame,
+                    text=f"  •  {item_data.get('video_count', 0)} video{'s' if item_data.get('video_count', 0) != 1 else ''}",
+                    font=self.theme_provider.small_font,
+                    bg=self.theme_provider.bg_color,
+                    fg="#888888",
+                    anchor='w'
+                ).pack(side=tk.LEFT)
+
+                separator = tk.Frame(
+                    header,
+                    height=1,
+                    bg=self.theme_provider.frame_border
+                )
+                separator.pack(side=tk.BOTTOM, fill=tk.X, pady=(5, 0))
+
+                grid_row += 1
+                continue
+
+            item = item_data['video_item']
+            video_path = item_data['path']
+            is_selected = video_path in self.selected_items
 
             card = tk.Frame(
                 self.grid_frame,
-                bg=self.theme_provider.listbox_bg,
+                bg=self.theme_provider.accent_color if is_selected else self.theme_provider.listbox_bg,
                 relief=tk.FLAT,
-                bd=0
+                bd=0,
+                highlightthickness=3 if is_selected else 1,
+                highlightbackground=self.theme_provider.accent_color if is_selected else self.theme_provider.frame_border
             )
-            card.grid(row=row, column=col, padx=8, pady=8, sticky='nsew')
+            card.grid(row=grid_row, column=video_col, padx=8, pady=8, sticky='nsew')
+
+            self.card_widgets[video_path] = card
 
             thumb_container = tk.Frame(
                 card,
                 bg="black",
-                width=220,
-                height=165,
-                highlightbackground="#e0e0e0",
-                highlightthickness=1
+                width=280,
+                height=158,
+                highlightthickness=2 if is_selected else 0,
+                highlightbackground=self.theme_provider.accent_color if is_selected else "black"
             )
             thumb_container.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
             thumb_container.pack_propagate(False)
@@ -230,67 +366,45 @@ class GridViewManager:
                 thumb_container,
                 bg="black",
                 fg="white",
-                text="Loading...",
-                font=self.theme_provider.small_font
+                text="▶",
+                font=(self.theme_provider.normal_font.actual()['family'], 24)
             )
             thumb_label.pack(expand=True)
 
-            threading.Thread(target=self._load_thumbnail, args=(item, thumb_label), daemon=True).start()
+            self.thumbnail_executor.submit(self._load_thumbnail, item, thumb_label)
 
-            info_frame = tk.Frame(card, bg=self.theme_provider.listbox_bg)
-            info_frame.pack(fill=tk.X, padx=8, pady=8)
+            info_frame = tk.Frame(
+                card,
+                bg=self.theme_provider.accent_color if is_selected else self.theme_provider.listbox_bg,
+                pady=8,
+                padx=10
+            )
+            info_frame.pack(fill=tk.X)
+
+            name = os.path.basename(item.video_path)
+            if len(name) > 35:
+                name = name[:32] + "..."
 
             name_label = tk.Label(
                 info_frame,
-                text=os.path.basename(item.video_path),
-                bg=self.theme_provider.listbox_bg,
-                fg=self.theme_provider.text_color,
-                wraplength=200,
-                font=self.theme_provider.normal_font,
+                text=name,
+                bg=self.theme_provider.accent_color if is_selected else self.theme_provider.listbox_bg,
+                fg="white" if is_selected else self.theme_provider.text_color,
+                font=(self.theme_provider.normal_font.actual()['family'], 9, 'bold' if is_selected else 'normal'),
                 anchor='w',
                 justify=tk.LEFT
             )
             name_label.pack(fill=tk.X)
 
-            if idx in self.selected_items:
-                card.configure(
-                    bg=self.theme_provider.accent_color,
-                    highlightbackground=self.theme_provider.accent_color,
-                    highlightthickness=3,
-                    relief=tk.SOLID
-                )
-                info_frame.configure(bg=self.theme_provider.accent_color)
-                name_label.configure(
-                    bg=self.theme_provider.accent_color,
-                    fg="white",
-                    font=(self.theme_provider.normal_font.actual()['family'],
-                          self.theme_provider.normal_font.actual()['size'],
-                          'bold')
-                )
-                thumb_container.configure(
-                    highlightbackground=self.theme_provider.accent_color,
-                    highlightthickness=2
-                )
-            else:
-                card.configure(
-                    highlightbackground="#e0e0e0",
-                    highlightthickness=1
-                )
+            for widget in [card, thumb_container, thumb_label, name_label, info_frame]:
+                widget.bind("<Button-1>", lambda e, vp=video_path: self._toggle_select(vp))
+                widget.bind("<Button-3>", lambda e, vp=video_path: self._show_context_menu(e, vp))
+                widget.bind("<Double-Button-1>", lambda e, vp=video_path: self._play_single(vp))
 
-            card.bind("<Button-1>", lambda e, i=idx: self._toggle_select(i))
-            thumb_label.bind("<Button-1>", lambda e, i=idx: self._toggle_select(i))
-            name_label.bind("<Button-1>", lambda e, i=idx: self._toggle_select(i))
-            info_frame.bind("<Button-1>", lambda e, i=idx: self._toggle_select(i))
-
-            card.bind("<Button-3>", lambda e, i=idx: self._show_context_menu(e, i))
-            thumb_label.bind("<Button-3>", lambda e, i=idx: self._show_context_menu(e, i))
-            name_label.bind("<Button-3>", lambda e, i=idx: self._show_context_menu(e, i))
-            info_frame.bind("<Button-3>", lambda e, i=idx: self._show_context_menu(e, i))
-
-            card.bind("<Double-Button-1>", lambda e, i=idx: self._play_single(i))
-            thumb_label.bind("<Double-Button-1>", lambda e, i=idx: self._play_single(i))
-            name_label.bind("<Double-Button-1>", lambda e, i=idx: self._play_single(i))
-            info_frame.bind("<Double-Button-1>", lambda e, i=idx: self._play_single(i))
+            video_col += 1
+            if video_col >= cols:
+                video_col = 0
+                grid_row += 1
 
         for i in range(cols):
             self.grid_frame.columnconfigure(i, weight=1, uniform="col")
@@ -307,10 +421,10 @@ class GridViewManager:
             else:
                 self.selection_label.config(text=f"{count} videos selected", fg=self.theme_provider.accent_color)
 
-    def _show_context_menu(self, event, idx):
+    def _show_context_menu(self, event, video_path):
         context_menu = tk.Menu(self.grid_window, tearoff=0)
 
-        if idx in self.selected_items:
+        if video_path in self.selected_items:
             context_menu.add_command(
                 label=f"Play Selected ({len(self.selected_items)} items)",
                 command=self._play_selected
@@ -318,7 +432,7 @@ class GridViewManager:
         else:
             context_menu.add_command(
                 label="Play This Video",
-                command=lambda: self._play_single(idx)
+                command=lambda: self._play_single(video_path)
             )
 
         context_menu.add_separator()
@@ -456,113 +570,107 @@ class GridViewManager:
         if self.video_preview_manager:
             self.video_preview_manager.tooltip.hide_preview()
 
-    def _toggle_select(self, idx):
-        if idx in self.selected_items:
-            self.selected_items.remove(idx)
+    def _toggle_select(self, video_path):
+        if video_path in self.selected_items:
+            self.selected_items.remove(video_path)
         else:
-            self.selected_items.add(idx)
+            self.selected_items.add(video_path)
 
-        self._update_card_selection(idx)
+        self._update_card_selection(video_path)
         self._update_selection_label()
 
-    def _update_card_selection(self, idx):
-        cols = self.grid_size_var.get()
-        row = idx // cols
-        col = idx % cols
+    def _update_card_selection(self, video_path):
+        if video_path not in self.card_widgets:
+            return
 
-        for widget in self.grid_frame.winfo_children():
-            if isinstance(widget, tk.Frame):
-                grid_info = widget.grid_info()
-                if grid_info and grid_info.get('row') == row and grid_info.get('column') == col:
-                    is_selected = idx in self.selected_items
+        card = self.card_widgets[video_path]
+        is_selected = video_path in self.selected_items
 
-                    info_frame = None
-                    name_label = None
-                    thumb_container = None
+        info_frame = None
+        name_label = None
+        thumb_container = None
 
-                    for child in widget.winfo_children():
-                        if isinstance(child, tk.Frame):
-                            if child.cget('bg') == 'black' or 'highlightbackground' in child.keys():
-                                thumb_container = child
-                            else:
-                                info_frame = child
-                                for label in child.winfo_children():
-                                    if isinstance(label, tk.Label):
-                                        name_label = label
+        for child in card.winfo_children():
+            if isinstance(child, tk.Frame):
+                if child.cget('bg') == 'black' or 'highlightbackground' in child.keys():
+                    thumb_container = child
+                else:
+                    info_frame = child
+                    for label in child.winfo_children():
+                        if isinstance(label, tk.Label):
+                            name_label = label
 
-                    if is_selected:
-                        widget.configure(
-                            bg=self.theme_provider.accent_color,
-                            highlightbackground=self.theme_provider.accent_color,
-                            highlightthickness=3,
-                            relief=tk.SOLID
-                        )
-                        if info_frame:
-                            info_frame.configure(bg=self.theme_provider.accent_color)
-                        if name_label:
-                            name_label.configure(
-                                bg=self.theme_provider.accent_color,
-                                fg="white",
-                                font=(self.theme_provider.normal_font.actual()['family'],
-                                      self.theme_provider.normal_font.actual()['size'],
-                                      'bold')
-                            )
-                        if thumb_container:
-                            thumb_container.configure(
-                                highlightbackground=self.theme_provider.accent_color,
-                                highlightthickness=2
-                            )
-                    else:
-                        widget.configure(
-                            bg=self.theme_provider.listbox_bg,
-                            highlightbackground="#e0e0e0",
-                            highlightthickness=1,
-                            relief=tk.FLAT
-                        )
-                        if info_frame:
-                            info_frame.configure(bg=self.theme_provider.listbox_bg)
-                        if name_label:
-                            name_label.configure(
-                                bg=self.theme_provider.listbox_bg,
-                                fg=self.theme_provider.text_color,
-                                font=self.theme_provider.normal_font
-                            )
-                        if thumb_container:
-                            thumb_container.configure(
-                                highlightbackground="#e0e0e0",
-                                highlightthickness=1
-                            )
-                    break
+        if is_selected:
+            card.configure(
+                bg=self.theme_provider.accent_color,
+                highlightbackground=self.theme_provider.accent_color,
+                highlightthickness=3
+            )
+            if info_frame:
+                info_frame.configure(bg=self.theme_provider.accent_color)
+            if name_label:
+                name_label.configure(
+                    bg=self.theme_provider.accent_color,
+                    fg="white",
+                    font=(self.theme_provider.normal_font.actual()['family'], 9, 'bold')
+                )
+            if thumb_container:
+                thumb_container.configure(
+                    highlightbackground=self.theme_provider.accent_color,
+                    highlightthickness=2
+                )
+        else:
+            card.configure(
+                bg=self.theme_provider.listbox_bg,
+                highlightbackground=self.theme_provider.frame_border,
+                highlightthickness=1
+            )
+            if info_frame:
+                info_frame.configure(bg=self.theme_provider.listbox_bg)
+            if name_label:
+                name_label.configure(
+                    bg=self.theme_provider.listbox_bg,
+                    fg=self.theme_provider.text_color,
+                    font=(self.theme_provider.normal_font.actual()['family'], 9, 'normal')
+                )
+            if thumb_container:
+                thumb_container.configure(
+                    highlightbackground=self.theme_provider.frame_border,
+                    highlightthickness=0
+                )
 
     def _select_all(self):
-        self.selected_items = set(range(len(self.items)))
-        for idx in range(len(self.items)):
-            self._update_card_selection(idx)
+        for item_data in self.items:
+            if item_data['type'] == 'video':
+                video_path = item_data['path']
+                self.selected_items.add(video_path)
+                self._update_card_selection(video_path)
         self._update_selection_label()
 
     def _clear_selection(self):
         old_selection = self.selected_items.copy()
         self.selected_items.clear()
-        for idx in old_selection:
-            self._update_card_selection(idx)
+        for video_path in old_selection:
+            self._update_card_selection(video_path)
         self._update_selection_label()
 
     def _play_selected(self):
         if not self.selected_items:
             return
-        videos = [self.items[i].video_path for i in sorted(self.selected_items)]
+        videos = sorted(list(self.selected_items))
         if self.play_callback:
             self.play_callback(videos)
 
-    def _play_single(self, idx):
+    def _play_single(self, video_path):
         old_selection = self.selected_items.copy()
-        self.selected_items = {idx}
+        self.selected_items = {video_path}
 
-        for old_idx in old_selection:
-            if old_idx != idx:
-                self._update_card_selection(old_idx)
+        for old_path in old_selection:
+            if old_path != video_path:
+                self._update_card_selection(old_path)
 
-        if idx not in old_selection:
-            self._update_card_selection(idx)
+        if video_path not in old_selection:
+            self._update_card_selection(video_path)
 
+        self._update_selection_label()
         self._play_selected()
