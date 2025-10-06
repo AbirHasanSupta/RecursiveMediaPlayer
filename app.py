@@ -444,11 +444,11 @@ def select_multiple_folders_and_play():
             )
             self.watch_history_button.pack(side=tk.LEFT)
 
-            self.grid_view_button = self.create_button(
-                media_section, "Grid View",
-                self._show_grid_view, "primary", "sm"
-            )
-            self.grid_view_button.pack(side=tk.LEFT, padx=(5, 0))
+            # self.grid_view_button = self.create_button(
+            #     media_section, "Grid View",
+            #     self._show_grid_view, "primary", "sm"
+            # )
+            # self.grid_view_button.pack(side=tk.LEFT, padx=(5, 0))
 
         def _show_grid_view(self):
             selected_dir = self.get_current_selected_directory()

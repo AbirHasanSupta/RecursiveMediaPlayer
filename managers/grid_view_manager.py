@@ -195,7 +195,12 @@ class GridViewManager:
             canvas.itemconfig(canvas_frame, width=event.width)
 
         canvas.bind("<Configure>", on_canvas_configure)
-        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+
+        def on_mousewheel(e):
+            if canvas.winfo_exists():
+                canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+
+        canvas.bind_all("<MouseWheel>", on_mousewheel)
 
 
         self.grid_window.bind("<Control-a>", lambda e: self._select_all())
@@ -204,6 +209,10 @@ class GridViewManager:
         self.grid_window.bind("<Return>", lambda e: self._play_selected())
 
         def on_closing():
+            try:
+                canvas.unbind_all("<MouseWheel>")
+            except:
+                pass
             if hasattr(self, 'thumbnail_executor'):
                 self.thumbnail_executor.shutdown(wait=False, cancel_futures=True)
             self.grid_window.destroy()
