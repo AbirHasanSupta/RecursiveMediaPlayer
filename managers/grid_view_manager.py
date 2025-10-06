@@ -85,7 +85,7 @@ class GridViewManager:
             width=5,
             command=lambda: self._rebuild_grid(),
             font=self.theme_provider.normal_font,
-            bg="white",
+            bg=self.theme_provider.bg_color,
             fg=self.theme_provider.text_color,
             relief=tk.FLAT,
             bd=1,
@@ -114,6 +114,14 @@ class GridViewManager:
             fg=self.theme_provider.text_color
         )
         search_entry.pack(side=tk.LEFT, padx=(0, 5))
+
+        if hasattr(self.theme_provider, 'entry_bg'):
+            search_entry.configure(
+                bg=self.theme_provider.entry_bg,
+                fg=self.theme_provider.entry_fg,
+                insertbackground=self.theme_provider.entry_fg,
+                highlightbackground=self.theme_provider.entry_border
+            )
 
         clear_search_btn = self.theme_provider.create_button(
             left_toolbar,

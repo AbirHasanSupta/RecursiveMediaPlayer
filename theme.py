@@ -153,6 +153,9 @@ class ThemeSelector:
             self.console_fg = "#BCBEC4"
             self.frame_border = "#323232"
             self.header_color = "#BBBBBB"
+            self.entry_bg = "#313335"
+            self.entry_fg = "#A9B7C6"
+            self.entry_border = "#323232"
         else:
             self.bg_color = "#f5f5f5"
             self.accent_color = "#3498db"
@@ -163,6 +166,9 @@ class ThemeSelector:
             self.console_bg = "#2c3e50"
             self.console_fg = "#ecf0f1"
             self.frame_border = "#cccccc"
+            self.entry_bg = "white"
+            self.entry_fg = "#333333"
+            self.entry_border = "#e0e0e0"
             self.header_color = "#333333"
 
         if hasattr(self, 'theme_button'):
@@ -247,6 +253,20 @@ class ThemeSelector:
             foreground=[("active", self.text_color), ("selected", self.accent_color)],
             background=[("active", self.bg_color)]
         )
+
+        for entry_attr in dir(self):
+            if entry_attr.endswith('_entry') and hasattr(self, entry_attr):
+                entry = getattr(self, entry_attr)
+                if isinstance(entry, tk.Entry):
+                    entry.configure(
+                        bg=self.entry_bg,
+                        fg=self.entry_fg,
+                        insertbackground=self.entry_fg,
+                        highlightbackground=self.entry_border
+                    )
+
+        style.configure("TRadiobutton", background=self.bg_color, foreground=self.text_color)
+        style.map("TRadiobutton", background=[("active", self.bg_color)])
 
         self.update_all_buttons()
         self.update_frames_recursive(self.root)

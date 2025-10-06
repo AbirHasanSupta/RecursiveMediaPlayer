@@ -277,6 +277,14 @@ class SettingsUI:
         )
         path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
 
+        if hasattr(self.theme_provider, 'entry_bg'):
+            path_entry.configure(
+                bg=self.theme_provider.entry_bg,
+                fg=self.theme_provider.entry_fg,
+                insertbackground=self.theme_provider.entry_fg,
+                highlightbackground=self.theme_provider.entry_border
+            )
+
         browse_btn = self.theme_provider.create_button(
             path_frame, "Browse", self._browse_index_path, "secondary", "sm"
         )
@@ -327,6 +335,13 @@ class SettingsUI:
         )
         workers_spin.pack(side=tk.LEFT, padx=(0, 5))
 
+        if hasattr(self.theme_provider, 'entry_bg'):
+            workers_spin.configure(
+                bg=self.theme_provider.entry_bg,
+                fg=self.theme_provider.entry_fg,
+                buttonbackground=self.theme_provider.bg_color
+            )
+
         tk.Label(
             workers_frame,
             text="(1-8, recommend 2-4)",
@@ -360,6 +375,13 @@ class SettingsUI:
         )
         frames_spin.pack(side=tk.LEFT, padx=(0, 5))
 
+        if hasattr(self.theme_provider, 'entry_bg'):
+            frames_spin.configure(
+                bg=self.theme_provider.entry_bg,
+                fg=self.theme_provider.entry_fg,
+                buttonbackground=self.theme_provider.bg_color
+            )
+
         tk.Label(
             frames_frame,
             text="(20-200, higher = more accurate)",
@@ -372,7 +394,8 @@ class SettingsUI:
         incremental_check = ttk.Checkbutton(
             prep_section,
             text="Incremental Preprocessing (add new videos only)",
-            variable=self.incremental_var
+            variable=self.incremental_var,
+            style="Modern.TCheckbutton"
         )
         incremental_check.pack(anchor='w', pady=2)
 
@@ -380,7 +403,8 @@ class SettingsUI:
         gpu_check = ttk.Checkbutton(
             prep_section,
             text="Enable GPU Acceleration (if available)",
-            variable=self.gpu_acceleration_var
+            variable=self.gpu_acceleration_var,
+            style="Modern.TCheckbutton"
         )
         gpu_check.pack(anchor='w', pady=2)
 
@@ -388,7 +412,8 @@ class SettingsUI:
         skip_raw_check = ttk.Checkbutton(
             prep_section,
             text="Skip 'Raw' directories during preprocessing",
-            variable=self.skip_raw_var
+            variable=self.skip_raw_var,
+            style="Modern.TCheckbutton"
         )
         skip_raw_check.pack(anchor='w', pady=2)
 
@@ -475,6 +500,13 @@ class SettingsUI:
         )
         duration_spin.pack(side=tk.LEFT, padx=(0, 5))
 
+        if hasattr(self.theme_provider, 'entry_bg'):
+            duration_spin.configure(
+                bg=self.theme_provider.entry_bg,
+                fg=self.theme_provider.entry_fg,
+                buttonbackground=self.theme_provider.bg_color
+            )
+
         tk.Label(
             duration_frame,
             text="(1-10 seconds)",
@@ -487,7 +519,8 @@ class SettingsUI:
         video_preview_check = ttk.Checkbutton(
             preview_section,
             text="Use Video Previews (disable for static thumbnails only)",
-            variable=self.use_video_preview_var
+            variable=self.use_video_preview_var,
+            style="Modern.TCheckbutton"
         )
         video_preview_check.pack(anchor='w', pady=2)
 
@@ -544,6 +577,13 @@ class SettingsUI:
             bg="white"
         )
         cleanup_spin.pack(side=tk.LEFT, padx=(0, 5))
+
+        if hasattr(self.theme_provider, 'entry_bg'):
+            cleanup_spin.configure(
+                bg=self.theme_provider.entry_bg,
+                fg=self.theme_provider.entry_fg,
+                buttonbackground=self.theme_provider.bg_color
+            )
 
         tk.Label(
             cleanup_frame,

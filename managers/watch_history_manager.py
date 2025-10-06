@@ -260,11 +260,9 @@ class WatchHistoryUI:
         self._refresh_history_list()
 
     def _setup_history_ui(self):
-        # Main container
         main_frame = tk.Frame(self.history_window, bg=self.theme_provider.bg_color)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-        # Header with stats
         header_frame = tk.Frame(main_frame, bg=self.theme_provider.bg_color)
         header_frame.pack(fill=tk.X, pady=(0, 20))
 
@@ -277,7 +275,6 @@ class WatchHistoryUI:
         )
         title_label.pack(side=tk.LEFT)
 
-        # Stats label
         self.stats_label = tk.Label(
             header_frame,
             text="",
@@ -287,7 +284,6 @@ class WatchHistoryUI:
         )
         self.stats_label.pack(side=tk.RIGHT)
 
-        # Filter frame
         filter_frame = tk.Frame(main_frame, bg=self.theme_provider.bg_color)
         filter_frame.pack(fill=tk.X, pady=(0, 15))
 
@@ -315,11 +311,11 @@ class WatchHistoryUI:
                 text=text,
                 variable=self.filter_var,
                 value=value,
-                command=self._apply_filter
+                command=self._apply_filter,
+                style="TRadiobutton"
             )
             radio.pack(side=tk.LEFT, padx=(0, 15))
 
-        # History list
         list_frame = tk.Frame(
             main_frame,
             bg=self.theme_provider.bg_color,
@@ -328,12 +324,10 @@ class WatchHistoryUI:
         )
         list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
 
-        # Create treeview for better data display
         columns = ('video', 'directory', 'watched_at', 'duration', 'completion')
 
         self.history_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=15)
 
-        # Define column headings and widths
         self.history_tree.heading('video', text='Video Name')
         self.history_tree.heading('directory', text='Directory')
         self.history_tree.heading('watched_at', text='Watched At')
@@ -346,13 +340,11 @@ class WatchHistoryUI:
         self.history_tree.column('duration', width=100, minwidth=80)
         self.history_tree.column('completion', width=100, minwidth=80)
 
-        # Scrollbars for treeview
         v_scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.history_tree.yview)
         h_scrollbar = ttk.Scrollbar(list_frame, orient=tk.HORIZONTAL, command=self.history_tree.xview)
 
         self.history_tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
 
-        # Pack treeview and scrollbars
         self.history_tree.grid(row=0, column=0, sticky='nsew')
         v_scrollbar.grid(row=0, column=1, sticky='ns')
         h_scrollbar.grid(row=1, column=0, sticky='ew')
@@ -360,11 +352,9 @@ class WatchHistoryUI:
         list_frame.grid_rowconfigure(0, weight=1)
         list_frame.grid_columnconfigure(0, weight=1)
 
-        # Button frame
         button_frame = tk.Frame(main_frame, bg=self.theme_provider.bg_color)
         button_frame.pack(fill=tk.X)
 
-        # Left side buttons
         left_buttons = tk.Frame(button_frame, bg=self.theme_provider.bg_color)
         left_buttons.pack(side=tk.LEFT)
 
@@ -382,7 +372,6 @@ class WatchHistoryUI:
         )
         self.clear_all_btn.pack(side=tk.LEFT)
 
-        # Right side buttons
         right_buttons = tk.Frame(button_frame, bg=self.theme_provider.bg_color)
         right_buttons.pack(side=tk.RIGHT)
 

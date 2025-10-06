@@ -586,7 +586,6 @@ class PlaylistInfoDialog:
         main_frame = tk.Frame(self.dialog, bg=self.theme_provider.bg_color, padx=20, pady=20)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Name field
         name_label = tk.Label(
             main_frame,
             text="Playlist Name:",
@@ -609,7 +608,14 @@ class PlaylistInfoDialog:
         self.name_entry.pack(fill=tk.X, pady=(0, 15))
         self.name_entry.insert(0, name)
 
-        # Description field
+        if hasattr(self.theme_provider, 'entry_bg'):
+            self.name_entry.configure(
+                bg=self.theme_provider.entry_bg,
+                fg=self.theme_provider.entry_fg,
+                insertbackground=self.theme_provider.entry_fg,
+                highlightbackground=self.theme_provider.entry_border
+            )
+
         desc_label = tk.Label(
             main_frame,
             text="Description (optional):",
@@ -633,7 +639,14 @@ class PlaylistInfoDialog:
         self.description_entry.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
         self.description_entry.insert("1.0", description)
 
-        # Buttons
+        if hasattr(self.theme_provider, 'entry_bg'):
+            self.description_entry.configure(
+                bg=self.theme_provider.entry_bg,
+                fg=self.theme_provider.entry_fg,
+                insertbackground=self.theme_provider.entry_fg,
+                highlightbackground=self.theme_provider.entry_border
+            )
+
         btn_frame = tk.Frame(main_frame, bg=self.theme_provider.bg_color)
         btn_frame.pack(fill=tk.X)
 
@@ -647,7 +660,6 @@ class PlaylistInfoDialog:
         )
         ok_btn.pack(side=tk.RIGHT)
 
-        # Focus and bindings
         self.name_entry.focus_set()
         self.dialog.bind('<Return>', lambda e: self._ok())
         self.dialog.bind('<Escape>', lambda e: self._cancel())
