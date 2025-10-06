@@ -326,7 +326,13 @@ class WatchHistoryUI:
 
         columns = ('video', 'directory', 'watched_at', 'duration', 'completion')
 
-        self.history_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=15)
+        style = ttk.Style()
+        style.configure("Custom.Treeview",
+                        background=self.theme_provider.bg_color,
+                        fieldbackground=self.theme_provider.bg_color,
+                        foreground=self.theme_provider.text_color)
+
+        self.history_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=15, style="Custom.Treeview")
 
         self.history_tree.heading('video', text='Video Name')
         self.history_tree.heading('directory', text='Directory')
