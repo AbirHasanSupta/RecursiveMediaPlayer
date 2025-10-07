@@ -62,7 +62,7 @@ def select_multiple_folders_and_play():
             self.setup_theme()
 
             root.title("Recursive Video Player")
-            root.geometry("1200x800")
+            root.geometry("1600x900")
             root.state('zoomed')
             root.protocol("WM_DELETE_WINDOW", self.cancel)
             root.configure(bg=self.bg_color)
