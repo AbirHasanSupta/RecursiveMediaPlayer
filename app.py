@@ -82,7 +82,26 @@ def select_multiple_folders_and_play():
             max_workers = min(8, (os.cpu_count() or 4))
             self.executor = ProcessPoolExecutor(max_workers=max_workers)
             self.apply_theme()
-            if self.save_directories:
+            command_line_dir = self._get_command_line_directory()
+            if command_line_dir:
+                self.selected_dirs = []
+                if self.save_directories:
+                    self.selected_dirs = preferences.get('selected_dirs', [])
+
+                if command_line_dir not in self.selected_dirs:
+                    self.selected_dirs.append(command_line_dir)
+
+                for directory in self.selected_dirs:
+                    display_name = directory
+                    if len(directory) > 60:
+                        display_name = os.path.basename(directory)
+                        parent = os.path.dirname(directory)
+                        if parent:
+                            display_name = f"{os.path.basename(parent)}/{display_name}"
+                        display_name = f".../{display_name}"
+                    self.dir_listbox.insert(tk.END, display_name)
+                    self._submit_scan(directory)
+            elif self.save_directories:
                 self.selected_dirs = preferences.get('selected_dirs', [])
                 for directory in self.selected_dirs:
                     display_name = directory
@@ -125,6 +144,13 @@ def select_multiple_folders_and_play():
 
             self.grid_view_manager = GridViewManager(self.root, self, self.update_console)
             self.grid_view_manager.set_play_callback(self._play_grid_videos)
+
+        def _get_command_line_directory(self):
+            if len(sys.argv) > 1:
+                arg_path = sys.argv[1]
+                if os.path.isdir(arg_path):
+                    return os.path.abspath(arg_path)
+            return None
 
         def setup_theme(self):
             self.bg_color = "#f5f5f5"
