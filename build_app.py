@@ -21,9 +21,42 @@ from managers.video_preview_manager import VideoPreviewManager
 import win32clipboard as wcb
 import win32con
 import struct
+import socket
+import time
 
 
 def select_multiple_folders_and_play():
+    port_file = os.path.expanduser("~/.rmp_instance_port")
+
+    if len(sys.argv) > 1:
+        arg_path = sys.argv[1]
+        if os.path.isdir(arg_path):
+            if os.path.exists(port_file):
+                try:
+                    with open(port_file, 'r') as f:
+                        port = int(f.read().strip())
+
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    result = sock.connect_ex(("127.0.0.1", port))
+                    sock.close()
+
+                    if result == 0:
+                        import win32gui
+                        import win32con
+                        hwnd = win32gui.FindWindow(None, "Recursive Video Player")
+                        if hwnd:
+                            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                            win32gui.SetForegroundWindow(hwnd)
+                            time.sleep(0.5)
+
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sock.connect(("127.0.0.1", port))
+                        sock.send(arg_path.encode())
+                        sock.close()
+                        return
+                except:
+                    pass
+
     class DirectorySelector(ThemeSelector):
         def __init__(self, root):
             super().__init__()
@@ -73,6 +106,34 @@ def select_multiple_folders_and_play():
             self.setup_status_section()
             self.setup_console_section()
             self.setup_action_buttons()
+
+            def start_ipc_server():
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind(("127.0.0.1", 0))
+                port = sock.getsockname()[1]
+
+                port_file = os.path.expanduser("~/.rmp_instance_port")
+                with open(port_file, 'w') as f:
+                    f.write(str(port))
+
+                sock.listen(1)
+
+                def accept_connections():
+                    while True:
+                        try:
+                            conn, addr = sock.accept()
+                            data = conn.recv(1024).decode()
+                            conn.close()
+                            if data and os.path.isdir(data):
+                                self.root.after(0, lambda: self._add_directory_from_ipc(data))
+                        except:
+                            break
+
+                threading.Thread(target=accept_connections, daemon=True).start()
+
+            start_ipc_server()
+
 
             self.scan_cache = {}
             self.pending_scans = set()
@@ -139,6 +200,21 @@ def select_multiple_folders_and_play():
 
             self.grid_view_manager = GridViewManager(self.root, self, self.update_console)
             self.grid_view_manager.set_play_callback(self._play_grid_videos)
+
+        def _add_directory_from_ipc(self, directory):
+            if directory not in self.selected_dirs:
+                self.selected_dirs.append(directory)
+                display_name = directory
+                if len(directory) > 60:
+                    display_name = os.path.basename(directory)
+                    parent = os.path.dirname(directory)
+                    if parent:
+                        display_name = f"{os.path.basename(parent)}/{display_name}"
+                    display_name = f".../{display_name}"
+                self.dir_listbox.insert(tk.END, display_name)
+                self._submit_scan(directory)
+                self.update_video_count()
+                self.save_preferences()
 
         def _get_command_line_directory(self):
             if len(sys.argv) > 1:

@@ -24,6 +24,9 @@ class GridViewManager:
         self.selected_items = set()
         self.card_widgets = {}
         self.play_callback = None
+        self.is_loading = False
+        self.loading_lock = threading.Lock()
+        self.pending_tasks = set()
 
     def set_play_callback(self, callback):
         self.play_callback = callback
@@ -32,6 +35,9 @@ class GridViewManager:
         if self.grid_window and self.grid_window.winfo_exists():
             self.grid_window.lift()
             return
+
+        with self.loading_lock:
+            self.is_loading = True
 
         self.grid_window = tk.Toplevel(self.root)
         self.grid_window.title("Grid View - Video Gallery")
@@ -217,6 +223,10 @@ class GridViewManager:
         self.grid_window.bind("<Return>", lambda e: self._play_selected())
 
         def on_closing():
+            with self.loading_lock:
+                self.is_loading = False
+            for task in list(self.pending_tasks):
+                task.cancel()
             try:
                 canvas.unbind_all("<MouseWheel>")
             except:
@@ -234,27 +244,34 @@ class GridViewManager:
         threading.Thread(target=self._load_videos, args=(videos,), daemon=True).start()
 
     def _load_videos(self, videos):
-        from collections import defaultdict
-        dir_groups = defaultdict(list)
-        for video in videos:
-            dir_path = os.path.dirname(video)
-            dir_groups[dir_path].append(video)
+        try:
+            with self.loading_lock:
+                if not self.is_loading:
+                    return
+            from collections import defaultdict
+            dir_groups = defaultdict(list)
+            for video in videos:
+                dir_path = os.path.dirname(video)
+                dir_groups[dir_path].append(video)
 
-        self.items = []
-        for dir_path in sorted(dir_groups.keys()):
-            video_count = len(dir_groups[dir_path])
-            self.items.append({
-                'type': 'header',
-                'path': dir_path,
-                'name': os.path.basename(dir_path) or dir_path,
-                'video_count': video_count
-            })
-            for video in sorted(dir_groups[dir_path]):
-                self.items.append({'type': 'video', 'path': video, 'video_item': GridViewItem(video)})
+            self.items = []
+            for dir_path in sorted(dir_groups.keys()):
+                video_count = len(dir_groups[dir_path])
+                self.items.append({
+                    'type': 'header',
+                    'path': dir_path,
+                    'name': os.path.basename(dir_path) or dir_path,
+                    'video_count': video_count
+                })
+                for video in sorted(dir_groups[dir_path]):
+                    self.items.append({'type': 'video', 'path': video, 'video_item': GridViewItem(video)})
 
-        self.all_items = self.items.copy()
+            self.all_items = self.items.copy()
 
-        self.root.after(0, self._rebuild_grid)
+            self.root.after(0, self._rebuild_grid)
+        except Exception as e:
+            with self.loading_lock:
+                self.is_loading = False
 
     def _filter_directories(self):
         search_term = self.search_var.get().lower()
@@ -533,6 +550,9 @@ class GridViewManager:
 
     def _load_thumbnail(self, item, label):
         try:
+            with self.loading_lock:
+                if not self.is_loading:
+                    return
             if self.video_preview_manager:
                 video_path_norm = os.path.normpath(item.video_path)
 
