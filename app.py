@@ -9,6 +9,8 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 
 from key_press import listen_keys, cleanup_hotkeys
+from managers.filter_sort_manager import AdvancedFilterSortManager
+from managers.filter_sort_ui import FilterSortUI
 from managers.grid_view_manager import GridViewManager
 from theme import ThemeSelector
 from utils import gather_videos_with_directories, is_video
@@ -147,6 +149,17 @@ def select_multiple_folders_and_play():
             self.grid_view_manager.set_play_callback(self._play_grid_videos)
             self.queue_manager = VideoQueueManager(self.root, self)
             self.queue_manager.set_play_callback(self._play_queue_videos)
+
+            self.filter_sort_manager = AdvancedFilterSortManager(
+                watch_history_manager=self.watch_history_manager
+            )
+
+            self.filter_sort_ui = FilterSortUI(
+                self.root,
+                self,
+                self.filter_sort_manager,
+                self._apply_filters_and_refresh
+            )
 
         def _get_command_line_directory(self):
             if len(sys.argv) > 1:
@@ -1702,6 +1715,8 @@ def select_multiple_folders_and_play():
             threading.Thread(target=_run, daemon=True).start()
 
         def on_video_changed(self, video_index, video_path):
+            if hasattr(self, 'filter_sort_manager'):
+                self.filter_sort_manager.metadata_cache.update_play_stats(video_path)
             self.last_played_video_index = video_index
             self.last_played_video_path = video_path
             if self.smart_resume_var.get():
@@ -2336,6 +2351,15 @@ def select_multiple_folders_and_play():
             theme_frame = tk.Frame(self.button_frame, bg=self.bg_color)
             theme_frame.pack(side=tk.LEFT, expand=True)
 
+            self.filter_sort_button = self.create_button(
+                theme_frame,
+                text="🔍 Filter/Sort",
+                command=self._show_filter_dialog,
+                variant="primary",
+                size="md"
+            )
+            self.filter_sort_button.pack(side=tk.LEFT, padx=(0, 10))
+
             self.ai_button = self.create_button(
                 theme_frame,
                 text="AI Mode" if not self.ai_mode else "Normal Mode",
@@ -2924,6 +2948,135 @@ def select_multiple_folders_and_play():
 
         def _show_settings(self):
             self.settings_manager.show_settings()
+
+        def _show_filter_dialog(self):
+            """Show filter/sort dialog"""
+            self.filter_sort_ui.show_filter_dialog()
+
+        def _apply_filters_and_refresh(self):
+            """Apply filters and refresh the current view"""
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                messagebox.showwarning("Warning", "Please select a directory first")
+                return
+
+            # Show progress dialog
+            progress_window = tk.Toplevel(self.root)
+            progress_window.title("Applying Filters")
+            progress_window.geometry("400x150")
+            progress_window.configure(bg=self.bg_color)
+            progress_window.transient(self.root)
+            progress_window.grab_set()
+
+            progress_label = tk.Label(
+                progress_window,
+                text="Processing videos...",
+                font=self.normal_font,
+                bg=self.bg_color,
+                fg=self.text_color
+            )
+            progress_label.pack(pady=20)
+
+            progress_bar = ttk.Progressbar(
+                progress_window,
+                length=350,
+                mode='determinate'
+            )
+            progress_bar.pack(pady=10)
+
+            status_label = tk.Label(
+                progress_window,
+                text="",
+                font=self.small_font,
+                bg=self.bg_color,
+                fg="#666666"
+            )
+            status_label.pack()
+
+            def update_progress(current, total):
+                if total > 0:
+                    progress = (current / total) * 100
+                    progress_bar['value'] = progress
+                    status_label.config(text=f"Processing {current}/{total} videos...")
+                    progress_window.update()
+
+            def process_in_thread():
+                try:
+                    # Get all videos from current directory
+                    cache = self.scan_cache.get(selected_dir)
+                    if not cache:
+                        def show_warning():
+                            progress_window.destroy()
+                            messagebox.showwarning("Warning", "Directory not scanned yet")
+
+                        self.root.after(0, show_warning)
+                        return
+
+                    videos, _, _ = cache
+
+                    # Apply filters and sort
+                    filtered_sorted = self.filter_sort_manager.apply_filter_and_sort(
+                        videos,
+                        load_properties=True,
+                        progress_callback=lambda c, t: self.root.after(0, lambda: update_progress(c, t))
+                    )
+
+                    def update_ui():
+                        try:
+                            progress_window.destroy()
+                        except:
+                            pass
+
+                        # Update the exclusion listbox with filtered results
+                        self.exclusion_listbox.delete(0, tk.END)
+                        self.current_subdirs_mapping = {}
+
+                        if not filtered_sorted:
+                            self.exclusion_listbox.insert(tk.END, "No videos match the current filters")
+                            self.update_console("No videos match current filters")
+                            return
+
+                        for idx, video_path in enumerate(filtered_sorted):
+                            try:
+                                rel_path = os.path.relpath(video_path, selected_dir)
+                            except ValueError:
+                                rel_path = os.path.basename(video_path)
+
+                            display_name = f"▶ {rel_path}"
+
+                            # Check if excluded
+                            if self.is_video_excluded(selected_dir, video_path):
+                                display_name += " 🚫[EXCLUDED]"
+
+                            self.exclusion_listbox.insert(tk.END, display_name)
+                            self.current_subdirs_mapping[idx] = video_path
+
+                        self.selected_dir_label.config(
+                            text=f"Filtered: {len(filtered_sorted)} videos in '{os.path.basename(selected_dir)}'"
+                        )
+                        self.update_console(
+                            f"Applied filters: {len(filtered_sorted)} videos shown from {len(videos)} total")
+
+                        # Attach video preview
+                        if hasattr(self, 'video_preview_manager'):
+                            self.video_preview_manager.attach_to_listbox(
+                                self.exclusion_listbox,
+                                self.current_subdirs_mapping
+                            )
+
+                    self.root.after(0, update_ui)
+
+                except Exception as e:
+                    def show_error():
+                        try:
+                            progress_window.destroy()
+                        except:
+                            pass
+                        messagebox.showerror("Error", f"Filter error: {e}")
+
+                    self.root.after(0, show_error)
+
+            threading.Thread(target=process_in_thread, daemon=True).start()
 
         def _save_volume_callback(self, volume):
             self.volume = volume
