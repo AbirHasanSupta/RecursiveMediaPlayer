@@ -18,6 +18,7 @@ from managers.watch_history_manager import WatchHistoryManager
 from managers.resume_playback_manager import ResumePlaybackManager
 from managers.settings_manager import SettingsManager
 from managers.video_preview_manager import VideoPreviewManager
+from managers.video_queue_manager import VideoQueueManager
 import win32clipboard as wcb
 import win32con
 import struct
@@ -144,6 +145,8 @@ def select_multiple_folders_and_play():
 
             self.grid_view_manager = GridViewManager(self.root, self, self.update_console)
             self.grid_view_manager.set_play_callback(self._play_grid_videos)
+            self.queue_manager = VideoQueueManager(self.root, self)
+            self.queue_manager.set_play_callback(self._play_queue_videos)
 
         def _get_command_line_directory(self):
             if len(sys.argv) > 1:
@@ -465,6 +468,12 @@ def select_multiple_folders_and_play():
             )
             self.manage_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
 
+            self.queue_manager_button = self.create_button(
+                media_section, "Manage Queue",
+                self._show_queue_manager, "primary", "sm"
+            )
+            self.queue_manager_button.pack(side=tk.LEFT, padx=(0, 5))
+
             self.watch_history_button = self.create_button(
                 media_section, "Watch History",
                 self._show_watch_history, "history", "sm"
@@ -653,7 +662,6 @@ def select_multiple_folders_and_play():
             threading.Thread(target=load_ai_models, daemon=True).start()
 
         def show_ai_loading_progress(self):
-            """Show loading progress for AI model initialization"""
             if not hasattr(self, '_ai_loading_dots'):
                 self._ai_loading_dots = 0
 
@@ -1129,6 +1137,15 @@ def select_multiple_folders_and_play():
             self.context_menu.add_command(
                 label="Add to Playlist",
                 command=lambda: self._context_add_to_playlist(selection)
+            )
+
+            self.context_menu.add_command(
+                label="Add to Queue",
+                command=lambda: self._context_add_to_queue(selection, mode="queue")
+            )
+            self.context_menu.add_command(
+                label="Play Next",
+                command=lambda: self._context_add_to_queue(selection, mode="next")
             )
 
             self.context_menu.add_separator()
@@ -2720,6 +2737,116 @@ def select_multiple_folders_and_play():
                 self.keys_thread.start()
 
             threading.Thread(target=start_playlist_player, daemon=True).start()
+
+        def _show_queue_manager(self):
+            self.queue_manager.show_manager()
+
+        def _context_add_to_queue(self, selection, mode="queue"):
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                return
+
+            selected_videos = []
+            selected_folders = []
+
+            for index in selection:
+                item_path = self.current_subdirs_mapping.get(index)
+                if not item_path:
+                    continue
+
+                if os.path.isfile(item_path) and is_video(item_path):
+                    if not self.is_video_excluded(selected_dir, item_path):
+                        selected_videos.append(item_path)
+                elif os.path.isdir(item_path):
+                    selected_folders.append(item_path)
+
+            for folder in selected_folders:
+                try:
+                    for root, dirs, files in os.walk(folder):
+                        for f in files:
+                            full_path = os.path.join(root, f)
+                            if is_video(full_path):
+                                if not self.is_video_excluded(selected_dir, full_path):
+                                    selected_videos.append(full_path)
+                except Exception as e:
+                    self.update_console(f"Error reading folder {folder}: {e}")
+
+            seen = set()
+            final_videos = []
+            for v in selected_videos:
+                v_norm = os.path.normpath(v)
+                if v_norm not in seen:
+                    seen.add(v_norm)
+                    final_videos.append(v_norm)
+
+            if final_videos:
+                if mode == "next":
+                    count = self.queue_manager.play_next(final_videos, added_from="selection")
+                    self.update_console(f"Added {count} videos to play next in queue")
+                else:
+                    count = self.queue_manager.add_to_queue(final_videos, added_from="selection")
+                    self.update_console(f"Added {count} videos to queue")
+            else:
+                messagebox.showwarning("Warning", "No valid videos found in selection")
+
+        def _play_queue_videos(self, videos):
+            if not videos:
+                return
+
+            if self.controller:
+                self.controller.stop()
+                cleanup_hotkeys()
+
+            all_video_to_dir = {}
+            all_directories = []
+
+            for video_path in videos:
+                if os.path.isfile(video_path):
+                    video_dir = os.path.dirname(video_path)
+                    all_video_to_dir[video_path] = video_dir
+                    if video_dir not in all_directories:
+                        all_directories.append(video_dir)
+
+            all_directories.sort()
+            valid_videos = list(all_video_to_dir.keys())
+
+            if not valid_videos:
+                messagebox.showwarning("Warning", "No valid videos found")
+                return
+
+            def start_queue_player():
+                self.update_console(f"Playing queue with {len(valid_videos)} videos")
+                self.controller = VLCPlayerControllerForMultipleDirectory(
+                    valid_videos, all_video_to_dir, all_directories, self.update_console
+                )
+                self.controller.set_loop_mode(self.loop_mode)
+                self.controller.volume = self.volume
+                self.controller.player.audio_set_volume(self.volume)
+                self.controller.set_volume_save_callback(self._save_volume_callback)
+                self.controller.set_watch_history_callback(
+                    self.watch_history_manager.track_video_playback
+                )
+                self.controller.set_resume_manager(self.resume_manager)
+
+                initial_speed = self.speed_var.get()
+                if initial_speed != 1.0:
+                    self.controller.set_initial_playback_rate(initial_speed)
+                    self.update_console(f"Initial playback speed set to {initial_speed}x")
+
+                self.controller.set_start_index(0)
+                self.controller.set_video_change_callback(self.on_video_changed)
+
+                if self.player_thread and self.player_thread.is_alive():
+                    self.controller.running = False
+                    self.player_thread.join(timeout=1.0)
+
+                self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
+                self.player_thread.start()
+
+                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
+                self.keys_thread.start()
+
+            threading.Thread(target=start_queue_player, daemon=True).start()
 
         def _show_watch_history(self):
             self.watch_history_manager.show_manager()

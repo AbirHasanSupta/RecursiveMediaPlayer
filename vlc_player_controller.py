@@ -498,8 +498,28 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
         if mode == "shuffle" and not hasattr(self, 'played_indices'):
             self.played_indices = set()
 
-
     def next_video(self):
+        if hasattr(self, 'queue_manager') and self.queue_manager:
+            next_video_path = self.queue_manager.advance_queue()
+
+            if next_video_path and os.path.isfile(next_video_path):
+                try:
+                    next_index = self.videos.index(next_video_path)
+                    self.play_video(next_index)
+                    if self.logger:
+                        self.logger(f"Playing next from queue: {os.path.basename(next_video_path)}")
+                    return
+                except ValueError:
+                    if self.logger:
+                        self.logger("Queue video not in current playlist, loading...")
+                    pass
+            elif next_video_path is None:
+                if self.logger:
+                    self.logger("Reached end of queue")
+                if self.loop_mode == "loop_off":
+                    self.player.pause()
+                    return
+
         if self.loop_mode == "shuffle":
             self._next_video_shuffle()
         elif self.loop_mode == "loop_off":
@@ -538,3 +558,16 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
         else:
             self.index = (self.index - 1) % len(self.videos)
             self.play_video(self.index)
+
+    def set_queue_manager(self, queue_manager):
+        self.queue_manager = queue_manager
+
+    def play_video_by_path(self, video_path):
+        try:
+            index = self.videos.index(video_path)
+            self.play_video(index)
+            return True
+        except ValueError:
+            if self.logger:
+                self.logger(f"Video not found in playlist: {os.path.basename(video_path)}")
+            return False
