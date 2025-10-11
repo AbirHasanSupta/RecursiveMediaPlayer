@@ -421,9 +421,12 @@ class GridViewManager:
             name_label.pack(fill=tk.X)
 
             for widget in [card, thumb_container, thumb_label, name_label, info_frame]:
-                widget.bind("<Button-1>", lambda e, vp=video_path: self._toggle_select(vp))
-                widget.bind("<Button-3>", lambda e, vp=video_path: self._show_context_menu(e, vp))
+                widget.bind("<Button-1>", lambda e, vp=video_path: self._on_card_click(e, vp))
+                widget.bind("<Button-3>", lambda e, vp=video_path: self._on_card_right_click(e, vp))
                 widget.bind("<Double-Button-1>", lambda e, vp=video_path: self._play_single(vp))
+
+            card.bind("<Enter>", lambda e, vp=video_path: self._on_card_enter(e, vp))
+            card.bind("<Leave>", lambda e, vp=video_path: self._on_card_leave(e, vp))
 
             video_col += 1
             if video_col >= cols:
@@ -465,8 +468,40 @@ class GridViewManager:
             else:
                 self.selection_label.config(text=f"{count} videos selected", fg=self.theme_provider.accent_color)
 
+
+    def _on_card_right_click(self, event, video_path):
+        if video_path not in self.selected_items and self.video_preview_manager:
+            video_path_norm = os.path.normpath(video_path)
+            self.video_preview_manager.right_clicked_item = list(self.card_widgets.keys()).index(
+                video_path) if video_path in self.card_widgets else None
+            if video_path_norm in self.video_preview_manager._thumbnails:
+                thumbnail = self.video_preview_manager._thumbnails[video_path_norm]
+                if thumbnail.is_valid() and thumbnail.thumbnail_data:
+                    self.video_preview_manager.tooltip.show_preview(video_path, thumbnail.thumbnail_data, event.x_root,
+                                                                    event.y_root)
+                    return
+            if video_path_norm not in self.video_preview_manager._generation_queue:
+                self.video_preview_manager._generate_thumbnail_async(video_path_norm, event.x_root, event.y_root)
+            return
+        self._show_context_menu(event, video_path)
+
+    def _on_card_click(self, event, video_path):
+        if self.video_preview_manager:
+            self.video_preview_manager.tooltip.hide_preview()
+        self._toggle_select(video_path)
+
+    def _on_card_enter(self, event, video_path):
+        pass
+
+    def _on_card_leave(self, event, video_path):
+        if self.video_preview_manager:
+            self.video_preview_manager.tooltip.hide_preview()
+
     def _show_context_menu(self, event, video_path):
         context_menu = tk.Menu(self.grid_window, tearoff=0)
+
+        if not self.selected_items:
+            return
 
         if video_path in self.selected_items:
             context_menu.add_command(
