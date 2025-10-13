@@ -9,6 +9,8 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 
 from key_press import listen_keys, cleanup_hotkeys
+from managers.filter_sort_manager import AdvancedFilterSortManager
+from managers.filter_sort_ui import FilterSortUI
 from managers.grid_view_manager import GridViewManager
 from theme import ThemeSelector
 from utils import gather_videos_with_directories, is_video
@@ -65,6 +67,9 @@ def select_multiple_folders_and_play():
             self.selected_dirs = []
             self.excluded_subdirs = {}
             self.excluded_videos = {}
+            self._is_filtered_mode = False
+            self._filtered_videos = []
+            self._base_directory = None
             self.controller = None
             self.player_thread = None
             self.keys_thread = None
@@ -203,6 +208,16 @@ def select_multiple_folders_and_play():
             self.grid_view_manager.set_play_callback(self._play_grid_videos)
             self.queue_manager = VideoQueueManager(self.root, self)
             self.queue_manager.set_play_callback(self._play_queue_videos)
+            self.filter_sort_manager = AdvancedFilterSortManager(
+                watch_history_manager=self.watch_history_manager
+            )
+
+            self.filter_sort_ui = FilterSortUI(
+                self.root,
+                self,
+                self.filter_sort_manager,
+                self._apply_filters_and_refresh
+            )
 
         def _add_directory_from_ipc(self, directory):
             if directory not in self.selected_dirs:
@@ -787,6 +802,23 @@ def select_multiple_folders_and_play():
             )
             self.context_menu.add_separator()
 
+            total_items = listbox.size()
+            selected_count = len(selection)
+
+            if selected_count < total_items:
+                self.context_menu.add_command(
+                    label="Select All",
+                    command=lambda: self._select_all_items(listbox)
+                )
+
+            if selected_count > 0:
+                self.context_menu.add_command(
+                    label="Unselect All",
+                    command=lambda: listbox.selection_clear(0, tk.END)
+                )
+
+            self.context_menu.add_separator()
+
             self.context_menu.add_command(
                 label="Exclude Selected",
                 command=self.exclude_subdirectories
@@ -841,6 +873,10 @@ def select_multiple_folders_and_play():
                 self.context_menu.tk_popup(event.x_root, event.y_root)
             finally:
                 self.context_menu.grab_release()
+
+        def _select_all_items(self, listbox):
+            listbox.selection_clear(0, tk.END)
+            listbox.selection_set(0, tk.END)
 
         def _context_open_grid_view(self, selection):
             selected_dir = self.get_current_selected_directory()
@@ -1143,6 +1179,177 @@ def select_multiple_folders_and_play():
             elif not pending:
                 self.update_console(f"Total: {total_videos} videos selected from {len(self.selected_dirs)} directories")
 
+        def _apply_filters_and_refresh(self):
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                messagebox.showwarning("Warning", "Please select a directory first")
+                return
+
+            progress_window = tk.Toplevel(self.root)
+            progress_window.title("Applying Filters")
+            progress_window.geometry("400x150")
+            progress_window.configure(bg=self.bg_color)
+            progress_window.transient(self.root)
+            progress_window.grab_set()
+
+            progress_label = tk.Label(
+                progress_window,
+                text="Processing videos...",
+                font=self.normal_font,
+                bg=self.bg_color,
+                fg=self.text_color
+            )
+            progress_label.pack(pady=20)
+
+            progress_bar = ttk.Progressbar(
+                progress_window,
+                length=350,
+                mode='determinate'
+            )
+            progress_bar.pack(pady=10)
+
+            status_label = tk.Label(
+                progress_window,
+                text="",
+                font=self.small_font,
+                bg=self.bg_color,
+                fg="#666666"
+            )
+            status_label.pack()
+
+            def update_progress(current, total):
+                if total > 0:
+                    progress = (current / total) * 100
+                    progress_bar['value'] = progress
+                    status_label.config(text=f"Processing {current}/{total} videos...")
+                    progress_window.update()
+
+            def process_in_thread():
+                try:
+                    cache = self.scan_cache.get(selected_dir)
+                    if not cache:
+                        def show_warning():
+                            try:
+                                progress_window.destroy()
+                            except:
+                                pass
+                            messagebox.showwarning("Warning", "Directory not scanned yet")
+
+                        self.root.after(0, show_warning)
+                        return
+
+                    videos, _, _ = cache
+
+                    filtered_sorted = self.filter_sort_manager.apply_filter_and_sort(
+                        videos,
+                        load_properties=True,
+                        progress_callback=lambda c, t: self.root.after(0, lambda: update_progress(c, t))
+                    )
+
+                    def update_ui():
+                        try:
+                            progress_window.destroy()
+                        except:
+                            pass
+
+                        self._is_filtered_mode = True
+                        self._filtered_videos = filtered_sorted
+                        self._base_directory = selected_dir
+
+                        self.exclusion_listbox.delete(0, tk.END)
+                        self.current_subdirs_mapping = {}
+
+                        if not filtered_sorted:
+                            self.exclusion_listbox.insert(tk.END, "No videos match the current filters")
+                            self.update_console("No videos match current filters")
+                            return
+
+                        for idx, video_path in enumerate(filtered_sorted):
+                            try:
+                                rel_path = os.path.relpath(video_path, selected_dir)
+                            except ValueError:
+                                rel_path = os.path.basename(video_path)
+
+                            display_name = f"▶ {rel_path}"
+
+                            if self.is_video_excluded(selected_dir, video_path):
+                                display_name += " 🚫[EXCLUDED]"
+
+                            self.exclusion_listbox.insert(tk.END, display_name)
+                            self.current_subdirs_mapping[idx] = video_path
+
+                        self.selected_dir_label.config(
+                            text=f"Filtered: {len(filtered_sorted)} videos in '{os.path.basename(selected_dir)}'"
+                        )
+                        self.update_console(
+                            f"Applied filters: {len(filtered_sorted)} videos shown from {len(videos)} total")
+
+                        if hasattr(self, 'video_preview_manager'):
+                            self.video_preview_manager.attach_to_listbox(
+                                self.exclusion_listbox,
+                                self.current_subdirs_mapping
+                            )
+
+                    self.root.after(0, update_ui)
+
+                except Exception as e:
+                    def show_error():
+                        try:
+                            progress_window.destroy()
+                        except:
+                            pass
+                        messagebox.showerror("Error", f"Filter error: {e}")
+
+                    self.root.after(0, show_error)
+
+            threading.Thread(target=process_in_thread, daemon=True).start()
+
+        def _reapply_filtered_view(self, scroll_pos=None):
+            if not hasattr(self, '_filtered_videos') or not hasattr(self, '_base_directory'):
+                return
+
+            selected_dir = self._base_directory
+            original_filtered = self._filtered_videos
+
+            filtered_sorted = original_filtered
+
+            self.exclusion_listbox.delete(0, tk.END)
+            self.current_subdirs_mapping = {}
+
+            if not filtered_sorted:
+                self.exclusion_listbox.insert(tk.END, "No videos match the current filters")
+                return
+
+            for idx, video_path in enumerate(filtered_sorted):
+                try:
+                    rel_path = os.path.relpath(video_path, selected_dir)
+                except ValueError:
+                    rel_path = os.path.basename(video_path)
+
+                display_name = f"▶ {rel_path}"
+
+                if self.is_video_excluded(selected_dir, video_path):
+                    display_name += " 🚫[EXCLUDED]"
+
+                self.exclusion_listbox.insert(tk.END, display_name)
+                self.current_subdirs_mapping[idx] = video_path
+
+            self.selected_dir_label.config(
+                text=f"Filtered: {len(filtered_sorted)} videos in '{os.path.basename(selected_dir)}'"
+            )
+
+            if hasattr(self, 'video_preview_manager'):
+                self.video_preview_manager.attach_to_listbox(
+                    self.exclusion_listbox,
+                    self.current_subdirs_mapping
+                )
+
+            if scroll_pos:
+                try:
+                    self.exclusion_listbox.yview_moveto(scroll_pos[0])
+                except:
+                    pass
+
         def play_videos(self):
             if not self.selected_dirs:
                 messagebox.showwarning("No Directories", "Please select at least one directory.")
@@ -1160,7 +1367,145 @@ def select_multiple_folders_and_play():
             self.update_console("=" * 100)
 
             def _run():
+                is_filtered_mode = hasattr(self, '_is_filtered_mode') and self._is_filtered_mode
+
                 exclusion_selection = self.exclusion_listbox.curselection()
+
+                if is_filtered_mode and not exclusion_selection:
+                    selected_dir = self.get_current_selected_directory()
+                    if selected_dir and hasattr(self, '_filtered_videos'):
+                        filtered_videos = [v for v in self._filtered_videos
+                                           if not self.is_video_excluded(selected_dir, v)]
+
+                        if not filtered_videos:
+                            def _show_no_videos():
+                                messagebox.showwarning("No Videos", "No filtered videos found (all excluded).")
+                                self.root.config(cursor="")
+
+                            self.root.after(0, _show_no_videos)
+                            return
+
+                        all_video_to_dir = {}
+                        for video_path in filtered_videos:
+                            all_video_to_dir[video_path] = os.path.dirname(video_path)
+
+                        all_directories = sorted(list(set(all_video_to_dir.values())))
+
+                        def _start_filtered_player():
+                            self.update_console(f"Playing {len(filtered_videos)} filtered videos")
+                            self.controller = VLCPlayerControllerForMultipleDirectory(
+                                filtered_videos, all_video_to_dir, all_directories, self.update_console
+                            )
+                            self.controller.set_loop_mode(self.loop_mode)
+                            self.controller.volume = self.volume
+                            self.controller.player.audio_set_volume(self.volume)
+                            self.controller.set_volume_save_callback(self._save_volume_callback)
+                            self.controller.set_watch_history_callback(
+                                self.watch_history_manager.track_video_playback
+                            )
+                            self.controller.set_resume_manager(self.resume_manager)
+
+                            initial_speed = self.speed_var.get()
+                            if initial_speed != 1.0:
+                                self.controller.set_initial_playback_rate(initial_speed)
+                                self.update_console(f"Initial playback speed set to {initial_speed}x")
+
+                            self.controller.set_start_index(0)
+                            self.controller.set_video_change_callback(self.on_video_changed)
+
+                            if self.player_thread and self.player_thread.is_alive():
+                                self.controller.running = False
+                                self.player_thread.join(timeout=1.0)
+
+                            self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
+                            self.player_thread.start()
+
+                            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller),
+                                                                daemon=True)
+                            self.keys_thread.start()
+                            self.root.config(cursor="")
+
+                        self.root.after(0, _start_filtered_player)
+                        return
+
+                if is_filtered_mode and exclusion_selection:
+                    selected_dir = self.get_current_selected_directory()
+                    if selected_dir:
+                        self.update_console("Playing selected filtered videos...")
+
+                        selected_videos = []
+
+                        for index in exclusion_selection:
+                            item_path = self.current_subdirs_mapping.get(index)
+                            if not item_path:
+                                continue
+
+                            if self.is_video_excluded(selected_dir, item_path):
+                                continue
+
+                            if os.path.isfile(item_path) and is_video(item_path):
+                                selected_videos.append(item_path)
+
+                        seen = set()
+                        final_videos = []
+                        for v in selected_videos:
+                            v_norm = os.path.normpath(v)
+                            if v_norm not in seen:
+                                seen.add(v_norm)
+                                final_videos.append(v_norm)
+
+                        if not final_videos:
+                            def _show_no_videos():
+                                messagebox.showwarning("No Videos", "No valid non-excluded videos found in selection.")
+                                self.root.config(cursor="")
+
+                            self.root.after(0, _show_no_videos)
+                            return
+
+                        all_video_to_dir = {}
+                        for video_path in final_videos:
+                            all_video_to_dir[video_path] = os.path.dirname(video_path)
+
+                        all_directories = sorted(list(set(all_video_to_dir.values())))
+
+                        def _start_selected_player():
+                            self.update_console(
+                                f"Playing {len(final_videos)} selected filtered videos")
+                            self.controller = VLCPlayerControllerForMultipleDirectory(
+                                final_videos, all_video_to_dir, all_directories, self.update_console
+                            )
+                            self.controller.set_loop_mode(self.loop_mode)
+                            self.controller.volume = self.volume
+                            self.controller.player.audio_set_volume(self.volume)
+                            self.controller.set_volume_save_callback(self._save_volume_callback)
+                            self.controller.set_watch_history_callback(
+                                self.watch_history_manager.track_video_playback
+                            )
+                            self.controller.set_resume_manager(self.resume_manager)
+
+                            initial_speed = self.speed_var.get()
+                            if initial_speed != 1.0:
+                                self.controller.set_initial_playback_rate(initial_speed)
+                                self.update_console(f"Initial playback speed set to {initial_speed}x")
+
+                            self.controller.set_start_index(0)
+                            self.controller.set_video_change_callback(self.on_video_changed)
+
+                            if self.player_thread and self.player_thread.is_alive():
+                                self.controller.running = False
+                                self.player_thread.join(timeout=1.0)
+
+                            self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
+                            self.player_thread.start()
+
+                            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller),
+                                                                daemon=True)
+                            self.keys_thread.start()
+                            self.root.config(cursor="")
+
+                        self.root.after(0, _start_selected_player)
+                        return
+
                 if exclusion_selection:
                     selected_dir = self.get_current_selected_directory()
                     if selected_dir:
@@ -1215,7 +1560,7 @@ def select_multiple_folders_and_play():
 
                         def _start_selected_player():
                             self.update_console(
-                                f"Playing {len(final_videos)} selected videos ({len(selected_folders)} folders, {len([v for v in selected_videos if v in final_videos])} direct videos)")
+                                f"Playing {len(final_videos)} selected videos")
                             self.controller = VLCPlayerControllerForMultipleDirectory(
                                 final_videos, all_video_to_dir, all_directories, self.update_console
                             )
@@ -1356,12 +1701,16 @@ def select_multiple_folders_and_play():
             threading.Thread(target=_run, daemon=True).start()
 
         def on_video_changed(self, video_index, video_path):
+            if hasattr(self, 'filter_sort_manager'):
+                self.filter_sort_manager.metadata_cache.update_play_stats(video_path)
             self.last_played_video_index = video_index
             self.last_played_video_path = video_path
             if self.smart_resume_var.get():
                 self.save_preferences()
 
         def on_directory_select(self, event):
+            self._is_filtered_mode = False
+
             selection = self.dir_listbox.curselection()
             if not selection:
                 if self.current_selected_dir_index is not None:
@@ -1416,6 +1765,8 @@ def select_multiple_folders_and_play():
             if not selected_dir:
                 messagebox.showinfo("Information", "Please select a directory first.")
                 return
+
+            is_filtered_mode = hasattr(self, '_is_filtered_mode') and self._is_filtered_mode
 
             self.exclusion_listbox.delete(0, tk.END)
             self.exclusion_listbox.insert(tk.END, "Excluding all... Please wait")
@@ -1472,7 +1823,11 @@ def select_multiple_folders_and_play():
 
                     scroll_pos = self.exclusion_listbox.yview()
 
-                    self.load_subdirectories(dir_path, restore_scroll=scroll_pos)
+                    if is_filtered_mode and hasattr(self, '_filtered_videos'):
+                        self._reapply_filtered_view(scroll_pos)
+                    else:
+                        self.load_subdirectories(dir_path, restore_scroll=scroll_pos)
+
                     self.update_video_count()
                     self.exclusion_listbox.selection_clear(0, tk.END)
                     if self.save_directories:
@@ -1494,8 +1849,11 @@ def select_multiple_folders_and_play():
                 messagebox.showinfo("Information", "Please select items to exclude.")
                 return
 
+            is_filtered_mode = hasattr(self, '_is_filtered_mode') and self._is_filtered_mode
+
             self.exclusion_listbox.insert(tk.END, "\nApplying exclusions... Please wait")
-            for btn in [getattr(self, 'exclude_button', None), getattr(self, 'include_button', None), getattr(self, 'exclude_all_button', None), getattr(self, 'clear_exclusions_button', None)]:
+            for btn in [getattr(self, 'exclude_button', None), getattr(self, 'include_button', None),
+                        getattr(self, 'exclude_all_button', None), getattr(self, 'clear_exclusions_button', None)]:
                 if btn:
                     btn.config(state=tk.DISABLED)
 
@@ -1506,10 +1864,6 @@ def select_multiple_folders_and_play():
 
                 displayed_items = set()
                 if hasattr(self, 'search_query') and self.search_query:
-                    def get_displayed():
-                        return self.get_displayed_items()
-
-                    displayed = self.root.after(0, get_displayed)
                     for idx in range(len(self.current_subdirs_mapping)):
                         if idx in self.current_subdirs_mapping:
                             displayed_items.add(self.current_subdirs_mapping[idx])
@@ -1570,7 +1924,11 @@ def select_multiple_folders_and_play():
                     first_path = self.current_subdirs_mapping.get(first_index) if first_index is not None else None
                     scroll_pos = self.exclusion_listbox.yview()
 
-                    self.load_subdirectories(dir_path, restore_path=first_path, restore_scroll=scroll_pos)
+                    if is_filtered_mode and hasattr(self, '_filtered_videos'):
+                        self._reapply_filtered_view(scroll_pos)
+                    else:
+                        self.load_subdirectories(dir_path, restore_path=first_path, restore_scroll=scroll_pos)
+
                     self.update_video_count()
 
                     if self.save_directories:
@@ -1601,8 +1959,11 @@ def select_multiple_folders_and_play():
             if selected_dir not in self.excluded_subdirs and selected_dir not in self.excluded_videos:
                 return
 
+            is_filtered_mode = hasattr(self, '_is_filtered_mode') and self._is_filtered_mode
+
             self.exclusion_listbox.insert(tk.END, "\nApplying includes... Please wait")
-            for btn in [getattr(self, 'exclude_button', None), getattr(self, 'include_button', None), getattr(self, 'exclude_all_button', None), getattr(self, 'clear_exclusions_button', None)]:
+            for btn in [getattr(self, 'exclude_button', None), getattr(self, 'include_button', None),
+                        getattr(self, 'exclude_all_button', None), getattr(self, 'clear_exclusions_button', None)]:
                 if btn:
                     btn.config(state=tk.DISABLED)
 
@@ -1678,7 +2039,11 @@ def select_multiple_folders_and_play():
                     first_path = self.current_subdirs_mapping.get(first_index) if first_index is not None else None
                     scroll_pos = self.exclusion_listbox.yview()
 
-                    self.load_subdirectories(dir_path, restore_path=first_path, restore_scroll=scroll_pos)
+                    if is_filtered_mode and hasattr(self, '_filtered_videos'):
+                        self._reapply_filtered_view(scroll_pos)
+                    else:
+                        self.load_subdirectories(dir_path, restore_path=first_path, restore_scroll=scroll_pos)
+
                     self.update_video_count()
 
                     if self.save_directories:
@@ -1747,6 +2112,8 @@ def select_multiple_folders_and_play():
                 messagebox.showinfo("Information", "Please select a directory first.")
                 return
 
+            is_filtered_mode = hasattr(self, '_is_filtered_mode') and self._is_filtered_mode
+
             had_subdir_excl = selected_dir in self.excluded_subdirs
             had_video_excl = selected_dir in self.excluded_videos
             if had_subdir_excl or had_video_excl:
@@ -1765,7 +2132,14 @@ def select_multiple_folders_and_play():
                         f"Cleared all {excluded_count} exclusions for '{os.path.basename(selected_dir)}'")
                     if self.save_directories:
                         self.save_preferences()
-                    self.load_subdirectories(selected_dir)
+
+                    scroll_pos = self.exclusion_listbox.yview()
+
+                    if is_filtered_mode and hasattr(self, '_filtered_videos'):
+                        self._reapply_filtered_view(scroll_pos)
+                    else:
+                        self.load_subdirectories(selected_dir)
+
                     self.update_video_count()
 
         def load_subdirectories(self, directory, max_depth=20, restore_path=None, restore_scroll=None):
@@ -1943,6 +2317,14 @@ def select_multiple_folders_and_play():
             theme_frame = tk.Frame(self.button_frame, bg=self.bg_color)
             theme_frame.pack(side=tk.LEFT, expand=True)
 
+            self.filter_sort_button = self.create_button(
+                theme_frame,
+                text="Filter/Sort",
+                command=self._show_filter_dialog,
+                variant="primary",
+                size="md"
+            )
+            self.filter_sort_button.pack(side=tk.LEFT, padx=(0, 10))
 
             self.theme_button = self.create_button(
                 theme_frame,
@@ -2006,6 +2388,9 @@ def select_multiple_folders_and_play():
                 fg=self.text_color
             )
             self.video_count_label.pack(side=tk.LEFT)
+
+        def _show_filter_dialog(self):
+            self.filter_sort_ui.show_filter_dialog()
 
         def add_directory(self):
             directory = filedialog.askdirectory(title="Select a Directory")

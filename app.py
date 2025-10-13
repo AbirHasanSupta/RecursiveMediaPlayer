@@ -2725,7 +2725,7 @@ def select_multiple_folders_and_play():
 
             self.filter_sort_button = self.create_button(
                 theme_frame,
-                text="🔍 Filter/Sort",
+                text="Filter/Sort",
                 command=self._show_filter_dialog,
                 variant="primary",
                 size="md"
