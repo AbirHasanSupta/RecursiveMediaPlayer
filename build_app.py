@@ -9,6 +9,7 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 
 from key_press import listen_keys, cleanup_hotkeys
+from managers.favorites_manager import FavoritesManager
 from managers.filter_sort_manager import AdvancedFilterSortManager
 from managers.filter_sort_ui import FilterSortUI
 from managers.grid_view_manager import GridViewManager
@@ -208,6 +209,9 @@ def select_multiple_folders_and_play():
             self.grid_view_manager.set_play_callback(self._play_grid_videos)
             self.queue_manager = VideoQueueManager(self.root, self)
             self.queue_manager.set_play_callback(self._play_queue_videos)
+            self.favorites_manager = FavoritesManager(self.root, self)
+            self.favorites_manager.set_play_callback(self._play_favorites_videos)
+
             self.filter_sort_manager = AdvancedFilterSortManager(
                 watch_history_manager=self.watch_history_manager
             )
@@ -743,11 +747,11 @@ def select_multiple_folders_and_play():
             )
             media_label.pack(side=tk.LEFT, padx=(0, 8))
 
-            self.add_to_playlist_button = self.create_button(
-                media_section, "Add to Playlist",
-                self._add_to_playlist, "playlist", "sm"
-            )
-            self.add_to_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
+            # self.add_to_playlist_button = self.create_button(
+            #     media_section, "Add to Playlist",
+            #     self._add_to_playlist, "playlist", "sm"
+            # )
+            # self.add_to_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
 
             self.manage_playlist_button = self.create_button(
                 media_section, "Manage Playlists",
@@ -760,6 +764,12 @@ def select_multiple_folders_and_play():
                 self._show_queue_manager, "primary", "sm"
             )
             self.queue_manager_button.pack(side=tk.LEFT, padx=(0, 5))
+
+            self.favorites_button = self.create_button(
+                media_section, "Favorites",
+                self._show_favorites_manager, "warning", "sm"
+            )
+            self.favorites_button.pack(side=tk.LEFT, padx=(0, 5))
 
             self.watch_history_button = self.create_button(
                 media_section, "Watch History",
@@ -818,7 +828,12 @@ def select_multiple_folders_and_play():
                 )
 
             self.context_menu.add_separator()
+            self.context_menu.add_command(
+                label="Open in Grid View",
+                command=lambda: self._context_open_grid_view(selection)
+            )
 
+            self.context_menu.add_separator()
             self.context_menu.add_command(
                 label="Exclude Selected",
                 command=self.exclude_subdirectories
@@ -827,6 +842,33 @@ def select_multiple_folders_and_play():
                 label="Include Selected",
                 command=self.include_subdirectories
             )
+
+            self.context_menu.add_separator()
+            self.context_menu.add_command(
+                label="Add to Playlist",
+                command=lambda: self._context_add_to_playlist(selection)
+            )
+
+            self.context_menu.add_command(
+                label="⭐ Add to Favorites",
+                command=lambda: self._context_add_to_favorites(selection)
+            )
+
+            self.context_menu.add_command(
+                label="★ Remove from Favorites",
+                command=lambda: self._context_remove_from_favorites(selection)
+            )
+
+            self.context_menu.add_separator()
+            self.context_menu.add_command(
+                label="Add to Queue",
+                command=lambda: self._context_add_to_queue(selection, mode="queue")
+            )
+            self.context_menu.add_command(
+                label="Play Next",
+                command=lambda: self._context_add_to_queue(selection, mode="next")
+            )
+
             self.context_menu.add_separator()
 
             self.context_menu.add_command(
@@ -848,31 +890,96 @@ def select_multiple_folders_and_play():
                     command=lambda: self._context_show_properties(first_path)
                 )
 
-            self.context_menu.add_separator()
-            self.context_menu.add_command(
-                label="Add to Playlist",
-                command=lambda: self._context_add_to_playlist(selection)
-            )
-
-            self.context_menu.add_command(
-                label="Add to Queue",
-                command=lambda: self._context_add_to_queue(selection, mode="queue")
-            )
-            self.context_menu.add_command(
-                label="Play Next",
-                command=lambda: self._context_add_to_queue(selection, mode="next")
-            )
-
-            self.context_menu.add_separator()
-            self.context_menu.add_command(
-                label="Open in Grid View",
-                command=lambda: self._context_open_grid_view(selection)
-            )
-
             try:
                 self.context_menu.tk_popup(event.x_root, event.y_root)
             finally:
                 self.context_menu.grab_release()
+
+        def _show_favorites_manager(self):
+            selected_dir = self.get_current_selected_directory()
+            self.favorites_manager.show_manager(selected_dir)
+
+        def _context_add_to_favorites(self, selection):
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                return
+
+            selected_videos = []
+            for index in selection:
+                item_path = self.current_subdirs_mapping.get(index)
+                if item_path and os.path.isfile(item_path) and is_video(item_path):
+                    selected_videos.append(item_path)
+                elif item_path and os.path.isdir(item_path):
+                    for root, dirs, files in os.walk(item_path):
+                        for file in files:
+                            full_path = os.path.join(root, file)
+                            if is_video(full_path):
+                                selected_videos.append(full_path)
+
+            if selected_videos:
+                count = self.favorites_manager.add_to_favorites(selected_videos, selected_dir)
+                self.update_console(f"Added {count} video(s) to favorites")
+
+                scroll_pos = self.exclusion_listbox.yview()
+                self.load_subdirectories(selected_dir, restore_scroll=scroll_pos)
+
+        def _context_remove_from_favorites(self, selection):
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                return
+
+            selected_videos = []
+            for index in selection:
+                item_path = self.current_subdirs_mapping.get(index)
+                if item_path and os.path.isfile(item_path) and is_video(item_path):
+                    selected_videos.append(item_path)
+
+            if selected_videos:
+                count = self.favorites_manager.remove_from_favorites(selected_videos, selected_dir)
+                self.update_console(f"Removed {count} video(s) from favorites")
+
+                scroll_pos = self.exclusion_listbox.yview()
+                self.load_subdirectories(selected_dir, restore_scroll=scroll_pos)
+
+        def _play_favorites_videos(self, videos):
+            if not videos:
+                return
+
+            if self.controller:
+                self.controller.stop()
+                cleanup_hotkeys()
+
+            all_video_to_dir = {v: os.path.dirname(v) for v in videos}
+            all_directories = sorted(list(set(all_video_to_dir.values())))
+
+            self.update_console(f"Playing {len(videos)} videos from favorites")
+
+            self.controller = VLCPlayerControllerForMultipleDirectory(
+                videos, all_video_to_dir, all_directories, self.update_console
+            )
+            self.controller.set_loop_mode(self.loop_mode)
+            self.controller.volume = self.volume
+            self.controller.player.audio_set_volume(self.volume)
+            self.controller.set_volume_save_callback(self._save_volume_callback)
+            self.controller.set_watch_history_callback(self.watch_history_manager.track_video_playback)
+            self.controller.set_resume_manager(self.resume_manager)
+
+            initial_speed = self.speed_var.get()
+            if initial_speed != 1.0:
+                self.controller.set_initial_playback_rate(initial_speed)
+
+            self.controller.set_start_index(0)
+            self.controller.set_video_change_callback(self.on_video_changed)
+
+            if self.player_thread and self.player_thread.is_alive():
+                self.controller.running = False
+                self.player_thread.join(timeout=1.0)
+
+            self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
+            self.player_thread.start()
+
+            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
+            self.keys_thread.start()
 
         def _select_all_items(self, listbox):
             listbox.selection_clear(0, tk.END)
@@ -2222,6 +2329,8 @@ def select_multiple_folders_and_play():
 
                                             if include_vid and show_this_video and show_this_dir:
                                                 v_name = ("  " * (indent_level + 1)) + '▶' + entry.name
+                                                if self.favorites_manager.is_favorite(full_path, base):
+                                                    v_name += " ⭐"
                                                 if full_path in excluded_vid_set:
                                                     v_name += "🚫[EXCLUDED]"
                                                 items.append((full_path, v_name))
@@ -2692,7 +2801,7 @@ def select_multiple_folders_and_play():
                 else:
                     messagebox.showwarning("Warning", "No videos found in selected items")
             else:
-                self.add_to_playlist_button.config(text="Adding...", state=tk.DISABLED)
+                # self.add_to_playlist_button.config(text="Adding...", state=tk.DISABLED)
                 search_active = hasattr(self, 'search_query') and self.search_query
                 if search_active:
                     self.update_console("Collecting all search results for playlist...")
@@ -2721,7 +2830,7 @@ def select_multiple_folders_and_play():
                                         all_videos.append(video)
 
                         def finish_collection():
-                            self.add_to_playlist_button.config(text="Add to Playlist", state=tk.NORMAL)
+                            # self.add_to_playlist_button.config(text="Add to Playlist", state=tk.NORMAL)
                             if all_videos:
                                 self.playlist_manager.add_videos_to_playlist([], all_videos)
                                 self.update_console(f"Added all {len(all_videos)} videos to playlist")
@@ -2732,7 +2841,7 @@ def select_multiple_folders_and_play():
 
                     except Exception as e:
                         def show_error():
-                            self.add_to_playlist_button.config(text="Add to Playlist", state=tk.NORMAL)
+                            # self.add_to_playlist_button.config(text="Add to Playlist", state=tk.NORMAL)
                             messagebox.showerror("Error", f"Failed to collect videos: {e}")
 
                         self.root.after(0, show_error)
