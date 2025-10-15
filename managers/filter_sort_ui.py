@@ -18,6 +18,7 @@ class FilterSortUI:
         self.on_apply_callback = on_apply_callback
 
         self.filter_window = None
+        self.app_instance = None
 
     def show_filter_dialog(self):
         """Show advanced filter dialog"""
@@ -381,12 +382,22 @@ class FilterSortUI:
             bg=self.theme_provider.bg_color,
             fg=self.theme_provider.text_color
         )
-        label.pack(anchor='w', pady=(0, 20))
+        label.pack(anchor='w', pady=(0, 10))
 
-        # Statistics display
+        desc_label = tk.Label(
+            container,
+            text="View detailed statistics about your video collection including size, duration, resolution, and playback data.",
+            font=self.theme_provider.small_font,
+            bg=self.theme_provider.bg_color,
+            fg="#666666",
+            wraplength=700,
+            justify=tk.LEFT
+        )
+        desc_label.pack(anchor='w', pady=(0, 20))
+
         self.stats_text = tk.Text(
             container,
-            height=12,
+            height=18,
             wrap=tk.WORD,
             font=self.theme_provider.normal_font,
             bg=self.theme_provider.bg_color,
@@ -407,6 +418,18 @@ class FilterSortUI:
             "md"
         )
         refresh_btn.pack()
+
+        self.stats_text.config(state=tk.NORMAL)
+        self.stats_text.insert(tk.END, "📊 Collection Statistics\n\n")
+        self.stats_text.insert(tk.END,
+                               "Click 'Refresh Statistics' to calculate statistics for your current video selection.\n\n")
+        self.stats_text.insert(tk.END, "Statistics include:\n")
+        self.stats_text.insert(tk.END, "• Total videos, size, and duration\n")
+        self.stats_text.insert(tk.END, "• Average file size and duration\n")
+        self.stats_text.insert(tk.END, "• Playback statistics\n")
+        self.stats_text.insert(tk.END, "• Resolution distribution\n")
+        self.stats_text.insert(tk.END, "• Codec information\n")
+        self.stats_text.config(state=tk.DISABLED)
 
         return frame
 
@@ -501,12 +524,121 @@ class FilterSortUI:
         """Refresh collection statistics"""
         self.stats_text.config(state=tk.NORMAL)
         self.stats_text.delete(1.0, tk.END)
-        self.stats_text.insert(tk.END, "Loading statistics...\n\n")
+        self.stats_text.insert(tk.END, "Calculating statistics...\n\n")
         self.stats_text.config(state=tk.DISABLED)
 
-        # This will be populated by the parent app when statistics are available
-        self.stats_text.config(state=tk.NORMAL)
-        self.stats_text.delete(1.0, tk.END)
-        self.stats_text.insert(tk.END, "Statistics will be calculated from your current video selection.\n\n")
-        self.stats_text.insert(tk.END, "Select a directory and apply filters to see detailed statistics.")
-        self.stats_text.config(state=tk.DISABLED)
+        if hasattr(self, 'refresh_stats_btn'):
+            self.refresh_stats_btn = None
+
+        def calculate_stats():
+            try:
+                if hasattr(self.parent, 'master') and hasattr(self.parent.master, 'get_all_videos_for_statistics'):
+                    video_paths = self.parent.master.get_all_videos_for_statistics()
+                else:
+                    video_paths = self._get_videos_from_app()
+
+                if not video_paths:
+                    def show_no_videos():
+                        self.stats_text.config(state=tk.NORMAL)
+                        self.stats_text.delete(1.0, tk.END)
+                        self.stats_text.insert(tk.END, "No videos found.\n\n")
+                        self.stats_text.insert(tk.END, "Please select a directory with videos first.")
+                        self.stats_text.config(state=tk.DISABLED)
+
+                    self.parent.after(0, show_no_videos)
+                    return
+
+                stats = self.manager.get_video_statistics(video_paths)
+
+                def display_stats():
+                    self.stats_text.config(state=tk.NORMAL)
+                    self.stats_text.delete(1.0, tk.END)
+
+                    self.stats_text.insert(tk.END, "📊 COLLECTION OVERVIEW\n", "header")
+                    self.stats_text.insert(tk.END, "=" * 50 + "\n\n")
+
+                    self.stats_text.insert(tk.END, f"Total Videos: {stats['total_videos']}\n", "bold")
+                    self.stats_text.insert(tk.END, f"Total Size: {stats['total_size_gb']:.2f} GB\n", "bold")
+                    self.stats_text.insert(tk.END, f"Total Duration: {stats['total_duration_hours']:.2f} hours\n",
+                                           "bold")
+                    self.stats_text.insert(tk.END, "\n")
+
+                    self.stats_text.insert(tk.END, "📈 AVERAGES\n", "header")
+                    self.stats_text.insert(tk.END, "-" * 50 + "\n")
+                    self.stats_text.insert(tk.END, f"Average File Size: {stats['avg_size_mb']:.2f} MB\n")
+                    self.stats_text.insert(tk.END, f"Average Duration: {stats['avg_duration_minutes']:.2f} minutes\n")
+                    self.stats_text.insert(tk.END, "\n")
+
+                    self.stats_text.insert(tk.END, "🎬 PLAYBACK STATISTICS\n", "header")
+                    self.stats_text.insert(tk.END, "-" * 50 + "\n")
+                    self.stats_text.insert(tk.END, f"Played Videos: {stats['played_count']}\n")
+                    self.stats_text.insert(tk.END, f"Never Played: {stats['never_played_count']}\n")
+                    played_percent = (stats['played_count'] / stats['total_videos'] * 100) if stats[
+                                                                                                  'total_videos'] > 0 else 0
+                    self.stats_text.insert(tk.END, f"Played Percentage: {played_percent:.1f}%\n")
+                    self.stats_text.insert(tk.END, "\n")
+
+                    self.stats_text.insert(tk.END, "📺 RESOLUTION DISTRIBUTION\n", "header")
+                    self.stats_text.insert(tk.END, "-" * 50 + "\n")
+                    res_dist = stats['resolution_distribution']
+                    if res_dist:
+                        for res, count in sorted(res_dist.items(), key=lambda x: x[1], reverse=True):
+                            percentage = (count / stats['total_videos'] * 100) if stats['total_videos'] > 0 else 0
+                            self.stats_text.insert(tk.END, f"{res}: {count} videos ({percentage:.1f}%)\n")
+                    else:
+                        self.stats_text.insert(tk.END, "No resolution data available\n")
+                    self.stats_text.insert(tk.END, "\n")
+
+                    self.stats_text.insert(tk.END, "🎞️ CODEC DISTRIBUTION\n", "header")
+                    self.stats_text.insert(tk.END, "-" * 50 + "\n")
+                    codec_dist = stats['codec_distribution']
+                    if codec_dist:
+                        for codec, count in sorted(codec_dist.items(), key=lambda x: x[1], reverse=True)[:5]:
+                            if codec and codec != "unknown":
+                                percentage = (count / stats['total_videos'] * 100) if stats['total_videos'] > 0 else 0
+                                self.stats_text.insert(tk.END, f"{codec}: {count} videos ({percentage:.1f}%)\n")
+                    else:
+                        self.stats_text.insert(tk.END, "No codec data available\n")
+
+                    self.stats_text.tag_configure("header", font=("Segoe UI", 11, "bold"), foreground="#2d89ef")
+                    self.stats_text.tag_configure("bold", font=("Segoe UI", 10, "bold"))
+
+                    self.stats_text.config(state=tk.DISABLED)
+
+                self.parent.after(0, display_stats)
+
+            except Exception as e:
+                def show_error():
+                    self.stats_text.config(state=tk.NORMAL)
+                    self.stats_text.delete(1.0, tk.END)
+                    self.stats_text.insert(tk.END, f"Error calculating statistics:\n\n{str(e)}\n\n")
+                    self.stats_text.insert(tk.END, "Please make sure you have selected a directory with videos.")
+                    self.stats_text.config(state=tk.DISABLED)
+
+                self.parent.after(0, show_error)
+
+        threading.Thread(target=calculate_stats, daemon=True).start()
+
+    def _get_videos_from_app(self):
+        try:
+            if hasattr(self, 'app_instance'):
+                return self.app_instance.get_all_videos_for_statistics()
+
+            if hasattr(self.theme_provider, 'get_all_videos_for_statistics'):
+                return self.theme_provider.get_all_videos_for_statistics()
+
+            root = self.parent
+            attempts = 0
+            while root and attempts < 10:
+                if hasattr(root, 'get_all_videos_for_statistics'):
+                    return root.get_all_videos_for_statistics()
+                if hasattr(root, 'master'):
+                    root = root.master
+                else:
+                    break
+                attempts += 1
+
+        except Exception as e:
+            print(f"Error getting videos from app: {e}")
+
+        return []

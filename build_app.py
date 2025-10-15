@@ -222,6 +222,7 @@ def select_multiple_folders_and_play():
                 self.filter_sort_manager,
                 self._apply_filters_and_refresh
             )
+            self.filter_sort_ui.app_instance = self
 
             self.settings_manager.ui.clear_metadata_callback = lambda: self._clear_metadata_cache()
             self.settings_manager.ui.get_metadata_info_callback = lambda: self._get_metadata_cache_info()
@@ -1224,6 +1225,17 @@ def select_multiple_folders_and_play():
                     self.selected_dirs):
                 return self.selected_dirs[self.current_selected_dir_index]
             return None
+
+        def get_all_videos_for_statistics(self):
+            all_videos = []
+            for directory in self.selected_dirs:
+                cache = self.scan_cache.get(directory)
+                if cache:
+                    videos, _, _ = cache
+                    for video in videos:
+                        if not self.is_video_excluded(directory, video):
+                            all_videos.append(video)
+            return all_videos
 
         def is_video_in_excluded_directory(self, video_path, excluded_subdirs):
             video_dir = os.path.dirname(video_path)
