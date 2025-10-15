@@ -203,6 +203,10 @@ class SettingsUI:
         self.batch_size_var = None
         self.cleanup_resume_callback = None
         self.cleanup_history_callback = None
+        self.clear_thumbnails_callback = None
+        self.clear_metadata_callback = None
+        self.get_metadata_info_callback = None
+        self.filter_sort_manager = None
 
     def show_settings_window(self):
         """Show the settings window"""
@@ -542,6 +546,48 @@ class SettingsUI:
         )
         self.thumbnail_info_label.pack(anchor='w', pady=(5, 0))
 
+        cache_section = tk.LabelFrame(
+            main_container,
+            text="Metadata Cache Settings",
+            font=self.theme_provider.normal_font,
+            bg=self.theme_provider.bg_color,
+            fg=self.theme_provider.text_color,
+            padx=10,
+            pady=10
+        )
+        cache_section.pack(fill=tk.X, pady=(0, 20))
+
+        cache_desc = tk.Label(
+            cache_section,
+            text="Video metadata cache stores information like resolution, duration, and play statistics.",
+            font=self.theme_provider.small_font,
+            bg=self.theme_provider.bg_color,
+            fg="#666666",
+            wraplength=600,
+            justify=tk.LEFT
+        )
+        cache_desc.pack(anchor='w', pady=(0, 10))
+
+        cache_btn_frame = tk.Frame(cache_section, bg=self.theme_provider.bg_color)
+        cache_btn_frame.pack(fill=tk.X, pady=10)
+
+        self.clear_metadata_btn = self.theme_provider.create_button(
+            cache_btn_frame, "Clear Metadata Cache",
+            self._clear_metadata_cache, "warning", "sm"
+        )
+        self.clear_metadata_btn.pack(side=tk.LEFT)
+
+        self.metadata_info_label = tk.Label(
+            cache_section,
+            text="",
+            font=self.theme_provider.small_font,
+            bg=self.theme_provider.bg_color,
+            fg="#666666"
+        )
+        self.metadata_info_label.pack(anchor='w', pady=(5, 0))
+
+        self._update_metadata_info()
+
         cleanup_section = tk.LabelFrame(
             main_container,
             text="Data Cleanup Settings",
@@ -754,6 +800,41 @@ class SettingsUI:
             else:
                 messagebox.showwarning("Warning", "History cleanup function not available")
 
+    def _clear_metadata_cache(self):
+        """Clear video metadata cache"""
+        result = messagebox.askyesno(
+            "Confirm Clear Cache",
+            "Clear all cached video metadata?\n\nThis will remove stored information like resolution, duration, and play statistics. The data will be regenerated when needed."
+        )
+
+        if result:
+            if self.clear_metadata_callback:
+                try:
+                    count = self.clear_metadata_callback()
+                    self._update_metadata_info()
+                    messagebox.showinfo("Cache Cleared", f"Cleared {count} metadata cache entries")
+                    if self.console_callback:
+                        self.console_callback(f"Cleared {count} video metadata cache entries")
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to clear metadata cache: {e}")
+            else:
+                messagebox.showwarning("Warning", "Metadata cache manager not available")
+
+    def _update_metadata_info(self):
+        """Update metadata cache information display"""
+        try:
+            if self.get_metadata_info_callback:
+                info = self.get_metadata_info_callback()
+                entries = info.get('total_entries', 0)
+                size_mb = info.get('cache_size_mb', 0)
+                self.metadata_info_label.config(
+                    text=f"Current cache: {entries} videos, {size_mb:.2f} MB"
+                )
+            else:
+                self.metadata_info_label.config(text="Cache info unavailable")
+        except Exception as e:
+            self.metadata_info_label.config(text="Cache info unavailable")
+
     def _clear_thumbnail_cache(self):
         """Clear video thumbnail cache"""
         result = messagebox.askyesno(
@@ -765,6 +846,7 @@ class SettingsUI:
             if hasattr(self, 'clear_thumbnails_callback') and self.clear_thumbnails_callback:
                 self.clear_thumbnails_callback()
                 self._update_thumbnail_info()
+                messagebox.showinfo("Cache Cleared", "Thumbnail cache has been cleared")
             else:
                 if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
                     self.video_preview_manager.clear_cache()

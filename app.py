@@ -142,13 +142,6 @@ def select_multiple_folders_and_play():
             self.video_preview_manager.set_preview_duration(app_settings.preview_duration)
             self.video_preview_manager.set_video_preview_enabled(app_settings.use_video_preview)
 
-            self.settings_manager.ui.cleanup_resume_callback = lambda: self.resume_manager.service.cleanup_old_positions(
-                self.settings_manager.get_settings().auto_cleanup_days)
-            self.settings_manager.ui.cleanup_history_callback = lambda: self.watch_history_manager.service.cleanup_old_entries(
-                self.settings_manager.get_settings().auto_cleanup_days)
-            self.settings_manager.ui.clear_thumbnails_callback = lambda: self._clear_thumbnail_cache()
-            self.settings_manager.ui.video_preview_manager = self.video_preview_manager
-
             self.grid_view_manager = GridViewManager(self.root, self, self.update_console)
             self.grid_view_manager.set_play_callback(self._play_grid_videos)
             self.queue_manager = VideoQueueManager(self.root, self)
@@ -166,6 +159,38 @@ def select_multiple_folders_and_play():
                 self.filter_sort_manager,
                 self._apply_filters_and_refresh
             )
+
+            self.settings_manager.ui.cleanup_resume_callback = lambda: self.resume_manager.service.cleanup_old_positions(
+                self.settings_manager.get_settings().auto_cleanup_days)
+            self.settings_manager.ui.cleanup_history_callback = lambda: self.watch_history_manager.service.cleanup_old_entries(
+                self.settings_manager.get_settings().auto_cleanup_days)
+            self.settings_manager.ui.clear_thumbnails_callback = lambda: self._clear_thumbnail_cache()
+            self.settings_manager.ui.video_preview_manager = self.video_preview_manager
+            self.settings_manager.ui.clear_metadata_callback = lambda: self._clear_metadata_cache()
+            self.settings_manager.ui.get_metadata_info_callback = lambda: self._get_metadata_cache_info()
+            self.settings_manager.ui.filter_sort_manager = self.filter_sort_manager
+
+
+        def _clear_metadata_cache(self):
+            try:
+                count = self.filter_sort_manager.metadata_cache.clear_cache()
+                self.update_console(f"Cleared {count} video metadata cache entries")
+                return count
+            except Exception as e:
+                self.update_console(f"Error clearing metadata cache: {e}")
+                return 0
+
+        def _get_metadata_cache_info(self):
+            try:
+                return self.filter_sort_manager.metadata_cache.get_cache_info()
+            except Exception as e:
+                self.update_console(f"Error getting metadata cache info: {e}")
+                return {
+                    'total_entries': 0,
+                    'cache_size_bytes': 0,
+                    'cache_size_mb': 0,
+                    'cache_file': ''
+                }
 
         def _get_command_line_directory(self):
             if len(sys.argv) > 1:

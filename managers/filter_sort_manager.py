@@ -229,11 +229,32 @@ class VideoMetadataCache:
 
             self._save_cache()
 
-    def clear_cache(self):
-        """Clear all cached metadata"""
+    def clear_cache(self) -> int:
+        """Clear all cached metadata and return count of cleared entries"""
         with self._lock:
+            count = len(self._cache)
             self._cache.clear()
             self._save_cache()
+            return count
+
+    def get_cache_info(self) -> Dict[str, Any]:
+        """Get information about the cache"""
+        with self._lock:
+            total_entries = len(self._cache)
+            cache_size = 0
+
+            try:
+                if self.cache_file.exists():
+                    cache_size = self.cache_file.stat().st_size
+            except:
+                pass
+
+            return {
+                'total_entries': total_entries,
+                'cache_size_bytes': cache_size,
+                'cache_size_mb': cache_size / (1024 * 1024),
+                'cache_file': str(self.cache_file)
+            }
 
 
 class FilterCriteria:

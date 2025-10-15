@@ -223,6 +223,31 @@ def select_multiple_folders_and_play():
                 self._apply_filters_and_refresh
             )
 
+            self.settings_manager.ui.clear_metadata_callback = lambda: self._clear_metadata_cache()
+            self.settings_manager.ui.get_metadata_info_callback = lambda: self._get_metadata_cache_info()
+            self.settings_manager.ui.filter_sort_manager = self.filter_sort_manager
+
+        def _clear_metadata_cache(self):
+            try:
+                count = self.filter_sort_manager.metadata_cache.clear_cache()
+                self.update_console(f"Cleared {count} video metadata cache entries")
+                return count
+            except Exception as e:
+                self.update_console(f"Error clearing metadata cache: {e}")
+                return 0
+
+        def _get_metadata_cache_info(self):
+            try:
+                return self.filter_sort_manager.metadata_cache.get_cache_info()
+            except Exception as e:
+                self.update_console(f"Error getting metadata cache info: {e}")
+                return {
+                    'total_entries': 0,
+                    'cache_size_bytes': 0,
+                    'cache_size_mb': 0,
+                    'cache_file': ''
+                }
+
         def _add_directory_from_ipc(self, directory):
             if directory not in self.selected_dirs:
                 self.selected_dirs.append(directory)
