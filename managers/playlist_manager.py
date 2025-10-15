@@ -286,6 +286,7 @@ class PlaylistUI:
             bd=0
         )
         self.video_listbox.pack(fill=tk.BOTH, expand=True)
+        self.video_listbox.bind('<Double-Button-1>', self._on_video_double_click)
         video_scrollbar.config(command=self.video_listbox.yview)
 
         video_btn_frame = tk.Frame(right_panel, bg=self.theme_provider.bg_color)
@@ -351,6 +352,30 @@ class PlaylistUI:
             refresh()
         else:
             self.parent.after(0, refresh)
+
+    def _on_video_double_click(self, event):
+        if not self.current_playlist:
+            return
+
+        selection = self.video_listbox.curselection()
+        if not selection:
+            return
+
+        index = selection[0]
+        if 0 <= index < len(self.current_playlist.videos):
+            video_path = self.current_playlist.videos[index]
+
+            if not os.path.exists(video_path):
+                messagebox.showwarning(
+                    "File Not Found",
+                    f"Video file not found:\n{video_path}",
+                    parent=self.playlist_window
+                )
+                return
+
+            if self.on_play_callback:
+                videos_to_play = self.current_playlist.videos[index:]
+                self.on_play_callback(videos_to_play)
 
     def _refresh_video_list(self):
         """Refresh the video list for current playlist"""

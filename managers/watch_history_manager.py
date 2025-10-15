@@ -355,6 +355,8 @@ class WatchHistoryUI:
         v_scrollbar.grid(row=0, column=1, sticky='ns')
         h_scrollbar.grid(row=1, column=0, sticky='ew')
 
+        self.history_tree.bind('<Double-Button-1>', self._on_history_double_click)
+
         list_frame.grid_rowconfigure(0, weight=1)
         list_frame.grid_columnconfigure(0, weight=1)
 
@@ -524,6 +526,38 @@ class WatchHistoryUI:
             self.history_service.clear_all_history()
             messagebox.showinfo("Success", "All watch history has been cleared")
             self._refresh_history_list()
+
+    def _on_history_double_click(self, event):
+        selection = self.history_tree.selection()
+        if not selection:
+            return
+
+        item = selection[0]
+        tags = self.history_tree.item(item, 'tags')
+        if not tags:
+            return
+
+        entry_id = tags[0]
+
+        selected_entry = None
+        for entry in self.current_entries:
+            if entry.id == entry_id:
+                selected_entry = entry
+                break
+
+        if not selected_entry:
+            return
+
+        if not os.path.exists(selected_entry.video_path):
+            messagebox.showerror(
+                "File Not Found",
+                f"Video file not found:\n{selected_entry.video_path}",
+                parent=self.history_window
+            )
+            return
+
+        if hasattr(self, 'play_callback') and self.play_callback:
+            self.play_callback([selected_entry.video_path])
 
 
 class WatchHistoryManager:
