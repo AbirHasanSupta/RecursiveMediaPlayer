@@ -245,6 +245,7 @@ class WatchHistoryUI:
         self.history_listbox = None
         self.current_entries: List[WatchHistoryEntry] = []
         self.filter_var = None
+        self.video_preview_manager = None
 
     def show_history_manager(self):
         if self.history_window and self.history_window.winfo_exists():
@@ -356,6 +357,8 @@ class WatchHistoryUI:
         h_scrollbar.grid(row=1, column=0, sticky='ew')
 
         self.history_tree.bind('<Double-Button-1>', self._on_history_double_click)
+        self.history_tree.bind('<Button-3>', self._on_history_right_click)
+        self.history_tree.bind('<Button-1>', self._on_history_left_click)
 
         list_frame.grid_rowconfigure(0, weight=1)
         list_frame.grid_columnconfigure(0, weight=1)
@@ -366,14 +369,14 @@ class WatchHistoryUI:
         left_buttons = tk.Frame(button_frame, bg=self.theme_provider.bg_color)
         left_buttons.pack(side=tk.LEFT)
 
-        self.remove_selected_btn = self.theme_provider.create_button(
-            left_buttons, "Remove Selected", self._remove_selected, "danger", "md"
-        )
-        self.remove_selected_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.play_selected_btn = self.theme_provider.create_button(
-            left_buttons, "Play Selected", self._play_selected_video, "success", "md"
-        )
-        self.play_selected_btn.pack(side=tk.LEFT, padx=(0, 5))
+        # self.remove_selected_btn = self.theme_provider.create_button(
+        #     left_buttons, "Remove Selected", self._remove_selected, "danger", "md"
+        # )
+        # self.remove_selected_btn.pack(side=tk.LEFT, padx=(0, 5))
+        # self.play_selected_btn = self.theme_provider.create_button(
+        #     left_buttons, "Play Selected", self._play_selected_video, "success", "md"
+        # )
+        # self.play_selected_btn.pack(side=tk.LEFT, padx=(0, 5))
 
         self.clear_all_btn = self.theme_provider.create_button(
             left_buttons, "Clear All History", self._clear_all_history, "warning", "md"
@@ -420,8 +423,190 @@ class WatchHistoryUI:
         else:
             self.parent.after(0, refresh)
 
+    def _on_history_left_click(self, event):
+        """Handle left click to hide preview"""
+        if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+            self.video_preview_manager.tooltip.hide_preview()
+
+    def _on_history_right_click(self, event):
+        """Handle right-click on history items"""
+        # Get item at click position
+        item_id = self.history_tree.identify_row(event.y)
+
+        if not item_id:
+            return
+
+        # Get current selection
+        selection = self.history_tree.selection()
+
+        # Show preview if no selection and hovering over an item
+        if not selection:
+            tags = self.history_tree.item(item_id, 'tags')
+            if tags and hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+                entry_id = tags[0]
+                # Find the entry
+                for entry in self.current_entries:
+                    if entry.id == entry_id:
+                        if os.path.isfile(entry.video_path):
+                            # Get the index for preview manager
+                            try:
+                                index = self.current_entries.index(entry)
+                                self.video_preview_manager.right_clicked_item = index
+                                self.video_preview_manager._show_video_preview(
+                                    entry.video_path, event.x_root, event.y_root
+                                )
+                            except:
+                                pass
+                        break
+            return
+
+        if not selection:
+            return
+
+        # Create context menu
+        context_menu = tk.Menu(self.history_window, tearoff=0)
+
+        # Get entries for selected items
+        selected_entries = []
+        for item_id in selection:
+            tags = self.history_tree.item(item_id, 'tags')
+            if tags:
+                entry_id = tags[0]
+                for entry in self.current_entries:
+                    if entry.id == entry_id:
+                        selected_entries.append(entry)
+                        break
+
+        if not selected_entries:
+            return
+
+        context_menu.add_command(
+            label=f"Play Selected ({len(selected_entries)} video{'s' if len(selected_entries) > 1 else ''})",
+            command=lambda: self._play_selected_from_context(selected_entries)
+        )
+
+        context_menu.add_separator()
+
+        context_menu.add_command(
+            label="Remove from History",
+            command=self._remove_selected
+        )
+
+        if len(selected_entries) == 1:
+            entry = selected_entries[0]
+            context_menu.add_separator()
+            context_menu.add_command(
+                label="Copy Path",
+                command=lambda: self._copy_path(entry.video_path)
+            )
+            context_menu.add_command(
+                label="Open File Location",
+                command=lambda: self._open_location(entry.video_path)
+            )
+            context_menu.add_command(
+                label="Properties",
+                command=lambda: self._show_properties(entry)
+            )
+
+        try:
+            context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            context_menu.grab_release()
+
+    def _play_selected_from_context(self, entries):
+        """Play selected videos from context menu"""
+        if not entries:
+            return
+
+        videos_to_play = []
+        missing_files = []
+
+        for entry in entries:
+            if os.path.exists(entry.video_path):
+                videos_to_play.append(entry.video_path)
+            else:
+                missing_files.append(entry.video_name)
+
+        if missing_files:
+            messagebox.showwarning(
+                "Missing Files",
+                f"{len(missing_files)} file(s) not found",
+                parent=self.history_window
+            )
+
+        if videos_to_play and hasattr(self, 'play_callback') and self.play_callback:
+            self.play_callback(videos_to_play)
+        elif not videos_to_play:
+            messagebox.showwarning(
+                "No Valid Files",
+                "No valid video files found",
+                parent=self.history_window
+            )
+
+    def _copy_path(self, file_path):
+        """Copy file path to clipboard"""
+        try:
+            self.parent.clipboard_clear()
+            self.parent.clipboard_append(file_path)
+        except Exception as e:
+            print(f"Error copying path: {e}")
+
+    def _open_location(self, file_path):
+        """Open file location in explorer"""
+        try:
+            import subprocess
+            import sys
+            if os.name == 'nt':
+                subprocess.Popen(f'explorer /select,"{file_path}"')
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', '-R', file_path])
+            else:
+                subprocess.Popen(['xdg-open', os.path.dirname(file_path)])
+        except Exception as e:
+            print(f"Error opening location: {e}")
+
+    def _show_properties(self, entry):
+        """Show video properties dialog"""
+        try:
+            from datetime import datetime
+
+            stat_info = os.stat(entry.video_path)
+            size_mb = stat_info.st_size / (1024 * 1024)
+            modified = datetime.fromtimestamp(stat_info.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+
+            info = f"File: {entry.video_name}\n\n"
+            info += f"Path: {entry.video_path}\n\n"
+            info += f"Size: {size_mb:.2f} MB ({stat_info.st_size:,} bytes)\n\n"
+            info += f"Modified: {modified}\n\n"
+            info += f"Watch History:\n"
+            info += f"  Last Watched: {entry.get_watch_date_formatted()}\n"
+            info += f"  Duration Watched: {entry.get_duration_formatted()}\n"
+            if entry.completion_percentage > 0:
+                info += f"  Completion: {entry.completion_percentage:.1f}%\n"
+
+            try:
+                import cv2
+                cap = cv2.VideoCapture(entry.video_path)
+                if cap.isOpened():
+                    fps = cap.get(cv2.CAP_PROP_FPS)
+                    frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                    duration = frame_count / fps if fps > 0 else 0
+                    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+                    info += f"\nVideo Properties:\n"
+                    info += f"  Duration: {int(duration // 60)}:{int(duration % 60):02d}\n"
+                    info += f"  Resolution: {width}x{height}\n"
+                    info += f"  FPS: {fps:.2f}\n"
+                    cap.release()
+            except:
+                pass
+
+            messagebox.showinfo("Properties", info, parent=self.history_window)
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not retrieve properties: {e}", parent=self.history_window)
+
     def _apply_filter(self):
-        """Apply the selected filter to the history list"""
         filter_value = self.filter_var.get()
 
         if filter_value == "all":
@@ -433,15 +618,13 @@ class WatchHistoryUI:
         elif filter_value == "month":
             self.current_entries = self.history_service.get_history_by_date_range(30)
 
-        # Update treeview
         for item in self.history_tree.get_children():
             self.history_tree.delete(item)
 
-        for entry in self.current_entries:
-            # Format completion percentage
+        video_mapping = {}
+        for i, entry in enumerate(self.current_entries):
             completion_text = f"{entry.completion_percentage:.1f}%" if entry.completion_percentage > 0 else "N/A"
 
-            # Insert into treeview
             self.history_tree.insert('', tk.END, values=(
                 entry.video_name,
                 os.path.basename(entry.directory_path),
@@ -449,6 +632,8 @@ class WatchHistoryUI:
                 entry.get_duration_formatted(),
                 completion_text
             ), tags=(entry.id,))
+
+            video_mapping[i] = entry.video_path
 
     def _play_selected_video(self):
         """Play selected video from history"""
@@ -612,3 +797,6 @@ class WatchHistoryManager:
             'week_count': len(self.service.get_history_by_date_range(7)),
             'month_count': len(self.service.get_history_by_date_range(30))
         }
+
+    def set_video_preview_manager(self, preview_manager):
+        self.ui.video_preview_manager = preview_manager

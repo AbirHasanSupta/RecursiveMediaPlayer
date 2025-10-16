@@ -70,7 +70,6 @@ def select_multiple_folders_and_play():
             self.loop_mode = preferences.get('loop_mode', 'loop_on')
 
             self.setup_theme()
-
             root.title("Recursive Video Player")
             root.geometry("1600x900")
             root.state('zoomed')
@@ -89,15 +88,14 @@ def select_multiple_folders_and_play():
             max_workers = min(8, (os.cpu_count() or 4))
             self.executor = ProcessPoolExecutor(max_workers=max_workers)
             self.apply_theme()
+
             command_line_dir = self._get_command_line_directory()
             if command_line_dir:
                 self.selected_dirs = []
                 if self.save_directories:
                     self.selected_dirs = preferences.get('selected_dirs', [])
-
                 if command_line_dir not in self.selected_dirs:
                     self.selected_dirs.append(command_line_dir)
-
                 for directory in self.selected_dirs:
                     display_name = directory
                     if len(directory) > 60:
@@ -124,30 +122,40 @@ def select_multiple_folders_and_play():
                 self.selected_dirs = []
 
             self.update_ui_for_mode()
-            self.playlist_manager = PlaylistManager(self.root, self)
-            self.playlist_manager.set_play_callback(self._play_playlist_videos)
 
-            self.watch_history_manager = WatchHistoryManager(self.root, self)
-            self.watch_history_manager.set_play_callback(self._play_history_videos)
-            self.resume_manager = ResumePlaybackManager()
-            self.resume_manager.set_resume_enabled(self.smart_resume_enabled)
             self.settings_manager = SettingsManager(self.root, self, self.update_console)
             self.settings_manager.add_settings_changed_callback(self._on_settings_changed)
-
             app_settings = self.settings_manager.get_settings()
-            self.ai_index_path = app_settings.ai_index_path
-            self.video_preview_manager = VideoPreviewManager(self.root, self.update_console)
-            self.playlist_manager.ui.video_preview_manager = self.video_preview_manager
 
+            self.video_preview_manager = VideoPreviewManager(self.root, self.update_console)
             self.video_preview_manager.set_preview_duration(app_settings.preview_duration)
             self.video_preview_manager.set_video_preview_enabled(app_settings.use_video_preview)
 
             self.grid_view_manager = GridViewManager(self.root, self, self.update_console)
             self.grid_view_manager.set_play_callback(self._play_grid_videos)
+
+            self.playlist_manager = PlaylistManager(self.root, self)
+            self.playlist_manager.set_play_callback(self._play_playlist_videos)
+            self.playlist_manager.set_video_preview_manager(self.video_preview_manager)
+            self.playlist_manager.set_grid_view_manager(self.grid_view_manager)
+            self.playlist_manager.ui.video_preview_manager = self.video_preview_manager
+
+            self.watch_history_manager = WatchHistoryManager(self.root, self)
+            self.watch_history_manager.set_play_callback(self._play_history_videos)
+            self.watch_history_manager.set_video_preview_manager(self.video_preview_manager)
+
+            self.resume_manager = ResumePlaybackManager()
+            self.resume_manager.set_resume_enabled(self.smart_resume_enabled)
+
             self.queue_manager = VideoQueueManager(self.root, self)
             self.queue_manager.set_play_callback(self._play_queue_videos)
+            self.queue_manager.set_video_preview_manager(self.video_preview_manager)
+            self.queue_manager.set_grid_view_manager(self.grid_view_manager)
+
             self.favorites_manager = FavoritesManager(self.root, self)
             self.favorites_manager.set_play_callback(self._play_favorites_videos)
+            self.favorites_manager.set_video_preview_manager(self.video_preview_manager)
+            self.favorites_manager.set_grid_view_manager(self.grid_view_manager)
 
             self.filter_sort_manager = AdvancedFilterSortManager(
                 watch_history_manager=self.watch_history_manager
@@ -160,6 +168,8 @@ def select_multiple_folders_and_play():
                 self._apply_filters_and_refresh
             )
             self.filter_sort_ui.app_instance = self
+
+            self.ai_index_path = app_settings.ai_index_path
 
             self.settings_manager.ui.cleanup_resume_callback = lambda: self.resume_manager.service.cleanup_old_positions(
                 self.settings_manager.get_settings().auto_cleanup_days)

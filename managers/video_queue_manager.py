@@ -303,6 +303,8 @@ class QueueUI:
 
         self.drag_start_index = None
         self.drag_data = None
+        self.video_preview_manager = None
+        self.grid_view_manager = None
 
     def show_queue_manager(self):
         if self.queue_window and self.queue_window.winfo_exists():
@@ -371,6 +373,7 @@ class QueueUI:
 
         self.queue_listbox.bind("<Double-Button-1>", self._on_double_click)
         self.queue_listbox.bind("<Button-1>", self._on_drag_start)
+        self.queue_listbox.bind("<Button-3>", self._on_right_click)
         self.queue_listbox.bind("<B1-Motion>", self._on_drag_motion)
         self.queue_listbox.bind("<ButtonRelease-1>", self._on_drag_release)
 
@@ -390,10 +393,10 @@ class QueueUI:
         )
         self.move_down_btn.pack(side=tk.LEFT, padx=(0, 5))
 
-        self.remove_btn = self.theme_provider.create_button(
-            left_buttons, "Remove", self._remove_selected, "danger", "sm"
-        )
-        self.remove_btn.pack(side=tk.LEFT, padx=(0, 5))
+        # self.remove_btn = self.theme_provider.create_button(
+        #     left_buttons, "Remove", self._remove_selected, "danger", "sm"
+        # )
+        # self.remove_btn.pack(side=tk.LEFT, padx=(0, 5))
 
         self.clear_played_btn = self.theme_provider.create_button(
             left_buttons, "Clear Played", self._clear_played, "warning", "sm"
@@ -430,12 +433,14 @@ class QueueUI:
                 self.queue_info_label.config(text="No videos in queue")
                 return
 
+            video_mapping = {}
             for i, entry in enumerate(queue):
                 prefix = "▶ " if i == current_index else "  "
                 status = " ✓" if entry.played else ""
                 display = f"{prefix}{entry.video_name}{status}"
 
                 self.queue_listbox.insert(tk.END, display)
+                video_mapping[i] = entry.video_path
 
                 if i == current_index:
                     self.queue_listbox.itemconfig(i, fg=self.theme_provider.accent_color)
@@ -445,10 +450,159 @@ class QueueUI:
                 text=f"{len(queue)} videos • {unplayed} unplayed • Playing #{current_index + 1}"
             )
 
+            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+                self.video_preview_manager.attach_to_listbox(self.queue_listbox, video_mapping)
+
         if threading.current_thread() is threading.main_thread():
             refresh()
         else:
             self.parent.after(0, refresh)
+
+    def _on_right_click(self, event):
+        """Handle right-click on queue items"""
+        listbox = event.widget
+        index = listbox.nearest(event.y)
+        selection = listbox.curselection()
+
+        queue = self.queue_service.get_queue()
+
+        # Show preview if no selection and hovering over a queue item
+        if not selection and index >= 0 and index < len(queue):
+            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+                entry = queue[index]
+                if os.path.isfile(entry.video_path):
+                    self.video_preview_manager.right_clicked_item = index
+                    self.video_preview_manager._show_video_preview(
+                        entry.video_path, event.x_root, event.y_root
+                    )
+            return
+
+        if not selection or not queue:
+            return
+
+        # Create context menu
+        context_menu = tk.Menu(self.queue_window, tearoff=0)
+
+        context_menu.add_command(
+            label=f"Play from Selected ({len(selection)} item{'s' if len(selection) > 1 else ''})",
+            command=lambda: self._play_from_selection(selection)
+        )
+
+        context_menu.add_command(
+            label="Jump to Selected",
+            command=lambda: self._jump_to_first_selected(selection)
+        )
+
+        context_menu.add_separator()
+
+        context_menu.add_command(
+            label="Open in Grid View",
+            command=lambda: self._open_grid_view_from_selection(selection)
+        )
+
+        context_menu.add_separator()
+
+        context_menu.add_command(
+            label="Remove from Queue",
+            command=self._remove_selected
+        )
+
+        if len(selection) == 1:
+            entry = queue[selection[0]]
+            context_menu.add_separator()
+            context_menu.add_command(
+                label="Copy Path",
+                command=lambda: self._copy_path(entry.video_path)
+            )
+            context_menu.add_command(
+                label="Open File Location",
+                command=lambda: self._open_location(entry.video_path)
+            )
+
+        try:
+            context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            context_menu.grab_release()
+
+    def _play_from_selection(self, selection):
+        """Play queue starting from first selected item"""
+        if not selection:
+            return
+
+        first_index = min(selection)
+        video_path = self.queue_service.jump_to_index(first_index)
+
+        if video_path and self.on_jump_callback:
+            self.on_jump_callback(video_path)
+
+        self._refresh_queue()
+
+    def _jump_to_first_selected(self, selection):
+        """Jump to first selected item without playing"""
+        if not selection:
+            return
+
+        first_index = min(selection)
+        self.queue_service.set_current_index(first_index)
+        self._refresh_queue()
+
+    def _open_grid_view(self):
+        """Open grid view with entire queue"""
+        queue = self.queue_service.get_queue()
+
+        if not queue:
+            messagebox.showwarning("Warning", "Queue is empty", parent=self.queue_window)
+            return
+
+        if not hasattr(self, 'grid_view_manager') or not self.grid_view_manager:
+            messagebox.showwarning("Warning", "Grid view not available", parent=self.queue_window)
+            return
+
+        video_paths = [entry.video_path for entry in queue if os.path.exists(entry.video_path)]
+
+        if video_paths:
+            self.grid_view_manager.show_grid_view(video_paths, self.video_preview_manager)
+        else:
+            messagebox.showwarning("No Valid Files", "No valid video files in queue", parent=self.queue_window)
+
+    def _open_grid_view_from_selection(self, selection):
+        """Open grid view with selected queue items"""
+        if not hasattr(self, 'grid_view_manager') or not self.grid_view_manager:
+            return
+
+        queue = self.queue_service.get_queue()
+        video_paths = []
+
+        for index in selection:
+            if 0 <= index < len(queue):
+                entry = queue[index]
+                if os.path.exists(entry.video_path):
+                    video_paths.append(entry.video_path)
+
+        if video_paths:
+            self.grid_view_manager.show_grid_view(video_paths, self.video_preview_manager)
+
+    def _copy_path(self, file_path):
+        """Copy file path to clipboard"""
+        try:
+            self.parent.clipboard_clear()
+            self.parent.clipboard_append(file_path)
+        except Exception as e:
+            print(f"Error copying path: {e}")
+
+    def _open_location(self, file_path):
+        """Open file location in explorer"""
+        try:
+            import subprocess
+            import sys
+            if os.name == 'nt':
+                subprocess.Popen(f'explorer /select,"{file_path}"')
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', '-R', file_path])
+            else:
+                subprocess.Popen(['xdg-open', os.path.dirname(file_path)])
+        except Exception as e:
+            print(f"Error opening location: {e}")
 
     def _on_double_click(self, event):
         selection = self.queue_listbox.curselection()
@@ -606,3 +760,9 @@ class VideoQueueManager:
     def _on_jump_to_video(self, video_path: str):
         if self._play_callback:
             self._play_callback([video_path])
+
+    def set_video_preview_manager(self, preview_manager):
+        self.ui.video_preview_manager = preview_manager
+
+    def set_grid_view_manager(self, grid_view_manager):
+        self.ui.grid_view_manager = grid_view_manager

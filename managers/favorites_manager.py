@@ -219,6 +219,8 @@ class FavoritesUI:
         self.current_directory = None
         self.favorite_entries = []
         self.dragging_index = None
+        self.video_preview_manager = None
+        self.grid_view_manager = None
 
     def show_favorites_manager(self, selected_directory: str = None):
         if self.favorites_window and self.favorites_window.winfo_exists():
@@ -300,6 +302,7 @@ class FavoritesUI:
 
         self.favorites_listbox.bind('<Double-Button-1>', self._on_double_click)
         self.favorites_listbox.bind('<Button-1>', self._on_mouse_down)
+        self.favorites_listbox.bind('<Button-3>', self._on_right_click)
         self.favorites_listbox.bind('<B1-Motion>', self._on_mouse_drag)
         self.favorites_listbox.bind('<ButtonRelease-1>', self._on_mouse_release)
 
@@ -309,20 +312,11 @@ class FavoritesUI:
         left_buttons = tk.Frame(button_frame, bg=self.theme_provider.bg_color)
         left_buttons.pack(side=tk.LEFT)
 
-        self.play_selected_btn = self.theme_provider.create_button(
-            left_buttons, "▶ Play Selected", self._play_selected, "success", "md"
-        )
-        self.play_selected_btn.pack(side=tk.LEFT, padx=(0, 5))
 
         self.play_all_btn = self.theme_provider.create_button(
             left_buttons, "▶ Play All", self._play_all, "primary", "md"
         )
         self.play_all_btn.pack(side=tk.LEFT, padx=(0, 5))
-
-        self.remove_btn = self.theme_provider.create_button(
-            left_buttons, "Remove Selected", self._remove_selected, "danger", "md"
-        )
-        self.remove_btn.pack(side=tk.LEFT, padx=(0, 5))
 
         self.clear_btn = self.theme_provider.create_button(
             left_buttons, "Clear All", self._clear_all, "warning", "md"
@@ -336,6 +330,134 @@ class FavoritesUI:
             right_buttons, "Close", self.favorites_window.destroy, "secondary", "md"
         )
         self.close_btn.pack(side=tk.RIGHT)
+
+    def _on_right_click(self, event):
+        """Handle right-click on favorites"""
+        if not self.current_directory or not self.favorite_entries:
+            return
+
+        listbox = event.widget
+        index = listbox.nearest(event.y)
+        selection = listbox.curselection()
+
+        if not selection and index >= 0 and index < len(self.favorite_entries):
+            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+                favorite = self.favorite_entries[index]
+                if os.path.isfile(favorite.video_path):
+                    self.video_preview_manager.right_clicked_item = index
+                    self.video_preview_manager._show_video_preview(
+                        favorite.video_path, event.x_root, event.y_root
+                    )
+            return
+
+        if not selection:
+            return
+
+        context_menu = tk.Menu(self.favorites_window, tearoff=0)
+
+        context_menu.add_command(
+            label=f"Play Selected ({len(selection)} favorite{'s' if len(selection) > 1 else ''})",
+            command=self._play_selected
+        )
+
+        context_menu.add_separator()
+
+        context_menu.add_command(
+            label="Open in Grid View",
+            command=lambda: self._open_grid_view_from_selection(selection)
+        )
+
+        context_menu.add_separator()
+
+        context_menu.add_command(
+            label="Remove from Favorites",
+            command=self._remove_selected
+        )
+
+        if len(selection) == 1:
+            favorite = self.favorite_entries[selection[0]]
+            context_menu.add_separator()
+            context_menu.add_command(
+                label="Copy Path",
+                command=lambda: self._copy_path(favorite.video_path)
+            )
+            context_menu.add_command(
+                label="Open File Location",
+                command=lambda: self._open_location(favorite.video_path)
+            )
+
+        try:
+            context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            context_menu.grab_release()
+
+    def _open_grid_view(self):
+        """Open grid view with all favorites"""
+        if not self.favorite_entries:
+            messagebox.showwarning("Warning", "No favorites to display", parent=self.favorites_window)
+            return
+
+        if not hasattr(self, 'grid_view_manager') or not self.grid_view_manager:
+            messagebox.showwarning("Warning", "Grid view not available", parent=self.favorites_window)
+            return
+
+        video_paths = []
+        missing_files = []
+
+        for favorite in self.favorite_entries:
+            if os.path.isfile(favorite.video_path):
+                video_paths.append(favorite.video_path)
+            else:
+                missing_files.append(favorite.video_name)
+
+        if missing_files:
+            messagebox.showwarning(
+                "Missing Files",
+                f"{len(missing_files)} file(s) not found",
+                parent=self.favorites_window
+            )
+
+        if video_paths:
+            self.grid_view_manager.show_grid_view(video_paths, self.video_preview_manager)
+        else:
+            messagebox.showwarning("No Valid Files", "No valid video files found", parent=self.favorites_window)
+
+    def _open_grid_view_from_selection(self, selection):
+        """Open grid view with selected favorites"""
+        if not hasattr(self, 'grid_view_manager') or not self.grid_view_manager:
+            return
+
+        video_paths = []
+        for index in selection:
+            if 0 <= index < len(self.favorite_entries):
+                favorite = self.favorite_entries[index]
+                if os.path.isfile(favorite.video_path):
+                    video_paths.append(favorite.video_path)
+
+        if video_paths:
+            self.grid_view_manager.show_grid_view(video_paths, self.video_preview_manager)
+
+    def _copy_path(self, file_path):
+        """Copy file path to clipboard"""
+        try:
+            self.parent.clipboard_clear()
+            self.parent.clipboard_append(file_path)
+        except Exception as e:
+            print(f"Error copying path: {e}")
+
+    def _open_location(self, file_path):
+        """Open file location in explorer"""
+        try:
+            import subprocess
+            import sys
+            if os.name == 'nt':
+                subprocess.Popen(f'explorer /select,"{file_path}"')
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', '-R', file_path])
+            else:
+                subprocess.Popen(['xdg-open', os.path.dirname(file_path)])
+        except Exception as e:
+            print(f"Error opening location: {e}")
 
     def _refresh_favorites_list(self):
         if not self.current_directory:
@@ -351,14 +473,19 @@ class FavoritesUI:
                 self.directory_label.config(text="")
                 return
 
+            video_mapping = {}
             for i, favorite in enumerate(self.favorite_entries):
                 display_name = f"{i + 1}. ▶ {favorite.video_name}"
                 self.favorites_listbox.insert(tk.END, display_name)
+                video_mapping[i] = favorite.video_path
 
             self.info_label.config(text=f"{len(self.favorite_entries)} favorite(s)")
             self.directory_label.config(
                 text=f"Directory: {os.path.basename(self.current_directory)}"
             )
+
+            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+                self.video_preview_manager.attach_to_listbox(self.favorites_listbox, video_mapping)
 
         if threading.current_thread() is threading.main_thread():
             refresh()
@@ -553,3 +680,9 @@ class FavoritesManager:
     def get_favorites_for_directory(self, directory_path: str) -> List[str]:
         favorites = self.service.get_favorites_by_directory(directory_path)
         return [fav.video_path for fav in favorites]
+
+    def set_video_preview_manager(self, preview_manager):
+        self.ui.video_preview_manager = preview_manager
+
+    def set_grid_view_manager(self, grid_view_manager):
+        self.ui.grid_view_manager = grid_view_manager
