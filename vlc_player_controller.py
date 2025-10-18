@@ -506,6 +506,12 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
             if queue_current and os.path.normpath(current_video) == os.path.normpath(queue_current):
                 next_video_path = self.queue_manager.advance_queue()
 
+                if hasattr(self, 'queue_ui_refresh_callback') and self.queue_ui_refresh_callback:
+                    try:
+                        self.queue_ui_refresh_callback()
+                    except Exception:
+                        pass
+
                 if next_video_path and os.path.isfile(next_video_path):
                     try:
                         next_index = self.videos.index(next_video_path)
@@ -562,6 +568,9 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
 
     def set_queue_manager(self, queue_manager):
         self.queue_manager = queue_manager
+
+    def set_queue_ui_refresh_callback(self, callback):
+        self.queue_ui_refresh_callback = callback
 
     def play_video_by_path(self, video_path):
         try:

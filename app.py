@@ -3389,6 +3389,7 @@ def select_multiple_folders_and_play():
                 self.controller.set_resume_manager(self.resume_manager)
 
                 self.controller.set_queue_manager(self.queue_manager)
+                self.controller.set_queue_ui_refresh_callback(lambda: self.queue_manager.ui._refresh_queue())
 
                 initial_speed = self.speed_var.get()
                 if initial_speed != 1.0:
