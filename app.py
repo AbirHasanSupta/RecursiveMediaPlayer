@@ -1287,13 +1287,19 @@ def select_multiple_folders_and_play():
                 item_path = self.current_subdirs_mapping.get(index)
                 if item_path and os.path.isfile(item_path) and is_video(item_path):
                     selected_videos.append(item_path)
+                elif item_path and os.path.isdir(item_path):
+                    for root, dirs, files in os.walk(item_path):
+                        for file in files:
+                            full_path = os.path.join(root, file)
+                            if is_video(full_path):
+                                selected_videos.append(full_path)
 
             if selected_videos:
                 count = self.favorites_manager.remove_from_favorites(selected_videos, selected_dir)
                 self.update_console(f"Removed {count} video(s) from favorites")
 
                 scroll_pos = self.exclusion_listbox.yview()
-                self.load_subdirectories(selected_dir, restore_scroll=scroll_pos)
+                self.load_subdirectories(selected_dir, max_depth=self.current_max_depth, restore_scroll=scroll_pos)
 
         def _play_favorites_videos(self, videos):
             if not videos:

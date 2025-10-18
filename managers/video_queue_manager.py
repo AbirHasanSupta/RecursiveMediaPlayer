@@ -459,14 +459,12 @@ class QueueUI:
             self.parent.after(0, refresh)
 
     def _on_right_click(self, event):
-        """Handle right-click on queue items"""
         listbox = event.widget
         index = listbox.nearest(event.y)
         selection = listbox.curselection()
 
         queue = self.queue_service.get_queue()
 
-        # Show preview if no selection and hovering over a queue item
         if not selection and index >= 0 and index < len(queue):
             if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
                 entry = queue[index]
@@ -480,12 +478,18 @@ class QueueUI:
         if not selection or not queue:
             return
 
-        # Create context menu
         context_menu = tk.Menu(self.queue_window, tearoff=0)
 
+        selected_videos = []
+        for idx in selection:
+            if 0 <= idx < len(queue):
+                entry = queue[idx]
+                if os.path.exists(entry.video_path):
+                    selected_videos.append(entry.video_path)
+
         context_menu.add_command(
-            label=f"Play from Selected ({len(selection)} item{'s' if len(selection) > 1 else ''})",
-            command=lambda: self._play_from_selection(selection)
+            label=f"Play Selected ({len(selection)} item{'s' if len(selection) > 1 else ''})",
+            command=lambda v=selected_videos: self._play_from_context(v)
         )
 
         context_menu.add_command(
@@ -523,6 +527,11 @@ class QueueUI:
             context_menu.tk_popup(event.x_root, event.y_root)
         finally:
             context_menu.grab_release()
+
+    def _play_from_context(self, videos):
+        if videos and self.on_play_callback:
+            self.on_play_callback(videos)
+        self._refresh_queue()
 
     def _play_from_selection(self, selection):
         """Play queue starting from first selected item"""
