@@ -500,23 +500,24 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
 
     def next_video(self):
         if hasattr(self, 'queue_manager') and self.queue_manager:
-            next_video_path = self.queue_manager.advance_queue()
+            current_video = self.videos[self.index]
+            queue_current = self.queue_manager.get_current_video()
 
-            if next_video_path and os.path.isfile(next_video_path):
-                try:
-                    next_index = self.videos.index(next_video_path)
-                    self.play_video(next_index)
+            if queue_current and os.path.normpath(current_video) == os.path.normpath(queue_current):
+                next_video_path = self.queue_manager.advance_queue()
+
+                if next_video_path and os.path.isfile(next_video_path):
+                    try:
+                        next_index = self.videos.index(next_video_path)
+                        self.play_video(next_index)
+                        if self.logger:
+                            self.logger(f"Playing next from queue: {os.path.basename(next_video_path)}")
+                        return
+                    except ValueError:
+                        pass
+                elif next_video_path is None:
                     if self.logger:
-                        self.logger(f"Playing next from queue: {os.path.basename(next_video_path)}")
-                    return
-                except ValueError:
-                    if self.logger:
-                        self.logger("Queue video not in current playlist, loading...")
-                    pass
-            elif next_video_path is None:
-                if self.logger:
-                    self.logger("Reached end of queue")
-                if self.loop_mode == "loop_off":
+                        self.logger("Reached end of queue")
                     self.player.pause()
                     return
 

@@ -3379,7 +3379,7 @@ def select_multiple_folders_and_play():
                 self.controller = VLCPlayerControllerForMultipleDirectory(
                     valid_videos, all_video_to_dir, all_directories, self.update_console
                 )
-                self.controller.set_loop_mode(self.loop_mode)
+                self.controller.set_loop_mode("loop_off")
                 self.controller.volume = self.volume
                 self.controller.player.audio_set_volume(self.volume)
                 self.controller.set_volume_save_callback(self._save_volume_callback)
@@ -3387,6 +3387,8 @@ def select_multiple_folders_and_play():
                     self.watch_history_manager.track_video_playback
                 )
                 self.controller.set_resume_manager(self.resume_manager)
+
+                self.controller.set_queue_manager(self.queue_manager)
 
                 initial_speed = self.speed_var.get()
                 if initial_speed != 1.0:
