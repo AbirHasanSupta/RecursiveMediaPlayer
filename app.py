@@ -2394,13 +2394,15 @@ def select_multiple_folders_and_play():
             for index in selection:
                 item_path = self.current_subdirs_mapping.get(index)
                 if item_path and os.path.isfile(item_path) and is_video(item_path):
-                    selected_videos.append(item_path)
+                    if not self.is_video_excluded(selected_dir, item_path):
+                        selected_videos.append(item_path)
                 elif item_path and os.path.isdir(item_path):
                     for root, dirs, files in os.walk(item_path):
                         for file in files:
                             full_path = os.path.join(root, file)
                             if is_video(full_path):
-                                selected_videos.append(full_path)
+                                if not self.is_video_excluded(selected_dir, full_path):
+                                    selected_videos.append(full_path)
 
             if selected_videos:
                 self.playlist_manager.add_videos_to_playlist([], selected_videos)
