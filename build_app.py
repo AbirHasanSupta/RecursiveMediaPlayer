@@ -181,36 +181,39 @@ def select_multiple_folders_and_play():
             else:
                 self.selected_dirs = []
 
-            self.playlist_manager = PlaylistManager(self.root, self)
-            self.playlist_manager.set_play_callback(self._play_playlist_videos)
-
-            self.watch_history_manager = WatchHistoryManager(self.root, self)
-            self.watch_history_manager.set_play_callback(self._play_history_videos)
-            self.resume_manager = ResumePlaybackManager()
-            self.resume_manager.set_resume_enabled(self.smart_resume_enabled)
             self.settings_manager = SettingsManager(self.root, self, self.update_console)
             self.settings_manager.add_settings_changed_callback(self._on_settings_changed)
-
             app_settings = self.settings_manager.get_settings()
-            self.video_preview_manager = VideoPreviewManager(self.root, self.update_console)
-            self.playlist_manager.ui.video_preview_manager = self.video_preview_manager
 
+            self.video_preview_manager = VideoPreviewManager(self.root, self.update_console)
             self.video_preview_manager.set_preview_duration(app_settings.preview_duration)
             self.video_preview_manager.set_video_preview_enabled(app_settings.use_video_preview)
 
-            self.settings_manager.ui.cleanup_resume_callback = lambda: self.resume_manager.service.cleanup_old_positions(
-                self.settings_manager.get_settings().auto_cleanup_days)
-            self.settings_manager.ui.cleanup_history_callback = lambda: self.watch_history_manager.service.cleanup_old_entries(
-                self.settings_manager.get_settings().auto_cleanup_days)
-            self.settings_manager.ui.clear_thumbnails_callback = lambda: self._clear_thumbnail_cache()
-            self.settings_manager.ui.video_preview_manager = self.video_preview_manager
-
             self.grid_view_manager = GridViewManager(self.root, self, self.update_console)
             self.grid_view_manager.set_play_callback(self._play_grid_videos)
+
+            self.playlist_manager = PlaylistManager(self.root, self)
+            self.playlist_manager.set_play_callback(self._play_playlist_videos)
+            self.playlist_manager.set_video_preview_manager(self.video_preview_manager)
+            self.playlist_manager.set_grid_view_manager(self.grid_view_manager)
+            self.playlist_manager.ui.video_preview_manager = self.video_preview_manager
+
+            self.watch_history_manager = WatchHistoryManager(self.root, self)
+            self.watch_history_manager.set_play_callback(self._play_history_videos)
+            self.watch_history_manager.set_video_preview_manager(self.video_preview_manager)
+
+            self.resume_manager = ResumePlaybackManager()
+            self.resume_manager.set_resume_enabled(self.smart_resume_enabled)
+
             self.queue_manager = VideoQueueManager(self.root, self)
             self.queue_manager.set_play_callback(self._play_queue_videos)
+            self.queue_manager.set_video_preview_manager(self.video_preview_manager)
+            self.queue_manager.set_grid_view_manager(self.grid_view_manager)
+
             self.favorites_manager = FavoritesManager(self.root, self)
             self.favorites_manager.set_play_callback(self._play_favorites_videos)
+            self.favorites_manager.set_video_preview_manager(self.video_preview_manager)
+            self.favorites_manager.set_grid_view_manager(self.grid_view_manager)
 
             self.filter_sort_manager = AdvancedFilterSortManager(
                 watch_history_manager=self.watch_history_manager
@@ -224,6 +227,12 @@ def select_multiple_folders_and_play():
             )
             self.filter_sort_ui.app_instance = self
 
+            self.settings_manager.ui.cleanup_resume_callback = lambda: self.resume_manager.service.cleanup_old_positions(
+                self.settings_manager.get_settings().auto_cleanup_days)
+            self.settings_manager.ui.cleanup_history_callback = lambda: self.watch_history_manager.service.cleanup_old_entries(
+                self.settings_manager.get_settings().auto_cleanup_days)
+            self.settings_manager.ui.clear_thumbnails_callback = lambda: self._clear_thumbnail_cache()
+            self.settings_manager.ui.video_preview_manager = self.video_preview_manager
             self.settings_manager.ui.clear_metadata_callback = lambda: self._clear_metadata_cache()
             self.settings_manager.ui.get_metadata_info_callback = lambda: self._get_metadata_cache_info()
             self.settings_manager.ui.filter_sort_manager = self.filter_sort_manager
@@ -934,13 +943,15 @@ def select_multiple_folders_and_play():
             for index in selection:
                 item_path = self.current_subdirs_mapping.get(index)
                 if item_path and os.path.isfile(item_path) and is_video(item_path):
-                    selected_videos.append(item_path)
+                    if not self.is_video_excluded(selected_dir, item_path):
+                        selected_videos.append(item_path)
                 elif item_path and os.path.isdir(item_path):
                     for root, dirs, files in os.walk(item_path):
                         for file in files:
                             full_path = os.path.join(root, file)
                             if is_video(full_path):
-                                selected_videos.append(full_path)
+                                if not self.is_video_excluded(selected_dir, full_path):
+                                    selected_videos.append(full_path)
 
             if selected_videos:
                 count = self.favorites_manager.add_to_favorites(selected_videos, selected_dir)
@@ -959,13 +970,19 @@ def select_multiple_folders_and_play():
                 item_path = self.current_subdirs_mapping.get(index)
                 if item_path and os.path.isfile(item_path) and is_video(item_path):
                     selected_videos.append(item_path)
+                elif item_path and os.path.isdir(item_path):
+                    for root, dirs, files in os.walk(item_path):
+                        for file in files:
+                            full_path = os.path.join(root, file)
+                            if is_video(full_path):
+                                selected_videos.append(full_path)
 
             if selected_videos:
                 count = self.favorites_manager.remove_from_favorites(selected_videos, selected_dir)
                 self.update_console(f"Removed {count} video(s) from favorites")
 
                 scroll_pos = self.exclusion_listbox.yview()
-                self.load_subdirectories(selected_dir, restore_scroll=scroll_pos)
+                self.load_subdirectories(selected_dir, max_depth=self.current_max_depth, restore_scroll=scroll_pos)
 
         def _play_favorites_videos(self, videos):
             if not videos:
@@ -1057,13 +1074,15 @@ def select_multiple_folders_and_play():
             for index in selection:
                 item_path = self.current_subdirs_mapping.get(index)
                 if item_path and os.path.isfile(item_path) and is_video(item_path):
-                    selected_videos.append(item_path)
+                    if not self.is_video_excluded(selected_dir, item_path):
+                        selected_videos.append(item_path)
                 elif item_path and os.path.isdir(item_path):
                     for root, dirs, files in os.walk(item_path):
                         for file in files:
                             full_path = os.path.join(root, file)
                             if is_video(full_path):
-                                selected_videos.append(full_path)
+                                if not self.is_video_excluded(selected_dir, full_path):
+                                    selected_videos.append(full_path)
 
             if selected_videos:
                 self.playlist_manager.add_videos_to_playlist([], selected_videos)
@@ -1136,6 +1155,16 @@ def select_multiple_folders_and_play():
             target_path = self.current_subdirs_mapping.get(index)
             if not target_path:
                 return
+
+            is_filtered_mode = hasattr(self, '_is_filtered_mode') and self._is_filtered_mode
+
+            if is_filtered_mode:
+                if os.path.isfile(target_path) and is_video(target_path):
+                    listbox.selection_clear(0, tk.END)
+                    listbox.selection_set(index)
+                    listbox.activate(index)
+                    self.root.after(100, self.play_videos)
+                return "break"
 
             if os.path.isdir(target_path):
                 selected_dir = self.get_current_selected_directory()
@@ -3035,7 +3064,7 @@ def select_multiple_folders_and_play():
                 self.controller = VLCPlayerControllerForMultipleDirectory(
                     valid_videos, all_video_to_dir, all_directories, self.update_console
                 )
-                self.controller.set_loop_mode(self.loop_mode)
+                self.controller.set_loop_mode("loop_off")
                 self.controller.volume = self.volume
                 self.controller.player.audio_set_volume(self.volume)
                 self.controller.set_volume_save_callback(self._save_volume_callback)
@@ -3043,6 +3072,9 @@ def select_multiple_folders_and_play():
                     self.watch_history_manager.track_video_playback
                 )
                 self.controller.set_resume_manager(self.resume_manager)
+
+                self.controller.set_queue_manager(self.queue_manager)
+                self.controller.set_queue_ui_refresh_callback(lambda: self.queue_manager.ui._refresh_queue())
 
                 initial_speed = self.speed_var.get()
                 if initial_speed != 1.0:
@@ -3146,7 +3178,6 @@ def select_multiple_folders_and_play():
             self.save_preferences()
 
         def _on_settings_changed(self, new_settings):
-            self.ai_index_path = new_settings.ai_index_path
             self.update_console(f"Settings updated")
 
             if hasattr(self, 'video_preview_manager'):
