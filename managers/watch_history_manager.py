@@ -775,10 +775,9 @@ class WatchHistoryManager:
         if video_path and os.path.exists(video_path):
             self.service.add_watch_entry(video_path, duration_watched, total_duration)
 
-    def track_video_playback(self, video_path: str):
-        """Simple tracking method for basic playback logging"""
+    def track_video_playback(self, video_path: str, duration_watched: int = 0, total_duration: int = 0):
         if video_path and os.path.exists(video_path):
-            self.service.add_watch_entry(video_path)
+            self.service.add_watch_entry(video_path, duration_watched, total_duration)
 
     def get_recent_videos(self, count: int = 10) -> List[WatchHistoryEntry]:
         """Get recently watched videos"""

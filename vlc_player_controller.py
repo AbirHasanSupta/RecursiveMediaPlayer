@@ -400,10 +400,16 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
         self.watch_history_callback = callback
 
     def _track_video_playback(self, video_path):
-        """Track video playback in history"""
         if self.watch_history_callback:
             try:
-                self.watch_history_callback(video_path)
+                duration_watched = 0
+                total_duration = 0
+                try:
+                    duration_watched = int(self.player.get_time() / 1000)
+                    total_duration = int(self.player.get_length() / 1000)
+                except:
+                    pass
+                self.watch_history_callback(video_path, duration_watched, total_duration)
             except Exception:
                 pass
 
@@ -480,8 +486,6 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
             if self.logger:
                 self.logger(f"Playing: {os.path.basename(current_video)} from {current_dir}")
 
-            self._track_video_playback(current_video)
-
             media = self.instance.media_new(current_video)
 
             resume_video, resume_position = self.check_resume_position(current_video)
@@ -499,6 +503,10 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
             self.played_indices = set()
 
     def next_video(self):
+        if self.index < len(self.videos):
+            current_video = self.videos[self.index]
+            self._track_video_playback(current_video)
+
         if hasattr(self, 'queue_manager') and self.queue_manager:
             current_video = self.videos[self.index]
             queue_current = self.queue_manager.get_current_video()
