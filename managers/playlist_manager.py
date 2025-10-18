@@ -304,7 +304,7 @@ class PlaylistUI:
         )
         self.video_listbox.pack(fill=tk.BOTH, expand=True)
         self.video_listbox.bind('<Double-Button-1>', self._on_video_double_click)
-        self.video_listbox.bind_all('<Button-3>', self._on_video_right_click)
+        self._right_click_binding = self.video_listbox.bind_all('<Button-3>', self._on_video_right_click_wrapper)
         self.video_listbox.bind('<Button-1>', self._on_mouse_down)
         self.video_listbox.bind('<B1-Motion>', self._on_mouse_drag)
         self.video_listbox.bind('<ButtonRelease-1>', self._on_mouse_release)
@@ -314,11 +314,6 @@ class PlaylistUI:
 
         video_btn_frame = tk.Frame(right_panel, bg=self.theme_provider.bg_color)
         video_btn_frame.pack(fill=tk.X)
-
-        # self.remove_video_btn = self.theme_provider.create_button(
-        #     video_btn_frame, "Remove Selected", self._remove_selected_videos, "danger", "sm"
-        # )
-        # self.remove_video_btn.pack(side=tk.LEFT, padx=(0, 5))
 
         close_btn = self.theme_provider.create_button(
             video_btn_frame,
@@ -330,6 +325,26 @@ class PlaylistUI:
         close_btn.pack(side=tk.RIGHT)
 
         self.playlist_window.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _on_video_right_click_wrapper(self, event):
+        if not hasattr(self, 'playlist_window') or not self.playlist_window:
+            return
+        if not self.playlist_window.winfo_exists():
+            return
+        if event.widget != self.video_listbox:
+            return
+        self._on_video_right_click(event)
+
+    def _on_close(self):
+        try:
+            if hasattr(self, '_right_click_binding') and self._right_click_binding:
+                self.video_listbox.unbind_all('<Button-3>')
+        except Exception:
+            pass
+
+        if self.playlist_window and self.playlist_window.winfo_exists():
+            self.playlist_window.destroy()
+        self.playlist_window = None
 
     def _on_mouse_down(self, event):
         """Handle mouse down for drag and drop"""
