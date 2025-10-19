@@ -1,5 +1,6 @@
 import sys
 import threading
+import time
 import tkinter as tk
 from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
@@ -646,6 +647,12 @@ def select_multiple_folders_and_play():
 
             self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
             self.keys_thread.start()
+
+            def init_overlay_delayed():
+                time.sleep(1)
+                self.controller.init_overlay()
+
+            threading.Thread(target=init_overlay_delayed, daemon=True).start()
 
         def _open_grid_view(self, videos):
             if not videos:
@@ -1343,6 +1350,12 @@ def select_multiple_folders_and_play():
             self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
             self.keys_thread.start()
 
+            def init_overlay_delayed():
+                time.sleep(1)
+                self.controller.init_overlay()
+
+            threading.Thread(target=init_overlay_delayed, daemon=True).start()
+
         def _select_all_items(self, listbox):
             listbox.selection_clear(0, tk.END)
             listbox.selection_set(0, tk.END)
@@ -1947,6 +1960,12 @@ def select_multiple_folders_and_play():
                     self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
                     self.keys_thread.start()
                     self.root.config(cursor="")
+
+                    def init_overlay_delayed():
+                        time.sleep(1)
+                        self.controller.init_overlay()
+
+                    threading.Thread(target=init_overlay_delayed, daemon=True).start()
 
                 self.root.after(0, _start_player)
 
@@ -3297,6 +3316,8 @@ def select_multiple_folders_and_play():
 
                 self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
                 self.keys_thread.start()
+                time.sleep(1)
+                self.controller.init_overlay()
 
             threading.Thread(target=start_playlist_player, daemon=True).start()
 
@@ -3410,6 +3431,8 @@ def select_multiple_folders_and_play():
 
                 self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
                 self.keys_thread.start()
+                time.sleep(1)
+                self.controller.init_overlay()
 
             threading.Thread(target=start_queue_player, daemon=True).start()
 
@@ -3477,6 +3500,8 @@ def select_multiple_folders_and_play():
 
                 self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
                 self.keys_thread.start()
+                time.sleep(1)
+                self.controller.init_overlay()
 
             threading.Thread(target=start_history_player, daemon=True).start()
 

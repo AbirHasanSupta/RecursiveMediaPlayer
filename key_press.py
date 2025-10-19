@@ -44,7 +44,7 @@ def _guarded(fn):
     return wrapped
 
 
-def listen_keys(controller, multi_directory=True):
+def listen_keys(controller):
     global hotkey_refs
 
     cleanup_hotkeys()
@@ -65,10 +65,9 @@ def listen_keys(controller, multi_directory=True):
     hotkey_refs.append(keyboard.add_hotkey('-', _guarded(lambda: controller.decrease_speed())))
     hotkey_refs.append(keyboard.add_hotkey('0', _guarded(lambda: controller.reset_speed_hotkey())))
     hotkey_refs.append(keyboard.add_hotkey('ctrl+c', _guarded(lambda: controller.copy_current_video())))
-
-    if multi_directory:
-        hotkey_refs.append(keyboard.add_hotkey('e', _guarded(lambda: controller.next_directory())))
-        hotkey_refs.append(keyboard.add_hotkey('q', _guarded(lambda: controller.prev_directory())))
+    hotkey_refs.append(keyboard.add_hotkey('i', _guarded(lambda: controller.toggle_overlay())))
+    hotkey_refs.append(keyboard.add_hotkey('e', _guarded(lambda: controller.next_directory())))
+    hotkey_refs.append(keyboard.add_hotkey('q', _guarded(lambda: controller.prev_directory())))
 
 
 def cleanup_hotkeys():

@@ -10,6 +10,7 @@ from key_press import cleanup_hotkeys
 import win32clipboard as wcb
 import win32con
 import struct
+from video_position_overlay import VideoPositionOverlay
 
 
 class MonitorInfo:
@@ -51,6 +52,7 @@ class BaseVLCPlayerController:
         self.initial_playback_rate = 1.0
         self.start_index = 0
         self.video_change_callback = None
+        self.position_overlay = None
 
     def set_initial_playback_rate(self, rate):
         self.initial_playback_rate = rate
@@ -126,6 +128,11 @@ class BaseVLCPlayerController:
                     self._volume_save_callback(self.volume)
                 except Exception:
                     pass
+
+            if self.position_overlay:
+                self.position_overlay.cleanup()
+                self.position_overlay = None
+
             self.player.stop()
             self.stop_position_tracking()
             cleanup_hotkeys()
@@ -322,6 +329,14 @@ class BaseVLCPlayerController:
             if self.logger:
                 self.logger(f"Switched to monitor {monitor_number}")
 
+            if self.position_overlay and self.position_overlay.is_visible:
+                def update_overlay_position():
+                    time.sleep(0.5)
+                    if self.position_overlay:
+                        self.position_overlay.position_window()
+
+                threading.Thread(target=update_overlay_position, daemon=True).start()
+
     def take_screenshot(self):
         with self.lock:
             try:
@@ -383,6 +398,16 @@ class BaseVLCPlayerController:
             if self.logger:
                 self.logger("Video player stopped")
             cleanup_hotkeys()
+
+    def init_overlay(self):
+        if not self.position_overlay:
+            self.position_overlay = VideoPositionOverlay(self, self.logger)
+            self.position_overlay.create_overlay()
+
+    def toggle_overlay(self):
+        if not self.position_overlay:
+            self.init_overlay()
+        self.position_overlay.toggle()
 
 
 class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
