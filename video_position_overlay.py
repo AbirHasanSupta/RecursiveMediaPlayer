@@ -17,13 +17,17 @@ class VideoPositionOverlay:
         self.auto_hide_timer = None
         self.update_timer = None
         self.position_update_timer = None
+        self.position_lock_timer = None
         self.is_hovering = False
         self.last_player_hwnd = None
+        self.target_x = 0
+        self.target_y = 0
+        self.position_locked = False
 
         self.bg_color = "#000000"
         self.overlay_alpha = 0.85
         self.progress_bg = "#404040"
-        self.progress_fg = "#E50914"  # YouTube red
+        self.progress_fg = "#E50914"
         self.buffered_color = "#808080"
         self.text_color = "#FFFFFF"
         self.handle_color = "#FFFFFF"
@@ -114,13 +118,8 @@ class VideoPositionOverlay:
         )
         self.container.pack(fill=tk.BOTH, expand=True)
 
-        self.container.bind('<Button-1>', self._prevent_drag)
-        self.container.bind('<B1-Motion>', self._prevent_drag)
-
         info_frame = tk.Frame(self.container, bg=self.bg_color)
         info_frame.pack(fill=tk.X, pady=(0, 10))
-        info_frame.bind('<Button-1>', self._prevent_drag)
-        info_frame.bind('<B1-Motion>', self._prevent_drag)
 
         self.title_label = tk.Label(
             info_frame,
@@ -131,18 +130,12 @@ class VideoPositionOverlay:
             anchor='w'
         )
         self.title_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self.title_label.bind('<Button-1>', self._prevent_drag)
-        self.title_label.bind('<B1-Motion>', self._prevent_drag)
 
         progress_frame = tk.Frame(self.container, bg=self.bg_color)
         progress_frame.pack(fill=tk.X, pady=(0, 8))
-        progress_frame.bind('<Button-1>', self._prevent_drag)
-        progress_frame.bind('<B1-Motion>', self._prevent_drag)
 
         time_frame = tk.Frame(progress_frame, bg=self.bg_color)
         time_frame.pack(fill=tk.X, pady=(0, 5))
-        time_frame.bind('<Button-1>', self._prevent_drag)
-        time_frame.bind('<B1-Motion>', self._prevent_drag)
 
         self.current_time_label = tk.Label(
             time_frame,
@@ -152,8 +145,6 @@ class VideoPositionOverlay:
             fg=self.text_color
         )
         self.current_time_label.pack(side=tk.LEFT)
-        self.current_time_label.bind('<Button-1>', self._prevent_drag)
-        self.current_time_label.bind('<B1-Motion>', self._prevent_drag)
 
         self.duration_label = tk.Label(
             time_frame,
@@ -163,8 +154,6 @@ class VideoPositionOverlay:
             fg=self.text_color
         )
         self.duration_label.pack(side=tk.RIGHT)
-        self.duration_label.bind('<Button-1>', self._prevent_drag)
-        self.duration_label.bind('<B1-Motion>', self._prevent_drag)
 
         self.progress_canvas = tk.Canvas(
             progress_frame,
@@ -185,8 +174,6 @@ class VideoPositionOverlay:
 
         controls_frame = tk.Frame(self.container, bg=self.bg_color)
         controls_frame.pack(fill=tk.X)
-        controls_frame.bind('<Button-1>', self._prevent_drag)
-        controls_frame.bind('<B1-Motion>', self._prevent_drag)
 
         self.play_pause_btn = tk.Button(
             controls_frame,
@@ -235,8 +222,6 @@ class VideoPositionOverlay:
 
         volume_frame = tk.Frame(controls_frame, bg=self.bg_color)
         volume_frame.pack(side=tk.LEFT, padx=(10, 0))
-        volume_frame.bind('<Button-1>', self._prevent_drag)
-        volume_frame.bind('<B1-Motion>', self._prevent_drag)
 
         self.volume_label = tk.Label(
             volume_frame,
@@ -246,8 +231,6 @@ class VideoPositionOverlay:
             fg=self.text_color
         )
         self.volume_label.pack(side=tk.LEFT, padx=(0, 5))
-        self.volume_label.bind('<Button-1>', self._prevent_drag)
-        self.volume_label.bind('<B1-Motion>', self._prevent_drag)
 
         self.volume_value_label = tk.Label(
             volume_frame,
@@ -258,13 +241,9 @@ class VideoPositionOverlay:
             width=4
         )
         self.volume_value_label.pack(side=tk.LEFT)
-        self.volume_value_label.bind('<Button-1>', self._prevent_drag)
-        self.volume_value_label.bind('<B1-Motion>', self._prevent_drag)
 
         speed_frame = tk.Frame(controls_frame, bg=self.bg_color)
         speed_frame.pack(side=tk.RIGHT)
-        speed_frame.bind('<Button-1>', self._prevent_drag)
-        speed_frame.bind('<B1-Motion>', self._prevent_drag)
 
         self.speed_label = tk.Label(
             speed_frame,
@@ -274,15 +253,10 @@ class VideoPositionOverlay:
             fg=self.text_color
         )
         self.speed_label.pack(side=tk.LEFT)
-        self.speed_label.bind('<Button-1>', self._prevent_drag)
-        self.speed_label.bind('<B1-Motion>', self._prevent_drag)
 
         self.create_tooltip()
 
         self.overlay_window.withdraw()
-
-    def _prevent_drag(self, event):
-        return "break"
 
     def create_tooltip(self):
         """Create hover tooltip for preview time"""
@@ -308,26 +282,8 @@ class VideoPositionOverlay:
 
         self.tooltip.withdraw()
 
-
     def position_window(self):
         if not self.overlay_window:
-            return
-
-        vlc_pos = self.get_vlc_window_position()
-
-        if not vlc_pos:
-            screen_width = self.overlay_window.winfo_screenwidth()
-            screen_height = self.overlay_window.winfo_screenheight()
-
-            self.overlay_window.update_idletasks()
-
-            window_width = 600
-            window_height = self.overlay_window.winfo_reqheight()
-
-            x = (screen_width - window_width) // 2
-            y = screen_height - window_height - 100
-
-            self.overlay_window.geometry(f"{window_width}x{window_height}+{x}+{y}")
             return
 
         self.overlay_window.update_idletasks()
@@ -335,31 +291,30 @@ class VideoPositionOverlay:
         overlay_width = 600
         overlay_height = self.overlay_window.winfo_reqheight()
 
-        vlc_center_x = vlc_pos['x'] + vlc_pos['width'] // 2
-        x = vlc_center_x - overlay_width // 2
+        x = 20
+        y = 20
 
-        y = vlc_pos['y'] + vlc_pos['height'] - overlay_height - 50
-
-        from screeninfo import get_monitors
-        monitors = get_monitors()
-
-        target_monitor = None
-        for monitor in monitors:
-            if (monitor.x <= vlc_pos['x'] < monitor.x + monitor.width and
-                    monitor.y <= vlc_pos['y'] < monitor.y + monitor.height):
-                target_monitor = monitor
-                break
-
-        if target_monitor:
-            x = max(target_monitor.x, min(x, target_monitor.x + target_monitor.width - overlay_width))
-            y = max(target_monitor.y, min(y, target_monitor.y + target_monitor.height - overlay_height))
-        else:
-            screen_width = self.overlay_window.winfo_screenwidth()
-            screen_height = self.overlay_window.winfo_screenheight()
-            x = max(0, min(x, screen_width - overlay_width))
-            y = max(0, min(y, screen_height - overlay_height))
+        self.target_x = x
+        self.target_y = y
 
         self.overlay_window.geometry(f"{overlay_width}x{overlay_height}+{x}+{y}")
+
+    def lock_position(self):
+        """Continuously enforce the window position"""
+        if not self.is_visible or not self.overlay_window or not self.position_locked:
+            return
+
+        try:
+            current_x = self.overlay_window.winfo_x()
+            current_y = self.overlay_window.winfo_y()
+
+            if abs(current_x - self.target_x) > 2 or abs(current_y - self.target_y) > 2:
+                self.overlay_window.geometry(f"+{self.target_x}+{self.target_y}")
+        except:
+            pass
+
+        if self.is_visible and self.position_locked:
+            self.position_lock_timer = self.overlay_window.after(50, self.lock_position)
 
     def show(self):
         """Show the overlay"""
@@ -367,8 +322,15 @@ class VideoPositionOverlay:
             self.create_overlay()
 
         self.is_visible = True
-        self.position_window()
         self.overlay_window.deiconify()
+        self.overlay_window.update()
+
+        self.position_window()
+        self.overlay_window.update()
+
+        self.position_locked = True
+        self.lock_position()
+
         self.update_display()
         self.start_updates()
         self.start_position_tracking()
@@ -377,6 +339,15 @@ class VideoPositionOverlay:
     def hide(self):
         """Hide the overlay"""
         self.is_visible = False
+        self.position_locked = False
+
+        if self.position_lock_timer:
+            try:
+                self.overlay_window.after_cancel(self.position_lock_timer)
+            except:
+                pass
+            self.position_lock_timer = None
+
         if self.overlay_window:
             self.overlay_window.withdraw()
         if self.tooltip:
@@ -511,19 +482,16 @@ class VideoPositionOverlay:
         self.is_dragging = True
         self.seek_to_position(event.x)
         self.reset_auto_hide()
-        return "break"
 
     def on_progress_drag(self, event):
         """Handle progress bar drag"""
         if self.is_dragging:
             self.seek_to_position(event.x)
-        return "break"
 
     def on_progress_release(self, event):
         """Handle progress bar release"""
         self.is_dragging = False
         self.reset_auto_hide()
-        return "break"
 
     def on_progress_enter(self, event):
         """Handle mouse enter progress bar"""
@@ -635,7 +603,7 @@ class VideoPositionOverlay:
     def position_tracking_loop(self):
         """Loop to track VLC window position and update overlay position"""
         if self.is_visible:
-            self.position_window()
+            pass
 
             self.position_update_timer = threading.Timer(0.5, self.position_tracking_loop)
             self.position_update_timer.daemon = True
@@ -658,10 +626,16 @@ class VideoPositionOverlay:
 
     def cleanup(self):
         """Cleanup resources"""
+        self.position_locked = False
         self.stop_updates()
         self.stop_position_tracking()
         if self.auto_hide_timer:
             self.auto_hide_timer.cancel()
+        if self.position_lock_timer:
+            try:
+                self.overlay_window.after_cancel(self.position_lock_timer)
+            except:
+                pass
         if self.tooltip:
             self.tooltip.destroy()
         if self.overlay_window:
