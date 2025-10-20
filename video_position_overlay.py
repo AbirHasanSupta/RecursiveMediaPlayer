@@ -14,7 +14,6 @@ class VideoPositionOverlay:
         self.overlay_window = None
         self.is_visible = False
         self.is_dragging = False
-        self.auto_hide_timer = None
         self.update_timer = None
         self.position_update_timer = None
         self.position_lock_timer = None
@@ -93,6 +92,25 @@ class VideoPositionOverlay:
                 self.logger(f"Error getting VLC window: {e}")
 
         return None
+
+    def get_monitor_from_position(self, x, y):
+        """Determine which monitor a position is on"""
+        try:
+            from screeninfo import get_monitors
+            monitors = get_monitors()
+
+            for i, monitor in enumerate(monitors, 1):
+                if (monitor.x <= x < monitor.x + monitor.width and
+                        monitor.y <= y < monitor.y + monitor.height):
+                    return i, monitor
+
+            if monitors:
+                return 1, monitors[0]
+        except Exception as e:
+            if self.logger:
+                self.logger(f"Error detecting monitor: {e}")
+
+        return 1, None
 
     def create_overlay(self):
         """Create the floating overlay window"""
@@ -283,6 +301,7 @@ class VideoPositionOverlay:
         self.tooltip.withdraw()
 
     def position_window(self):
+        """Position overlay in top-left of the monitor where VLC is playing"""
         if not self.overlay_window:
             return
 
@@ -293,6 +312,20 @@ class VideoPositionOverlay:
 
         x = 20
         y = 20
+
+        vlc_pos = self.get_vlc_window_position()
+        if vlc_pos:
+            vlc_center_x = vlc_pos['x'] + vlc_pos['width'] // 2
+            vlc_center_y = vlc_pos['y'] + vlc_pos['height'] // 2
+
+            monitor_num, monitor = self.get_monitor_from_position(vlc_center_x, vlc_center_y)
+
+            if monitor:
+                x = monitor.x + 20
+                y = monitor.y + 20
+
+                if self.logger:
+                    self.logger(f"Overlay positioned on monitor {monitor_num} at ({x}, {y})")
 
         self.target_x = x
         self.target_y = y
@@ -334,7 +367,6 @@ class VideoPositionOverlay:
         self.update_display()
         self.start_updates()
         self.start_position_tracking()
-        self.reset_auto_hide()
 
     def hide(self):
         """Hide the overlay"""
@@ -481,7 +513,6 @@ class VideoPositionOverlay:
         """Handle progress bar click"""
         self.is_dragging = True
         self.seek_to_position(event.x)
-        self.reset_auto_hide()
 
     def on_progress_drag(self, event):
         """Handle progress bar drag"""
@@ -491,7 +522,6 @@ class VideoPositionOverlay:
     def on_progress_release(self, event):
         """Handle progress bar release"""
         self.is_dragging = False
-        self.reset_auto_hide()
 
     def on_progress_enter(self, event):
         """Handle mouse enter progress bar"""
@@ -555,7 +585,6 @@ class VideoPositionOverlay:
         if self.controller:
             self.controller.toggle_pause()
             self.update_display()
-            self.reset_auto_hide()
 
     def previous_video(self):
         """Play previous video"""
@@ -565,14 +594,12 @@ class VideoPositionOverlay:
             else:
                 self.controller.prev_video()
             self.update_display()
-            self.reset_auto_hide()
 
     def next_video(self):
         """Play next video"""
         if self.controller:
             self.controller.next_video()
             self.update_display()
-            self.reset_auto_hide()
 
     def start_updates(self):
         """Start periodic updates"""
@@ -582,12 +609,28 @@ class VideoPositionOverlay:
     def update_loop(self):
         """Update loop for progress bar"""
         if self.is_visible and not self.is_dragging:
+            if not self._is_player_active():
+                self.hide()
+                return
             self.update_display()
 
         if self.is_visible:
             self.update_timer = threading.Timer(0.5, self.update_loop)
             self.update_timer.daemon = True
             self.update_timer.start()
+
+    def _is_player_active(self):
+        """Check if the player is still active"""
+        try:
+            if not self.controller:
+                return False
+            if not hasattr(self.controller, 'running') or not self.controller.running:
+                return False
+            if not hasattr(self.controller, 'player') or not self.controller.player:
+                return False
+            return True
+        except:
+            return False
 
     def stop_updates(self):
         """Stop periodic updates"""
@@ -601,11 +644,31 @@ class VideoPositionOverlay:
         self.position_tracking_loop()
 
     def position_tracking_loop(self):
-        """Loop to track VLC window position and update overlay position"""
+        """Loop to track VLC window position and update overlay position when monitor changes"""
         if self.is_visible:
-            pass
+            if not self._is_player_active():
+                self.hide()
+                return
 
-            self.position_update_timer = threading.Timer(0.5, self.position_tracking_loop)
+            vlc_pos = self.get_vlc_window_position()
+            if vlc_pos:
+                vlc_center_x = vlc_pos['x'] + vlc_pos['width'] // 2
+                vlc_center_y = vlc_pos['y'] + vlc_pos['height'] // 2
+
+                monitor_num, monitor = self.get_monitor_from_position(vlc_center_x, vlc_center_y)
+                if monitor:
+                    new_x = monitor.x + 20
+                    new_y = monitor.y + 20
+
+                    if abs(self.target_x - new_x) > 100 or abs(self.target_y - new_y) > 100:
+                        self.target_x = new_x
+                        self.target_y = new_y
+                        try:
+                            self.overlay_window.geometry(f"+{new_x}+{new_y}")
+                        except:
+                            pass
+
+            self.position_update_timer = threading.Timer(1.0, self.position_tracking_loop)
             self.position_update_timer.daemon = True
             self.position_update_timer.start()
 
@@ -615,22 +678,11 @@ class VideoPositionOverlay:
             self.position_update_timer.cancel()
             self.position_update_timer = None
 
-    def reset_auto_hide(self):
-        """Reset auto-hide timer"""
-        if self.auto_hide_timer:
-            self.auto_hide_timer.cancel()
-
-        self.auto_hide_timer = threading.Timer(5.0, self.hide)
-        self.auto_hide_timer.daemon = True
-        self.auto_hide_timer.start()
-
     def cleanup(self):
         """Cleanup resources"""
         self.position_locked = False
         self.stop_updates()
         self.stop_position_tracking()
-        if self.auto_hide_timer:
-            self.auto_hide_timer.cancel()
         if self.position_lock_timer:
             try:
                 self.overlay_window.after_cancel(self.position_lock_timer)
