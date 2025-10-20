@@ -246,9 +246,13 @@ class VideoPositionOverlay:
             text="🔊",
             font=("Segoe UI", 11),
             bg=self.bg_color,
-            fg=self.text_color
+            fg=self.text_color,
+            cursor="hand2"
         )
         self.volume_label.pack(side=tk.LEFT, padx=(0, 5))
+        self.volume_label.bind("<Button-1>", lambda e: self.volume_up())
+        self.volume_label.bind("<Button-3>", lambda e: self.volume_down())
+        self.volume_label.bind("<MouseWheel>", self.on_volume_scroll)
 
         self.volume_value_label = tk.Label(
             volume_frame,
@@ -266,11 +270,16 @@ class VideoPositionOverlay:
         self.speed_label = tk.Label(
             speed_frame,
             text="1.0×",
-            font=("Segoe UI", 9),
+            font=("Segoe UI", 9, "bold"),
             bg=self.bg_color,
-            fg=self.text_color
+            fg=self.text_color,
+            cursor="hand2"
         )
         self.speed_label.pack(side=tk.LEFT)
+        self.speed_label.bind("<Button-1>", lambda e: self.increase_speed())
+        self.speed_label.bind("<Button-3>", lambda e: self.decrease_speed())
+        self.speed_label.bind("<Double-Button-1>", lambda e: self.reset_speed())
+        self.speed_label.bind("<MouseWheel>", self.on_speed_scroll)
 
         self.create_tooltip()
 
@@ -573,6 +582,73 @@ class VideoPositionOverlay:
         except Exception as e:
             if self.logger:
                 self.logger(f"Error seeking: {e}")
+
+    def set_speed_from_position(self, x):
+        """Set playback speed based on slider position"""
+        try:
+            canvas_width = self.speed_canvas.winfo_width()
+            if canvas_width <= 1:
+                return
+
+            min_speed = 0.25
+            max_speed = 2.0
+
+            progress = max(0, min(1, x / canvas_width))
+            new_speed = min_speed + progress * (max_speed - min_speed)
+
+            new_speed = round(new_speed * 4) / 4
+            new_speed = max(min_speed, min(max_speed, new_speed))
+
+            self.controller.set_playback_rate(new_speed)
+            self.speed_label.config(text=f"{new_speed:.2f}×")
+
+        except Exception as e:
+            if self.logger:
+                self.logger(f"Error setting speed: {e}")
+
+    def volume_up(self):
+        """Increase volume"""
+        if self.controller:
+            self.controller.volume_up()
+            self.update_display()
+
+    def volume_down(self):
+        """Decrease volume"""
+        if self.controller:
+            self.controller.volume_down()
+            self.update_display()
+
+    def on_volume_scroll(self, event):
+        """Handle mouse wheel on volume label"""
+        if event.delta > 0:
+            self.volume_up()
+        else:
+            self.volume_down()
+
+    def increase_speed(self):
+        """Increase playback speed"""
+        if self.controller:
+            self.controller.increase_speed()
+            self.update_display()
+
+    def decrease_speed(self):
+        """Decrease playback speed"""
+        if self.controller:
+            self.controller.decrease_speed()
+            self.update_display()
+
+    def reset_speed(self):
+        """Reset speed to 1.0x"""
+        if self.controller:
+            self.controller.set_playback_rate(1.0)
+            self.update_display()
+
+    def on_speed_scroll(self, event):
+        """Handle mouse wheel on speed label"""
+        if event.delta > 0:
+            self.increase_speed()
+        else:
+            self.decrease_speed()
 
     def toggle_pause(self):
         """Toggle play/pause"""
