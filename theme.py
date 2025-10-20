@@ -75,6 +75,7 @@ class ConfigHandler:
                         'last_played_video_index': config.get('last_played_video_index', 0),
                         'last_played_video_path': last_played_path,
                         'excluded_subdirs': decoded_excluded_subdirs,
+                        'excluded_videos': decoded_excluded_videos,
                         'smart_resume_enabled': config.get('smart_resume_enabled', False),
                         'volume': config.get('volume', 50),
                         'loop_mode': config.get('loop_mode', 'loop_on'),
