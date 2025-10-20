@@ -324,9 +324,6 @@ class VideoPositionOverlay:
                 x = monitor.x + 20
                 y = monitor.y + 20
 
-                if self.logger:
-                    self.logger(f"Overlay positioned on monitor {monitor_num} at ({x}, {y})")
-
         self.target_x = x
         self.target_y = y
 
@@ -572,9 +569,6 @@ class VideoPositionOverlay:
             self.controller.player.set_time(new_time)
 
             self.draw_progress()
-
-            if self.logger:
-                self.logger(f"Seeked to {self.format_time(new_time)}")
 
         except Exception as e:
             if self.logger:
