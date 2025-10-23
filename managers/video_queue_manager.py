@@ -623,7 +623,12 @@ class QueueUI:
             self._refresh_queue()
 
     def _on_drag_start(self, event):
-        self.drag_start_index = self.queue_listbox.nearest(event.y)
+        index = self.queue_listbox.nearest(event.y)
+        if not (event.state & 0x4):
+            self.queue_listbox.selection_clear(0, tk.END)
+            self.queue_listbox.selection_set(index)
+
+        self.drag_start_index = index
         self.drag_data = None
 
     def _on_drag_motion(self, event):

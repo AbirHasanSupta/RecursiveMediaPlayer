@@ -511,7 +511,14 @@ class FavoritesUI:
                 )
 
     def _on_mouse_down(self, event):
+        if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+            self.video_preview_manager.tooltip.hide_preview()
+
         index = self.favorites_listbox.nearest(event.y)
+        if not (event.state & 0x4):
+            self.favorites_listbox.selection_clear(0, tk.END)
+            self.favorites_listbox.selection_set(index)
+
         if 0 <= index < len(self.favorite_entries):
             self.dragging_index = index
 

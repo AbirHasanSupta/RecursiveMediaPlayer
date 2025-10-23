@@ -1144,7 +1144,10 @@ def select_multiple_folders_and_play():
             self.context_menu = tk.Menu(self.root, tearoff=0)
 
         def _on_left_click(self, event):
-            pass
+            index = self.exclusion_listbox.nearest(event.y)
+            if not (event.state & 0x4):
+                self.exclusion_listbox.selection_clear(0, tk.END)
+                self.exclusion_listbox.selection_set(index)
 
         def _show_context_menu(self, event):
             listbox = event.widget

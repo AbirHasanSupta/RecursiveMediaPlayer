@@ -347,12 +347,14 @@ class PlaylistUI:
         self.playlist_window = None
 
     def _on_mouse_down(self, event):
-        """Handle mouse down for drag and drop"""
-        # Hide any preview when clicking
         if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
             self.video_preview_manager.tooltip.hide_preview()
 
         index = self.video_listbox.nearest(event.y)
+        if not (event.state & 0x4):
+            self.video_listbox.selection_clear(0, tk.END)
+            self.video_listbox.selection_set(index)
+
         if self.current_playlist and 0 <= index < len(self.current_playlist.videos):
             self.dragging_index = index
 
