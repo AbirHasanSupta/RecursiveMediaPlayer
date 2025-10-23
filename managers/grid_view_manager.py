@@ -505,7 +505,52 @@ class GridViewManager:
     def _on_card_click(self, event, video_path):
         if self.video_preview_manager:
             self.video_preview_manager.tooltip.hide_preview()
-        self._toggle_select(video_path)
+
+        ctrl_held = bool(event.state & 0x4)
+        shift_held = bool(event.state & 0x1)
+
+        video_paths = [item_data['path'] for item_data in self.items if item_data['type'] == 'video']
+
+        if video_path not in video_paths:
+            return
+
+        current_index = video_paths.index(video_path)
+
+        if shift_held and self.selected_items:
+            last_selected = None
+            for path in reversed(video_paths):
+                if path in self.selected_items:
+                    last_selected = video_paths.index(path)
+                    break
+
+            if last_selected is not None:
+                start = min(last_selected, current_index)
+                end = max(last_selected, current_index)
+
+                for i in range(start, end + 1):
+                    path = video_paths[i]
+                    self.selected_items.add(path)
+                    self._update_card_selection(path)
+
+        elif ctrl_held:
+            if video_path in self.selected_items:
+                self.selected_items.remove(video_path)
+            else:
+                self.selected_items.add(video_path)
+
+            self._update_card_selection(video_path)
+
+        else:
+            old_selection = self.selected_items.copy()
+            self.selected_items = {video_path}
+
+            for path in old_selection:
+                if path != video_path:
+                    self._update_card_selection(path)
+
+            self._update_card_selection(video_path)
+
+        self._update_selection_label()
 
     def _on_card_enter(self, event, video_path):
         pass

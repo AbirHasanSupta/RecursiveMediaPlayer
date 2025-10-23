@@ -607,6 +607,7 @@ def select_multiple_folders_and_play():
             self.exclusion_scrollbar.config(command=self.exclusion_listbox.yview)
 
             self.exclusion_listbox.bind("<Button-3>", self._show_context_menu)
+            self._selection_anchor = None
             self.exclusion_listbox.bind("<Button-1>", self._on_left_click)
             self.exclusion_listbox.bind("<Double-Button-1>", self._on_double_click)
             self._create_context_menu()
@@ -820,9 +821,49 @@ def select_multiple_folders_and_play():
 
         def _on_left_click(self, event):
             index = self.exclusion_listbox.nearest(event.y)
-            if not (event.state & 0x4):
+
+            if index < 0 or index >= self.exclusion_listbox.size():
+                return
+
+            ctrl_held = bool(event.state & 0x4)
+            shift_held = bool(event.state & 0x1)
+            current_selection = list(self.exclusion_listbox.curselection())
+
+            if shift_held:
+                if self._selection_anchor is None:
+                    self._selection_anchor = current_selection[0] if current_selection else 0
+
+                self.exclusion_listbox.selection_clear(0, tk.END)
+
+                start = min(self._selection_anchor, index)
+                end = max(self._selection_anchor, index)
+
+                for i in range(start, end + 1):
+                    self.exclusion_listbox.selection_set(i)
+
+                self.exclusion_listbox.activate(index)
+                return "break"
+
+            elif ctrl_held:
+                if index in current_selection:
+                    self.exclusion_listbox.selection_clear(index)
+                    if index == self._selection_anchor:
+                        remaining = self.exclusion_listbox.curselection()
+                        self._selection_anchor = remaining[-1] if remaining else None
+                else:
+                    self.exclusion_listbox.selection_set(index)
+                    self._selection_anchor = index
+
+                self.exclusion_listbox.activate(index)
+                return "break"
+
+            else:
                 self.exclusion_listbox.selection_clear(0, tk.END)
                 self.exclusion_listbox.selection_set(index)
+                self.exclusion_listbox.activate(index)
+
+                self._selection_anchor = index
+                return "break"
 
         def _show_context_menu(self, event):
             listbox = event.widget

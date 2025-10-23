@@ -351,12 +351,44 @@ class PlaylistUI:
             self.video_preview_manager.tooltip.hide_preview()
 
         index = self.video_listbox.nearest(event.y)
-        if not (event.state & 0x4):
+
+        if not self.current_playlist or index < 0 or index >= len(self.current_playlist.videos):
+            return
+
+        ctrl_held = bool(event.state & 0x4)
+        shift_held = bool(event.state & 0x1)
+
+        current_selection = list(self.video_listbox.curselection())
+
+        if shift_held and current_selection:
+            self.video_listbox.selection_clear(0, tk.END)
+
+            anchor = current_selection[-1] if current_selection else 0
+
+            start = min(anchor, index)
+            end = max(anchor, index)
+
+            for i in range(start, end + 1):
+                self.video_listbox.selection_set(i)
+
+            return "break"
+
+        elif ctrl_held:
+            if index in current_selection:
+                self.video_listbox.selection_clear(index)
+            else:
+                self.video_listbox.selection_set(index)
+
+            return "break"
+
+        else:
             self.video_listbox.selection_clear(0, tk.END)
             self.video_listbox.selection_set(index)
 
-        if self.current_playlist and 0 <= index < len(self.current_playlist.videos):
-            self.dragging_index = index
+            if 0 <= index < len(self.current_playlist.videos):
+                self.dragging_index = index
+
+            return "break"
 
     def _on_mouse_drag(self, event):
         """Handle mouse drag for reordering videos"""

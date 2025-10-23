@@ -624,12 +624,48 @@ class QueueUI:
 
     def _on_drag_start(self, event):
         index = self.queue_listbox.nearest(event.y)
-        if not (event.state & 0x4):
+
+        queue = self.queue_service.get_queue()
+
+        if index < 0 or index >= len(queue):
+            return
+
+        ctrl_held = bool(event.state & 0x4)
+        shift_held = bool(event.state & 0x1)
+
+        current_selection = list(self.queue_listbox.curselection())
+
+        if shift_held and current_selection:
+            self.queue_listbox.selection_clear(0, tk.END)
+
+            anchor = current_selection[-1] if current_selection else 0
+
+            start = min(anchor, index)
+            end = max(anchor, index)
+
+            for i in range(start, end + 1):
+                self.queue_listbox.selection_set(i)
+
+            self.drag_start_index = None
+            return "break"
+
+        elif ctrl_held:
+            if index in current_selection:
+                self.queue_listbox.selection_clear(index)
+            else:
+                self.queue_listbox.selection_set(index)
+
+            self.drag_start_index = None
+            return "break"
+
+        else:
             self.queue_listbox.selection_clear(0, tk.END)
             self.queue_listbox.selection_set(index)
 
-        self.drag_start_index = index
-        self.drag_data = None
+            self.drag_start_index = index
+            self.drag_data = None
+
+            return "break"
 
     def _on_drag_motion(self, event):
         if self.drag_start_index is None:

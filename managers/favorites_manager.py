@@ -515,12 +515,44 @@ class FavoritesUI:
             self.video_preview_manager.tooltip.hide_preview()
 
         index = self.favorites_listbox.nearest(event.y)
-        if not (event.state & 0x4):
+
+        if index < 0 or index >= len(self.favorite_entries):
+            return
+
+        ctrl_held = bool(event.state & 0x4)
+        shift_held = bool(event.state & 0x1)
+
+        current_selection = list(self.favorites_listbox.curselection())
+
+        if shift_held and current_selection:
+            self.favorites_listbox.selection_clear(0, tk.END)
+
+            anchor = current_selection[-1] if current_selection else 0
+
+            start = min(anchor, index)
+            end = max(anchor, index)
+
+            for i in range(start, end + 1):
+                self.favorites_listbox.selection_set(i)
+
+            return "break"
+
+        elif ctrl_held:
+            if index in current_selection:
+                self.favorites_listbox.selection_clear(index)
+            else:
+                self.favorites_listbox.selection_set(index)
+
+            return "break"
+
+        else:
             self.favorites_listbox.selection_clear(0, tk.END)
             self.favorites_listbox.selection_set(index)
 
-        if 0 <= index < len(self.favorite_entries):
-            self.dragging_index = index
+            if 0 <= index < len(self.favorite_entries):
+                self.dragging_index = index
+
+            return "break"
 
     def _on_mouse_drag(self, event):
         if self.dragging_index is None or not self.favorite_entries:
