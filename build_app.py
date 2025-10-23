@@ -22,13 +22,8 @@ from managers.resume_playback_manager import ResumePlaybackManager
 from managers.settings_manager import SettingsManager
 from managers.video_preview_manager import VideoPreviewManager
 from managers.video_queue_manager import VideoQueueManager
-try:
-    import win32clipboard as wcb
-    import win32con
-except Exception:
-    wcb = None
-    win32con = None
-
+import win32clipboard as wcb
+import win32con
 import struct
 import socket
 import time
@@ -1576,10 +1571,7 @@ def select_multiple_folders_and_play():
                         for video_path in filtered_videos:
                             all_video_to_dir[video_path] = os.path.dirname(video_path)
 
-                        all_directories = []
-                        for video_dir in set(all_video_to_dir.values()):
-                            if video_dir not in all_directories:
-                                all_directories.append(video_dir)
+                        all_directories = sorted(list(set(all_video_to_dir.values())))
 
                         def _start_filtered_player():
                             self.update_console(f"Playing {len(filtered_videos)} filtered videos")
@@ -1656,10 +1648,7 @@ def select_multiple_folders_and_play():
                         for video_path in final_videos:
                             all_video_to_dir[video_path] = os.path.dirname(video_path)
 
-                        all_directories = []
-                        for video_dir in set(all_video_to_dir.values()):
-                            if video_dir not in all_directories:
-                                all_directories.append(video_dir)
+                        all_directories = sorted(list(set(all_video_to_dir.values())))
 
                         def _start_selected_player():
                             self.update_console(
@@ -1749,10 +1738,7 @@ def select_multiple_folders_and_play():
                         for video_path in final_videos:
                             all_video_to_dir[video_path] = os.path.dirname(video_path)
 
-                        all_directories = []
-                        for video_dir in set(all_video_to_dir.values()):
-                            if video_dir not in all_directories:
-                                all_directories.append(video_dir)
+                        all_directories = sorted(list(set(all_video_to_dir.values())))
 
                         def _start_selected_player():
                             self.update_console(
@@ -1842,7 +1828,7 @@ def select_multiple_folders_and_play():
                         all_video_to_dir.update(video_to_dir)
                         all_directories.extend(directories)
 
-                all_directories = list(dict.fromkeys(all_directories))
+                all_directories = sorted(list(set(all_directories)))
 
                 def _start_player():
                     if not all_videos:
@@ -1851,58 +1837,8 @@ def select_multiple_folders_and_play():
                         return
 
                     self.update_console(f"Playing from {len(all_directories)} directories")
-
-                    ordered_videos = all_videos
-                    ordered_directories = all_directories
-
-                    try:
-                        selected_dir = None
-                        if (hasattr(self, 'current_selected_dir_index') and
-                                self.current_selected_dir_index is not None and
-                                0 <= self.current_selected_dir_index < len(self.selected_dirs)):
-                            selected_dir = self.selected_dirs[self.current_selected_dir_index]
-
-                        if selected_dir and selected_dir in all_directories:
-                            priority_videos = []
-                            if hasattr(self, 'current_subdirs_mapping') and self.current_subdirs_mapping:
-                                for idx in range(len(self.current_subdirs_mapping)):
-                                    path = self.current_subdirs_mapping.get(idx)
-                                    if not path:
-                                        continue
-                                    try:
-                                        path_norm = os.path.normpath(path)
-                                    except Exception:
-                                        continue
-
-                                    if os.path.isfile(path_norm) and is_video(path_norm) and path_norm in all_video_to_dir:
-                                        priority_videos.append(path_norm)
-
-                            sel_index = all_directories.index(selected_dir)
-                            rotated_dirs = all_directories[sel_index:] + all_directories[:sel_index]
-
-                            seen = set()
-                            merged = []
-
-                            for v in priority_videos:
-                                if v not in seen:
-                                    seen.add(v)
-                                    merged.append(v)
-
-                            for d in rotated_dirs:
-                                for v in all_videos:
-                                    if v not in seen and all_video_to_dir.get(v) == d:
-                                        seen.add(v)
-                                        merged.append(v)
-
-                            if merged:
-                                ordered_videos = merged
-                                ordered_directories = rotated_dirs
-                                self.update_console(f"Starting playback from selected directory: {selected_dir}")
-                    except Exception as e:
-                        self.update_console(f"Error ordering videos for selected directory: {e}")
-
-                    self.controller = VLCPlayerControllerForMultipleDirectory(ordered_videos, all_video_to_dir,
-                                                                              ordered_directories, self.update_console)
+                    self.controller = VLCPlayerControllerForMultipleDirectory(all_videos, all_video_to_dir,
+                                                                              all_directories, self.update_console)
                     self.controller.set_loop_mode(self.loop_mode)
                     self.controller.volume = self.volume
                     self.controller.player.audio_set_volume(self.volume)
@@ -1926,11 +1862,6 @@ def select_multiple_folders_and_play():
                         elif self.save_directories and self.last_played_video_index < len(all_videos):
                             start_index = self.last_played_video_index
                             self.update_console(f"Smart Resume: Starting from last played index: {start_index}")
-
-
-                    if ordered_videos is not all_videos:
-                        if self.smart_resume_var.get() and self.last_played_video_path and self.last_played_video_path in ordered_videos:
-                            start_index = ordered_videos.index(self.last_played_video_path)
 
                     self.controller.set_start_index(start_index)
 
@@ -1978,7 +1909,7 @@ def select_multiple_folders_and_play():
                 return
 
             selected_index = selection[0]
-            if not (0 <= selected_index < len(self.selected_dirs)):
+            if selected_index >= len(self.selected_dirs):
                 return
 
             self.current_selected_dir_index = selected_index
@@ -3011,7 +2942,7 @@ def select_multiple_folders_and_play():
         def _play_playlist_videos(self, videos):
             """Play videos from playlist"""
             if not videos:
-                messagebox.showwarning("Warning", "No videos to play")
+                messagebox.showwarning("Warning", "Playlist is empty")
                 return
 
             if self.controller:
@@ -3032,7 +2963,7 @@ def select_multiple_folders_and_play():
                     if video_dir not in all_directories:
                         all_directories.append(video_dir)
 
-            all_directories = list(dict.fromkeys(all_directories))
+            all_directories.sort()
             valid_videos = list(all_video_to_dir.keys())
 
             if not valid_videos:
@@ -3134,10 +3065,6 @@ def select_multiple_folders_and_play():
                 self.controller.stop()
                 cleanup_hotkeys()
 
-            self.update_console("=" * 100)
-            self.update_console("STARTING QUEUE VIDEO PLAYBACK")
-            self.update_console("=" * 100)
-
             all_video_to_dir = {}
             all_directories = []
 
@@ -3148,7 +3075,7 @@ def select_multiple_folders_and_play():
                     if video_dir not in all_directories:
                         all_directories.append(video_dir)
 
-            all_directories = list(dict.fromkeys(all_directories))
+            all_directories.sort()
             valid_videos = list(all_video_to_dir.keys())
 
             if not valid_videos:
@@ -3220,7 +3147,7 @@ def select_multiple_folders_and_play():
                     if video_dir not in all_directories:
                         all_directories.append(video_dir)
 
-            all_directories = list(dict.fromkeys(all_directories))
+            all_directories.sort()
             valid_videos = list(all_video_to_dir.keys())
 
             if not valid_videos:
