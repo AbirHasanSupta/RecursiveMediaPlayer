@@ -12,6 +12,8 @@ from typing import List, Dict, Any, Callable, Optional, Tuple
 from collections import defaultdict
 import cv2
 
+from managers.resource_manager import get_resource_manager
+
 
 class VideoMetadata:
     """Data class for video file metadata"""
@@ -164,8 +166,16 @@ class VideoMetadataCache:
         self.cache_file = self.cache_dir / "video_metadata_cache.json"
 
         self._cache: Dict[str, VideoMetadata] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._load_cache()
+        get_resource_manager().register_cleanup_callback(self._cleanup)
+
+    def _cleanup(self):
+        try:
+            with self._lock:
+                self._cache.clear()
+        except:
+            pass
 
     def _load_cache(self):
         """Load cache from disk"""

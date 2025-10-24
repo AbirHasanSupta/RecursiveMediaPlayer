@@ -749,16 +749,47 @@ class VideoPositionOverlay:
             self.position_update_timer = None
 
     def cleanup(self):
-        """Cleanup resources"""
         self.position_locked = False
-        self.stop_updates()
-        self.stop_position_tracking()
-        if self.position_lock_timer:
+        self.is_visible = False
+        self.running = False
+
+        if self.update_timer:
             try:
-                self.overlay_window.after_cancel(self.position_lock_timer)
+                self.update_timer.cancel()
             except:
                 pass
+            self.update_timer = None
+
+        if self.position_update_timer:
+            try:
+                self.position_update_timer.cancel()
+            except:
+                pass
+            self.position_update_timer = None
+
+        if self.position_lock_timer:
+            try:
+                if self.overlay_window and self.overlay_window.winfo_exists():
+                    self.overlay_window.after_cancel(self.position_lock_timer)
+            except:
+                pass
+            self.position_lock_timer = None
+
+        self.stop_updates()
+        self.stop_position_tracking()
+
         if self.tooltip:
-            self.tooltip.destroy()
+            try:
+                self.tooltip.withdraw()
+                self.tooltip.destroy()
+            except:
+                pass
+            self.tooltip = None
+
         if self.overlay_window:
-            self.overlay_window.destroy()
+            try:
+                self.overlay_window.withdraw()
+                self.overlay_window.destroy()
+            except:
+                pass
+            self.overlay_window = None

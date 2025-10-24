@@ -5,8 +5,10 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Callable
+from typing import List, Dict
 import uuid
+
+from managers.resource_manager import get_resource_manager
 
 
 class WatchHistoryEntry:
@@ -120,8 +122,16 @@ class WatchHistoryService:
     def __init__(self, storage: WatchHistoryStorage):
         self.storage = storage
         self._history: List[WatchHistoryEntry] = []
+        self._lock = threading.RLock()
         self._load_history()
-        self._lock = threading.Lock()
+        get_resource_manager().register_cleanup_callback(self._cleanup)
+
+    def _cleanup(self):
+        try:
+            with self._lock:
+                self._history.clear()
+        except:
+            pass
 
     def _load_history(self):
         self._history = self.storage.load_history()

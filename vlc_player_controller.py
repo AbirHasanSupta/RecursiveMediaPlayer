@@ -10,6 +10,8 @@ from key_press import cleanup_hotkeys
 import win32clipboard as wcb
 import win32con
 import struct
+
+from managers.resource_manager import get_resource_manager
 from video_position_overlay import VideoPositionOverlay
 
 
@@ -37,6 +39,7 @@ class BaseVLCPlayerController:
         self.instance = vlc.Instance(f'--video-x={x}', f'--video-y={y}')
         self.player = self.instance.media_player_new()
         self.volume = 50
+        self.is_muted = False
         try:
             self.player.audio_set_mute(False)
             self.player.audio_set_volume(self.volume)
@@ -54,18 +57,24 @@ class BaseVLCPlayerController:
         self.video_change_callback = None
         self.position_overlay = None
 
+        self.resource_manager = get_resource_manager()
+        self._is_cleanup = False
+        self._cleanup_lock = threading.RLock()
+        self.resource_manager.register_vlc_instance(self.instance)
+
     def set_initial_playback_rate(self, rate):
         self.initial_playback_rate = rate
 
     def _play_video(self, media):
         self.player.set_media(media)
         try:
-            self.player.audio_set_mute(False)
+            self.player.audio_set_mute(self.is_muted)
         except Exception:
             pass
         self.player.play()
         try:
-            self.player.audio_set_volume(self.volume)
+            if not self.is_muted:
+                self.player.audio_set_volume(self.volume)
         except Exception:
             pass
 
@@ -75,8 +84,9 @@ class BaseVLCPlayerController:
             state = self.player.get_state()
 
         try:
-            self.player.audio_set_mute(False)
-            self.player.audio_set_volume(self.volume)
+            self.player.audio_set_mute(self.is_muted)
+            if not self.is_muted:
+                self.player.audio_set_volume(self.volume)
             try:
                 track_count = self.player.audio_get_track_count()
                 if track_count and track_count > 0:
@@ -121,33 +131,88 @@ class BaseVLCPlayerController:
         self._volume_save_callback = callback
 
     def stop(self):
-        with self.lock:
-            self.running = False
-            if hasattr(self, '_volume_save_callback') and self._volume_save_callback:
-                try:
-                    self._volume_save_callback(self.volume)
-                except Exception:
-                    pass
+        with self._cleanup_lock:
+            if self._is_cleanup:
+                return
+            self._is_cleanup = True
 
-            if self.position_overlay:
+
+        self.running = False
+
+        if hasattr(self, '_volume_save_callback') and self._volume_save_callback:
+            try:
+                self._volume_save_callback(self.volume)
+            except Exception:
+                pass
+
+        self.stop_position_tracking()
+
+        if self.position_overlay:
+            try:
                 self.position_overlay.cleanup()
-                self.position_overlay = None
+            except Exception:
+                pass
+            self.position_overlay = None
 
-            self.player.stop()
-            self.stop_position_tracking()
+        if self.player:
+            try:
+                self.player.stop()
+                time.sleep(0.2)
+            except Exception:
+                pass
+
+            try:
+                self.player.release()
+            except Exception:
+                pass
+
+            self.player = None
+
+        try:
+            media = self.player.get_media() if self.player else None
+            if media:
+                media.release()
+        except Exception:
+            pass
+
+        try:
+            if self.instance:
+                self.instance.release()
+                self.instance = None
+        except Exception:
+            pass
+
+        try:
             cleanup_hotkeys()
+        except Exception:
+            pass
+
+        self.videos = []
+
+    def toggle_mute(self):
+        with self.lock:
+            self.is_muted = not self.is_muted
+            try:
+                self.player.audio_set_mute(self.is_muted)
+                if self.logger:
+                    self.logger(f"Audio {'Muted' if self.is_muted else 'Unmuted'}")
+            except Exception as e:
+                if self.logger:
+                    self.logger(f"Error toggling mute: {e}")
 
     def volume_up(self):
         with self.lock:
             self.volume = min(100, self.volume + 10)
-            self.player.audio_set_volume(self.volume)
+            if not self.is_muted:
+                self.player.audio_set_volume(self.volume)
             if self.logger:
                 self.logger(f"Volume set to: {self.volume}")
 
     def volume_down(self):
         with self.lock:
             self.volume = max(0, self.volume - 10)
-            self.player.audio_set_volume(self.volume)
+            if not self.is_muted:
+                self.player.audio_set_volume(self.volume)
             if self.logger:
                 self.logger(f"Volume set to: {self.volume}")
 
@@ -304,8 +369,9 @@ class BaseVLCPlayerController:
             self.instance = vlc.Instance(f'--video-x={x}', f'--video-y={y}')
             self.player = self.instance.media_player_new()
             try:
-                self.player.audio_set_mute(False)
-                self.player.audio_set_volume(self.volume)
+                self.player.audio_set_mute(self.is_muted)
+                if not self.is_muted:
+                    self.player.audio_set_volume(self.volume)
             except Exception:
                 pass
             self.current_monitor = monitor_number
@@ -314,8 +380,9 @@ class BaseVLCPlayerController:
                 self.player.set_media(current_media)
                 self.player.play()
                 try:
-                    self.player.audio_set_mute(False)
-                    self.player.audio_set_volume(self.volume)
+                    self.player.audio_set_mute(self.is_muted)
+                    if not self.is_muted:
+                        self.player.audio_set_volume(self.volume)
                 except Exception:
                     pass
                 self.player.set_time(current_position)
@@ -614,3 +681,21 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
             if self.logger:
                 self.logger(f"Video not found in playlist: {os.path.basename(video_path)}")
             return False
+
+    def cleanup(self):
+        self.stop_position_tracking()
+
+        if hasattr(self, 'video_to_dir'):
+            self.video_to_dir.clear()
+        if hasattr(self, 'directories'):
+            self.directories.clear()
+        if hasattr(self, 'original_video_order'):
+            self.original_video_order.clear()
+        if hasattr(self, 'played_indices'):
+            self.played_indices.clear()
+
+        self.watch_history_callback = None
+        self.queue_manager = None
+        self.queue_ui_refresh_callback = None
+
+        self.stop()

@@ -2,6 +2,8 @@ import os
 import ctypes
 import keyboard
 
+from managers.resource_manager import get_resource_manager
+
 hotkey_refs = []
 
 _user32 = ctypes.windll.user32 if hasattr(ctypes, 'windll') else None
@@ -54,6 +56,7 @@ def listen_keys(controller):
     hotkey_refs.append(keyboard.add_hotkey('a', _guarded(lambda: controller.prev_video())))
     hotkey_refs.append(keyboard.add_hotkey('w', _guarded(lambda: controller.volume_up())))
     hotkey_refs.append(keyboard.add_hotkey('s', _guarded(lambda: controller.volume_down())))
+    hotkey_refs.append(keyboard.add_hotkey('m', _guarded(lambda: controller.toggle_mute())))
     hotkey_refs.append(keyboard.add_hotkey('space', _guarded(lambda: controller.toggle_pause())))
     hotkey_refs.append(keyboard.add_hotkey('right', _guarded(lambda: controller.fast_forward())))
     hotkey_refs.append(keyboard.add_hotkey('left', _guarded(lambda: controller.rewind())))
@@ -76,6 +79,15 @@ def cleanup_hotkeys():
     for ref in hotkey_refs:
         try:
             keyboard.remove_hotkey(ref)
-        except (KeyError, ValueError):
+        except (KeyError, ValueError, AttributeError):
             pass
+        except Exception as e:
+            print(f"Error removing hotkey: {e}")
+
     hotkey_refs.clear()
+    try:
+        keyboard.unhook_all()
+    except:
+        pass
+
+get_resource_manager().register_cleanup_callback(cleanup_hotkeys)

@@ -85,8 +85,17 @@ class QueueService:
         self.storage = storage
         self._queue: List[QueueEntry] = []
         self._current_index = 0
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._load_queue()
+        from managers.resource_manager import get_resource_manager
+        get_resource_manager().register_cleanup_callback(self._cleanup)
+
+    def _cleanup(self):
+        try:
+            with self._lock:
+                self._queue.clear()
+        except:
+            pass
 
     def _load_queue(self):
         entries, index = self.storage.load_queue()

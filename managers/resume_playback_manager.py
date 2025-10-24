@@ -6,6 +6,8 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Callable
 
+from managers.resource_manager import ManagedThread, get_resource_manager
+
 
 class PlaybackPosition:
     """Data class for storing playback position information"""
@@ -112,11 +114,23 @@ class ResumePlaybackService:
     def __init__(self, storage: PlaybackPositionStorage):
         self.storage = storage
         self._positions: Dict[str, PlaybackPosition] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._load_positions()
 
         self._save_timer = None
         self._pending_saves = False
+        from managers.resource_manager import get_resource_manager
+        get_resource_manager().register_cleanup_callback(self._cleanup)
+
+    def _cleanup(self):
+        try:
+            if self._save_timer:
+                self._save_timer.cancel()
+            self._perform_save()
+            with self._lock:
+                self._positions.clear()
+        except:
+            pass
 
     def _load_positions(self):
         self._positions = self.storage.load_positions()
@@ -227,10 +241,7 @@ class ResumePlaybackTracker:
         self._current_video = video_path
         self._is_tracking = True
 
-        self._tracking_thread = threading.Thread(
-            target=self._track_position,
-            daemon=True
-        )
+        self._tracking_thread = ManagedThread(target=self._track_position, name="TrackPlayback")
         self._tracking_thread.start()
 
     def stop_tracking(self):
@@ -252,11 +263,13 @@ class ResumePlaybackTracker:
         self._current_video = None
 
     def _track_position(self):
-        """Background thread that tracks playback position"""
         last_save_time = 0
         save_interval = 10000
 
         while self._is_tracking and self._current_player:
+            if get_resource_manager().is_shutting_down():
+                break
+
             try:
                 position = self._current_player.get_time()
                 duration = self._current_player.get_length()

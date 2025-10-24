@@ -14,6 +14,8 @@ from managers.favorites_manager import FavoritesManager
 from managers.filter_sort_manager import AdvancedFilterSortManager
 from managers.filter_sort_ui import FilterSortUI
 from managers.grid_view_manager import GridViewManager
+from managers.resource_manager import ThreadSafeDict, get_resource_manager, ManagedExecutor, ManagedThread, \
+    MemoryMonitor
 from theme import ThemeSelector
 from utils import gather_videos_with_directories, is_video
 from vlc_player_controller import VLCPlayerControllerForMultipleDirectory
@@ -84,10 +86,14 @@ def select_multiple_folders_and_play():
             self.setup_console_section()
             self.setup_action_buttons()
 
-            self.scan_cache = {}
+            self.scan_cache = ThreadSafeDict()
             self.pending_scans = set()
+            self._pending_scans_lock = threading.RLock()
             max_workers = min(8, (os.cpu_count() or 4))
-            self.executor = ProcessPoolExecutor(max_workers=max_workers)
+            self.executor = ManagedExecutor(ProcessPoolExecutor, max_workers=max_workers)
+            self.resource_manager = get_resource_manager()
+            self.resource_manager.register_cleanup_callback(self._cleanup_scan_cache)
+            self.resource_manager.register_cleanup_callback(self._cleanup_player_threads)
             self.apply_theme()
 
             command_line_dir = self._get_command_line_directory()
@@ -182,6 +188,77 @@ def select_multiple_folders_and_play():
             self.settings_manager.ui.get_metadata_info_callback = lambda: self._get_metadata_cache_info()
             self.settings_manager.ui.filter_sort_manager = self.filter_sort_manager
 
+            self._setup_periodic_cleanup()
+            self.resource_manager.register_cleanup_callback(self._cleanup_managers)
+
+        def _setup_periodic_cleanup(self):
+            self.memory_monitor = MemoryMonitor(threshold_mb=1200)
+
+            def periodic_cleanup():
+                if hasattr(self, 'root') and self.root.winfo_exists():
+                    self.memory_monitor.cleanup_if_needed()
+                    self.root.after(300000, periodic_cleanup)
+
+            self.root.after(300000, periodic_cleanup)
+
+        def _cleanup_managers(self):
+            managers = [
+                'video_preview_manager',
+                'grid_view_manager',
+                'playlist_manager',
+                'watch_history_manager',
+                'queue_manager',
+                'favorites_manager',
+                'filter_sort_manager',
+                'settings_manager',
+                'resume_manager'
+            ]
+
+            for manager_name in managers:
+                if hasattr(self, manager_name):
+                    manager = getattr(self, manager_name)
+                    if hasattr(manager, 'cleanup'):
+                        try:
+                            manager.cleanup()
+                        except Exception as e:
+                            print(f"Error cleaning up {manager_name}: {e}")
+
+        def __del__(self):
+            try:
+                if hasattr(self, 'resource_manager'):
+                    self.resource_manager.cleanup_all()
+            except:
+                pass
+
+        def _cleanup_scan_cache(self):
+            try:
+                if hasattr(self, 'scan_cache'):
+                    self.scan_cache.clear()
+                if hasattr(self, 'pending_scans'):
+                    self.pending_scans.clear()
+            except Exception as e:
+                print(f"Error cleaning scan cache: {e}")
+
+        def _cleanup_player_threads(self):
+            try:
+                if hasattr(self, 'controller') and self.controller:
+                    self.controller.running = False
+
+                if hasattr(self, 'player_thread') and self.player_thread:
+                    try:
+                        if self.player_thread.is_alive():
+                            self.player_thread.join(timeout=2.0)
+                    except Exception:
+                        pass
+
+                if hasattr(self, 'keys_thread') and self.keys_thread:
+                    try:
+                        if self.keys_thread.is_alive():
+                            self.keys_thread.join(timeout=1.0)
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"Error cleaning player threads: {e}")
 
         def _clear_metadata_cache(self):
             try:
@@ -438,23 +515,33 @@ def select_multiple_folders_and_play():
             self.console_text.config(state=tk.DISABLED)
 
         def _submit_scan(self, directory):
-            if directory in self.scan_cache or directory in self.pending_scans:
+            cache_result = self.scan_cache.get(directory)
+            if cache_result is not None:
                 return
-            self.pending_scans.add(directory)
+
+            with self._pending_scans_lock:
+                if directory in self.pending_scans:
+                    return
+                self.pending_scans.add(directory)
+
             future = self.executor.submit(gather_videos_with_directories, directory)
 
             def on_done(fut, dir_path=directory):
                 try:
                     res = fut.result()
-                    self.scan_cache[dir_path] = res
+                    self.scan_cache.set(dir_path, res)
                     videos, _, directories = res
                     self.update_console(
                         f"Found {len(videos)} videos in '{os.path.basename(dir_path)}' ({len(directories)} subdirs)")
                 except Exception as e:
                     self.update_console(f"Error scanning {dir_path}: {e}")
                 finally:
-                    self.pending_scans.discard(dir_path)
-                    self.root.after(0, self.update_video_count)
+                    with self._pending_scans_lock:
+                        self.pending_scans.discard(dir_path)
+                    try:
+                        self.root.after(0, self.update_video_count)
+                    except:
+                        pass
 
             future.add_done_callback(on_done)
 
@@ -652,7 +739,7 @@ def select_multiple_folders_and_play():
                 time.sleep(1)
                 self.controller.init_overlay()
 
-            threading.Thread(target=init_overlay_delayed, daemon=True).start()
+            ManagedThread(target=init_overlay_delayed, name="InitOverlay").start()
 
         def _open_grid_view(self, videos):
             if not videos:
@@ -727,7 +814,7 @@ def select_multiple_folders_and_play():
 
                     self.root.after(0, show_general_error)
 
-            threading.Thread(target=load_ai_models, daemon=True).start()
+            ManagedThread(target=load_ai_models, name="LoadAIModels").start()
 
         def show_ai_loading_progress(self):
             if not hasattr(self, '_ai_loading_dots'):
@@ -879,7 +966,7 @@ def select_multiple_folders_and_play():
 
                     self.root.after(0, show_error)
 
-            threading.Thread(target=search_worker, daemon=True).start()
+            ManagedThread(target=search_worker, name="AISearch").start()
 
         def on_directory_focus_out(self, event):
             selection = self.dir_listbox.curselection()
@@ -1142,7 +1229,7 @@ def select_multiple_folders_and_play():
             buttons_row3.pack(fill=tk.X, pady=(10, 0))
 
         def _create_context_menu(self):
-            self.context_menu = tk.Menu(self.root, tearoff=0)
+            pass
 
         def _on_left_click(self, event):
             index = self.exclusion_listbox.nearest(event.y)
@@ -1205,100 +1292,104 @@ def select_multiple_folders_and_play():
             if not selection:
                 return
 
-            self.context_menu.delete(0, tk.END)
+            context_menu = tk.Menu(self.root, tearoff=0)
 
             first_index = selection[0]
             first_path = self.current_subdirs_mapping.get(first_index)
 
-            self.context_menu.add_command(
+            context_menu.add_command(
                 label="Play Selected",
                 command=self.play_videos
             )
-            self.context_menu.add_separator()
+            context_menu.add_separator()
 
             total_items = listbox.size()
             selected_count = len(selection)
 
             if selected_count < total_items:
-                self.context_menu.add_command(
+                context_menu.add_command(
                     label="Select All",
                     command=lambda: self._select_all_items(listbox)
                 )
 
             if selected_count > 0:
-                self.context_menu.add_command(
+                context_menu.add_command(
                     label="Unselect All",
                     command=lambda: listbox.selection_clear(0, tk.END)
                 )
 
-            self.context_menu.add_separator()
-            self.context_menu.add_command(
+            context_menu.add_separator()
+            context_menu.add_command(
                 label="Open in Grid View",
                 command=lambda: self._context_open_grid_view(selection)
             )
 
-            self.context_menu.add_separator()
-            self.context_menu.add_command(
+            context_menu.add_separator()
+            context_menu.add_command(
                 label="Exclude Selected",
                 command=self.exclude_subdirectories
             )
-            self.context_menu.add_command(
+            context_menu.add_command(
                 label="Include Selected",
                 command=self.include_subdirectories
             )
 
-            self.context_menu.add_separator()
-            self.context_menu.add_command(
+            context_menu.add_separator()
+            context_menu.add_command(
                 label="Add to Playlist",
                 command=lambda: self._context_add_to_playlist(selection)
             )
 
 
-            self.context_menu.add_command(
+            context_menu.add_command(
                 label="⭐ Add to Favorites",
                 command=lambda: self._context_add_to_favorites(selection)
             )
 
-            self.context_menu.add_command(
+            context_menu.add_command(
                 label="★ Remove from Favorites",
                 command=lambda: self._context_remove_from_favorites(selection)
             )
 
-            self.context_menu.add_separator()
-            self.context_menu.add_command(
+            context_menu.add_separator()
+            context_menu.add_command(
                 label="Add to Queue",
                 command=lambda: self._context_add_to_queue(selection, mode="queue")
             )
-            self.context_menu.add_command(
+            context_menu.add_command(
                 label="Play Next",
                 command=lambda: self._context_add_to_queue(selection, mode="next")
             )
 
-            self.context_menu.add_separator()
+            context_menu.add_separator()
 
-            self.context_menu.add_command(
+            context_menu.add_command(
                 label=f"Copy ({len(selection)} item{'s' if len(selection) > 1 else ''})",
                 command=lambda: self._context_copy_selected(selection)
             )
 
             if len(selection) == 1 and first_path and os.path.isfile(first_path):
-                self.context_menu.add_command(
+                context_menu.add_command(
                     label="Copy Path",
                     command=lambda: self._context_copy_path(first_path)
                 )
-                self.context_menu.add_command(
+                context_menu.add_command(
                     label="Open File Location",
                     command=lambda: self._context_open_location(first_path)
                 )
-                self.context_menu.add_command(
+                context_menu.add_command(
                     label="Properties",
                     command=lambda: self._context_show_properties(first_path)
                 )
 
             try:
-                self.context_menu.tk_popup(event.x_root, event.y_root)
+                context_menu.tk_popup(event.x_root, event.y_root)
             finally:
-                self.context_menu.grab_release()
+                context_menu.grab_release()
+                try:
+                    self.root.after(100, lambda: context_menu.destroy())
+                except:
+                    pass
 
         def _show_favorites_manager(self):
             selected_dir = self.get_current_selected_directory()
@@ -1907,13 +1998,13 @@ def select_multiple_folders_and_play():
 
                 futures = {}
                 for directory in self.selected_dirs:
-                    if directory not in self.scan_cache and directory not in self.pending_scans:
+                    if self.scan_cache.get(directory) is None and directory not in self.pending_scans:
                         self.pending_scans.add(directory)
                         futures[directory] = self.executor.submit(gather_videos_with_directories, directory)
                 for directory, future in list(futures.items()):
                     try:
                         result = future.result()
-                        self.scan_cache[directory] = result
+                        self.scan_cache.set(directory, result)
                         self.update_console(f"Scan completed: {directory}")
                     except Exception as e:
                         self.update_console(f"Error scanning {directory}: {e}")
@@ -2013,7 +2104,7 @@ def select_multiple_folders_and_play():
 
                 self.root.after(0, _start_player)
 
-            threading.Thread(target=_run, daemon=True).start()
+            ManagedThread(target=_run, name="PlayVideos").start()
 
         def exclude_subdirectories(self):
             selected_dir = self.get_current_selected_directory()
@@ -2120,7 +2211,7 @@ def select_multiple_folders_and_play():
 
                 self.root.after(0, apply_and_refresh)
 
-            threading.Thread(target=worker, daemon=True).start()
+            ManagedThread(target=worker, name="ExcludeWorker").start()
 
         def include_subdirectories(self):
             selected_dir = self.get_current_selected_directory()
@@ -2235,7 +2326,7 @@ def select_multiple_folders_and_play():
 
                 self.root.after(0, apply_and_refresh)
 
-            threading.Thread(target=worker, daemon=True).start()
+            ManagedThread(target=worker, name="IncludeWorker").start()
 
         def exclude_all_subdirectories(self):
             selected_dir = self.get_current_selected_directory()
@@ -2312,7 +2403,7 @@ def select_multiple_folders_and_play():
 
                 self.root.after(0, apply_and_refresh)
 
-            threading.Thread(target=worker, daemon=True).start()
+            ManagedThread(target=worker, name="ExcludeAllWorker").start()
 
         def clear_all_exclusions(self):
             selected_dir = self.get_current_selected_directory()
@@ -2740,8 +2831,11 @@ def select_multiple_folders_and_play():
 
             if not hasattr(self, '_subdir_load_token'):
                 self._subdir_load_token = None
-            token = object()
-            self._subdir_load_token = token
+                self._subdir_load_lock = threading.RLock()
+
+            with self._subdir_load_lock:
+                token = object()
+                self._subdir_load_token = token
 
             excluded_dir_set = set(self.excluded_subdirs.get(directory, []))
             excluded_vid_set = set(self.excluded_videos.get(directory, []))
@@ -2750,11 +2844,18 @@ def select_multiple_folders_and_play():
 
             def build_and_post():
                 try:
+                    if self.resource_manager.is_shutting_down():
+                        return
+                    with self._subdir_load_lock:
+                        if self._subdir_load_token is not token:
+                            return
                     base = os.path.abspath(directory)
                     base_sep = os.sep
                     items = []
 
                     for root, dirs, files in os.walk(base):
+                        if self.resource_manager.is_shutting_down():
+                            break
                         rel = os.path.relpath(root, base)
                         depth = 0 if rel == '.' else rel.count(base_sep) + 1
                         if depth > max_depth:
@@ -2876,7 +2977,7 @@ def select_multiple_folders_and_play():
                         self.current_subdirs_mapping = {}
                     self.root.after(0, post_error)
 
-            threading.Thread(target=build_and_post, daemon=True).start()
+            ManagedThread(target=build_and_post, name="LoadSubdirs").start()
 
         def on_search_changed(self, event=None):
             self.search_query = self.search_entry.get().strip().lower()
@@ -3064,8 +3165,8 @@ def select_multiple_folders_and_play():
                 if total_cleared:
                     self.update_console(f"Cleared {total_cleared} exclusions for '{os.path.basename(dir_to_remove)}'")
 
-                if hasattr(self, 'scan_cache') and dir_to_remove in self.scan_cache:
-                    del self.scan_cache[dir_to_remove]
+                if hasattr(self, 'scan_cache') and self.scan_cache.get(dir_to_remove) is not None:
+                    self.scan_cache.delete(dir_to_remove)
                 if hasattr(self, 'pending_scans'):
                     self.pending_scans.discard(dir_to_remove)
 
@@ -3621,8 +3722,29 @@ def select_multiple_folders_and_play():
                 self.video_preview_manager.tooltip.hide_preview()
             except Exception:
                 pass
-            self.root.quit()
-            self.root.destroy()
+
+            try:
+                self._cleanup_managers()
+            except Exception:
+                pass
+
+            try:
+                if hasattr(self, 'memory_monitor'):
+                    self.memory_monitor.cleanup_if_needed()
+                self.resource_manager.cleanup_all()
+            except Exception:
+                pass
+
+            try:
+                self.root.quit()
+                self.root.destroy()
+            except Exception:
+                pass
+
+            try:
+                sys.exit(0)
+            except:
+                os._exit(0)
 
     root = tk.Tk()
     app = DirectorySelector(root)

@@ -1,7 +1,6 @@
 import os
 import threading
 import tkinter as tk
-from tkinter import ttk
 from pathlib import Path
 import cv2
 import base64
@@ -11,6 +10,8 @@ import time
 from typing import Dict, Optional, Callable
 from PIL import Image, ImageTk
 import tempfile
+
+from managers.resource_manager import get_resource_manager, ManagedThread
 
 
 class VideoThumbnail:
@@ -127,7 +128,7 @@ class ThumbnailGenerator:
             return self._generate_static_thumbnail(video_path)
 
     def _generate_video_preview(self, video_path: str) -> Optional[str]:
-        """Generate a short video preview clip"""
+        temp_path = None
         try:
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
@@ -192,11 +193,17 @@ class ThumbnailGenerator:
                     video_data = f.read()
 
                 if len(video_data) > 5 * 1024 * 1024:
-                    os.unlink(temp_path)
+                    try:
+                        os.unlink(temp_path)
+                    except:
+                        pass
                     return None
 
                 base64_data = f"VIDEO:{base64.b64encode(video_data).decode('utf-8')}"
-                os.unlink(temp_path)
+                try:
+                    os.unlink(temp_path)
+                except:
+                    get_resource_manager().register_temp_file(temp_path)
                 return base64_data
             except Exception:
                 try:
@@ -406,6 +413,8 @@ class VideoPreviewManager:
         self.generator = ThumbnailGenerator()
         self.tooltip = VideoPreviewTooltip(parent)
 
+        get_resource_manager().register_cleanup_callback(self._cleanup)
+
         self.generator.set_preview_duration(3)
         self.generator.set_use_video_preview(True)
         self.generator.fallback_to_static = True
@@ -419,6 +428,16 @@ class VideoPreviewManager:
         self.current_listbox = None
         self.current_mapping = None
         self.right_clicked_item = None
+
+    def _cleanup(self):
+        try:
+            if hasattr(self, 'tooltip'):
+                self.tooltip.hide_preview()
+            with self._lock:
+                self._thumbnails.clear()
+                self._generation_queue.clear()
+        except:
+            pass
 
     def set_preview_duration(self, seconds: int):
         """Set video preview duration (1-10 seconds)"""
@@ -554,11 +573,9 @@ class VideoPreviewManager:
                 if self.console_callback:
                     self.console_callback(f"Error generating thumbnail: {e}")
 
-        threading.Thread(target=generate, daemon=True).start()
+        ManagedThread(target=generate, name="GenThumbnail").start()
 
     def pregenerate_thumbnails(self, video_paths: list, progress_callback: Callable = None):
-        """Pre-generate thumbnails for a list of videos"""
-
         def pregenerate():
             total = len(video_paths)
             for i, video_path in enumerate(video_paths):
@@ -567,12 +584,10 @@ class VideoPreviewManager:
 
                 video_path_norm = os.path.normpath(video_path)
 
-                # Skip if already exists and valid
                 if (video_path_norm in self._thumbnails and
                         self._thumbnails[video_path_norm].is_valid()):
                     continue
 
-                # Generate thumbnail
                 thumbnail_data = self.generator.generate_thumbnail(video_path_norm)
 
                 if thumbnail_data:
@@ -580,19 +595,17 @@ class VideoPreviewManager:
                     with self._lock:
                         self._thumbnails[video_path_norm] = thumbnail
 
-                # Update progress
                 if progress_callback:
                     progress = ((i + 1) / total) * 100
                     self.parent.after(0, lambda p=progress: progress_callback(p))
 
-            # Save all thumbnails
             self._save_thumbnails()
 
             if self.console_callback:
                 generated_count = len([p for p in video_paths if os.path.normpath(p) in self._thumbnails])
                 self.console_callback(f"Pre-generated {generated_count}/{total} video thumbnails")
 
-        threading.Thread(target=pregenerate, daemon=True).start()
+        ManagedThread(target=pregenerate, name="PregenThumbnails").start()
 
     def clear_cache(self):
         """Clear thumbnail cache"""

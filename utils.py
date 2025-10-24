@@ -12,29 +12,40 @@ def gather_videos_with_directories(directory):
     video_to_dir = {}
     directories = []
 
-    for root, dirs, files in os.walk(directory):
-        if any(is_video(file) for file in files):
-            directories.append(root)
+    try:
+        for root, dirs, files in os.walk(directory):
+            try:
+                if any(is_video(file) for file in files):
+                    directories.append(root)
+            except (PermissionError, OSError):
+                continue
 
-    directories.sort()
+        directories.sort()
 
-    for dir_path in directories:
-        dir_videos = []
-        try:
-            with os.scandir(dir_path) as it:
-                for entry in it:
-                    if entry.is_file() and is_video(entry.name):
-                        dir_videos.append(entry.path)
-        except PermissionError:
-            continue
+        for dir_path in directories:
+            dir_videos = []
+            try:
+                with os.scandir(dir_path) as it:
+                    for entry in it:
+                        try:
+                            if entry.is_file() and is_video(entry.name):
+                                dir_videos.append(entry.path)
+                        except (PermissionError, OSError):
+                            continue
+            except (PermissionError, OSError):
+                continue
 
-        dir_videos.sort()
+            dir_videos.sort()
 
-        for video in dir_videos:
-            videos.append(video)
-            video_to_dir[video] = dir_path
+            for video in dir_videos:
+                videos.append(video)
+                video_to_dir[video] = dir_path
 
-    return videos, video_to_dir, directories
+        return videos, video_to_dir, directories
+
+    except Exception as e:
+        print(f"Error gathering videos: {e}")
+        return [], {}, []
 
 
 def gather_videos(directory):

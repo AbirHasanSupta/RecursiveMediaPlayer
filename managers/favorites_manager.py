@@ -8,6 +8,8 @@ from datetime import datetime
 from typing import List, Callable
 import uuid
 
+from managers.resource_manager import get_resource_manager
+
 
 class FavoriteEntry:
     def __init__(self, video_path: str, directory_path: str, favorite_id: str = None, added_date: str = None, order: int = None):
@@ -72,8 +74,16 @@ class FavoriteService:
     def __init__(self, storage: FavoriteStorage):
         self.storage = storage
         self._favorites: List[FavoriteEntry] = []
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._load_favorites()
+        get_resource_manager().register_cleanup_callback(self._cleanup)
+
+    def _cleanup(self):
+        try:
+            with self._lock:
+                self._favorites.clear()
+        except:
+            pass
 
     def _load_favorites(self):
         self._favorites = self.storage.load_favorites()

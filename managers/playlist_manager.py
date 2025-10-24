@@ -2,11 +2,13 @@ import json
 import os
 import threading
 import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import messagebox
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Optional, Callable
+from typing import List, Optional, Callable
 import uuid
+
+from managers.resource_manager import get_resource_manager
 
 
 class PlaylistData:
@@ -76,12 +78,19 @@ class PlaylistStorage:
 
 
 class PlaylistService:
-    """Business logic for playlist operations following Single Responsibility Principle"""
-
     def __init__(self, storage: PlaylistStorage):
         self.storage = storage
         self._playlists: List[PlaylistData] = []
+        self._lock = threading.RLock()
         self._load_playlists()
+        get_resource_manager().register_cleanup_callback(self._cleanup)
+
+    def _cleanup(self):
+        try:
+            with self._lock:
+                self._playlists.clear()
+        except:
+            pass
 
     def _load_playlists(self):
         self._playlists = self.storage.load_playlists()
@@ -90,10 +99,11 @@ class PlaylistService:
         return self._playlists.copy()
 
     def create_playlist(self, name: str, description: str = "", videos: List[str] = None) -> PlaylistData:
-        playlist = PlaylistData(name=name, description=description, videos=videos or [])
-        self._playlists.append(playlist)
-        self.storage.save_playlists(self._playlists)
-        return playlist
+        with self._lock:
+            playlist = PlaylistData(name=name, description=description, videos=videos or [])
+            self._playlists.append(playlist)
+            self.storage.save_playlists(self._playlists)
+            return playlist
 
     def update_playlist(self, playlist_id: str, name: str = None, description: str = None,
                         videos: List[str] = None) -> bool:
@@ -573,10 +583,7 @@ class PlaylistUI:
             print(f"Error opening location: {e}")
 
     def _refresh_playlist_list(self):
-        """Refresh the playlist list in UI thread"""
-
         def refresh():
-            # Store current selection
             current_selection = self.playlist_listbox.curselection()
             current_playlist_id = None
             if current_selection and self.current_playlist:
@@ -590,7 +597,6 @@ class PlaylistUI:
                 display_text = f"{playlist.name} ({len(playlist.videos)} videos)"
                 self.playlist_listbox.insert(tk.END, display_text)
 
-                # Check if this was the previously selected playlist
                 if current_playlist_id and playlist.id == current_playlist_id:
                     selection_to_restore = i
 
@@ -601,7 +607,6 @@ class PlaylistUI:
                 self.edit_info_btn.pack_forget()
                 self.grid_view_btn.pack_forget()
             elif selection_to_restore is not None:
-                # Restore previous selection
                 self.playlist_listbox.selection_set(selection_to_restore)
                 self.playlist_listbox.activate(selection_to_restore)
 

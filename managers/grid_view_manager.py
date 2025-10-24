@@ -2,8 +2,11 @@ import tkinter as tk
 from PIL import Image, ImageTk
 import os
 import threading
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
+
+from managers.resource_manager import ManagedExecutor, get_resource_manager, ManagedThread
+
 
 class GridViewItem:
     def __init__(self, video_path, thumbnail_path=None):
@@ -18,7 +21,7 @@ class GridViewManager:
         self.theme_provider = theme_provider
         self.console_callback = console_callback
         max_workers = min(8, (multiprocessing.cpu_count() or 4))
-        self.thumbnail_executor = ThreadPoolExecutor(max_workers=max_workers)
+        self.thumbnail_executor = ManagedExecutor(ThreadPoolExecutor, max_workers=max_workers)
         self.grid_window = None
         self.items = []
         self.selected_items = set()
@@ -27,6 +30,27 @@ class GridViewManager:
         self.is_loading = False
         self.loading_lock = threading.Lock()
         self.pending_tasks = set()
+        get_resource_manager().register_cleanup_callback(self._cleanup)
+
+    def _cleanup(self):
+        try:
+            with self.loading_lock:
+                self.is_loading = False
+            for task in list(self.pending_tasks):
+                try:
+                    task.cancel()
+                except:
+                    pass
+            if hasattr(self, 'thumbnail_executor'):
+                try:
+                    self.thumbnail_executor.shutdown(wait=False, cancel_futures=False)
+                except:
+                    pass
+            self.items = []
+            self.selected_items.clear()
+            self.card_widgets.clear()
+        except:
+            pass
 
     def set_play_callback(self, callback):
         self.play_callback = callback
@@ -226,14 +250,23 @@ class GridViewManager:
             with self.loading_lock:
                 self.is_loading = False
             for task in list(self.pending_tasks):
-                task.cancel()
+                try:
+                    task.cancel()
+                except:
+                    pass
             try:
                 canvas.unbind_all("<MouseWheel>")
             except:
                 pass
             if hasattr(self, 'thumbnail_executor'):
-                self.thumbnail_executor.shutdown(wait=False, cancel_futures=True)
-            self.grid_window.destroy()
+                try:
+                    self.thumbnail_executor.shutdown(wait=False, cancel_futures=True)
+                except:
+                    pass
+            try:
+                self.grid_window.destroy()
+            except:
+                pass
             self.grid_window = None
 
         self.grid_window.protocol("WM_DELETE_WINDOW", on_closing)
@@ -241,7 +274,7 @@ class GridViewManager:
         self.canvas = canvas
         self.video_preview_manager = video_preview_manager
 
-        threading.Thread(target=self._load_videos, args=(videos,), daemon=True).start()
+        ManagedThread(target=self._load_videos, args=(videos,), name="LoadGridVideos").start()
 
     def _load_videos(self, videos):
         try:
@@ -618,7 +651,7 @@ class GridViewManager:
                     self._display_thumbnail_from_data(label, thumbnail_data, item)
                     return
 
-            self.root.after(0, lambda: label.configure(text="No Preview"))
+            self.root.after(0, lambda lbl=label: lbl.winfo_exists() and lbl.configure(text="No Preview"))
         except Exception as e:
             self.root.after(0, lambda: label.configure(text="Error"))
 
