@@ -40,7 +40,6 @@ from nltk.corpus import wordnet
 from nltk.tokenize import word_tokenize
 from nltk.stem import WordNetLemmatizer
 
-# Safe NLTK download with error handling
 try:
     nltk.data.find('tokenizers/punkt')
     nltk.data.find('corpora/wordnet')
