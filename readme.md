@@ -80,26 +80,28 @@ pip install -r requirements\ai_requirements.txt
 
 ### Keyboard Controls During Playback
 
-| Key         | Action                  |
-|-------------|-------------------------|
-| `Space`     | Pause/Resume            |
-| `D`         | Next video              |
-| `A`         | Previous video          |
-| `E`         | Next directory          |
-| `Q`         | Previous directory      |
-| `W`         | Volume up               |
-| `S`         | Volume down             |
-| `Right Arrow` | Fast forward (200ms)  |
-| `Left Arrow`  | Rewind (200ms)        |
-| `F`         | Toggle fullscreen       |
-| `1`         | Switch to monitor 1     |
-| `2`         | Switch to monitor 2     |
-| `+/=`       | Increase playback speed |
-| `-`         | Decrease playback speed |
-| `0`         | Reset speed to 1.0x     |
-| `T`         | Take screenshot         |
-| `Ctrl+C`    | Copy current video path |
-| `Esc`       | Stop playback           |
+| Key           | Action                  |
+|---------------|-------------------------|
+| `Space`       | Pause/Resume            |
+| `D`           | Next video              |
+| `A`           | Previous video          |
+| `E`           | Next directory          |
+| `Q`           | Previous directory      |
+| `W`           | Volume up               |
+| `S`           | Volume down             |
+| `M`           | Toggle Mute             |
+| `I`           | Toggle Overlay          |
+| `Right Arrow` | Fast forward (200ms)    |
+| `Left Arrow`  | Rewind (200ms)          |
+| `F`           | Toggle fullscreen       |
+| `1`           | Switch to monitor 1     |
+| `2`           | Switch to monitor 2     |
+| `+/=`         | Increase playback speed |
+| `-`           | Decrease playback speed |
+| `0`           | Reset speed to 1.0x     |
+| `T`           | Take screenshot         |
+| `Ctrl+C`      | Copy current video path |
+| `Esc`         | Stop playback           |
 
 ## AI Search System
 
