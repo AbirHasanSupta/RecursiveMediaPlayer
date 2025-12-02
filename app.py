@@ -3,7 +3,7 @@ import threading
 import time
 import tkinter as tk
 from datetime import datetime
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, ttk, simpledialog
 from tkinter.font import Font
 import os
 import multiprocessing
@@ -25,9 +25,15 @@ from managers.resume_playback_manager import ResumePlaybackManager
 from managers.settings_manager import SettingsManager
 from managers.video_preview_manager import VideoPreviewManager
 from managers.video_queue_manager import VideoQueueManager
+from managers.google_drive_manager import GoogleDriveManager
 import win32clipboard as wcb
 import win32con
 import struct
+try:
+    from managers.voice_command_manager import VoiceCommandManager, SPEECH_RECOGNITION_AVAILABLE
+except ImportError:
+    SPEECH_RECOGNITION_AVAILABLE = False
+    VoiceCommandManager = None
 
 
 def select_multiple_folders_and_play():
@@ -71,6 +77,20 @@ def select_multiple_folders_and_play():
             self.excluded_videos = preferences.get('excluded_videos', {})
             self.volume = preferences.get('volume', 50)
             self.loop_mode = preferences.get('loop_mode', 'loop_on')
+            self.voice_manager = None
+            self.voice_enabled = False
+            self.voice_available = False
+
+            if SPEECH_RECOGNITION_AVAILABLE and VoiceCommandManager:
+                try:
+                    self.voice_available = True
+                    self.update_console("Voice commands available")
+                except Exception as e:
+                    self.voice_available = False
+                    self.update_console(f"Voice commands unavailable: {e}")
+            else:
+                self.voice_available = False
+                self.update_console("Voice commands not installed (pip install SpeechRecognition pyaudio)")
 
             self.setup_theme()
             root.title("Recursive Video Player")
@@ -78,6 +98,13 @@ def select_multiple_folders_and_play():
             root.state('zoomed')
             root.protocol("WM_DELETE_WINDOW", self.cancel)
             root.configure(bg=self.bg_color)
+
+            # Initialize Google Drive helper
+            try:
+                self.drive_manager = GoogleDriveManager()
+            except Exception as e:
+                self.drive_manager = None
+                self.update_console(f"Google Drive integration unavailable: {e}")
 
             self.setup_main_layout()
             self.setup_directory_section()
@@ -211,7 +238,8 @@ def select_multiple_folders_and_play():
                 'favorites_manager',
                 'filter_sort_manager',
                 'settings_manager',
-                'resume_manager'
+                'resume_manager',
+                'voice_manager'
             ]
 
             for manager_name in managers:
@@ -2094,6 +2122,19 @@ def select_multiple_folders_and_play():
 
                     self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
                     self.keys_thread.start()
+                    if self.voice_enabled and self.voice_manager:
+                        self.voice_manager.stop_listening()
+                        try:
+                            self.voice_manager = VoiceCommandManager(
+                                self.controller,
+                                self.update_console
+                            )
+                            self.voice_manager.start_listening()
+                        except Exception as e:
+                            self.update_console(f"Voice commands error: {e}")
+                            self.voice_enabled = False
+                            if hasattr(self, 'voice_button'):
+                                self.voice_button.config(text="🎤 Voice Off")
                     self.root.config(cursor="")
 
                     def init_overlay_delayed():
@@ -3041,6 +3082,16 @@ def select_multiple_folders_and_play():
             )
             self.add_button.pack(side=tk.LEFT, padx=(0, 5))
 
+            # Add Google Drive Link button
+            self.add_drive_button = self.create_button(
+                dir_buttons_frame,
+                text="Add Drive Link",
+                command=self.add_drive_link,
+                variant="primary",
+                size="md"
+            )
+            self.add_drive_button.pack(side=tk.LEFT, padx=(0, 5))
+
             self.remove_button = self.create_button(
                 dir_buttons_frame,
                 text="Remove Selected",
@@ -3089,6 +3140,16 @@ def select_multiple_folders_and_play():
             )
             self.settings_button.pack(side=tk.LEFT, padx=(0, 10))
 
+            if self.voice_available:
+                self.voice_button = self.create_button(
+                    theme_frame,
+                    text="🎤 Voice Off",
+                    command=self.toggle_voice_commands,
+                    variant="warning",
+                    size="md"
+                )
+                self.voice_button.pack(side=tk.LEFT, padx=(0, 10))
+
             action_buttons_frame = tk.Frame(self.button_frame, bg=self.bg_color)
             action_buttons_frame.pack(side=tk.RIGHT)
 
@@ -3121,6 +3182,152 @@ def select_multiple_folders_and_play():
             )
             self.play_button.pack(side=tk.LEFT)
 
+        def toggle_voice_commands(self):
+            """Toggle voice command recognition on/off"""
+            if not self.voice_available:
+                messagebox.showinfo("Voice Commands",
+                                    "Voice commands require: pip install SpeechRecognition pyaudio")
+                return
+
+            if not self.controller:
+                messagebox.showwarning("No Player",
+                                       "Please start video playback first")
+                return
+
+            if not self.voice_enabled:
+                # Start voice commands
+                if not self.voice_manager:
+                    try:
+                        self.voice_manager = VoiceCommandManager(
+                            self.controller,
+                            self.update_console
+                        )
+                    except Exception as e:
+                        messagebox.showerror("Voice Error", f"Failed to initialize: {e}")
+                        return
+
+                if self.voice_manager.start_listening():
+                    self.voice_enabled = True
+                    self.voice_button.config(text="🎤 Voice On")
+                    self.update_console("Voice commands activated")
+
+                    # Show available commands
+                    self._show_voice_commands()
+                else:
+                    messagebox.showerror("Voice Error", "Failed to start voice recognition")
+            else:
+                # Stop voice commands
+                self.voice_manager.stop_listening()
+                self.voice_enabled = False
+                self.voice_button.config(text="🎤 Voice Off")
+                self.update_console("Voice commands deactivated")
+
+        def _show_voice_commands(self):
+            """Show dialog with available voice commands"""
+            if not self.voice_manager:
+                return
+
+            commands_window = tk.Toplevel(self.root)
+            commands_window.title("Voice Commands")
+            commands_window.geometry("500x600")
+            commands_window.configure(bg=self.bg_color)
+            commands_window.transient(self.root)
+
+            # Header
+            header = tk.Label(
+                commands_window,
+                text="Available Voice Commands",
+                font=self.header_font,
+                bg=self.bg_color,
+                fg=self.text_color
+            )
+            header.pack(pady=10)
+
+            # Wake word info
+            if self.voice_manager.use_wake_word:
+                wake_info = tk.Label(
+                    commands_window,
+                    text=f"Wake words: {', '.join(self.voice_manager.wake_words)}",
+                    font=self.small_font,
+                    bg=self.bg_color,
+                    fg=self.accent_color
+                )
+                wake_info.pack(pady=5)
+
+            # Commands list
+            frame = tk.Frame(commands_window, bg=self.bg_color)
+            frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+            scrollbar = tk.Scrollbar(frame)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+            text = tk.Text(
+                frame,
+                wrap=tk.WORD,
+                yscrollcommand=scrollbar.set,
+                font=self.normal_font,
+                bg=self.listbox_bg,
+                fg=self.listbox_fg,
+                relief=tk.FLAT,
+                padx=10,
+                pady=10
+            )
+            text.pack(fill=tk.BOTH, expand=True)
+            scrollbar.config(command=text.yview)
+
+            # Group commands by category
+            categories = {
+                "Playback": ["play", "pause", "stop", "resume"],
+                "Navigation": ["next", "previous", "skip", "back", "next folder", "previous folder"],
+                "Seeking": ["forward", "rewind", "fast forward"],
+                "Volume": ["volume up", "volume down", "louder", "quieter", "mute", "unmute"],
+                "Display": ["fullscreen", "exit fullscreen", "screenshot", "overlay"],
+                "Speed": ["speed up", "slow down", "normal speed", "faster", "slower"],
+                "Advanced": [
+                    "volume [0-100]",
+                    "speed [0.25-2.0]",
+                    "skip [N] seconds",
+                    "back [N] seconds"
+                ]
+            }
+
+            for category, commands in categories.items():
+                text.insert(tk.END, f"\n{category}:\n", "category")
+                for cmd in commands:
+                    text.insert(tk.END, f"  • {cmd}\n")
+
+            text.tag_config("category", font=(self.header_font.name, 11, "bold"))
+            text.config(state=tk.DISABLED)
+
+            # Buttons
+            button_frame = tk.Frame(commands_window, bg=self.bg_color)
+            button_frame.pack(pady=10)
+
+            toggle_wake = self.create_button(
+                button_frame,
+                text="Toggle Wake Word",
+                command=lambda: self._toggle_wake_word_dialog(commands_window),
+                variant="secondary",
+                size="sm"
+            )
+            toggle_wake.pack(side=tk.LEFT, padx=5)
+
+            close_btn = self.create_button(
+                button_frame,
+                text="Close",
+                command=commands_window.destroy,
+                variant="primary",
+                size="sm"
+            )
+            close_btn.pack(side=tk.LEFT, padx=5)
+
+        def _toggle_wake_word_dialog(self, parent_window):
+            """Toggle wake word and update the commands window"""
+            if self.voice_manager:
+                self.voice_manager.toggle_wake_word()
+                parent_window.destroy()
+                self._show_voice_commands()
+
         def setup_status_section(self):
             self.status_frame = tk.Frame(self.main_frame, bg=self.bg_color)
             self.status_frame.pack(fill=tk.X)
@@ -3144,6 +3351,216 @@ def select_multiple_folders_and_play():
                 self._submit_scan(directory)
                 self.update_video_count()
                 self.save_preferences()
+
+        def _ask_drive_link_dialog(self):
+            """Modern, themed popup to input a Google Drive link. Returns URL or None."""
+            dlg = tk.Toplevel(self.root)
+            dlg.title("Add Google Drive Link")
+            dlg.configure(bg=self.bg_color)
+            dlg.transient(self.root)
+            dlg.grab_set()
+
+            # Window size and positioning
+            dlg.geometry("560x260")
+            try:
+                dlg.update_idletasks()
+                x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (560 // 2)
+                y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (260 // 2)
+                dlg.geometry(f"+{x}+{y}")
+            except Exception:
+                pass
+
+            result = {"url": None}
+
+            container = tk.Frame(dlg, bg=self.bg_color)
+            container.pack(fill=tk.BOTH, expand=True, padx=18, pady=16)
+
+            # Header
+            header = tk.Label(
+                container,
+                text="Add Google Drive Link",
+                font=self.header_font,
+                bg=self.bg_color,
+                fg=self.text_color
+            )
+            header.pack(anchor="w")
+
+            # Helper text
+            helper = tk.Label(
+                container,
+                text="Paste a public Google Drive folder or file link. The folder structure will be preserved.",
+                font=self.small_font,
+                bg=self.bg_color,
+                fg=self.accent_color,
+                wraplength=520,
+                justify=tk.LEFT
+            )
+            helper.pack(anchor="w", pady=(6, 10))
+
+            entry_frame = tk.Frame(container, bg=self.bg_color)
+            entry_frame.pack(fill=tk.X)
+
+            url_var = tk.StringVar()
+            entry = tk.Entry(
+                entry_frame,
+                textvariable=url_var,
+                font=self.normal_font,
+                bg=self.listbox_bg,
+                fg=self.listbox_fg,
+                relief=tk.FLAT,
+                insertbackground=self.text_color,
+                highlightthickness=1,
+                highlightbackground=self.accent_color,
+                highlightcolor=self.accent_color
+            )
+            entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=6)
+
+            def paste_clipboard():
+                try:
+                    wcb.OpenClipboard()
+                    data = wcb.GetClipboardData(win32con.CF_UNICODETEXT)
+                    wcb.CloseClipboard()
+                    if data:
+                        url_var.set(data.strip())
+                        entry.icursor(tk.END)
+                        validate_now()
+                except Exception:
+                    pass
+
+            paste_btn = self.create_button(
+                entry_frame,
+                text="Paste",
+                command=paste_clipboard,
+                variant="secondary",
+                size="sm"
+            )
+            paste_btn.pack(side=tk.LEFT, padx=(8, 0))
+
+            # Validation label
+            validate_lbl = tk.Label(
+                container,
+                text="",
+                font=self.small_font,
+                bg=self.bg_color,
+                fg="#e17055"  # subtle warning color
+            )
+            validate_lbl.pack(anchor="w", pady=(6, 0))
+
+            btns = tk.Frame(container, bg=self.bg_color)
+            btns.pack(anchor="e", pady=(14, 0))
+
+            def validate_url(u: str) -> bool:
+                if not u:
+                    return False
+                try:
+                    # Use Drive manager's parser for authoritative validation
+                    return self.drive_manager is not None and (self.drive_manager._extract_id_and_type(u) is not None)
+                except Exception:
+                    return "drive.google.com" in u
+
+            def validate_now():
+                u = url_var.get().strip()
+                if not u:
+                    validate_lbl.config(text="Please enter a link.")
+                    return False
+                if not validate_url(u):
+                    validate_lbl.config(text="This doesn't look like a public Google Drive link.")
+                    return False
+                validate_lbl.config(text="")
+                return True
+
+            def on_submit():
+                if validate_now():
+                    result["url"] = url_var.get().strip()
+                    dlg.destroy()
+
+            def on_cancel():
+                result["url"] = None
+                dlg.destroy()
+
+            add_btn = self.create_button(
+                btns,
+                text="Add Link",
+                command=on_submit,
+                variant="primary",
+                size="md"
+            )
+            add_btn.pack(side=tk.RIGHT, padx=(8, 0))
+
+            cancel_btn = self.create_button(
+                btns,
+                text="Cancel",
+                command=on_cancel,
+                variant="secondary",
+                size="md"
+            )
+            cancel_btn.pack(side=tk.RIGHT)
+
+            # Prefill from clipboard if it looks like a Drive URL
+            try:
+                wcb.OpenClipboard()
+                data = wcb.GetClipboardData(win32con.CF_UNICODETEXT)
+                wcb.CloseClipboard()
+                if data and ("drive.google.com" in data or "id=" in data):
+                    url_var.set(data.strip())
+                    entry.icursor(tk.END)
+            except Exception:
+                pass
+
+            # Key bindings
+            dlg.bind("<Return>", lambda _e: on_submit())
+            dlg.bind("<Escape>", lambda _e: on_cancel())
+
+            entry.focus_set()
+            self.root.wait_window(dlg)
+            return result["url"]
+
+        def add_drive_link(self):
+            if not self.drive_manager:
+                messagebox.showerror("Google Drive", "Google Drive integration is unavailable. Ensure 'gdown' is installed.")
+                return
+
+            url = self._ask_drive_link_dialog()
+            if not url:
+                return
+
+            self.update_console("Processing Google Drive link…")
+            self.create_toast("Downloading from Google Drive… This may take time for large folders.") if hasattr(self, 'create_toast') else None
+
+            def worker():
+                try:
+                    result = self.drive_manager.ensure_downloaded(url, progress_cb=lambda m: self.update_console(m))
+                    local_dir = result.local_path
+
+                    def on_success():
+                        if local_dir in self.selected_dirs:
+                            self.update_console("Drive folder already added.")
+                            return
+                        self.selected_dirs.append(local_dir)
+                        display_name = local_dir
+                        if len(local_dir) > 60:
+                            display_name = os.path.basename(local_dir)
+                            parent = os.path.dirname(local_dir)
+                            if parent:
+                                display_name = f"{os.path.basename(parent)}/{display_name}"
+                            display_name = f".../{display_name}"
+                        self.dir_listbox.insert(tk.END, display_name)
+                        base = os.path.basename(local_dir)
+                        self.update_console(f"Added Google Drive {'folder' if result.is_folder else 'file'}: {base}")
+                        self.update_console(f"Scanning '{base}' for videos…")
+                        self._submit_scan(local_dir)
+                        self.update_video_count()
+                        self.save_preferences()
+
+                    self.root.after(0, on_success)
+                except Exception as e:
+                    err_msg = str(e)
+                    def on_err(msg=err_msg):
+                        messagebox.showerror("Google Drive", f"Failed to add link: {msg}")
+                        self.update_console(f"Google Drive error: {msg}")
+                    self.root.after(0, on_err)
+
+            ManagedThread(target=worker, name="GDriveDownload").start()
 
         def remove_directory(self):
             selected_indices = self.dir_listbox.curselection()
@@ -3734,6 +4151,12 @@ def select_multiple_folders_and_play():
                 self.resource_manager.cleanup_all()
             except Exception:
                 pass
+
+            if hasattr(self, 'voice_manager') and self.voice_manager:
+                try:
+                    self.voice_manager.cleanup()
+                except Exception:
+                    pass
 
             try:
                 self.root.quit()

@@ -71,6 +71,7 @@ def listen_keys(controller):
     hotkey_refs.append(keyboard.add_hotkey('i', _guarded(lambda: controller.toggle_overlay())))
     hotkey_refs.append(keyboard.add_hotkey('e', _guarded(lambda: controller.next_directory())))
     hotkey_refs.append(keyboard.add_hotkey('q', _guarded(lambda: controller.prev_directory())))
+    hotkey_refs.append(keyboard.add_hotkey('v', _guarded(lambda: controller.toggle_voice_commands() if hasattr(controller, 'toggle_voice_commands') else None)))
 
 
 def cleanup_hotkeys():

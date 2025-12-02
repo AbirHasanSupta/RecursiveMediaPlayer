@@ -2610,11 +2610,12 @@ def select_multiple_folders_and_play():
                     self.root.after(0, post_chunks)
 
                 except Exception as e:
-                    def post_error():
+                    err_msg = str(e)
+                    def post_error(msg=err_msg):
                         if self._subdir_load_token is not token:
                             return
                         self.exclusion_listbox.delete(0, tk.END)
-                        self.exclusion_listbox.insert(tk.END, f"Error loading subdirectories: {str(e)}")
+                        self.exclusion_listbox.insert(tk.END, f"Error loading subdirectories: {msg}")
                         self.current_subdirs_mapping = {}
                     self.root.after(0, post_error)
 

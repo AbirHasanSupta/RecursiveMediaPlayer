@@ -4,3 +4,6 @@ screeninfo>=0.8.1
 PyQt6>=6.5
 pyinstaller
 pywin32
+SpeechRecognition
+pyaudio
+gdown>=5.2.0
