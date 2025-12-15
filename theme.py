@@ -124,7 +124,13 @@ class ThemeSelector:
             'dark_mode': self.dark_mode,
             'show_videos': self.show_videos,
             'expand_all': self.expand_all_var.get() if hasattr(self, 'expand_all_var') else True,
-            'selected_dirs': getattr(self, 'selected_dirs', []),
+            'selected_dirs': [
+                d for d in getattr(self, 'selected_dirs', [])
+                if isinstance(d, str)
+                and not d.startswith('gdrive://')
+                and not d.startswith('http://')
+                and not d.startswith('https://')
+            ],
             'save_directories': getattr(self, 'save_directories', False),
             'start_from_last_played': getattr(self, 'start_from_last_played', False),
             'smart_resume_enabled': getattr(self, 'smart_resume_enabled', False),
