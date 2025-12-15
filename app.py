@@ -1797,7 +1797,11 @@ def select_multiple_folders_and_play():
                             if self.is_video_excluded(selected_dir, item_path):
                                 continue
 
-                            if os.path.isfile(item_path) and is_video(item_path):
+                            # Accept local files and HTTP(S) stream URLs
+                            if (
+                                (isinstance(item_path, str) and (item_path.startswith("http://") or item_path.startswith("https://")))
+                                or (os.path.isfile(item_path) and is_video(item_path))
+                            ):
                                 selected_videos.append(item_path)
 
                         seen = set()
@@ -1818,7 +1822,10 @@ def select_multiple_folders_and_play():
 
                         all_video_to_dir = {}
                         for video_path in final_videos:
-                            all_video_to_dir[video_path] = os.path.dirname(video_path)
+                            if isinstance(video_path, str) and (video_path.startswith("http://") or video_path.startswith("https://")):
+                                all_video_to_dir[video_path] = selected_dir
+                            else:
+                                all_video_to_dir[video_path] = os.path.dirname(video_path)
 
                         all_directories = sorted(list(set(all_video_to_dir.values())))
 
@@ -1873,7 +1880,11 @@ def select_multiple_folders_and_play():
                             if not item_path:
                                 continue
 
-                            if os.path.isfile(item_path) and is_video(item_path):
+                            # Accept local files and HTTP(S) stream URLs
+                            if (
+                                (isinstance(item_path, str) and (item_path.startswith("http://") or item_path.startswith("https://")))
+                                or (os.path.isfile(item_path) and is_video(item_path))
+                            ):
                                 if not self.is_video_excluded(selected_dir, item_path):
                                     selected_videos.append(item_path)
                             elif os.path.isdir(item_path):
@@ -1893,7 +1904,8 @@ def select_multiple_folders_and_play():
                         seen = set()
                         final_videos = []
                         for v in selected_videos:
-                            v_norm = os.path.normpath(v)
+                            # Avoid normalizing HTTP URLs as file paths
+                            v_norm = v if (isinstance(v, str) and (v.startswith("http://") or v.startswith("https://"))) else os.path.normpath(v)
                             if v_norm not in seen:
                                 seen.add(v_norm)
                                 final_videos.append(v_norm)
@@ -1908,7 +1920,10 @@ def select_multiple_folders_and_play():
 
                         all_video_to_dir = {}
                         for video_path in final_videos:
-                            all_video_to_dir[video_path] = os.path.dirname(video_path)
+                            if isinstance(video_path, str) and (video_path.startswith("http://") or video_path.startswith("https://")):
+                                all_video_to_dir[video_path] = selected_dir
+                            else:
+                                all_video_to_dir[video_path] = os.path.dirname(video_path)
 
                         all_directories = sorted(list(set(all_video_to_dir.values())))
 
@@ -2870,6 +2885,41 @@ def select_multiple_folders_and_play():
             self.exclusion_listbox.insert(tk.END, "Loading...")
             self.current_subdirs_mapping = {}
 
+            # Special handling for non-filesystem pseudo directories (e.g., Google Drive streaming)
+            try:
+                if isinstance(directory, str) and directory.startswith("gdrive://"):
+                    cache = self.scan_cache.get(directory)
+                    items = []
+                    if cache:
+                        videos, _, _ = cache
+                        for v in videos:
+                            # Display a simple entry for the stream URL
+                            display = '▶ Drive Stream'
+                            items.append((v, display))
+
+                    def _post_drive_items():
+                        self.exclusion_listbox.delete(0, tk.END)
+                        if not items:
+                            self.exclusion_listbox.insert(tk.END, "No items")
+                            self.current_subdirs_mapping = {}
+                        else:
+                            self.current_subdirs_mapping = {}
+                            for idx, (p, name) in enumerate(items):
+                                self.exclusion_listbox.insert(tk.END, name)
+                                self.current_subdirs_mapping[idx] = p
+                        # Restore scroll position if provided
+                        if restore_scroll:
+                            try:
+                                self.exclusion_listbox.yview_moveto(restore_scroll[0])
+                            except Exception:
+                                pass
+
+                    self.root.after(0, _post_drive_items)
+                    return
+            except Exception:
+                # Fall through to normal handling on any unexpected error
+                pass
+
             if not hasattr(self, '_subdir_load_token'):
                 self._subdir_load_token = None
                 self._subdir_load_lock = threading.RLock()
@@ -3517,50 +3567,66 @@ def select_multiple_folders_and_play():
 
         def add_drive_link(self):
             if not self.drive_manager:
-                messagebox.showerror("Google Drive", "Google Drive integration is unavailable. Ensure 'gdown' is installed.")
+                messagebox.showerror("Google Drive", "Google Drive integration is unavailable.")
                 return
 
             url = self._ask_drive_link_dialog()
             if not url:
                 return
 
-            self.update_console("Processing Google Drive link…")
-            self.create_toast("Downloading from Google Drive… This may take time for large folders.") if hasattr(self, 'create_toast') else None
+            self.update_console("Processing Google Drive link for streaming…")
 
-            def worker():
-                try:
-                    result = self.drive_manager.ensure_downloaded(url, progress_cb=lambda m: self.update_console(m))
-                    local_dir = result.local_path
+            try:
+                source = self.drive_manager.make_source_from_url(url)
+                if not source:
+                    messagebox.showerror("Google Drive", "Unrecognized Google Drive link.")
+                    return
 
-                    def on_success():
-                        if local_dir in self.selected_dirs:
-                            self.update_console("Drive folder already added.")
-                            return
-                        self.selected_dirs.append(local_dir)
-                        display_name = local_dir
-                        if len(local_dir) > 60:
-                            display_name = os.path.basename(local_dir)
-                            parent = os.path.dirname(local_dir)
-                            if parent:
-                                display_name = f"{os.path.basename(parent)}/{display_name}"
-                            display_name = f".../{display_name}"
-                        self.dir_listbox.insert(tk.END, display_name)
-                        base = os.path.basename(local_dir)
-                        self.update_console(f"Added Google Drive {'folder' if result.is_folder else 'file'}: {base}")
-                        self.update_console(f"Scanning '{base}' for videos…")
-                        self._submit_scan(local_dir)
-                        self.update_video_count()
-                        self.save_preferences()
+                kind = source.get("kind")
+                if kind == "folder":
+                    folder_id = source["id"]
+                    pseudo_dir = f"gdrive://folder/{folder_id}"
+                    if pseudo_dir in self.selected_dirs:
+                        self.update_console("Drive link already added.")
+                        return
 
-                    self.root.after(0, on_success)
-                except Exception as e:
-                    err_msg = str(e)
-                    def on_err(msg=err_msg):
-                        messagebox.showerror("Google Drive", f"Failed to add link: {msg}")
-                        self.update_console(f"Google Drive error: {msg}")
-                    self.root.after(0, on_err)
+                    videos, video_to_dir, directories = self.drive_manager.gather_videos_with_directories_for_source(source)
+                    # Cache the scan result under the pseudo directory key
+                    self.scan_cache.set(pseudo_dir, (videos, video_to_dir, directories))
 
-            ManagedThread(target=worker, name="GDriveDownload").start()
+                    # Add to selected list and UI
+                    self.selected_dirs.append(pseudo_dir)
+
+                    # Friendly display name
+                    display_name = f"Drive Folder {folder_id}"
+                    self.dir_listbox.insert(tk.END, display_name)
+
+                    self.update_console(f"Added Google Drive folder for streaming: {folder_id} with {len(videos)} videos")
+                else:
+                    # Single file streaming
+                    file_id = source["id"]
+                    pseudo_dir = f"gdrive://file/{file_id}"
+                    if pseudo_dir in self.selected_dirs:
+                        self.update_console("Drive link already added.")
+                        return
+
+                    videos, video_to_dir, directories = self.drive_manager.gather_videos_with_directories_for_source(source)
+                    # Cache the scan result under the pseudo directory key
+                    self.scan_cache.set(pseudo_dir, (videos, video_to_dir, directories))
+
+                    # Add to selected list and UI
+                    self.selected_dirs.append(pseudo_dir)
+
+                    # Friendly display name
+                    display_name = f"Drive File {file_id}"
+                    self.dir_listbox.insert(tk.END, display_name)
+
+                    self.update_console(f"Added Google Drive file for streaming: {file_id}")
+                self.update_video_count()
+                self.save_preferences()
+            except Exception as e:
+                messagebox.showerror("Google Drive", f"Failed to add link: {e}")
+                self.update_console(f"Google Drive error: {e}")
 
         def remove_directory(self):
             selected_indices = self.dir_listbox.curselection()

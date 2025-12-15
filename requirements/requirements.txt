@@ -7,3 +7,5 @@ pywin32
 SpeechRecognition
 pyaudio
 gdown>=5.2.0
+requests>=2.31.0
+beautifulsoup4>=4.12.2

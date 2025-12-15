@@ -2,7 +2,9 @@ import os
 import re
 import shutil
 from dataclasses import dataclass
-from typing import Optional, Callable
+from typing import Optional, Callable, List, Dict, Tuple
+import requests
+from bs4 import BeautifulSoup
 
 try:
     import gdown
@@ -26,10 +28,11 @@ class GoogleDriveResult:
 
 class GoogleDriveManager:
     """
-    Minimal Google Drive helper that downloads public file/folder share links
-    into a local cache directory and returns the local path. Designed so the
-    app can treat the result just like an added directory.
+    Helper for Google Drive links.
+    Previous behavior downloaded to a local cache; now we also support streaming
+    (no local storage) by producing HTTP URLs and synthetic directory structures.
     """
+    VIDEO_SUFFIXES = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv')
 
     def __init__(self, cache_root: Optional[str] = None):
         # Use local app data on Windows, else home directory
@@ -60,6 +63,90 @@ class GoogleDriveManager:
         if m:
             return m.group(1), "file"
         return None
+
+    @staticmethod
+    def build_stream_url(file_id: str) -> str:
+        # Use the usercontent host which serves the file bytes directly and
+        # avoids the Google Drive interstitial confirmation page for large files.
+        # VLC can open this URL directly for streaming.
+        return f"https://drive.usercontent.google.com/uc?id={file_id}&export=download"
+
+    @staticmethod
+    def make_source_from_url(url: str) -> Optional[dict]:
+        parsed = GoogleDriveManager._extract_id_and_type(url)
+        if not parsed:
+            return None
+        drive_id, typ = parsed
+        if typ == "file":
+            return {"provider": "gdrive", "kind": "file", "id": drive_id, "url": url}
+        else:
+            return {"provider": "gdrive", "kind": "folder", "id": drive_id, "url": url}
+
+    def _list_public_folder_files(self, folder_id: str) -> list[dict]:
+        """
+        Scrape the public embedded folder view to list files.
+        Returns list of dicts: {id, name, href}
+        """
+        url = f"https://drive.google.com/embeddedfolderview?id={folder_id}#list"
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+            )
+        }
+        resp = requests.get(url, headers=headers, timeout=20)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        results: list[dict] = []
+        # Strategy: find anchor tags linking to /file/d/<ID>/view
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            m = re.search(r"/file/d/([a-zA-Z0-9_-]+)/view", href)
+            if not m:
+                continue
+            fid = m.group(1)
+            # Try to get a readable name
+            name = a.get("title") or a.get_text(strip=True) or fid
+            results.append({"id": fid, "name": name, "href": href})
+        return results
+
+    def gather_videos_with_directories_for_source(self, source: dict):
+        """
+        For a gdrive 'file' source: return a pseudo directory with one video that streams via HTTP.
+        For a 'folder' source: currently unsupported without API; raise NotImplementedError.
+        Returns tuple (videos, video_to_dir, directories).
+        """
+        kind = source.get("kind")
+        if kind == "file":
+            file_id = source.get("id")
+            # Use id as filename placeholder; VLC will display stream title
+            pseudo_dir = f"gdrive://file/{file_id}"
+            video_url = self.build_stream_url(file_id)
+            videos = [video_url]
+            video_to_dir = {video_url: pseudo_dir}
+            directories = [pseudo_dir]
+            return videos, video_to_dir, directories
+        elif kind == "folder":
+            folder_id = source.get("id")
+            pseudo_dir = f"gdrive://folder/{folder_id}"
+            # Scrape folder for file ids and names
+            items = self._list_public_folder_files(folder_id)
+            videos: List[str] = []
+            video_to_dir: Dict[str, str] = {}
+            for it in items:
+                name = (it.get("name") or "").lower()
+                if not name.endswith(self.VIDEO_SUFFIXES):
+                    # Unknown extension: still allow if no dot? Keep conservative: skip
+                    continue
+                file_id = it["id"]
+                video_url = self.build_stream_url(file_id)
+                videos.append(video_url)
+                video_to_dir[video_url] = pseudo_dir
+            directories = [pseudo_dir]
+            return videos, video_to_dir, directories
+        else:
+            raise ValueError("Invalid Google Drive source descriptor.")
 
     def _target_path(self, drive_id: str, is_folder: bool) -> str:
         sub = "folders" if is_folder else "files"
