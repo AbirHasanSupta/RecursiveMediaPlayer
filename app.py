@@ -3571,57 +3571,136 @@ def select_multiple_folders_and_play():
 
             self.update_console("Processing Google Drive link for streaming…")
 
+            # Show a small modal progress window so the user knows it's working
+            progress_window = tk.Toplevel(self.root)
+            progress_window.title("Google Drive")
+            progress_window.geometry("420x140")
+            progress_window.configure(bg=self.bg_color)
+            progress_window.transient(self.root)
+            progress_window.grab_set()
+
+            lbl = tk.Label(
+                progress_window,
+                text="Fetching contents… Large Drive folders can take a while…",
+                font=self.normal_font,
+                bg=self.bg_color,
+                fg=self.text_color,
+                wraplength=380,
+                justify=tk.LEFT,
+            )
+            lbl.pack(padx=16, pady=(16, 8), anchor="w")
+
+            bar = ttk.Progressbar(progress_window, mode='indeterminate', length=380)
+            bar.pack(padx=16, pady=(0, 8))
+            try:
+                bar.start(10)
+            except Exception:
+                pass
+
+            status_lbl = tk.Label(
+                progress_window,
+                text="Starting…",
+                font=self.small_font,
+                bg=self.bg_color,
+                fg="#666666",
+                wraplength=380,
+                justify=tk.LEFT,
+            )
+            status_lbl.pack(padx=16, pady=(0, 8), anchor="w")
+
+            # Disable the Add button while working, if present
+            try:
+                if hasattr(self, 'add_drive_button') and self.add_drive_button:
+                    self.add_drive_button.configure(state=tk.DISABLED)
+            except Exception:
+                pass
+
+            def set_status(msg: str):
+                try:
+                    status_lbl.config(text=msg)
+                    self.update_console(msg)
+                except Exception:
+                    pass
+
+            def finish_cleanup():
+                try:
+                    bar.stop()
+                except Exception:
+                    pass
+                try:
+                    progress_window.destroy()
+                except Exception:
+                    pass
+                try:
+                    if hasattr(self, 'add_drive_button') and self.add_drive_button:
+                        self.add_drive_button.configure(state=tk.NORMAL)
+                except Exception:
+                    pass
+
+            # Validate URL and make source descriptor first
             try:
                 source = self.drive_manager.make_source_from_url(url)
                 if not source:
-                    messagebox.showerror("Google Drive", "Unrecognized Google Drive link.")
-                    return
-
-                kind = source.get("kind")
-                if kind == "folder":
-                    folder_id = source["id"]
-                    pseudo_dir = f"gdrive://folder/{folder_id}"
-                    if pseudo_dir in self.selected_dirs:
-                        self.update_console("Drive link already added.")
-                        return
-
-                    videos, video_to_dir, directories = self.drive_manager.gather_videos_with_directories_for_source(source)
-                    # Cache the scan result under the pseudo directory key
-                    self.scan_cache.set(pseudo_dir, (videos, video_to_dir, directories))
-
-                    # Add to selected list and UI
-                    self.selected_dirs.append(pseudo_dir)
-
-                    # Friendly display name
-                    display_name = f"Drive Folder {folder_id}"
-                    self.dir_listbox.insert(tk.END, display_name)
-
-                    self.update_console(f"Added Google Drive folder for streaming: {folder_id} with {len(videos)} videos")
-                else:
-                    # Single file streaming
-                    file_id = source["id"]
-                    pseudo_dir = f"gdrive://file/{file_id}"
-                    if pseudo_dir in self.selected_dirs:
-                        self.update_console("Drive link already added.")
-                        return
-
-                    videos, video_to_dir, directories = self.drive_manager.gather_videos_with_directories_for_source(source)
-                    # Cache the scan result under the pseudo directory key
-                    self.scan_cache.set(pseudo_dir, (videos, video_to_dir, directories))
-
-                    # Add to selected list and UI
-                    self.selected_dirs.append(pseudo_dir)
-
-                    # Friendly display name
-                    display_name = f"Drive File {file_id}"
-                    self.dir_listbox.insert(tk.END, display_name)
-
-                    self.update_console(f"Added Google Drive file for streaming: {file_id}")
-                self.update_video_count()
-                self.save_preferences()
+                    raise ValueError("Unrecognized Google Drive link.")
             except Exception as e:
-                messagebox.showerror("Google Drive", f"Failed to add link: {e}")
+                finish_cleanup()
+                messagebox.showerror("Google Drive", str(e))
                 self.update_console(f"Google Drive error: {e}")
+                return
+
+            def worker():
+                try:
+                    kind = source.get("kind")
+                    if kind == "folder":
+                        folder_id = source["id"]
+                        pseudo_dir = f"gdrive://folder/{folder_id}"
+                        # Duplicate check on UI thread state snapshot
+                        if pseudo_dir in self.selected_dirs:
+                            self.root.after(0, lambda: (set_status("Drive link already added."), finish_cleanup()))
+                            return
+                        self.root.after(0, lambda: set_status("Listing folder recursively…"))
+                        videos, video_to_dir, directories = self.drive_manager.gather_videos_with_directories_for_source(source)
+
+                        def apply_folder():
+                            self.scan_cache.set(pseudo_dir, (videos, video_to_dir, directories))
+                            self.selected_dirs.append(pseudo_dir)
+                            display_name = f"Drive Folder {folder_id}"
+                            self.dir_listbox.insert(tk.END, display_name)
+                            self.update_console(f"Added Google Drive folder for streaming: {folder_id} with {len(videos)} videos")
+                            self.update_video_count()
+                            self.save_preferences()
+                            finish_cleanup()
+
+                        self.root.after(0, apply_folder)
+                    else:
+                        # Single file streaming
+                        file_id = source["id"]
+                        pseudo_dir = f"gdrive://file/{file_id}"
+                        if pseudo_dir in self.selected_dirs:
+                            self.root.after(0, lambda: (set_status("Drive link already added."), finish_cleanup()))
+                            return
+                        self.root.after(0, lambda: set_status("Preparing file stream…"))
+                        videos, video_to_dir, directories = self.drive_manager.gather_videos_with_directories_for_source(source)
+
+                        def apply_file():
+                            self.scan_cache.set(pseudo_dir, (videos, video_to_dir, directories))
+                            self.selected_dirs.append(pseudo_dir)
+                            display_name = f"Drive File {file_id}"
+                            self.dir_listbox.insert(tk.END, display_name)
+                            self.update_console(f"Added Google Drive file for streaming: {file_id}")
+                            self.update_video_count()
+                            self.save_preferences()
+                            finish_cleanup()
+
+                        self.root.after(0, apply_file)
+                except Exception as e:
+                    def on_err():
+                        finish_cleanup()
+                        messagebox.showerror("Google Drive", f"Failed to add link: {e}")
+                        self.update_console(f"Google Drive error: {e}")
+                    self.root.after(0, on_err)
+
+            ManagedThread(target=worker, name="AddDriveLink").start()
 
         def remove_directory(self):
             selected_indices = self.dir_listbox.curselection()
