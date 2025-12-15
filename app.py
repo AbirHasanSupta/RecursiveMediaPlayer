@@ -2891,11 +2891,57 @@ def select_multiple_folders_and_play():
                     cache = self.scan_cache.get(directory)
                     items = []
                     if cache:
-                        videos, _, _ = cache
-                        for v in videos:
-                            # Display a simple entry for the stream URL
-                            display = '▶ Drive Stream'
-                            items.append((v, display))
+                        videos, video_to_dir, directories = cache
+
+                        # If this is a folder pseudo dir, we can try to show a recursive tree
+                        if directory.startswith("gdrive://folder/"):
+                            # Obtain names and structure from manager cached tree
+                            tree = None
+                            try:
+                                if self.drive_manager:
+                                    tree = self.drive_manager.get_folder_tree(directory)
+                            except Exception:
+                                tree = None
+
+                            # Determine the subtree to display: all dirs under 'directory'
+                            dir_prefix = directory.rstrip('/')
+                            subdirs = []
+                            for d in directories:
+                                if d.startswith(dir_prefix):
+                                    subdirs.append(d)
+                            subdirs = sorted(subdirs, key=lambda s: (s.count('/'), s))
+
+                            # Build a relative depth for indentation
+                            base_depth = dir_prefix.count('/')
+
+                            for d in subdirs:
+                                rel_depth = d.count('/') - base_depth
+                                name = os.path.basename(d)
+                                if tree and 'dir_names' in tree:
+                                    name = tree['dir_names'].get(d, name)
+                                # Skip the base itself for visual clarity; still list its files separately below
+                                if d != dir_prefix:
+                                    indented = ("  " * rel_depth) + '📁' + name
+                                    items.append((d, indented))
+
+                                # Files directly in this directory d
+                                if self.show_videos:
+                                    for v in videos:
+                                        parent = video_to_dir.get(v)
+                                        if parent == d:
+                                            vname = None
+                                            if tree and 'file_names' in tree:
+                                                vname = tree['file_names'].get(v)
+                                            if not vname:
+                                                # fallback to last segment of URL id
+                                                vname = 'Drive Stream'
+                                            ind = ("  " * (rel_depth + 1)) + '▶ ' + vname
+                                            items.append((v, ind))
+                        else:
+                            # Single file pseudo dir
+                            for v in videos:
+                                display = '▶ Drive Stream'
+                                items.append((v, display))
 
                     def _post_drive_items():
                         self.exclusion_listbox.delete(0, tk.END)
