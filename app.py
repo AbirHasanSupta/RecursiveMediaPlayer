@@ -1787,30 +1787,7 @@ def select_multiple_folders_and_play():
                     if selected_dir:
                         self.update_console("Playing selected filtered videos...")
 
-                        selected_videos = []
-
-                        for index in exclusion_selection:
-                            item_path = self.current_subdirs_mapping.get(index)
-                            if not item_path:
-                                continue
-
-                            if self.is_video_excluded(selected_dir, item_path):
-                                continue
-
-                            # Accept local files and HTTP(S) stream URLs
-                            if (
-                                (isinstance(item_path, str) and (item_path.startswith("http://") or item_path.startswith("https://")))
-                                or (os.path.isfile(item_path) and is_video(item_path))
-                            ):
-                                selected_videos.append(item_path)
-
-                        seen = set()
-                        final_videos = []
-                        for v in selected_videos:
-                            v_norm = os.path.normpath(v)
-                            if v_norm not in seen:
-                                seen.add(v_norm)
-                                final_videos.append(v_norm)
+                        final_videos = self._resolve_selection_indices_to_videos(selected_dir, exclusion_selection)
 
                         if not final_videos:
                             def _show_no_videos():
@@ -1822,7 +1799,7 @@ def select_multiple_folders_and_play():
 
                         all_video_to_dir = {}
                         for video_path in final_videos:
-                            if isinstance(video_path, str) and (video_path.startswith("http://") or video_path.startswith("https://")):
+                            if self._is_stream_url(video_path):
                                 all_video_to_dir[video_path] = selected_dir
                             else:
                                 all_video_to_dir[video_path] = os.path.dirname(video_path)
@@ -1872,43 +1849,7 @@ def select_multiple_folders_and_play():
                     if selected_dir:
                         self.update_console("Playing selected items only...")
 
-                        selected_videos = []
-                        selected_folders = []
-
-                        for index in exclusion_selection:
-                            item_path = self.current_subdirs_mapping.get(index)
-                            if not item_path:
-                                continue
-
-                            # Accept local files and HTTP(S) stream URLs
-                            if (
-                                (isinstance(item_path, str) and (item_path.startswith("http://") or item_path.startswith("https://")))
-                                or (os.path.isfile(item_path) and is_video(item_path))
-                            ):
-                                if not self.is_video_excluded(selected_dir, item_path):
-                                    selected_videos.append(item_path)
-                            elif os.path.isdir(item_path):
-                                selected_folders.append(item_path)
-
-                        for folder in selected_folders:
-                            try:
-                                for root, dirs, files in os.walk(folder):
-                                    for f in files:
-                                        full_path = os.path.join(root, f)
-                                        if is_video(full_path):
-                                            if not self.is_video_excluded(selected_dir, full_path):
-                                                selected_videos.append(full_path)
-                            except Exception as e:
-                                self.update_console(f"Error reading folder {folder}: {e}")
-
-                        seen = set()
-                        final_videos = []
-                        for v in selected_videos:
-                            # Avoid normalizing HTTP URLs as file paths
-                            v_norm = v if (isinstance(v, str) and (v.startswith("http://") or v.startswith("https://"))) else os.path.normpath(v)
-                            if v_norm not in seen:
-                                seen.add(v_norm)
-                                final_videos.append(v_norm)
+                        final_videos = self._resolve_selection_indices_to_videos(selected_dir, exclusion_selection)
 
                         if not final_videos:
                             def _show_no_videos():
@@ -1920,7 +1861,7 @@ def select_multiple_folders_and_play():
 
                         all_video_to_dir = {}
                         for video_path in final_videos:
-                            if isinstance(video_path, str) and (video_path.startswith("http://") or video_path.startswith("https://")):
+                            if self._is_stream_url(video_path):
                                 all_video_to_dir[video_path] = selected_dir
                             else:
                                 all_video_to_dir[video_path] = os.path.dirname(video_path)
@@ -1975,13 +1916,13 @@ def select_multiple_folders_and_play():
                         for index in exclusion_selection:
                             if index in self.current_subdirs_mapping:
                                 path = self.current_subdirs_mapping[index]
-                                if os.path.isfile(path) and is_video(path):
+                                if (self._is_stream_url(path)) or (os.path.isfile(path) and is_video(path)):
                                     ai_video_paths.append(path)
                     else:
                         for i in range(len(self.current_subdirs_mapping)):
                             if i in self.current_subdirs_mapping:
                                 path = self.current_subdirs_mapping[i]
-                                if os.path.isfile(path) and is_video(path):
+                                if (self._is_stream_url(path)) or (os.path.isfile(path) and is_video(path)):
                                     ai_video_paths.append(path)
 
                     if not ai_video_paths:
@@ -1997,7 +1938,10 @@ def select_multiple_folders_and_play():
                     selected_dir = self.get_current_selected_directory()
 
                     for video_path in ai_video_paths:
-                        all_video_to_dir[video_path] = os.path.dirname(video_path)
+                        if self._is_stream_url(video_path):
+                            all_video_to_dir[video_path] = selected_dir or "AI"
+                        else:
+                            all_video_to_dir[video_path] = os.path.dirname(video_path)
 
                     all_directories = list(set(all_video_to_dir.values()))
                     all_directories.sort()
@@ -2062,8 +2006,13 @@ def select_multiple_folders_and_play():
                     if not cache:
                         continue
                     videos, video_to_dir, directories = cache
-                    videos = [os.path.normpath(v) for v in videos]
-                    video_to_dir = {os.path.normpath(k): v for k, v in video_to_dir.items()}
+                    # Avoid normalizing HTTP URLs
+                    videos = [v if self._is_stream_url(v) else os.path.normpath(v) for v in videos]
+                    new_map = {}
+                    for k, v in video_to_dir.items():
+                        new_key = k if self._is_stream_url(k) else os.path.normpath(k)
+                        new_map[new_key] = v
+                    video_to_dir = new_map
 
                     excluded_subdirs = self.excluded_subdirs.get(directory, [])
                     excluded_videos = self.excluded_videos.get(directory, [])
@@ -3722,6 +3671,91 @@ def select_multiple_folders_and_play():
 
             return displayed_items
 
+        # --- Helpers for playing selections that may include streaming URLs and pseudo directories ---
+        def _is_stream_url(self, path: str) -> bool:
+            return isinstance(path, str) and (path.startswith("http://") or path.startswith("https://"))
+
+        def _collect_videos_from_pseudo_dir(self, root_pseudo_dir: str, pseudo_dir: str) -> list:
+            """
+            Given a gdrive pseudo root (one of self.selected_dirs) and a pseudo_dir within that tree,
+            collect all videos whose parent is this pseudo_dir or any of its descendants.
+            """
+            cache = self.scan_cache.get(root_pseudo_dir)
+            if not cache:
+                return []
+            videos, video_to_dir, directories = cache
+            results = []
+            prefix = pseudo_dir.rstrip('/') + '/'
+            for v in videos:
+                parent = video_to_dir.get(v)
+                if not parent:
+                    continue
+                if parent == pseudo_dir or parent.startswith(prefix):
+                    results.append(v)
+            return results
+
+        def _resolve_selection_indices_to_videos(self, selected_dir, indices) -> list:
+            """
+            Resolve listbox indices into a list of playable videos, supporting:
+            - local files
+            - http(s) streaming URLs
+            - local folders (recursive)
+            - gdrive pseudo folders (gdrive://folder/..)
+            Applies exclusions for the selected_dir.
+            """
+            collected = []
+            for index in indices:
+                item_path = self.current_subdirs_mapping.get(index)
+                if not item_path:
+                    continue
+
+                # Stream URL
+                if self._is_stream_url(item_path):
+                    if not self.is_video_excluded(selected_dir, item_path):
+                        collected.append(item_path)
+                    continue
+
+                # gdrive pseudo folder
+                if isinstance(item_path, str) and item_path.startswith("gdrive://folder/"):
+                    # Find the root pseudo directory for this item (the one present in selected_dirs)
+                    root_pseudo = None
+                    for d in self.selected_dirs:
+                        if isinstance(d, str) and d.startswith("gdrive://folder/") and item_path.startswith(d):
+                            root_pseudo = d
+                            break
+                    if root_pseudo:
+                        for v in self._collect_videos_from_pseudo_dir(root_pseudo, item_path):
+                            if not self.is_video_excluded(root_pseudo, v):
+                                collected.append(v)
+                    continue
+
+                # Local file
+                if os.path.isfile(item_path) and is_video(item_path):
+                    if not self.is_video_excluded(selected_dir, item_path):
+                        collected.append(item_path)
+                    continue
+
+                # Local directory
+                if os.path.isdir(item_path):
+                    try:
+                        for root, dirs, files in os.walk(item_path):
+                            for f in files:
+                                full_path = os.path.join(root, f)
+                                if is_video(full_path) and not self.is_video_excluded(selected_dir, full_path):
+                                    collected.append(full_path)
+                    except Exception as e:
+                        self.update_console(f"Error reading folder {item_path}: {e}")
+
+            # Deduplicate, avoid normalizing HTTP URLs
+            seen = set()
+            final_videos = []
+            for v in collected:
+                v_norm = v if self._is_stream_url(v) else os.path.normpath(v)
+                if v_norm not in seen:
+                    seen.add(v_norm)
+                    final_videos.append(v_norm)
+            return final_videos
+
         def draw_slider(self):
             if not hasattr(self, 'speed_canvas'):
                 return
@@ -3822,11 +3856,12 @@ def select_multiple_folders_and_play():
                     search_active = hasattr(self, 'search_query') and self.search_query
                     filter_msg = " from search results" if search_active else ""
 
+                    # Include stream URLs too
                     selected_videos = []
                     for index in selection:
                         if index in self.current_subdirs_mapping:
                             path = self.current_subdirs_mapping[index]
-                            if os.path.isfile(path) and is_video(path):
+                            if (self._is_stream_url(path)) or (os.path.isfile(path) and is_video(path)):
                                 selected_videos.append(path)
 
                     if selected_videos:
@@ -3839,7 +3874,7 @@ def select_multiple_folders_and_play():
                     for i in range(len(self.current_subdirs_mapping)):
                         if i in self.current_subdirs_mapping:
                             path = self.current_subdirs_mapping[i]
-                            if os.path.isfile(path) and is_video(path):
+                            if (self._is_stream_url(path)) or (os.path.isfile(path) and is_video(path)):
                                 ai_video_paths.append(path)
 
                     if ai_video_paths:
@@ -3857,21 +3892,8 @@ def select_multiple_folders_and_play():
             selection = self.exclusion_listbox.curselection()
 
             if selection:
-                selected_videos = []
-                for index in selection:
-                    if index in self.current_subdirs_mapping:
-                        item_path = self.current_subdirs_mapping[index]
-                        if os.path.isfile(item_path) and is_video(item_path):
-                            selected_videos.append(item_path)
-                        elif os.path.isdir(item_path):
-                            try:
-                                for root, dirs, files in os.walk(item_path):
-                                    for file in files:
-                                        full_path = os.path.join(root, file)
-                                        if is_video(full_path):
-                                            selected_videos.append(full_path)
-                            except Exception as e:
-                                self.update_console(f"Error reading directory {item_path}: {e}")
+                # Use resolver to support stream URLs and gdrive pseudo folders
+                selected_videos = self._resolve_selection_indices_to_videos(selected_dir, selection)
 
                 if selected_videos:
                     self.playlist_manager.add_videos_to_playlist([], selected_videos)
@@ -3946,7 +3968,13 @@ def select_multiple_folders_and_play():
             all_directories = []
 
             for video_path in videos:
-                if os.path.isfile(video_path):
+                if self._is_stream_url(video_path):
+                    # Map stream URLs to a synthetic directory key
+                    video_dir = "STREAMS"
+                    all_video_to_dir[video_path] = video_dir
+                    if video_dir not in all_directories:
+                        all_directories.append(video_dir)
+                elif os.path.isfile(video_path):
                     video_dir = os.path.dirname(video_path)
                     all_video_to_dir[video_path] = video_dir
                     if video_dir not in all_directories:
@@ -4003,38 +4031,7 @@ def select_multiple_folders_and_play():
             if not selected_dir:
                 return
 
-            selected_videos = []
-            selected_folders = []
-
-            for index in selection:
-                item_path = self.current_subdirs_mapping.get(index)
-                if not item_path:
-                    continue
-
-                if os.path.isfile(item_path) and is_video(item_path):
-                    if not self.is_video_excluded(selected_dir, item_path):
-                        selected_videos.append(item_path)
-                elif os.path.isdir(item_path):
-                    selected_folders.append(item_path)
-
-            for folder in selected_folders:
-                try:
-                    for root, dirs, files in os.walk(folder):
-                        for f in files:
-                            full_path = os.path.join(root, f)
-                            if is_video(full_path):
-                                if not self.is_video_excluded(selected_dir, full_path):
-                                    selected_videos.append(full_path)
-                except Exception as e:
-                    self.update_console(f"Error reading folder {folder}: {e}")
-
-            seen = set()
-            final_videos = []
-            for v in selected_videos:
-                v_norm = os.path.normpath(v)
-                if v_norm not in seen:
-                    seen.add(v_norm)
-                    final_videos.append(v_norm)
+            final_videos = self._resolve_selection_indices_to_videos(selected_dir, selection)
 
             if final_videos:
                 if mode == "next":
@@ -4058,7 +4055,12 @@ def select_multiple_folders_and_play():
             all_directories = []
 
             for video_path in videos:
-                if os.path.isfile(video_path):
+                if self._is_stream_url(video_path):
+                    video_dir = "STREAMS"
+                    all_video_to_dir[video_path] = video_dir
+                    if video_dir not in all_directories:
+                        all_directories.append(video_dir)
+                elif os.path.isfile(video_path):
                     video_dir = os.path.dirname(video_path)
                     all_video_to_dir[video_path] = video_dir
                     if video_dir not in all_directories:
@@ -4130,7 +4132,12 @@ def select_multiple_folders_and_play():
             all_directories = []
 
             for video_path in videos:
-                if os.path.isfile(video_path):
+                if self._is_stream_url(video_path):
+                    video_dir = "STREAMS"
+                    all_video_to_dir[video_path] = video_dir
+                    if video_dir not in all_directories:
+                        all_directories.append(video_dir)
+                elif os.path.isfile(video_path):
                     video_dir = os.path.dirname(video_path)
                     all_video_to_dir[video_path] = video_dir
                     if video_dir not in all_directories:
