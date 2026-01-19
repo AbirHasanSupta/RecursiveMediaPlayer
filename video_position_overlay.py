@@ -422,7 +422,9 @@ class VideoPositionOverlay:
             volume = self.controller.volume
             self.volume_value_label.config(text=f"{volume}%")
 
-            if volume == 0:
+            if getattr(self.controller, 'is_muted', False):
+                self.volume_label.config(text="🔇")
+            elif volume == 0:
                 self.volume_label.config(text="🔇")
             elif volume < 30:
                 self.volume_label.config(text="🔈")

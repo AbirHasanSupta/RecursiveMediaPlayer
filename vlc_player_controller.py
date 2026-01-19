@@ -194,6 +194,9 @@ class BaseVLCPlayerController:
             self.is_muted = not self.is_muted
             try:
                 self.player.audio_set_mute(self.is_muted)
+                if not self.is_muted:
+                    self.player.audio_set_volume(self.volume)
+                
                 if self.logger:
                     self.logger(f"Audio {'Muted' if self.is_muted else 'Unmuted'}")
             except Exception as e:
@@ -202,17 +205,33 @@ class BaseVLCPlayerController:
 
     def volume_up(self):
         with self.lock:
+            if self.is_muted:
+                self.is_muted = False
+                try:
+                    self.player.audio_set_mute(False)
+                    if self.logger:
+                        self.logger("Audio Unmuted via Volume Up")
+                except Exception:
+                    pass
+
             self.volume = min(100, self.volume + 10)
-            if not self.is_muted:
-                self.player.audio_set_volume(self.volume)
+            self.player.audio_set_volume(self.volume)
             if self.logger:
                 self.logger(f"Volume set to: {self.volume}")
 
     def volume_down(self):
         with self.lock:
+            if self.is_muted:
+                self.is_muted = False
+                try:
+                    self.player.audio_set_mute(False)
+                    if self.logger:
+                        self.logger("Audio Unmuted via Volume Down")
+                except Exception:
+                    pass
+
             self.volume = max(0, self.volume - 10)
-            if not self.is_muted:
-                self.player.audio_set_volume(self.volume)
+            self.player.audio_set_volume(self.volume)
             if self.logger:
                 self.logger(f"Volume set to: {self.volume}")
 
