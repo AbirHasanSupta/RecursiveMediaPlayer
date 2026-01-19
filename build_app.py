@@ -1709,6 +1709,22 @@ def select_multiple_folders_and_play():
                             all_video_to_dir[video_path] = os.path.dirname(video_path)
 
                         all_directories = sorted(list(set(all_video_to_dir.values())))
+                        
+                        dir_selection = self.dir_listbox.curselection()
+                        if dir_selection:
+                            start_idx = dir_selection[0]
+                            dirs_order = list(self.selected_dirs)
+                            dirs_order = dirs_order[start_idx:] + dirs_order[:start_idx]
+                            
+                            ordered_dirs = []
+                            all_dirs_set = set(all_directories)
+                            for d in dirs_order:
+                                if d in all_dirs_set:
+                                    ordered_dirs.append(d)
+                            for d in all_directories:
+                                if d not in ordered_dirs:
+                                    ordered_dirs.append(d)
+                            all_directories = ordered_dirs
 
                         def _start_filtered_player():
                             self.update_console(f"Playing {len(filtered_videos)} filtered videos")
@@ -1770,6 +1786,22 @@ def select_multiple_folders_and_play():
                                 all_video_to_dir[video_path] = os.path.dirname(video_path)
 
                         all_directories = sorted(list(set(all_video_to_dir.values())))
+
+                        dir_selection = self.dir_listbox.curselection()
+                        if dir_selection:
+                            start_idx = dir_selection[0]
+                            dirs_order = list(self.selected_dirs)
+                            dirs_order = dirs_order[start_idx:] + dirs_order[:start_idx]
+
+                            ordered_dirs = []
+                            all_dirs_set = set(all_directories)
+                            for d in dirs_order:
+                                if d in all_dirs_set:
+                                    ordered_dirs.append(d)
+                            for d in all_directories:
+                                if d not in ordered_dirs:
+                                    ordered_dirs.append(d)
+                            all_directories = ordered_dirs
 
                         def _start_selected_player():
                             self.update_console(
@@ -1833,6 +1865,22 @@ def select_multiple_folders_and_play():
 
                         all_directories = sorted(list(set(all_video_to_dir.values())))
 
+                        dir_selection = self.dir_listbox.curselection()
+                        if dir_selection:
+                            start_idx = dir_selection[0]
+                            dirs_order = list(self.selected_dirs)
+                            dirs_order = dirs_order[start_idx:] + dirs_order[:start_idx]
+
+                            ordered_dirs = []
+                            all_dirs_set = set(all_directories)
+                            for d in dirs_order:
+                                if d in all_dirs_set:
+                                    ordered_dirs.append(d)
+                            for d in all_directories:
+                                if d not in ordered_dirs:
+                                    ordered_dirs.append(d)
+                            all_directories = ordered_dirs
+
                         def _start_selected_player():
                             self.update_console(
                                 f"Playing {len(final_videos)} selected videos")
@@ -1889,7 +1937,14 @@ def select_multiple_folders_and_play():
                 all_videos = []
                 all_video_to_dir = {}
                 all_directories = []
-                for directory in self.selected_dirs:
+
+                dirs_to_process = list(self.selected_dirs)
+                dir_selection = self.dir_listbox.curselection()
+                if dir_selection:
+                    start_idx = dir_selection[0]
+                    dirs_to_process = dirs_to_process[start_idx:] + dirs_to_process[:start_idx]
+
+                for directory in dirs_to_process:
                     cache = self.scan_cache.get(directory)
                     if not cache:
                         continue
@@ -1925,7 +1980,15 @@ def select_multiple_folders_and_play():
                         all_video_to_dir.update(video_to_dir)
                         all_directories.extend(directories)
 
-                all_directories = sorted(list(set(all_directories)))
+                all_directories_unordered = set(all_directories)
+                all_directories = []
+                for d in dirs_to_process:
+                    if d in all_directories_unordered:
+                        all_directories.append(d)
+                
+                for d in sorted(list(all_directories_unordered)):
+                    if d not in all_directories:
+                        all_directories.append(d)
 
                 def _start_player():
                     if not all_videos:
