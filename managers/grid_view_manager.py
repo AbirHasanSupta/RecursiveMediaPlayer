@@ -433,6 +433,7 @@ class GridViewManager:
                 highlightthickness=2 if is_selected else 0,
                 highlightbackground=self.theme_provider.accent_color if is_selected else "black"
             )
+            thumb_container._is_thumb = True
             thumb_container.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
             thumb_container.pack_propagate(False)
 
@@ -453,6 +454,7 @@ class GridViewManager:
                 pady=8,
                 padx=10
             )
+            info_frame._is_info = True
             info_frame.pack(fill=tk.X)
 
             name = os.path.basename(item.video_path)
@@ -769,9 +771,9 @@ class GridViewManager:
 
         for child in card.winfo_children():
             if isinstance(child, tk.Frame):
-                if child.cget('bg') == 'black' or 'highlightbackground' in child.keys():
+                if getattr(child, '_is_thumb', False) or (child.cget('bg') == 'black' and not getattr(child, '_is_info', False)):
                     thumb_container = child
-                else:
+                elif getattr(child, '_is_info', False) or (child.cget('bg') != 'black'):
                     info_frame = child
                     for label in child.winfo_children():
                         if isinstance(label, tk.Label):
