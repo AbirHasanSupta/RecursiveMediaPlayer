@@ -2894,7 +2894,7 @@ def select_multiple_folders_and_play():
 
             self.add_button = self.create_button(
                 dir_buttons_frame,
-                text="📁+",
+                text='+ ADD',
                 command=self.add_directory,
                 variant="primary",
                 size="md"
