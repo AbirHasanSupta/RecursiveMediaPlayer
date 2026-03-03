@@ -32,16 +32,16 @@ class MonitorInfo:
 
 
 class BaseVLCPlayerController:
-    def __init__(self, videos, logger=None):
+    def __init__(self, videos, logger=None, volume=50, is_muted=False):
         self.monitor_info = MonitorInfo()
         x, y, width, height = self.monitor_info.monitor1
 
         self.instance = vlc.Instance(f'--video-x={x}', f'--video-y={y}')
         self.player = self.instance.media_player_new()
-        self.volume = 50
-        self.is_muted = False
+        self.volume = volume
+        self.is_muted = is_muted
         try:
-            self.player.audio_set_mute(False)
+            self.player.audio_set_mute(self.is_muted)
             self.player.audio_set_volume(self.volume)
         except Exception:
             pass
@@ -127,8 +127,19 @@ class BaseVLCPlayerController:
         self.play_video(prev_index)
 
     def set_volume_save_callback(self, callback):
-        """Set callback to save volume when player stops"""
+        """Set callback to save volume and mute state when they change or player stops"""
         self._volume_save_callback = callback
+
+    def _trigger_config_save(self):
+        if hasattr(self, '_volume_save_callback') and self._volume_save_callback:
+            try:
+                # Assuming callback takes (volume, is_muted) or we'll adjust it in DirectorySelector
+                self._volume_save_callback(self.volume, self.is_muted)
+            except Exception:
+                try:
+                    self._volume_save_callback(self.volume)
+                except Exception:
+                    pass
 
     def stop(self):
         with self._cleanup_lock:
@@ -139,11 +150,7 @@ class BaseVLCPlayerController:
 
         self.running = False
 
-        if hasattr(self, '_volume_save_callback') and self._volume_save_callback:
-            try:
-                self._volume_save_callback(self.volume)
-            except Exception:
-                pass
+        self._trigger_config_save()
 
         self.stop_position_tracking()
 
@@ -199,6 +206,7 @@ class BaseVLCPlayerController:
                 
                 if self.logger:
                     self.logger(f"Audio {'Muted' if self.is_muted else 'Unmuted'}")
+                self._trigger_config_save()
             except Exception as e:
                 if self.logger:
                     self.logger(f"Error toggling mute: {e}")
@@ -218,6 +226,7 @@ class BaseVLCPlayerController:
             self.player.audio_set_volume(self.volume)
             if self.logger:
                 self.logger(f"Volume set to: {self.volume}")
+            self._trigger_config_save()
 
     def volume_down(self):
         with self.lock:
@@ -234,6 +243,7 @@ class BaseVLCPlayerController:
             self.player.audio_set_volume(self.volume)
             if self.logger:
                 self.logger(f"Volume set to: {self.volume}")
+            self._trigger_config_save()
 
     def toggle_fullscreen(self):
         with self.lock:
@@ -497,8 +507,8 @@ class BaseVLCPlayerController:
 
 
 class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
-    def __init__(self, videos, video_to_dir, directories, logger=None):
-        super(VLCPlayerControllerForMultipleDirectory, self).__init__(videos, logger)
+    def __init__(self, videos, video_to_dir, directories, logger=None, volume=50, is_muted=False):
+        super(VLCPlayerControllerForMultipleDirectory, self).__init__(videos, logger, volume, is_muted)
         self.video_to_dir = video_to_dir
         self.directories = directories
         self.watch_history_callback = None

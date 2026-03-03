@@ -99,6 +99,7 @@ def select_multiple_folders_and_play():
             self.excluded_subdirs = preferences.get('excluded_subdirs', {})
             self.excluded_videos = preferences.get('excluded_videos', {})
             self.volume = preferences.get('volume', 50)
+            self.is_muted = preferences.get('is_muted', False)
             self.loop_mode = preferences.get('loop_mode', 'loop_on')
 
             self.setup_theme()
@@ -1138,11 +1139,10 @@ def select_multiple_folders_and_play():
             self.update_console(f"Playing {len(videos)} videos from favorites")
 
             self.controller = VLCPlayerControllerForMultipleDirectory(
-                videos, all_video_to_dir, all_directories, self.update_console
+                videos, all_video_to_dir, all_directories, self.update_console,
+                volume=self.volume, is_muted=self.is_muted
             )
             self.controller.set_loop_mode(self.loop_mode)
-            self.controller.volume = self.volume
-            self.controller.player.audio_set_volume(self.volume)
             self.controller.set_volume_save_callback(self._save_volume_callback)
             self.controller.set_watch_history_callback(self.watch_history_manager.track_video_playback)
             self.controller.set_resume_manager(self.resume_manager)
@@ -1729,11 +1729,10 @@ def select_multiple_folders_and_play():
                         def _start_filtered_player():
                             self.update_console(f"Playing {len(filtered_videos)} filtered videos")
                             self.controller = VLCPlayerControllerForMultipleDirectory(
-                                filtered_videos, all_video_to_dir, all_directories, self.update_console
+                                filtered_videos, all_video_to_dir, all_directories, self.update_console,
+                                volume=self.volume, is_muted=self.is_muted
                             )
                             self.controller.set_loop_mode(self.loop_mode)
-                            self.controller.volume = self.volume
-                            self.controller.player.audio_set_volume(self.volume)
                             self.controller.set_volume_save_callback(self._save_volume_callback)
                             self.controller.set_watch_history_callback(
                                 self.watch_history_manager.track_video_playback
@@ -1807,11 +1806,10 @@ def select_multiple_folders_and_play():
                             self.update_console(
                                 f"Playing {len(final_videos)} selected filtered videos")
                             self.controller = VLCPlayerControllerForMultipleDirectory(
-                                final_videos, all_video_to_dir, all_directories, self.update_console
+                                final_videos, all_video_to_dir, all_directories, self.update_console,
+                                volume=self.volume, is_muted=self.is_muted
                             )
                             self.controller.set_loop_mode(self.loop_mode)
-                            self.controller.volume = self.volume
-                            self.controller.player.audio_set_volume(self.volume)
                             self.controller.set_volume_save_callback(self._save_volume_callback)
                             self.controller.set_watch_history_callback(
                                 self.watch_history_manager.track_video_playback
@@ -1885,11 +1883,10 @@ def select_multiple_folders_and_play():
                             self.update_console(
                                 f"Playing {len(final_videos)} selected videos")
                             self.controller = VLCPlayerControllerForMultipleDirectory(
-                                final_videos, all_video_to_dir, all_directories, self.update_console
+                                final_videos, all_video_to_dir, all_directories, self.update_console,
+                                volume=self.volume, is_muted=self.is_muted
                             )
                             self.controller.set_loop_mode(self.loop_mode)
-                            self.controller.volume = self.volume
-                            self.controller.player.audio_set_volume(self.volume)
                             self.controller.set_volume_save_callback(self._save_volume_callback)
                             self.controller.set_watch_history_callback(
                                 self.watch_history_manager.track_video_playback
@@ -1998,10 +1995,9 @@ def select_multiple_folders_and_play():
 
                     self.update_console(f"Playing from {len(all_directories)} directories")
                     self.controller = VLCPlayerControllerForMultipleDirectory(all_videos, all_video_to_dir,
-                                                                              all_directories, self.update_console)
+                                                                              all_directories, self.update_console,
+                                                                              volume=self.volume, is_muted=self.is_muted)
                     self.controller.set_loop_mode(self.loop_mode)
-                    self.controller.volume = self.volume
-                    self.controller.player.audio_set_volume(self.volume)
                     self.controller.set_volume_save_callback(self._save_volume_callback)
                     self.controller.set_watch_history_callback(
                         self.watch_history_manager.track_video_playback
@@ -3092,11 +3088,10 @@ def select_multiple_folders_and_play():
             self.update_console(f"Playing {len(videos)} videos from grid selection")
 
             self.controller = VLCPlayerControllerForMultipleDirectory(
-                videos, all_video_to_dir, all_directories, self.update_console
+                videos, all_video_to_dir, all_directories, self.update_console,
+                volume=self.volume, is_muted=self.is_muted
             )
             self.controller.set_loop_mode(self.loop_mode)
-            self.controller.volume = self.volume
-            self.controller.player.audio_set_volume(self.volume)
             self.controller.set_volume_save_callback(self._save_volume_callback)
             self.controller.set_watch_history_callback(self.watch_history_manager.track_video_playback)
             self.controller.set_resume_manager(self.resume_manager)
@@ -3226,11 +3221,10 @@ def select_multiple_folders_and_play():
             def start_playlist_player():
                 self.update_console(f"Playing playlist with {len(valid_videos)} videos")
                 self.controller = VLCPlayerControllerForMultipleDirectory(
-                    valid_videos, all_video_to_dir, all_directories, self.update_console
+                    valid_videos, all_video_to_dir, all_directories, self.update_console,
+                    volume=self.volume, is_muted=self.is_muted
                 )
                 self.controller.set_loop_mode(self.loop_mode)
-                self.controller.volume = self.volume
-                self.controller.player.audio_set_volume(self.volume)
                 self.controller.set_volume_save_callback(self._save_volume_callback)
                 self.controller.set_watch_history_callback(
                     self.watch_history_manager.track_video_playback
@@ -3312,11 +3306,10 @@ def select_multiple_folders_and_play():
             def start_queue_player():
                 self.update_console(f"Playing queue with {len(valid_videos)} videos")
                 self.controller = VLCPlayerControllerForMultipleDirectory(
-                    valid_videos, all_video_to_dir, all_directories, self.update_console
+                    valid_videos, all_video_to_dir, all_directories, self.update_console,
+                    volume=self.volume, is_muted=self.is_muted
                 )
                 self.controller.set_loop_mode("loop_off")
-                self.controller.volume = self.volume
-                self.controller.player.audio_set_volume(self.volume)
                 self.controller.set_volume_save_callback(self._save_volume_callback)
                 self.controller.set_watch_history_callback(
                     self.watch_history_manager.track_video_playback
@@ -3389,11 +3382,10 @@ def select_multiple_folders_and_play():
             def start_history_player():
                 self.update_console(f"Playing {len(valid_videos)} videos from history")
                 self.controller = VLCPlayerControllerForMultipleDirectory(
-                    valid_videos, all_video_to_dir, all_directories, self.update_console
+                    valid_videos, all_video_to_dir, all_directories, self.update_console,
+                    volume=self.volume, is_muted=self.is_muted
                 )
                 self.controller.set_loop_mode(self.loop_mode)
-                self.controller.volume = self.volume
-                self.controller.player.audio_set_volume(self.volume)
                 self.controller.set_volume_save_callback(self._save_volume_callback)
                 self.controller.set_watch_history_callback(
                     self.watch_history_manager.track_video_playback
@@ -3432,8 +3424,10 @@ def select_multiple_folders_and_play():
         def _show_settings(self):
             self.settings_manager.show_settings()
 
-        def _save_volume_callback(self, volume):
+        def _save_volume_callback(self, volume, is_muted=None):
             self.volume = volume
+            if is_muted is not None:
+                self.is_muted = is_muted
             self.save_preferences()
 
         def _is_stream_url(self, path: str) -> bool:
