@@ -135,6 +135,49 @@ class WatchHistoryService:
 
     def _load_history(self):
         self._history = self.storage.load_history()
+        # Clean up any existing duplicates on load
+        with self._lock:
+            if self._history:
+                seen_videos = {}  # video_path -> list of entries
+                to_remove = []
+                
+                # Group by video_path
+                for entry in self._history:
+                    if entry.video_path not in seen_videos:
+                        seen_videos[entry.video_path] = []
+                    seen_videos[entry.video_path].append(entry)
+                
+                # For each video, if it has multiple entries within 5 minutes of each other, merge them
+                for path, entries in seen_videos.items():
+                    if len(entries) < 2:
+                        continue
+                        
+                    # Entries are already sorted by date (most recent first)
+                    # We'll keep the most recent one and remove others that are within 5 minutes
+                    kept_entry = entries[0]
+                    for other_entry in entries[1:]:
+                        try:
+                            # Also remove entries that have the exact same duration and are very close
+                            # This handles the "300+ times" case where they might be identical
+                            t1 = datetime.fromisoformat(kept_entry.watched_at)
+                            t2 = datetime.fromisoformat(other_entry.watched_at)
+                            
+                            is_identical = (kept_entry.duration_watched == other_entry.duration_watched and 
+                                           kept_entry.total_duration == other_entry.total_duration)
+                            
+                            # If identical or within 5 minutes, remove the older one
+                            if is_identical or abs((t1 - t2).total_seconds()) < 300:
+                                to_remove.append(other_entry)
+                            else:
+                                kept_entry = other_entry
+                        except:
+                            continue
+                
+                if to_remove:
+                    for entry in to_remove:
+                        if entry in self._history:
+                            self._history.remove(entry)
+                    self.storage.save_history(self._history)
 
     def get_all_history(self) -> List[WatchHistoryEntry]:
         with self._lock:
@@ -142,23 +185,50 @@ class WatchHistoryService:
 
     def add_watch_entry(self, video_path: str, duration_watched: int = 0,
                         total_duration: int = 0) -> WatchHistoryEntry:
+        # Ignore entries with 0 duration unless it's a very short video
+        # This prevents flooding history when just clicking through videos
+        if duration_watched < 2 and total_duration > 10:
+             # Check if we already have an entry for this video
+             # If we do, don't add a new "0 duration" entry
+             with self._lock:
+                 video_path_norm = os.path.normpath(video_path)
+                 for entry in self._history:
+                     if entry.video_path == video_path_norm:
+                         return entry
+
         with self._lock:
             # Check if this video was already watched recently (within last 5 minutes)
             video_path_norm = os.path.normpath(video_path)
             now = datetime.now()
 
+            # Find all recent entries for this video and update the most recent one
+            recent_entry = None
             for entry in self._history:
-                if (entry.video_path == video_path_norm and
-                        entry.is_recently_watched(hours=0) and
-                        (now - datetime.fromisoformat(entry.watched_at)).total_seconds() < 300):
-                    # Update existing recent entry instead of creating new one
-                    entry.duration_watched = duration_watched
-                    entry.total_duration = total_duration
-                    if total_duration > 0:
-                        entry.completion_percentage = (duration_watched / total_duration) * 100
-                    entry.watched_at = now.isoformat()
-                    self.storage.save_history(self._history)
-                    return entry
+                if entry.video_path == video_path_norm:
+                    try:
+                        watched_at = datetime.fromisoformat(entry.watched_at)
+                        if (now - watched_at).total_seconds() < 300:
+                            # If multiple recent entries exist (shouldn't happen with this fix), 
+                            # we update the most recent one we find first (since it's sorted)
+                            recent_entry = entry
+                            break
+                    except:
+                        continue
+
+            if recent_entry:
+                # Update existing recent entry instead of creating new one
+                recent_entry.duration_watched = duration_watched
+                recent_entry.total_duration = total_duration
+                if total_duration > 0:
+                    recent_entry.completion_percentage = (duration_watched / total_duration) * 100
+                recent_entry.watched_at = now.isoformat()
+                
+                # Move updated entry to the top of the list
+                self._history.remove(recent_entry)
+                self._history.insert(0, recent_entry)
+                
+                self.storage.save_history(self._history)
+                return recent_entry
 
             # Create new entry
             completion_percentage = 0.0
