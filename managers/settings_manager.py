@@ -24,6 +24,7 @@ class SettingsData:
         self.preprocessing_batch_size = 10
         self.preview_duration = 3
         self.use_video_preview = True
+        self.enable_watch_history = True
 
     def to_dict(self) -> dict:
         return {
@@ -36,7 +37,8 @@ class SettingsData:
             'skip_raw_directories': self.skip_raw_directories,
             'preprocessing_batch_size': self.preprocessing_batch_size,
             'preview_duration': self.preview_duration,
-            'use_video_preview': self.use_video_preview
+            'use_video_preview': self.use_video_preview,
+            'enable_watch_history': self.enable_watch_history
         }
 
     @classmethod
@@ -52,6 +54,7 @@ class SettingsData:
         settings.preprocessing_batch_size = data.get('preprocessing_batch_size', settings.preprocessing_batch_size)
         settings.preview_duration = data.get('preview_duration', settings.preview_duration)
         settings.use_video_preview = data.get('use_video_preview', settings.use_video_preview)
+        settings.enable_watch_history = data.get('enable_watch_history', settings.enable_watch_history)
         return settings
 
 
@@ -528,6 +531,15 @@ class SettingsUI:
         )
         video_preview_check.pack(anchor='w', pady=2)
 
+        self.enable_watch_history_var = tk.BooleanVar(value=self.settings.enable_watch_history)
+        watch_history_check = ttk.Checkbutton(
+            preview_section,
+            text="Enable Watch History tracking",
+            variable=self.enable_watch_history_var,
+            style="Modern.TCheckbutton"
+        )
+        watch_history_check.pack(anchor='w', pady=2)
+
         thumbnail_btn_frame = tk.Frame(preview_section, bg=self.theme_provider.bg_color)
         thumbnail_btn_frame.pack(fill=tk.X, pady=10)
 
@@ -882,6 +894,7 @@ class SettingsUI:
         self.skip_raw_var.set(settings.skip_raw_directories)
         self.preview_duration_var.set(settings.preview_duration)
         self.use_video_preview_var.set(settings.use_video_preview)
+        self.enable_watch_history_var.set(settings.enable_watch_history)
         self._update_index_info()
 
     def _apply_current_settings(self):
@@ -895,6 +908,7 @@ class SettingsUI:
         self.settings.skip_raw_directories = self.skip_raw_var.get()
         self.settings.preview_duration = self.preview_duration_var.get()
         self.settings.use_video_preview = self.use_video_preview_var.get()
+        self.settings.enable_watch_history = self.enable_watch_history_var.get()
 
     def _save_settings(self):
         """Save current settings"""

@@ -763,9 +763,14 @@ class WatchHistoryManager:
         self.service = WatchHistoryService(self.storage)
         self.ui = WatchHistoryUI(parent, theme_provider, self.service)
         self.ui.play_callback = None
+        self.settings_manager = None
 
         self._last_video_path = None
         self._last_start_time = None
+
+    def set_settings_manager(self, settings_manager):
+        """Set settings manager to check for history tracking settings"""
+        self.settings_manager = settings_manager
 
     def show_manager(self):
         """Show the watch history manager window"""
@@ -775,17 +780,30 @@ class WatchHistoryManager:
         """Set callback for playing videos from history"""
         self.ui.play_callback = callback
 
+    def _should_track_history(self) -> bool:
+        """Check if history tracking is enabled in settings"""
+        if self.settings_manager:
+            settings = self.settings_manager.get_settings()
+            return getattr(settings, 'enable_watch_history', True)
+        return True
+
     def track_video_start(self, video_path: str):
         """Track when a video starts playing"""
+        if not self._should_track_history():
+            return
         self._last_video_path = video_path
         self._last_start_time = datetime.now()
 
     def track_video_end(self, video_path: str, duration_watched: int = 0, total_duration: int = 0):
         """Track when a video ends or changes"""
+        if not self._should_track_history():
+            return
         if video_path and os.path.exists(video_path):
             self.service.add_watch_entry(video_path, duration_watched, total_duration)
 
     def track_video_playback(self, video_path: str, duration_watched: int = 0, total_duration: int = 0):
+        if not self._should_track_history():
+            return
         if video_path and os.path.exists(video_path):
             self.service.add_watch_entry(video_path, duration_watched, total_duration)
 

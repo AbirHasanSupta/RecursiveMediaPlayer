@@ -211,6 +211,7 @@ def select_multiple_folders_and_play():
             self.playlist_manager.ui.video_preview_manager = self.video_preview_manager
 
             self.watch_history_manager = WatchHistoryManager(self.root, self)
+            self.watch_history_manager.set_settings_manager(self.settings_manager)
             self.watch_history_manager.set_play_callback(self._play_history_videos)
             self.watch_history_manager.set_video_preview_manager(self.video_preview_manager)
 
@@ -614,6 +615,8 @@ def select_multiple_folders_and_play():
             self.dir_listbox.bind('<Button-3>', self._show_main_dir_context_menu)
             self.dir_listbox.bind('<Control-a>', self._select_all_main_dirs)
             self.dir_listbox.bind('<Control-A>', self._select_all_main_dirs)
+            self.dir_listbox.bind('<B1-Motion>', self._on_drag)
+            self.dir_listbox.bind('<ButtonRelease-1>', self._on_drop)
             self.scrollbar.config(command=self.dir_listbox.yview)
 
 
@@ -926,6 +929,7 @@ def select_multiple_folders_and_play():
             if index < 0 or index >= self.dir_listbox.size():
                 return
 
+            self._drag_start_index = index
             ctrl_held = bool(event.state & 0x4)
             shift_held = bool(event.state & 0x1)
             current_selection = list(self.dir_listbox.curselection())
@@ -957,6 +961,40 @@ def select_multiple_folders_and_play():
                 self._main_dir_anchor = index
                 self.on_directory_select(None)
                 return "break"
+
+        def _on_drag(self, event):
+            pass
+
+        def _on_drop(self, event):
+            if not hasattr(self, '_drag_start_index') or self._drag_start_index is None:
+                return
+
+            drop_index = self.dir_listbox.nearest(event.y)
+            if drop_index < 0:
+                drop_index = 0
+            if drop_index >= self.dir_listbox.size():
+                drop_index = self.dir_listbox.size() - 1
+
+            if drop_index != self._drag_start_index:
+                # Reorder selected_dirs
+                dir_to_move = self.selected_dirs.pop(self._drag_start_index)
+                self.selected_dirs.insert(drop_index, dir_to_move)
+
+                # Reorder listbox items
+                text = self.dir_listbox.get(self._drag_start_index)
+                self.dir_listbox.delete(self._drag_start_index)
+                self.dir_listbox.insert(drop_index, text)
+                
+                # Keep the moved item selected
+                self.dir_listbox.selection_clear(0, tk.END)
+                self.dir_listbox.selection_set(drop_index)
+                self.dir_listbox.activate(drop_index)
+                self.current_selected_dir_index = drop_index
+                
+                # Trigger directory select to update other UI parts
+                self.on_directory_select(None)
+
+            self._drag_start_index = None
 
         def _show_main_dir_context_menu(self, event):
             index = self.dir_listbox.nearest(event.y)
