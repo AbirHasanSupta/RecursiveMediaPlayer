@@ -16,7 +16,7 @@ from managers.grid_view_manager import GridViewManager
 from managers.resource_manager import ThreadSafeDict, get_resource_manager, ManagedExecutor, MemoryMonitor, \
     ManagedThread
 from theme import ThemeSelector
-from utils import gather_videos_with_directories, is_video
+from utils import gather_videos_with_directories, is_video, gather_videos
 from vlc_player_controller import VLCPlayerControllerForMultipleDirectory
 from managers.playlist_manager import PlaylistManager
 from managers.watch_history_manager import WatchHistoryManager
@@ -593,7 +593,7 @@ def select_multiple_folders_and_play():
 
             self.dir_listbox = tk.Listbox(
                 list_container,
-                selectmode=tk.SINGLE,
+                selectmode=tk.EXTENDED,
                 yscrollcommand=self.scrollbar.set,
                 font=self.normal_font,
                 bg="white",
@@ -610,6 +610,10 @@ def select_multiple_folders_and_play():
             self.dir_listbox.bind('<<ListboxSelect>>', self.on_directory_select)
             self.dir_listbox.bind('<FocusOut>', self.on_directory_focus_out)
             self.dir_listbox.bind('<FocusIn>', self.on_directory_focus_in)
+            self.dir_listbox.bind('<Button-1>', self._on_main_dir_left_click)
+            self.dir_listbox.bind('<Button-3>', self._show_main_dir_context_menu)
+            self.dir_listbox.bind('<Control-a>', self._select_all_main_dirs)
+            self.dir_listbox.bind('<Control-A>', self._select_all_main_dirs)
             self.scrollbar.config(command=self.dir_listbox.yview)
 
 
@@ -768,7 +772,7 @@ def select_multiple_folders_and_play():
                 variable=self.smart_resume_var,
                 command=self.toggle_smart_resume
             )
-            self.smart_resume_check.pack(side=tk.LEFT, padx=(15, 0))
+            self.smart_resume_check.pack(side=tk.LEFT, padx=(0, 0))
 
             buttons_row = tk.Frame(self.exclusion_buttons_frame, bg=self.bg_color)
             buttons_row.pack(fill=tk.X, pady=(5, 0))
@@ -911,6 +915,123 @@ def select_multiple_folders_and_play():
 
         def _create_context_menu(self):
             pass
+
+        def _select_all_main_dirs(self, event=None):
+            self.dir_listbox.selection_set(0, tk.END)
+            self.on_directory_select(None)
+            return "break"
+
+        def _on_main_dir_left_click(self, event):
+            index = self.dir_listbox.nearest(event.y)
+            if index < 0 or index >= self.dir_listbox.size():
+                return
+
+            ctrl_held = bool(event.state & 0x4)
+            shift_held = bool(event.state & 0x1)
+            current_selection = list(self.dir_listbox.curselection())
+
+            if shift_held:
+                if not hasattr(self, '_main_dir_anchor') or self._main_dir_anchor is None:
+                    self._main_dir_anchor = current_selection[0] if current_selection else 0
+                self.dir_listbox.selection_clear(0, tk.END)
+                start = min(self._main_dir_anchor, index)
+                end = max(self._main_dir_anchor, index)
+                for i in range(start, end + 1):
+                    self.dir_listbox.selection_set(i)
+                self.dir_listbox.activate(index)
+                self.on_directory_select(None)
+                return "break"
+            elif ctrl_held:
+                if index in current_selection:
+                    self.dir_listbox.selection_clear(index)
+                else:
+                    self.dir_listbox.selection_set(index)
+                self._main_dir_anchor = index
+                self.dir_listbox.activate(index)
+                self.on_directory_select(None)
+                return "break"
+            else:
+                self.dir_listbox.selection_clear(0, tk.END)
+                self.dir_listbox.selection_set(index)
+                self.dir_listbox.activate(index)
+                self._main_dir_anchor = index
+                self.on_directory_select(None)
+                return "break"
+
+        def _show_main_dir_context_menu(self, event):
+            index = self.dir_listbox.nearest(event.y)
+            selection = self.dir_listbox.curselection()
+
+            if index >= 0 and index not in selection:
+                self.dir_listbox.selection_clear(0, tk.END)
+                self.dir_listbox.selection_set(index)
+                self.dir_listbox.activate(index)
+                self._main_dir_anchor = index
+                self.on_directory_select(None)
+                selection = self.dir_listbox.curselection()
+
+            if not selection:
+                return
+
+            context_menu = tk.Menu(self.root, tearoff=0)
+            context_menu.add_command(label="Play Selected", command=self._play_selected_main_dirs)
+            context_menu.add_command(label="Open in Grid View", command=self._open_grid_view_main_dirs)
+            context_menu.add_separator()
+            context_menu.add_command(label="Remove Selected", command=self.remove_directory)
+            
+            context_menu.post(event.x_root, event.y_root)
+
+        def _play_selected_main_dirs(self):
+            selection = self.dir_listbox.curselection()
+            if not selection:
+                return
+            
+            all_videos = []
+            for i in selection:
+                if i < len(self.selected_dirs):
+                    root_dir = self.selected_dirs[i]
+                    excluded_subdirs = self.excluded_subdirs.get(root_dir, [])
+                    excluded_files = self.excluded_videos.get(root_dir, [])
+                    
+                    videos = gather_videos(root_dir)
+                    filtered_videos = []
+                    for v_path in videos:
+                        if not self.is_video_in_excluded_directory(v_path, excluded_subdirs) and \
+                           v_path not in excluded_files:
+                            filtered_videos.append(v_path)
+                    all_videos.extend(filtered_videos)
+            
+            if not all_videos:
+                messagebox.showinfo("Information", "No videos found in selected directories.")
+                return
+
+            self._play_grid_videos(all_videos)
+
+        def _open_grid_view_main_dirs(self):
+            selection = self.dir_listbox.curselection()
+            if not selection:
+                return
+                
+            all_videos = []
+            for i in selection:
+                if i < len(self.selected_dirs):
+                    root_dir = self.selected_dirs[i]
+                    excluded_subdirs = self.excluded_subdirs.get(root_dir, [])
+                    excluded_files = self.excluded_videos.get(root_dir, [])
+                    
+                    videos = gather_videos(root_dir)
+                    filtered_videos = []
+                    for v_path in videos:
+                        if not self.is_video_in_excluded_directory(v_path, excluded_subdirs) and \
+                           v_path not in excluded_files:
+                            filtered_videos.append(v_path)
+                    all_videos.extend(filtered_videos)
+            
+            if not all_videos:
+                messagebox.showinfo("Information", "No videos found in selected directories.")
+                return
+
+            self._open_grid_view(all_videos)
 
         def _on_left_click(self, event):
             index = self.exclusion_listbox.nearest(event.y)
@@ -2735,13 +2856,11 @@ def select_multiple_folders_and_play():
 
             self.add_button = self.create_button(
                 dir_buttons_frame,
-                text="Add Directory",
+                text="📁+",
                 command=self.add_directory,
                 variant="primary",
                 size="md"
             )
-            self.add_button.pack(side=tk.LEFT, padx=(0, 5))
-
             self.add_button.pack(side=tk.LEFT, padx=(0, 5))
 
             self.add_drive_button = self.create_button(
@@ -2753,14 +2872,6 @@ def select_multiple_folders_and_play():
             )
             self.add_drive_button.pack(side=tk.LEFT, padx=(0, 5))
 
-            self.remove_button = self.create_button(
-                dir_buttons_frame,
-                text="Remove Selected",
-                command=self.remove_directory,
-                variant="secondary",
-                size="md"
-            )
-            self.remove_button.pack(side=tk.LEFT)
 
             theme_frame = tk.Frame(self.button_frame, bg=self.bg_color)
             theme_frame.pack(side=tk.LEFT, expand=True)
