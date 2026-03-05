@@ -676,6 +676,10 @@ class GridViewManager:
                         temp_path = temp_file.name
 
                     import cv2
+                    from utils import is_gpu_available
+                    gpu_status = is_gpu_available()
+                    use_opencl = gpu_status.get('opencv_opencl', False)
+
                     cap = cv2.VideoCapture(temp_path)
                     ret, frame = cap.read()
                     cap.release()
@@ -686,8 +690,16 @@ class GridViewManager:
                         pass
 
                     if ret and frame is not None:
-                        frame_resized = cv2.resize(frame, (190, 140))
-                        frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+                        if use_opencl:
+                            # Use UMat for Transparent API (OpenCL acceleration)
+                            umat_frame = cv2.UMat(frame)
+                            resized_umat = cv2.resize(umat_frame, (190, 140))
+                            rgb_umat = cv2.cvtColor(resized_umat, cv2.COLOR_BGR2RGB)
+                            frame_rgb = rgb_umat.get()
+                        else:
+                            frame_resized = cv2.resize(frame, (190, 140))
+                            frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+
                         pil_image = Image.fromarray(frame_rgb)
                         photo = ImageTk.PhotoImage(pil_image)
                         item.thumbnail_image = photo
@@ -697,20 +709,37 @@ class GridViewManager:
             image_b64 = thumbnail_data[6:] if thumbnail_data.startswith("IMAGE:") else thumbnail_data
             image_data = base64.b64decode(image_b64)
 
-            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
-                temp_file.write(image_data)
-                temp_path = temp_file.name
+            import cv2
+            from utils import is_gpu_available
+            gpu_status = is_gpu_available()
+            use_opencl = gpu_status.get('opencv_opencl', False)
 
-            img = Image.open(temp_path)
-            img.thumbnail((190, 140), Image.Resampling.LANCZOS)
+            # Use OpenCV for image loading and resizing if OpenCL is available
+            import io
+            if use_opencl:
+                import numpy as np
+                # Load image from bytes
+                nparr = np.frombuffer(image_data, np.uint8)
+                img_cv = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                if img_cv is not None:
+                    umat_img = cv2.UMat(img_cv)
+                    # Calculate aspect ratio preserving resize
+                    h, w = img_cv.shape[:2]
+                    scale = min(190/w, 140/h)
+                    new_w, new_h = int(w * scale), int(h * scale)
+                    resized_umat = cv2.resize(umat_img, (new_w, new_h))
+                    rgb_umat = cv2.cvtColor(resized_umat, cv2.COLOR_BGR2RGB)
+                    frame_rgb = rgb_umat.get()
+                    img = Image.fromarray(frame_rgb)
+                else:
+                    img = Image.open(io.BytesIO(image_data))
+                    img.thumbnail((190, 140), Image.Resampling.LANCZOS)
+            else:
+                img = Image.open(io.BytesIO(image_data))
+                img.thumbnail((190, 140), Image.Resampling.LANCZOS)
+
             photo = ImageTk.PhotoImage(img)
             item.thumbnail_image = photo
-
-            try:
-                os.unlink(temp_path)
-            except:
-                pass
-
             self.root.after(0, lambda: self._set_thumbnail(label, photo))
 
         except Exception as e:

@@ -58,6 +58,10 @@ class VideoMetadata:
     def load_video_properties(self):
         """Load video properties using OpenCV"""
         try:
+            from utils import is_gpu_available
+            gpu_status = is_gpu_available()
+            use_opencl = gpu_status.get('opencv_opencl', False)
+
             cap = cv2.VideoCapture(self.video_path)
             if cap.isOpened():
                 self.width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))

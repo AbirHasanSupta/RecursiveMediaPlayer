@@ -666,6 +666,10 @@ class WatchHistoryUI:
 
             try:
                 import cv2
+                from utils import is_gpu_available
+                gpu_status = is_gpu_available()
+                use_opencl = gpu_status.get('opencv_opencl', False)
+
                 cap = cv2.VideoCapture(entry.video_path)
                 if cap.isOpened():
                     fps = cap.get(cv2.CAP_PROP_FPS)

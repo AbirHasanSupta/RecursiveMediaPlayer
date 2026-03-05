@@ -12,6 +12,7 @@ from PIL import Image, ImageTk
 import tempfile
 
 from managers.resource_manager import get_resource_manager, ManagedThread
+from utils import is_gpu_available
 
 
 class VideoThumbnail:
@@ -129,6 +130,9 @@ class ThumbnailGenerator:
 
     def _generate_video_preview(self, video_path: str) -> Optional[str]:
         temp_path = None
+        gpu_status = is_gpu_available()
+        use_opencl = gpu_status.get('opencv_opencl', False)
+
         try:
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
@@ -174,7 +178,16 @@ class ThumbnailGenerator:
                 if not ret:
                     break
 
-                resized = cv2.resize(frame, (target_width, target_height))
+                if use_opencl:
+                    # Use UMat for Transparent API (OpenCL acceleration)
+                    umat_frame = cv2.UMat(frame)
+                    resized_umat = cv2.resize(umat_frame, (target_width, target_height))
+                    # Check if we can keep it in UMat for more operations
+                    # For now, VideoWriter needs a numpy array on CPU
+                    resized = resized_umat.get()
+                else:
+                    resized = cv2.resize(frame, (target_width, target_height))
+
                 out.write(resized)
                 captured += 1
 
@@ -233,8 +246,16 @@ class ThumbnailGenerator:
             if not ret or frame is None:
                 return None
 
-            frame_resized = cv2.resize(frame, self.thumbnail_size)
-            frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+            gpu_status = is_gpu_available()
+            if gpu_status.get('opencv_opencl'):
+                umat_frame = cv2.UMat(frame)
+                resized_umat = cv2.resize(umat_frame, self.thumbnail_size)
+                rgb_umat = cv2.cvtColor(resized_umat, cv2.COLOR_BGR2RGB)
+                frame_rgb = rgb_umat.get()
+            else:
+                frame_resized = cv2.resize(frame, self.thumbnail_size)
+                frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+
             pil_image = Image.fromarray(frame_rgb)
 
             with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
@@ -322,9 +343,31 @@ class VideoPreviewTooltip:
             if is_video:
                 try:
                     import vlc
+                    from utils import is_gpu_available
+                    vlc_args = ['--no-xlib', '--quiet', '--no-audio']
+                    gpu_status = is_gpu_available()
+                    if gpu_status.get('vlc_hw_accel'):
+                        vlc_args.extend([
+                            '--avcodec-hw=any',
+                            '--d3d11-hw-decoder=any',
+                            '--d3d11-va-context=1'
+                        ])
+                    
+                    instance = vlc.Instance(*vlc_args)
+                    if not instance and gpu_status.get('vlc_hw_accel'):
+                        # Fallback to no HW accel if it failed
+                        vlc_args = ['--no-xlib', '--quiet', '--no-audio']
+                        instance = vlc.Instance(*vlc_args)
 
-                    instance = vlc.Instance('--no-xlib', '--quiet', '--no-audio')
+                    if not instance:
+                        raise Exception("Failed to create VLC Instance")
+
                     player = instance.media_player_new()
+                    if not player:
+                        raise Exception("Failed to create VLC Media Player")
+
+                    from managers.resource_manager import get_resource_manager
+                    get_resource_manager().register_vlc_instance(instance)
 
                     player.audio_set_mute(True)
                     player.audio_set_volume(0)
@@ -576,34 +619,54 @@ class VideoPreviewManager:
         ManagedThread(target=generate, name="GenThumbnail").start()
 
     def pregenerate_thumbnails(self, video_paths: list, progress_callback: Callable = None):
+        """Pregenerate thumbnails for a list of videos using parallel processing"""
         def pregenerate():
+            import concurrent.futures
+            from utils import is_gpu_available
+            gpu_status = is_gpu_available()
+            
+            # Use more workers if GPU is available to handle I/O and OpenCL tasks
+            max_workers = 4 if gpu_status.get('opencv_opencl') else 2
+            
             total = len(video_paths)
-            for i, video_path in enumerate(video_paths):
+            to_process = []
+            
+            for video_path in video_paths:
                 if not os.path.isfile(video_path):
                     continue
-
                 video_path_norm = os.path.normpath(video_path)
-
-                if (video_path_norm in self._thumbnails and
-                        self._thumbnails[video_path_norm].is_valid()):
-                    continue
-
-                thumbnail_data = self.generator.generate_thumbnail(video_path_norm)
-
-                if thumbnail_data:
-                    thumbnail = VideoThumbnail(video_path_norm, thumbnail_data)
-                    with self._lock:
-                        self._thumbnails[video_path_norm] = thumbnail
-
+                if video_path_norm not in self._thumbnails or not self._thumbnails[video_path_norm].is_valid():
+                    to_process.append(video_path_norm)
+            
+            if not to_process:
                 if progress_callback:
-                    progress = ((i + 1) / total) * 100
-                    self.parent.after(0, lambda p=progress: progress_callback(p))
+                    self.parent.after(0, lambda: progress_callback(100))
+                return
+
+            completed = 0
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_video = {executor.submit(self.generator.generate_thumbnail, v): v for v in to_process}
+                for future in concurrent.futures.as_completed(future_to_video):
+                    video_path_norm = future_to_video[future]
+                    try:
+                        thumbnail_data = future.result()
+                        if thumbnail_data:
+                            thumbnail = VideoThumbnail(video_path_norm, thumbnail_data)
+                            with self._lock:
+                                self._thumbnails[video_path_norm] = thumbnail
+                    except Exception as e:
+                        if self.console_callback:
+                            self.console_callback(f"Error pregenerating for {os.path.basename(video_path_norm)}: {e}")
+                    
+                    completed += 1
+                    if progress_callback:
+                        progress = (completed / total) * 100
+                        self.parent.after(0, lambda p=progress: progress_callback(p))
 
             self._save_thumbnails()
 
             if self.console_callback:
-                generated_count = len([p for p in video_paths if os.path.normpath(p) in self._thumbnails])
-                self.console_callback(f"Pre-generated {generated_count}/{total} video thumbnails")
+                self.console_callback(f"Pre-generated {completed} video thumbnails")
 
         ManagedThread(target=pregenerate, name="PregenThumbnails").start()
 

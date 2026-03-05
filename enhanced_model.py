@@ -118,12 +118,20 @@ def adaptive_frame_sampling(video_path: str, base_interval: float = 1.0, max_fra
     # Ensure we don't exceed max_frames
     sample_points = sorted(list(sample_points))[:max_frames]
 
+    # Check for OpenCL support
+    from utils import is_gpu_available
+    gpu_status = is_gpu_available()
+    use_opencl = gpu_status.get('opencv_opencl', False)
+
     for frame_idx in sample_points:
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
         ret, frame = cap.read()
         if ret:
             timestamp = frame_idx / fps
-            yield timestamp, frame
+            if use_opencl:
+                yield timestamp, cv2.UMat(frame).get()
+            else:
+                yield timestamp, frame
 
     cap.release()
 
@@ -268,12 +276,16 @@ def _init_high_accuracy_worker(worker_id: int = 0, device: str = None):
 
     _worker_state['worker_id'] = worker_id
 
-    # Smart device allocation - use CPU for some workers to balance load
+    # Smart device allocation - RTX 3060 Ti has 8GB VRAM, can handle 2-3 workers easily
     if device:
         dev = device
-    elif worker_id == 0:  # Primary worker gets GPU
-        dev = "cuda" if torch.cuda.is_available() else "cpu"
-    else:  # Secondary workers use CPU to avoid GPU memory conflicts
+    elif torch.cuda.is_available():
+        # Allow up to 2 workers to use GPU if memory is available
+        if worker_id < 2:
+            dev = "cuda"
+        else:
+            dev = "cpu"
+    else:
         dev = "cpu"
 
     _worker_state['device'] = dev
