@@ -1,45 +1,6 @@
 import os
-import cv2
 
 VIDEO_SUFFIXES = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv')
-
-
-def is_gpu_available():
-    """
-    Check if GPU acceleration is available for OpenCV (OpenCL) and VLC.
-    Returns a dictionary with availability status for different components.
-    """
-    gpu_status = {
-        'opencv_opencl': False,
-        'vlc_hw_accel': True,  # Assume True as most modern systems support some form of HW accel in VLC
-        'cuda_available': False,
-        'gpu_name': None,
-        'vram_total': 0,
-        'vram_free': 0
-    }
-
-    try:
-        if cv2.ocl.haveOpenCL():
-            cv2.ocl.setUseOpenCL(True)
-            gpu_status['opencv_opencl'] = cv2.ocl.useOpenCL()
-    except Exception:
-        pass
-
-    try:
-        import torch
-        if torch.cuda.is_available():
-            gpu_status['cuda_available'] = True
-            gpu_status['gpu_name'] = torch.cuda.get_device_name(0)
-            # VRAM info
-            t = torch.cuda.get_device_properties(0).total_memory
-            r = torch.cuda.memory_reserved(0)
-            a = torch.cuda.memory_allocated(0)
-            gpu_status['vram_total'] = t / (1024 ** 3)  # GB
-            gpu_status['vram_free'] = (t - (r + a)) / (1024 ** 3)  # Approx free GB
-    except Exception:
-        pass
-
-    return gpu_status
 
 
 def is_video(file_name: str) -> bool:

@@ -13,7 +13,6 @@ import struct
 
 from managers.resource_manager import get_resource_manager
 from video_position_overlay import VideoPositionOverlay
-from utils import is_gpu_available
 
 
 class MonitorInfo:
@@ -37,30 +36,8 @@ class BaseVLCPlayerController:
         self.monitor_info = MonitorInfo()
         x, y, width, height = self.monitor_info.monitor1
 
-        vlc_args = [f'--video-x={x}', f'--video-y={y}']
-
-        gpu_status = is_gpu_available()
-        if gpu_status.get('vlc_hw_accel'):
-            # Standard VLC HW acceleration flags
-            vlc_args.extend([
-                '--avcodec-hw=any',
-                '--d3d11-hw-decoder=any',
-                '--d3d11-va-context=1'
-            ])
-
-        self.instance = vlc.Instance(*vlc_args)
-        if not self.instance:
-            # Try without GPU acceleration if it failed
-            if gpu_status.get('vlc_hw_accel'):
-                vlc_args = [f'--video-x={x}', f'--video-y={y}']
-                self.instance = vlc.Instance(*vlc_args)
-            
-            if not self.instance:
-                raise Exception("Failed to create VLC Instance")
-
+        self.instance = vlc.Instance(f'--video-x={x}', f'--video-y={y}')
         self.player = self.instance.media_player_new()
-        if not self.player:
-            raise Exception("Failed to create VLC Media Player")
         self.volume = volume
         self.is_muted = is_muted
         try:
@@ -418,33 +395,8 @@ class BaseVLCPlayerController:
             else:
                 x, y, height, width = self.monitor_info.monitor2
 
-            vlc_args = [f'--video-x={x}', f'--video-y={y}']
-            gpu_status = is_gpu_available()
-            if gpu_status.get('vlc_hw_accel'):
-                vlc_args.extend([
-                    '--avcodec-hw=any',
-                    '--d3d11-hw-decoder=any',
-                    '--d3d11-va-context=1'
-                ])
-
-            self.instance = vlc.Instance(*vlc_args)
-            if not self.instance:
-                # Fallback to safe args if instance creation failed
-                vlc_args = [f'--video-x={x}', f'--video-y={y}']
-                self.instance = vlc.Instance(*vlc_args)
-            
-            if not self.instance:
-                if self.logger:
-                    self.logger("Critical error: Failed to recreate VLC Instance during monitor switch")
-                return
-
+            self.instance = vlc.Instance(f'--video-x={x}', f'--video-y={y}')
             self.player = self.instance.media_player_new()
-            if not self.player:
-                if self.logger:
-                    self.logger("Critical error: Failed to recreate VLC Media Player during monitor switch")
-                return
-
-            self.resource_manager.register_vlc_instance(self.instance)
             try:
                 self.player.audio_set_mute(self.is_muted)
                 if not self.is_muted:
