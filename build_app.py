@@ -25,6 +25,7 @@ from managers.settings_manager import SettingsManager
 from managers.video_preview_manager import VideoPreviewManager
 from managers.video_queue_manager import VideoQueueManager
 from managers.google_drive_manager import GoogleDriveManager
+from managers.dual_player_manager import DualPlayerManager
 import win32clipboard as wcb
 import win32con
 import struct
@@ -228,6 +229,13 @@ def select_multiple_folders_and_play():
             self.favorites_manager.set_video_preview_manager(self.video_preview_manager)
             self.favorites_manager.set_grid_view_manager(self.grid_view_manager)
 
+            self.dual_player_manager = DualPlayerManager(
+                self.root,
+                self,
+                self.update_console,
+                watch_history_callback=self.watch_history_manager.track_video_playback
+            )
+
             self.filter_sort_manager = AdvancedFilterSortManager(
                 watch_history_manager=self.watch_history_manager
             )
@@ -272,7 +280,8 @@ def select_multiple_folders_and_play():
                 'favorites_manager',
                 'filter_sort_manager',
                 'settings_manager',
-                'resume_manager'
+                'resume_manager',
+                'dual_player_manager',
             ]
 
             for manager_name in managers:
@@ -2662,9 +2671,7 @@ def select_multiple_folders_and_play():
                     if cache:
                         videos, video_to_dir, directories = cache
 
-                        # If this is a folder pseudo dir, we can try to show a recursive tree
                         if directory.startswith("gdrive://folder/"):
-                            # Obtain names and structure from manager cached tree
                             tree = None
                             try:
                                 if self.drive_manager:
@@ -2672,7 +2679,6 @@ def select_multiple_folders_and_play():
                             except Exception:
                                 tree = None
 
-                            # Determine the subtree to display: all dirs under 'directory'
                             dir_prefix = directory.rstrip('/')
                             subdirs = []
                             for d in directories:
@@ -2680,7 +2686,6 @@ def select_multiple_folders_and_play():
                                     subdirs.append(d)
                             subdirs = sorted(subdirs, key=lambda s: (s.count('/'), s))
 
-                            # Build a relative depth for indentation
                             base_depth = dir_prefix.count('/')
 
                             for d in subdirs:
@@ -2688,12 +2693,10 @@ def select_multiple_folders_and_play():
                                 name = os.path.basename(d)
                                 if tree and 'dir_names' in tree:
                                     name = tree['dir_names'].get(d, name)
-                                # Skip the base itself for visual clarity; still list its files separately below
                                 if d != dir_prefix:
                                     indented = ("  " * rel_depth) + '📁' + name
                                     items.append((d, indented))
 
-                                # Files directly in this directory d
                                 if self.show_videos:
                                     for v in videos:
                                         parent = video_to_dir.get(v)
@@ -2702,12 +2705,10 @@ def select_multiple_folders_and_play():
                                             if tree and 'file_names' in tree:
                                                 vname = tree['file_names'].get(v)
                                             if not vname:
-                                                # fallback to last segment of URL id
                                                 vname = 'Drive Stream'
                                             ind = ("  " * (rel_depth + 1)) + '▶ ' + vname
                                             items.append((v, ind))
                         else:
-                            # Single file pseudo dir
                             for v in videos:
                                 display = '▶ Drive Stream'
                                 items.append((v, display))
@@ -2722,7 +2723,6 @@ def select_multiple_folders_and_play():
                             for idx, (p, name) in enumerate(items):
                                 self.exclusion_listbox.insert(tk.END, name)
                                 self.current_subdirs_mapping[idx] = p
-                        # Restore scroll position if provided
                         if restore_scroll:
                             try:
                                 self.exclusion_listbox.yview_moveto(restore_scroll[0])
@@ -2732,7 +2732,6 @@ def select_multiple_folders_and_play():
                     self.root.after(0, _post_drive_items)
                     return
             except Exception:
-                # Fall through to normal handling on any unexpected error
                 pass
 
             if not hasattr(self, '_subdir_load_token'):
@@ -2940,6 +2939,15 @@ def select_multiple_folders_and_play():
                 size="md"
             )
             self.settings_button.pack(side=tk.LEFT, padx=(0, 10))
+
+            self.dual_player_button = self.create_button(
+              theme_frame,
+              text="Dual Player",
+              command=self._open_dual_player,
+              variant="primary",
+              size="md"
+            )
+            self.dual_player_button.pack(side=tk.LEFT, padx=(0, 10))
 
             action_buttons_frame = tk.Frame(self.button_frame, bg=self.bg_color)
             action_buttons_frame.pack(side=tk.RIGHT)
@@ -3280,7 +3288,6 @@ def select_multiple_folders_and_play():
                 else:
                     messagebox.showwarning("Warning", "No videos found in selected items")
             else:
-                # self.add_to_playlist_button.config(text="Adding...", state=tk.DISABLED)
                 search_active = hasattr(self, 'search_query') and self.search_query
                 if search_active:
                     self.update_console("Collecting all search results for playlist...")
@@ -3309,7 +3316,6 @@ def select_multiple_folders_and_play():
                                         all_videos.append(video)
 
                         def finish_collection():
-                            # self.add_to_playlist_button.config(text="Add to Playlist", state=tk.NORMAL)
                             if all_videos:
                                 self.playlist_manager.add_videos_to_playlist([], all_videos)
                                 self.update_console(f"Added all {len(all_videos)} videos to playlist")
@@ -3320,7 +3326,6 @@ def select_multiple_folders_and_play():
 
                     except Exception as e:
                         def show_error():
-                            # self.add_to_playlist_button.config(text="Add to Playlist", state=tk.NORMAL)
                             messagebox.showerror("Error", f"Failed to collect videos: {e}")
 
                         self.root.after(0, show_error)
@@ -3328,11 +3333,9 @@ def select_multiple_folders_and_play():
                 threading.Thread(target=collect_all_videos, daemon=True).start()
 
         def _manage_playlists(self):
-            """Open playlist manager window"""
             self.playlist_manager.show_manager()
 
         def _play_playlist_videos(self, videos):
-            """Play videos from playlist"""
             if not videos:
                 messagebox.showwarning("Warning", "Playlist is empty")
                 return
@@ -3573,6 +3576,24 @@ def select_multiple_folders_and_play():
         def _show_settings(self):
             self.settings_manager.show_settings()
 
+        def _open_dual_player(self):
+          self.dual_player_manager.show()
+
+          selected_dir = self.get_current_selected_directory()
+          if selected_dir:
+              cache = self.scan_cache.get(selected_dir)
+              if cache:
+                  videos, _, _ = cache
+                  filtered = [v for v in videos
+                              if not self.is_video_excluded(selected_dir, v)]
+                  if filtered:
+                      self.root.after(
+                          400,
+                          lambda: self.dual_player_manager.preload(
+                              videos1=filtered[:200]
+                          )
+                      )
+
         def _save_volume_callback(self, volume, is_muted=None):
             self.volume = volume
             if is_muted is not None:
@@ -3583,10 +3604,6 @@ def select_multiple_folders_and_play():
             return isinstance(path, str) and (path.startswith("http://") or path.startswith("https://"))
 
         def _collect_videos_from_pseudo_dir(self, root_pseudo_dir: str, pseudo_dir: str) -> list:
-            """
-            Given a gdrive pseudo root (one of self.selected_dirs) and a pseudo_dir within that tree,
-            collect all videos whose parent is this pseudo_dir or any of its descendants.
-            """
             cache = self.scan_cache.get(root_pseudo_dir)
             if not cache:
                 return []
@@ -3602,29 +3619,18 @@ def select_multiple_folders_and_play():
             return results
 
         def _resolve_selection_indices_to_videos(self, selected_dir, indices) -> list:
-            """
-            Resolve listbox indices into a list of playable videos, supporting:
-            - local files
-            - http(s) streaming URLs
-            - local folders (recursive)
-            - gdrive pseudo folders (gdrive://folder/..)
-            Applies exclusions for the selected_dir.
-            """
             collected = []
             for index in indices:
                 item_path = self.current_subdirs_mapping.get(index)
                 if not item_path:
                     continue
 
-                # Stream URL
                 if self._is_stream_url(item_path):
                     if not self.is_video_excluded(selected_dir, item_path):
                         collected.append(item_path)
                     continue
 
-                # gdrive pseudo folder
                 if isinstance(item_path, str) and item_path.startswith("gdrive://folder/"):
-                    # Find the root pseudo directory for this item (the one present in selected_dirs)
                     root_pseudo = None
                     for d in self.selected_dirs:
                         if isinstance(d, str) and d.startswith("gdrive://folder/") and item_path.startswith(d):
@@ -3636,13 +3642,11 @@ def select_multiple_folders_and_play():
                                 collected.append(v)
                     continue
 
-                # Local file
                 if os.path.isfile(item_path) and is_video(item_path):
                     if not self.is_video_excluded(selected_dir, item_path):
                         collected.append(item_path)
                     continue
 
-                # Local directory
                 if os.path.isdir(item_path):
                     try:
                         for root, dirs, files in os.walk(item_path):
@@ -3653,7 +3657,6 @@ def select_multiple_folders_and_play():
                     except Exception as e:
                         self.update_console(f"Error reading folder {item_path}: {e}")
 
-            # Deduplicate, avoid normalizing HTTP URLs
             seen = set()
             final_videos = []
             for v in collected:
@@ -3664,14 +3667,12 @@ def select_multiple_folders_and_play():
             return final_videos
 
         def _ask_drive_link_dialog(self):
-            """Modern, themed popup to input a Google Drive link. Returns URL or None."""
             dlg = tk.Toplevel(self.root)
             dlg.title("Add Google Drive Link")
             dlg.configure(bg=self.bg_color)
             dlg.transient(self.root)
             dlg.grab_set()
 
-            # Window size and positioning
             dlg.geometry("560x260")
             try:
                 dlg.update_idletasks()
@@ -3686,7 +3687,6 @@ def select_multiple_folders_and_play():
             container = tk.Frame(dlg, bg=self.bg_color)
             container.pack(fill=tk.BOTH, expand=True, padx=18, pady=16)
 
-            # Header
             header = tk.Label(
                 container,
                 text="Add Google Drive Link",
@@ -3696,7 +3696,6 @@ def select_multiple_folders_and_play():
             )
             header.pack(anchor="w")
 
-            # Helper text
             helper = tk.Label(
                 container,
                 text="Paste a public Google Drive folder or file link. The folder structure will be preserved.",
@@ -3747,13 +3746,12 @@ def select_multiple_folders_and_play():
             )
             paste_btn.pack(side=tk.LEFT, padx=(8, 0))
 
-            # Validation label
             validate_lbl = tk.Label(
                 container,
                 text="",
                 font=self.small_font,
                 bg=self.bg_color,
-                fg="#e17055"  # subtle warning color
+                fg="#e17055"
             )
             validate_lbl.pack(anchor="w", pady=(6, 0))
 
@@ -3764,7 +3762,6 @@ def select_multiple_folders_and_play():
                 if not u:
                     return False
                 try:
-                    # Use Drive manager's parser for authoritative validation
                     return self.drive_manager is not None and (self.drive_manager._extract_id_and_type(u) is not None)
                 except Exception:
                     return "drive.google.com" in u
@@ -3807,7 +3804,6 @@ def select_multiple_folders_and_play():
             )
             cancel_btn.pack(side=tk.RIGHT)
 
-            # Prefill from clipboard if it looks like a Drive URL
             try:
                 wcb.OpenClipboard()
                 data = wcb.GetClipboardData(win32con.CF_UNICODETEXT)
@@ -3818,7 +3814,6 @@ def select_multiple_folders_and_play():
             except Exception:
                 pass
 
-            # Key bindings
             dlg.bind("<Return>", lambda _e: on_submit())
             dlg.bind("<Escape>", lambda _e: on_cancel())
 
@@ -3837,7 +3832,6 @@ def select_multiple_folders_and_play():
 
             self.update_console("Processing Google Drive link for streaming…")
 
-            # Show a small modal progress window so the user knows it's working
             progress_window = tk.Toplevel(self.root)
             progress_window.title("Google Drive")
             progress_window.geometry("420x140")
@@ -3874,7 +3868,6 @@ def select_multiple_folders_and_play():
             )
             status_lbl.pack(padx=16, pady=(0, 8), anchor="w")
 
-            # Disable the Add button while working, if present
             try:
                 if hasattr(self, 'add_drive_button') and self.add_drive_button:
                     self.add_drive_button.configure(state=tk.DISABLED)
@@ -3903,7 +3896,6 @@ def select_multiple_folders_and_play():
                 except Exception:
                     pass
 
-            # Validate URL and make source descriptor first
             try:
                 source = self.drive_manager.make_source_from_url(url)
                 if not source:
@@ -3941,7 +3933,6 @@ def select_multiple_folders_and_play():
 
                         self.root.after(0, apply_folder)
                     else:
-                        # Single file streaming
                         file_id = source["id"]
                         pseudo_dir = f"gdrive://file/{file_id}"
                         if pseudo_dir in self.selected_dirs:
