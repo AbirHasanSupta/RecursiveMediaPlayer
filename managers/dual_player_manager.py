@@ -26,10 +26,6 @@ def _fmt_time(ms: int) -> str:
     return f"{s // 60}:{s % 60:02d}"
 
 
-# ---------------------------------------------------------------------------
-# DualPlayerSlot
-# ---------------------------------------------------------------------------
-
 class DualPlayerSlot:
     SPEED_MIN = 0.25
     SPEED_MAX = 2.0
@@ -61,10 +57,6 @@ class DualPlayerSlot:
         self.watch_history_callback: Optional[Callable] = None
 
         self._build_ui()
-
-    # -----------------------------------------------------------------------
-    # UI
-    # -----------------------------------------------------------------------
 
     def _build_ui(self):
         bg     = self.theme.bg_color
@@ -187,24 +179,6 @@ class DualPlayerSlot:
                                   bg=bg, fg=accent, width=5)
         self.spd_label.pack(side=tk.LEFT)
 
-        misc = tk.Frame(self.parent_frame, bg=bg)
-        misc.pack(fill=tk.X, padx=8, pady=(0, 4))
-
-        tk.Button(misc, text="Screenshot",
-                  font=Font(family="Segoe UI", size=8),
-                  bg=self.theme.get_button_colors("secondary")["bg"],
-                  fg="white", bd=0, padx=6, pady=3,
-                  cursor="hand2", relief=tk.FLAT,
-                  command=self._screenshot).pack(side=tk.LEFT, padx=(0, 4))
-
-        self.playlist_label = tk.Label(misc, text="0 videos",
-                                       font=Font(family="Segoe UI", size=8),
-                                       bg=bg, fg="#888888")
-        self.playlist_label.pack(side=tk.RIGHT)
-
-    # -----------------------------------------------------------------------
-    # Volume  (FIX: completely isolated per-slot via tk.Scale command=)
-    # -----------------------------------------------------------------------
 
     def _on_vol_scale(self, val_str: str):
         """Called by THIS slot's tk.Scale only - never touches the other slot."""
@@ -246,9 +220,6 @@ class DualPlayerSlot:
             self._vol_updating = False
         self.vol_label.config(text=f"{self.volume}%")
 
-    # -----------------------------------------------------------------------
-    # Speed
-    # -----------------------------------------------------------------------
 
     def _on_spd_scale(self, val_str: str):
         try:
@@ -264,10 +235,6 @@ class DualPlayerSlot:
                 self.player.set_rate(speed)
             except Exception:
                 pass
-
-    # -----------------------------------------------------------------------
-    # VLC lifecycle
-    # -----------------------------------------------------------------------
 
     def _make_vlc_instance(self) -> vlc.Instance:
         """
@@ -305,10 +272,6 @@ class DualPlayerSlot:
                 pass
             self.instance = None
 
-    # -----------------------------------------------------------------------
-    # Public API
-    # -----------------------------------------------------------------------
-
     def load_videos(self, videos: List[str], start_index: int = 0):
         if not videos:
             return
@@ -322,8 +285,7 @@ class DualPlayerSlot:
             self._no_video_label.place_forget()
         except Exception:
             pass
-        self.playlist_label.config(
-            text=f"{len(videos)} video{'s' if len(videos) != 1 else ''}")
+
         self._start_polling()
 
     def load_single_video(self, path: str):
@@ -343,10 +305,6 @@ class DualPlayerSlot:
             self.status_label.config(text="Stopped")
         except Exception:
             pass
-
-    # -----------------------------------------------------------------------
-    # Playback helpers
-    # -----------------------------------------------------------------------
 
     def _play_current(self):
         if not self.player or not self.videos:
@@ -401,10 +359,6 @@ class DualPlayerSlot:
             except Exception:
                 pass
 
-    # -----------------------------------------------------------------------
-    # Polling
-    # -----------------------------------------------------------------------
-
     def _start_polling(self):
         self._cancel_poll()
         self._poll()
@@ -457,10 +411,6 @@ class DualPlayerSlot:
             self._play_current()
         self._poll_job = self.parent_frame.after(500, self._poll)
 
-    # -----------------------------------------------------------------------
-    # Seek bar
-    # -----------------------------------------------------------------------
-
     def _draw_seek_bar(self):
         try:
             c = self.seek_canvas
@@ -494,10 +444,6 @@ class DualPlayerSlot:
 
     def _on_seek_click(self, e): self._seek_from_x(e.x)
     def _on_seek_drag(self,  e): self._seek_from_x(e.x)
-
-    # -----------------------------------------------------------------------
-    # Controls
-    # -----------------------------------------------------------------------
 
     def _toggle_pause(self):
         if not self.player:
@@ -541,22 +487,6 @@ class DualPlayerSlot:
             self.player.audio_set_volume(self.volume)
         self.mute_btn.config(text="Unmute" if self.is_muted else "Mute")
 
-
-    def _screenshot(self):
-        if not self.player or not self.videos:
-            return
-        try:
-            path    = self.videos[self.index]
-            out_dir = Path.home() / "Documents" / "Recursive Media Player" / "Screenshots"
-            out_dir.mkdir(parents=True, exist_ok=True)
-            name = os.path.splitext(os.path.basename(path))[0]
-            ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
-            out  = out_dir / f"P{self.slot_id}_{name}_{ts}.png"
-            self.player.video_take_snapshot(0, str(out), 0, 0)
-            self._log(f"Player {self.slot_id} screenshot: {out}")
-        except Exception as e:
-            self._log(f"Screenshot error: {e}")
-
     def _cycle_loop_mode(self):
         modes = ["loop_on", "loop_off", "shuffle"]
         labels = {"loop_on": "Loop ON", "loop_off": "Loop OFF", "shuffle": "Shuffle"}
@@ -570,10 +500,6 @@ class DualPlayerSlot:
             except Exception:
                 pass
 
-
-# ---------------------------------------------------------------------------
-# DualPlayerWindow
-# ---------------------------------------------------------------------------
 
 class DualPlayerWindow:
 
@@ -756,10 +682,6 @@ class DualPlayerWindow:
     def is_open(self) -> bool:
         return bool(self.window and self.window.winfo_exists())
 
-
-# ---------------------------------------------------------------------------
-# Public facade
-# ---------------------------------------------------------------------------
 
 class DualPlayerManager:
     """
