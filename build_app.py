@@ -943,6 +943,14 @@ def select_multiple_folders_and_play():
             shift_held = bool(event.state & 0x1)
             current_selection = list(self.dir_listbox.curselection())
 
+            if not ctrl_held and not shift_held:
+                if current_selection == [index]:
+                    self.dir_listbox.selection_clear(0, tk.END)
+                    self.current_selected_dir_index = None
+                    self.clear_exclusion_list()
+                    self._is_filtered_mode = False
+                    return "break"
+
             if shift_held:
                 if not hasattr(self, '_main_dir_anchor') or self._main_dir_anchor is None:
                     self._main_dir_anchor = current_selection[0] if current_selection else 0
@@ -964,6 +972,13 @@ def select_multiple_folders_and_play():
                 self.on_directory_select(None)
                 return "break"
             else:
+                if current_selection == [index]:
+                    self.dir_listbox.selection_clear(0, tk.END)
+                    self.current_selected_dir_index = None
+                    self._is_filtered_mode = False
+                    self.clear_exclusion_list()
+                    return "break"
+
                 self.dir_listbox.selection_clear(0, tk.END)
                 self.dir_listbox.selection_set(index)
                 self.dir_listbox.activate(index)
