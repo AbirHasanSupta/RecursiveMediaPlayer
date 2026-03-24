@@ -418,7 +418,7 @@ class GridViewManager:
         label = os.path.basename(dir_path) or dir_path
         self._create_drag_ghost(f"📁 {label}", event.x_root, event.y_root)
         try:
-            self.drag_mode_label.config(text="📦 Dragging directory…")
+            self.drag_mode_label.config(text="Dragging directory…")
         except Exception:
             pass
 
@@ -482,7 +482,7 @@ class GridViewManager:
             label = label[:27] + "…"
         self._create_drag_ghost(f"▶ {label}", event.x_root, event.y_root)
         try:
-            self.drag_mode_label.config(text="🎬 Dragging video…")
+            self.drag_mode_label.config(text="Dragging video…")
         except Exception:
             pass
 
@@ -712,7 +712,7 @@ class GridViewManager:
                 bd=0,
                 highlightthickness=3 if is_selected else 1,
                 highlightbackground=self.theme_provider.accent_color if is_selected else self.theme_provider.frame_border,
-                cursor="fleur"
+                cursor="hand2"
             )
             card.grid(row=grid_row, column=video_col, padx=8, pady=8, sticky='nsew')
 
