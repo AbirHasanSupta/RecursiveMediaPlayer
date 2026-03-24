@@ -30,6 +30,12 @@ class GridViewManager:
         self.is_loading = False
         self.loading_lock = threading.Lock()
         self.pending_tasks = set()
+
+        self._drag_source = None
+        self._drag_ghost = None
+        self._drag_over_widget = None
+        self._drag_type = None
+
         get_resource_manager().register_cleanup_callback(self._cleanup)
 
     def _cleanup(self):
@@ -91,6 +97,16 @@ class GridViewManager:
             fg="#666666"
         )
         self.selection_label.pack(side=tk.LEFT, padx=(15, 0))
+
+        # Drag mode indicator
+        self.drag_mode_label = tk.Label(
+            header_frame,
+            text="",
+            font=self.theme_provider.small_font,
+            bg=self.theme_provider.bg_color,
+            fg=self.theme_provider.accent_color
+        )
+        self.drag_mode_label.pack(side=tk.LEFT, padx=(15, 0))
 
         toolbar = tk.Frame(self.grid_window, bg=self.theme_provider.bg_color)
         toolbar.pack(fill=tk.X, padx=20, pady=(0, 15))
@@ -240,7 +256,6 @@ class GridViewManager:
 
         canvas.bind_all("<MouseWheel>", on_mousewheel)
 
-
         self.grid_window.bind("<Control-a>", lambda e: self._select_all())
         self.grid_window.bind("<Escape>", lambda e: self._clear_selection())
         self.grid_window.bind("<Delete>", lambda e: self._clear_selection())
@@ -254,6 +269,7 @@ class GridViewManager:
                     task.cancel()
                 except:
                     pass
+            self._cancel_drag()
             try:
                 canvas.unbind_all("<MouseWheel>")
             except:
@@ -305,6 +321,247 @@ class GridViewManager:
         except Exception as e:
             with self.loading_lock:
                 self.is_loading = False
+
+    def _create_drag_ghost(self, label_text, x_root, y_root):
+        self._cancel_drag_ghost()
+        ghost = tk.Toplevel(self.root)
+        ghost.overrideredirect(True)
+        ghost.attributes('-topmost', True)
+        try:
+            ghost.attributes('-alpha', 0.75)
+        except Exception:
+            pass
+        lbl = tk.Label(
+            ghost,
+            text=label_text,
+            font=self.theme_provider.small_font,
+            bg=self.theme_provider.accent_color,
+            fg="white",
+            padx=8, pady=4,
+            relief=tk.FLAT
+        )
+        lbl.pack()
+        ghost.geometry(f"+{x_root + 14}+{y_root + 14}")
+        self._drag_ghost = ghost
+
+    def _move_drag_ghost(self, x_root, y_root):
+        if self._drag_ghost:
+            try:
+                self._drag_ghost.geometry(f"+{x_root + 14}+{y_root + 14}")
+            except Exception:
+                pass
+
+    def _cancel_drag_ghost(self):
+        if self._drag_ghost:
+            try:
+                self._drag_ghost.destroy()
+            except Exception:
+                pass
+            self._drag_ghost = None
+
+    def _highlight_drop_target(self, widget, active=True):
+        if widget is None:
+            return
+        try:
+            if active:
+                widget.configure(highlightbackground=self.theme_provider.accent_color,
+                                 highlightthickness=2)
+            else:
+                widget.configure(highlightbackground=self.theme_provider.frame_border,
+                                 highlightthickness=1)
+        except Exception:
+            pass
+
+    def _cancel_drag(self):
+        self._cancel_drag_ghost()
+        if self._drag_over_widget:
+            self._highlight_drop_target(self._drag_over_widget, active=False)
+            self._drag_over_widget = None
+        self._drag_source = None
+        self._drag_type = None
+        try:
+            if self.drag_mode_label.winfo_exists():
+                self.drag_mode_label.config(text="")
+        except Exception:
+            pass
+
+    def _get_dir_order(self):
+        seen = []
+        for item in self.items:
+            if item['type'] == 'header' and item['path'] not in seen:
+                seen.append(item['path'])
+        return seen
+
+    def _reorder_items_by_dir(self, new_dir_order):
+        by_dir = {}
+        for item in self.items:
+            if item['type'] == 'header':
+                by_dir.setdefault(item['path'], {'header': item, 'videos': []})
+                by_dir[item['path']]['header'] = item
+            else:
+                d = os.path.dirname(item['path'])
+                by_dir.setdefault(d, {'header': None, 'videos': []})
+                by_dir[d]['videos'].append(item)
+
+        new_items = []
+        for d in new_dir_order:
+            if d in by_dir:
+                new_items.append(by_dir[d]['header'])
+                new_items.extend(by_dir[d]['videos'])
+        self.items = new_items
+        if not self.search_var.get():
+            self.all_items = self.items.copy()
+
+    def _on_dir_header_press(self, event, dir_path, header_frame):
+        self._drag_source = {'type': 'dir', 'dir_path': dir_path, 'widget': header_frame}
+        self._drag_type = 'dir'
+        label = os.path.basename(dir_path) or dir_path
+        self._create_drag_ghost(f"📁 {label}", event.x_root, event.y_root)
+        try:
+            self.drag_mode_label.config(text="📦 Dragging directory…")
+        except Exception:
+            pass
+
+    def _on_dir_header_motion(self, event, dir_path):
+        self._move_drag_ghost(event.x_root, event.y_root)
+
+    def _on_dir_header_release(self, event, src_dir_path):
+        self._cancel_drag_ghost()
+        if self._drag_over_widget:
+            self._highlight_drop_target(self._drag_over_widget, active=False)
+            self._drag_over_widget = None
+
+        target_dir = self._find_dir_at_root_coords(event.x_root, event.y_root)
+        if target_dir and target_dir != src_dir_path:
+            self._move_dir_before(src_dir_path, target_dir)
+            self.root.after(0, self._rebuild_grid)
+
+        self._drag_source = None
+        self._drag_type = None
+        try:
+            self.drag_mode_label.config(text="")
+        except Exception:
+            pass
+
+    def _find_dir_at_root_coords(self, x_root, y_root):
+        for item in self.items:
+            if item['type'] != 'header':
+                continue
+            widget = item.get('_header_widget')
+            if widget is None:
+                continue
+            try:
+                wx = widget.winfo_rootx()
+                wy = widget.winfo_rooty()
+                ww = widget.winfo_width()
+                wh = widget.winfo_height()
+                if wx <= x_root <= wx + ww and wy <= y_root <= wy + wh:
+                    return item['path']
+            except Exception:
+                continue
+        return None
+
+    def _move_dir_before(self, src_dir, target_dir):
+        order = self._get_dir_order()
+        if src_dir not in order or target_dir not in order:
+            return
+        order.remove(src_dir)
+        idx = order.index(target_dir)
+        order.insert(idx, src_dir)
+        self._reorder_items_by_dir(order)
+
+    def _on_card_press(self, event, video_path, card_widget):
+        ctrl_held = bool(event.state & 0x4)
+        shift_held = bool(event.state & 0x1)
+        if ctrl_held or shift_held:
+            return
+        self._drag_source = {'type': 'video', 'video_path': video_path, 'widget': card_widget}
+        self._drag_type = 'video'
+        label = os.path.basename(video_path)
+        if len(label) > 30:
+            label = label[:27] + "…"
+        self._create_drag_ghost(f"▶ {label}", event.x_root, event.y_root)
+        try:
+            self.drag_mode_label.config(text="🎬 Dragging video…")
+        except Exception:
+            pass
+
+    def _on_card_motion(self, event, video_path):
+        if self._drag_type != 'video':
+            return
+        self._move_drag_ghost(event.x_root, event.y_root)
+
+        target_path = self._find_card_at_root_coords(event.x_root, event.y_root)
+        if target_path and target_path != video_path:
+            card = self.card_widgets.get(target_path)
+            if card != self._drag_over_widget:
+                if self._drag_over_widget:
+                    self._highlight_drop_target(self._drag_over_widget, active=False)
+                self._drag_over_widget = card
+                self._highlight_drop_target(card, active=True)
+        else:
+            if self._drag_over_widget:
+                self._highlight_drop_target(self._drag_over_widget, active=False)
+                self._drag_over_widget = None
+
+    def _on_card_release(self, event, src_video_path):
+        self._cancel_drag_ghost()
+        if self._drag_over_widget:
+            self._highlight_drop_target(self._drag_over_widget, active=False)
+            self._drag_over_widget = None
+
+        if self._drag_type != 'video':
+            self._cancel_drag()
+            return
+
+        target_path = self._find_card_at_root_coords(event.x_root, event.y_root)
+        if target_path and target_path != src_video_path:
+            src_dir = os.path.dirname(src_video_path)
+            tgt_dir = os.path.dirname(target_path)
+            if src_dir == tgt_dir:
+                self._move_video_before(src_video_path, target_path)
+                self.root.after(0, self._rebuild_grid)
+            else:
+                pass
+
+        self._drag_source = None
+        self._drag_type = None
+        try:
+            self.drag_mode_label.config(text="")
+        except Exception:
+            pass
+
+    def _find_card_at_root_coords(self, x_root, y_root):
+        for video_path, card in self.card_widgets.items():
+            try:
+                wx = card.winfo_rootx()
+                wy = card.winfo_rooty()
+                ww = card.winfo_width()
+                wh = card.winfo_height()
+                if wx <= x_root <= wx + ww and wy <= y_root <= wy + wh:
+                    return video_path
+            except Exception:
+                continue
+        return None
+
+    def _move_video_before(self, src_video, target_video):
+        src_idx = next((i for i, it in enumerate(self.items)
+                        if it['type'] == 'video' and it['path'] == src_video), None)
+        tgt_idx = next((i for i, it in enumerate(self.items)
+                        if it['type'] == 'video' and it['path'] == target_video), None)
+        if src_idx is None or tgt_idx is None:
+            return
+        item = self.items.pop(src_idx)
+        # Recalculate tgt_idx after removal
+        tgt_idx = next((i for i, it in enumerate(self.items)
+                        if it['type'] == 'video' and it['path'] == target_video), None)
+        if tgt_idx is None:
+            self.items.append(item)
+        else:
+            self.items.insert(tgt_idx, item)
+        if not self.search_var.get():
+            self.all_items = self.items.copy()
+
 
     def _filter_directories(self):
         search_term = self.search_var.get().lower()
@@ -369,12 +626,27 @@ class GridViewManager:
 
                 header = tk.Frame(
                     self.grid_frame,
-                    bg=self.theme_provider.bg_color
+                    bg=self.theme_provider.bg_color,
+                    cursor="arrow"
                 )
                 header.grid(row=grid_row, column=0, columnspan=cols, sticky='ew', padx=10, pady=(20, 10))
 
+                item_data['_header_widget'] = header
+
                 label_frame = tk.Frame(header, bg=self.theme_provider.bg_color)
                 label_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+                dir_path = item_data['path']
+
+                drag_hint = tk.Label(
+                    label_frame,
+                    text="⠿",
+                    font=self.theme_provider.small_font,
+                    bg=self.theme_provider.bg_color,
+                    fg="#aaaaaa",
+                    cursor="fleur"
+                )
+                drag_hint.pack(side=tk.LEFT, padx=(0, 4))
 
                 dir_label = tk.Label(
                     label_frame,
@@ -396,8 +668,28 @@ class GridViewManager:
                     anchor='w'
                 )
                 count_label.pack(side=tk.LEFT)
-                dir_label.bind("<Button-1>", lambda e, dir_path=item_data['path']: self._toggle_select_directory(dir_path))
 
+                reorder_hint = tk.Label(
+                    label_frame,
+                    text=" ",
+                    font=self.theme_provider.small_font,
+                    bg=self.theme_provider.bg_color,
+                    fg="#aaaaaa",
+                    anchor='w'
+                )
+                reorder_hint.pack(side=tk.LEFT)
+
+                # Only the drag icon should start drag-to-reorder operations.
+                drag_hint.bind("<Button-1>",
+                               lambda e, dp=dir_path, hw=header: self._on_dir_header_press(e, dp, hw))
+                drag_hint.bind("<B1-Motion>",
+                               lambda e, dp=dir_path: self._on_dir_header_motion(e, dp))
+                drag_hint.bind("<ButtonRelease-1>",
+                               lambda e, dp=dir_path: self._on_dir_header_release(e, dp))
+
+                # Clicking the header (or its labels) should toggle selection for the directory.
+                for w in [header, dir_label, count_label, reorder_hint, label_frame]:
+                    w.bind("<Button-1>", lambda e, dp=dir_path: self._toggle_select_directory(dp))
 
                 separator = tk.Frame(
                     header,
@@ -419,7 +711,8 @@ class GridViewManager:
                 relief=tk.FLAT,
                 bd=0,
                 highlightthickness=3 if is_selected else 1,
-                highlightbackground=self.theme_provider.accent_color if is_selected else self.theme_provider.frame_border
+                highlightbackground=self.theme_provider.accent_color if is_selected else self.theme_provider.frame_border,
+                cursor="fleur"
             )
             card.grid(row=grid_row, column=video_col, padx=8, pady=8, sticky='nsew')
 
@@ -472,10 +765,34 @@ class GridViewManager:
             )
             name_label.pack(fill=tk.X)
 
+            drag_label = tk.Label(
+                info_frame,
+                text=" ",
+                bg=self.theme_provider.accent_color if is_selected else self.theme_provider.listbox_bg,
+                fg="#aaaaaa",
+                font=(self.theme_provider.small_font.actual()['family'], 7),
+                anchor='w'
+            )
+            drag_label.pack(fill=tk.X)
+
             for widget in [card, thumb_container, thumb_label, name_label, info_frame]:
-                widget.bind("<Button-1>", lambda e, vp=video_path: self._on_card_click(e, vp))
-                widget.bind("<Button-3>", lambda e, vp=video_path: self._on_card_right_click(e, vp))
-                widget.bind("<Double-Button-1>", lambda e, vp=video_path: self._play_single(vp))
+                widget.bind("<Button-1>",
+                            lambda e, vp=video_path, cw=card: self._on_card_click_or_press(e, vp, cw))
+                widget.bind("<B1-Motion>",
+                            lambda e, vp=video_path: self._on_card_motion(e, vp))
+                widget.bind("<ButtonRelease-1>",
+                            lambda e, vp=video_path: self._on_card_release(e, vp))
+                widget.bind("<Button-3>",
+                            lambda e, vp=video_path: self._on_card_right_click(e, vp))
+                widget.bind("<Double-Button-1>",
+                            lambda e, vp=video_path: self._play_single(vp))
+
+            drag_label.bind("<Button-1>",
+                            lambda e, vp=video_path, cw=card: self._on_card_press(e, vp, cw))
+            drag_label.bind("<B1-Motion>",
+                            lambda e, vp=video_path: self._on_card_motion(e, vp))
+            drag_label.bind("<ButtonRelease-1>",
+                            lambda e, vp=video_path: self._on_card_release(e, vp))
 
             card.bind("<Enter>", lambda e, vp=video_path: self._on_card_enter(e, vp))
             card.bind("<Leave>", lambda e, vp=video_path: self._on_card_leave(e, vp))
@@ -489,6 +806,10 @@ class GridViewManager:
             self.grid_frame.columnconfigure(i, weight=1, uniform="col")
 
         self._update_selection_label()
+
+    def _on_card_click_or_press(self, event, video_path, card_widget):
+        self._on_card_press(event, video_path, card_widget)
+        self._on_card_click(event, video_path)
 
     def _toggle_select_directory(self, dir_path):
         video_paths_in_dir = [item_data['path'] for item_data in self.items
@@ -519,7 +840,6 @@ class GridViewManager:
                 self.selection_label.config(text="1 video selected", fg=self.theme_provider.accent_color)
             else:
                 self.selection_label.config(text=f"{count} videos selected", fg=self.theme_provider.accent_color)
-
 
     def _on_card_right_click(self, event, video_path):
         if video_path not in self.selected_items and self.video_preview_manager:
@@ -836,7 +1156,8 @@ class GridViewManager:
     def _play_selected(self):
         if not self.selected_items:
             return
-        videos = sorted(list(self.selected_items))
+        videos = [it['path'] for it in self.items
+                  if it['type'] == 'video' and it['path'] in self.selected_items]
         if self.play_callback:
             self.play_callback(videos)
 
