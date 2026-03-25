@@ -27,6 +27,7 @@ class GridViewManager:
         self.selected_items = set()
         self.card_widgets = {}
         self.play_callback = None
+        self.excluded_items = set()
         self.is_loading = False
         self.loading_lock = threading.Lock()
         self.pending_tasks = set()
@@ -54,6 +55,7 @@ class GridViewManager:
                     pass
             self.items = []
             self.selected_items.clear()
+            self.excluded_items.clear()
             self.card_widgets.clear()
         except:
             pass
@@ -76,6 +78,7 @@ class GridViewManager:
 
         self.items = []
         self.selected_items = set()
+        self.excluded_items = set()
 
         header_frame = tk.Frame(self.grid_window, bg=self.theme_provider.bg_color, pady=15)
         header_frame.pack(fill=tk.X, padx=20, pady=(10, 0))
@@ -704,14 +707,28 @@ class GridViewManager:
             item = item_data['video_item']
             video_path = item_data['path']
             is_selected = video_path in self.selected_items
+            is_excluded = video_path in self.excluded_items
+
+            if is_selected:
+                card_bg = self.theme_provider.accent_color
+                card_hl = self.theme_provider.accent_color
+                card_hl_thickness = 3
+            elif is_excluded:
+                card_bg = self.theme_provider.listbox_bg
+                card_hl = "#cc4444"
+                card_hl_thickness = 2
+            else:
+                card_bg = self.theme_provider.listbox_bg
+                card_hl = self.theme_provider.frame_border
+                card_hl_thickness = 1
 
             card = tk.Frame(
                 self.grid_frame,
-                bg=self.theme_provider.accent_color if is_selected else self.theme_provider.listbox_bg,
+                bg=card_bg,
                 relief=tk.FLAT,
                 bd=0,
-                highlightthickness=3 if is_selected else 1,
-                highlightbackground=self.theme_provider.accent_color if is_selected else self.theme_provider.frame_border,
+                highlightthickness=card_hl_thickness,
+                highlightbackground=card_hl,
                 cursor="hand2"
             )
             card.grid(row=grid_row, column=video_col, padx=8, pady=8, sticky='nsew')
@@ -739,6 +756,17 @@ class GridViewManager:
             )
             thumb_label.pack(expand=True)
 
+            if is_excluded:
+                excluded_badge = tk.Label(
+                    thumb_container,
+                    text="🚫 Excluded",
+                    bg="#aa0000",
+                    fg="white",
+                    font=(self.theme_provider.small_font.actual()['family'], 8, 'bold'),
+                    padx=4, pady=2
+                )
+                excluded_badge.place(relx=0.0, rely=0.0, anchor='nw')
+
             self.thumbnail_executor.submit(self._load_thumbnail, item, thumb_label)
 
             info_frame = tk.Frame(
@@ -758,7 +786,7 @@ class GridViewManager:
                 info_frame,
                 text=name,
                 bg=self.theme_provider.accent_color if is_selected else self.theme_provider.listbox_bg,
-                fg="white" if is_selected else self.theme_provider.text_color,
+                fg="white" if is_selected else ("#888888" if is_excluded else self.theme_provider.text_color),
                 font=(self.theme_provider.normal_font.actual()['family'], 9, 'bold' if is_selected else 'normal'),
                 anchor='w',
                 justify=tk.LEFT
@@ -933,6 +961,33 @@ class GridViewManager:
 
         context_menu.add_separator()
 
+        selected_excluded = [vp for vp in self.selected_items if vp in self.excluded_items]
+        selected_not_excluded = [vp for vp in self.selected_items if vp not in self.excluded_items]
+
+        if selected_not_excluded:
+            label = (
+                f"Exclude Selected ({len(selected_not_excluded)} items)"
+                if len(selected_not_excluded) > 1
+                else "Exclude This Video"
+            )
+            context_menu.add_command(
+                label=label,
+                command=self._exclude_selected
+            )
+
+        if selected_excluded:
+            label = (
+                f"Remove Exclusion ({len(selected_excluded)} items)"
+                if len(selected_excluded) > 1
+                else "Remove Exclusion"
+            )
+            context_menu.add_command(
+                label=label,
+                command=self._remove_exclusion_selected
+            )
+
+        context_menu.add_separator()
+
         context_menu.add_command(
             label="Select All",
             command=self._select_all
@@ -947,6 +1002,16 @@ class GridViewManager:
             context_menu.tk_popup(event.x_root, event.y_root)
         finally:
             context_menu.grab_release()
+
+    def _exclude_selected(self):
+        for vp in list(self.selected_items):
+            self.excluded_items.add(vp)
+            self._update_card_selection(vp)
+
+    def _remove_exclusion_selected(self):
+        for vp in list(self.selected_items):
+            self.excluded_items.discard(vp)
+            self._update_card_selection(vp)
 
     def _load_thumbnail(self, item, label):
         try:
@@ -1084,6 +1149,7 @@ class GridViewManager:
 
         card = self.card_widgets[video_path]
         is_selected = video_path in self.selected_items
+        is_excluded = video_path in self.excluded_items
 
         info_frame = None
         name_label = None
@@ -1118,6 +1184,26 @@ class GridViewManager:
                     highlightbackground=self.theme_provider.accent_color,
                     highlightthickness=2
                 )
+        elif is_excluded:
+            card.configure(
+                bg=self.theme_provider.listbox_bg,
+                highlightbackground="#cc4444",
+                highlightthickness=2
+            )
+            if info_frame:
+                info_frame.configure(bg=self.theme_provider.listbox_bg)
+            if name_label:
+                name_label.configure(
+                    bg=self.theme_provider.listbox_bg,
+                    fg="#888888",
+                    font=(self.theme_provider.normal_font.actual()['family'], 9, 'normal')
+                )
+            if thumb_container:
+                thumb_container.configure(
+                    highlightbackground="#cc4444",
+                    highlightthickness=0
+                )
+            self._refresh_excluded_badge(thumb_container, is_excluded=True)
         else:
             card.configure(
                 bg=self.theme_provider.listbox_bg,
@@ -1137,6 +1223,25 @@ class GridViewManager:
                     highlightbackground=self.theme_provider.frame_border,
                     highlightthickness=0
                 )
+            self._refresh_excluded_badge(thumb_container, is_excluded=False)
+
+    def _refresh_excluded_badge(self, thumb_container, is_excluded):
+        if thumb_container is None:
+            return
+        for child in thumb_container.winfo_children():
+            if isinstance(child, tk.Label) and getattr(child, '_is_excluded_badge', False):
+                child.destroy()
+        if is_excluded:
+            badge = tk.Label(
+                thumb_container,
+                text="🚫 Excluded",
+                bg="#aa0000",
+                fg="white",
+                font=(self.theme_provider.small_font.actual()['family'], 8, 'bold'),
+                padx=4, pady=2
+            )
+            badge._is_excluded_badge = True
+            badge.place(relx=0.0, rely=0.0, anchor='nw')
 
     def _select_all(self):
         for item_data in self.items:
@@ -1157,7 +1262,11 @@ class GridViewManager:
         if not self.selected_items:
             return
         videos = [it['path'] for it in self.items
-                  if it['type'] == 'video' and it['path'] in self.selected_items]
+                  if it['type'] == 'video'
+                  and it['path'] in self.selected_items
+                  and it['path'] not in self.excluded_items]
+        if not videos:
+            return
         if self.play_callback:
             self.play_callback(videos)
 
