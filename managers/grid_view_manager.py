@@ -37,6 +37,9 @@ class GridViewManager:
         self._drag_over_widget = None
         self._drag_type = None
 
+        # Cache for PhotoImage objects keyed by video_path (norm) so they survive grid rebuilds
+        self._photo_cache = {}
+
         get_resource_manager().register_cleanup_callback(self._cleanup)
 
     def _cleanup(self):
@@ -57,6 +60,7 @@ class GridViewManager:
             self.selected_items.clear()
             self.excluded_items.clear()
             self.card_widgets.clear()
+            self._photo_cache.clear()
         except:
             pass
 
@@ -79,6 +83,8 @@ class GridViewManager:
         self.items = []
         self.selected_items = set()
         self.excluded_items = set()
+        # Clear photo cache when opening a fresh grid window
+        self._photo_cache.clear()
 
         header_frame = tk.Frame(self.grid_window, bg=self.theme_provider.bg_color, pady=15)
         header_frame.pack(fill=tk.X, padx=20, pady=(10, 0))
@@ -282,6 +288,7 @@ class GridViewManager:
                     self.thumbnail_executor.shutdown(wait=False, cancel_futures=True)
                 except:
                     pass
+            self._photo_cache.clear()
             try:
                 self.grid_window.destroy()
             except:
@@ -709,18 +716,29 @@ class GridViewManager:
             is_selected = video_path in self.selected_items
             is_excluded = video_path in self.excluded_items
 
+            # Always derive card colours from selection/exclusion state — never use
+            # stale state from a previous grid build.
             if is_selected:
                 card_bg = self.theme_provider.accent_color
                 card_hl = self.theme_provider.accent_color
                 card_hl_thickness = 3
+                info_bg = self.theme_provider.accent_color
+                name_fg = "white"
+                name_weight = "bold"
             elif is_excluded:
                 card_bg = self.theme_provider.listbox_bg
                 card_hl = "#cc4444"
                 card_hl_thickness = 2
+                info_bg = self.theme_provider.listbox_bg
+                name_fg = "#888888"
+                name_weight = "normal"
             else:
                 card_bg = self.theme_provider.listbox_bg
                 card_hl = self.theme_provider.frame_border
                 card_hl_thickness = 1
+                info_bg = self.theme_provider.listbox_bg
+                name_fg = self.theme_provider.text_color
+                name_weight = "normal"
 
             card = tk.Frame(
                 self.grid_frame,
@@ -767,11 +785,19 @@ class GridViewManager:
                 )
                 excluded_badge.place(relx=0.0, rely=0.0, anchor='nw')
 
-            self.thumbnail_executor.submit(self._load_thumbnail, item, thumb_label)
+            # --- Thumbnail loading: reuse cached PhotoImage if available,
+            #     otherwise submit a background load task.
+            video_path_norm = os.path.normpath(video_path)
+            cached_photo = self._photo_cache.get(video_path_norm)
+            if cached_photo is not None:
+                # Restore thumbnail immediately — no background task needed
+                self._set_thumbnail(thumb_label, cached_photo)
+            else:
+                self.thumbnail_executor.submit(self._load_thumbnail, item, thumb_label, video_path_norm)
 
             info_frame = tk.Frame(
                 card,
-                bg=self.theme_provider.accent_color if is_selected else self.theme_provider.listbox_bg,
+                bg=info_bg,
                 pady=8,
                 padx=10
             )
@@ -785,9 +811,9 @@ class GridViewManager:
             name_label = tk.Label(
                 info_frame,
                 text=name,
-                bg=self.theme_provider.accent_color if is_selected else self.theme_provider.listbox_bg,
-                fg="white" if is_selected else ("#888888" if is_excluded else self.theme_provider.text_color),
-                font=(self.theme_provider.normal_font.actual()['family'], 9, 'bold' if is_selected else 'normal'),
+                bg=info_bg,
+                fg=name_fg,
+                font=(self.theme_provider.normal_font.actual()['family'], 9, name_weight),
                 anchor='w',
                 justify=tk.LEFT
             )
@@ -796,7 +822,7 @@ class GridViewManager:
             drag_label = tk.Label(
                 info_frame,
                 text=" ",
-                bg=self.theme_provider.accent_color if is_selected else self.theme_provider.listbox_bg,
+                bg=info_bg,
                 fg="#aaaaaa",
                 font=(self.theme_provider.small_font.actual()['family'], 7),
                 anchor='w'
@@ -1013,98 +1039,154 @@ class GridViewManager:
             self.excluded_items.discard(vp)
             self._update_card_selection(vp)
 
-    def _load_thumbnail(self, item, label):
+    def _load_thumbnail(self, item, label, video_path_norm=None):
+        """Load thumbnail in background using raw binary blobs — no base64 on disk."""
         try:
             with self.loading_lock:
                 if not self.is_loading:
                     return
-            if self.video_preview_manager:
+            if video_path_norm is None:
                 video_path_norm = os.path.normpath(item.video_path)
 
-                if video_path_norm in self.video_preview_manager._thumbnails:
-                    thumbnail = self.video_preview_manager._thumbnails[video_path_norm]
-                    if thumbnail.is_valid() and thumbnail.thumbnail_data:
-                        self._display_thumbnail_from_data(label, thumbnail.thumbnail_data, item)
+            vpm = self.video_preview_manager
+            if vpm:
+                th = vpm._thumbnails.get(video_path_norm)
+                if th and th.is_valid():
+                    # Fast path: read directly from blob file — zero base64 cost
+                    if hasattr(th, 'blob_path') and th.blob_path and th.blob_path.exists():
+                        photo = self._photo_from_blob(th.blob_path, getattr(th, 'is_video', False), item)
+                        if photo:
+                            self._photo_cache[video_path_norm] = photo
+                            self.root.after(0, lambda lbl=label, p=photo: self._set_thumbnail(lbl, p))
+                            return
+                    # Fallback to sentinel string (old-style cache entries)
+                    td = th.thumbnail_data
+                    if td:
+                        self._display_thumbnail_from_data(label, td, item, video_path_norm)
                         return
 
-                thumbnail_data = self.video_preview_manager.generator.generate_thumbnail(item.video_path)
-
-                if thumbnail_data:
-                    from managers.video_preview_manager import VideoThumbnail
-                    thumbnail = VideoThumbnail(item.video_path, thumbnail_data)
-                    self.video_preview_manager._thumbnails[video_path_norm] = thumbnail
-                    self.video_preview_manager._save_thumbnails()
-
-                    self._display_thumbnail_from_data(label, thumbnail_data, item)
+                # Generate fresh thumbnail
+                result = vpm.generator.generate_thumbnail(item.video_path)
+                if result:
+                    raw_bytes, is_vid = result
+                    try:
+                        from managers.video_preview_manager import VideoThumbnail, _file_hash_key
+                        ext = ".mp4" if is_vid else ".jpg"
+                        hk = _file_hash_key(item.video_path)
+                        blob_path = vpm.storage.write_blob(hk, raw_bytes, ext)
+                        th_new = VideoThumbnail(item.video_path, blob_path, is_vid, hk)
+                        vpm._thumbnails[video_path_norm] = th_new
+                        vpm._save_thumbnails()
+                        photo = self._photo_from_blob(blob_path, is_vid, item)
+                        if photo:
+                            self._photo_cache[video_path_norm] = photo
+                            self.root.after(0, lambda lbl=label, p=photo: self._set_thumbnail(lbl, p))
+                            return
+                    except Exception:
+                        pass
+                    # Last resort: build sentinel string in-memory (never written to disk)
+                    import base64
+                    prefix = "VIDEO:" if is_vid else "IMAGE:"
+                    td = prefix + base64.b64encode(raw_bytes).decode("ascii")
+                    self._display_thumbnail_from_data(label, td, item, video_path_norm)
                     return
 
             self.root.after(0, lambda lbl=label: lbl.winfo_exists() and lbl.configure(text="No Preview"))
-        except Exception as e:
-            self.root.after(0, lambda: label.configure(text="Error"))
+        except Exception:
+            self.root.after(0, lambda: label.winfo_exists() and label.configure(text="Error"))
 
-    def _display_thumbnail_from_data(self, label, thumbnail_data, item):
+    def _photo_from_blob(self, blob_path, is_video, item):
+        """Decode a raw JPEG or MP4 blob file directly — no base64 at all."""
+        import shutil, tempfile as _tf
+        tmp_path = None
         try:
-            import tempfile
-            import base64
-
-            is_video = thumbnail_data.startswith("VIDEO:")
-
             if is_video:
-                image_b64 = thumbnail_data[6:] if thumbnail_data.startswith("IMAGE:") else \
-                thumbnail_data.split("IMAGE:")[-1] if "IMAGE:" in thumbnail_data else None
-                if not image_b64:
-                    video_b64 = thumbnail_data[6:]
-                    video_data = base64.b64decode(video_b64)
-
-                    with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_file:
-                        temp_file.write(video_data)
-                        temp_path = temp_file.name
-
-                    import cv2
-                    cap = cv2.VideoCapture(temp_path)
-                    ret, frame = cap.read()
-                    cap.release()
-
-                    try:
-                        os.unlink(temp_path)
-                    except:
-                        pass
-
-                    if ret and frame is not None:
-                        frame_resized = cv2.resize(frame, (190, 140))
-                        frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
-                        pil_image = Image.fromarray(frame_rgb)
-                        photo = ImageTk.PhotoImage(pil_image)
-                        item.thumbnail_image = photo
-                        self.root.after(0, lambda: self._set_thumbnail(label, photo))
-                        return
-
-            image_b64 = thumbnail_data[6:] if thumbnail_data.startswith("IMAGE:") else thumbnail_data
-            image_data = base64.b64decode(image_b64)
-
-            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
-                temp_file.write(image_data)
-                temp_path = temp_file.name
-
-            img = Image.open(temp_path)
-            img.thumbnail((190, 140), Image.Resampling.LANCZOS)
-            photo = ImageTk.PhotoImage(img)
+                fd, tmp_path = _tf.mkstemp(suffix=".mp4")
+                os.close(fd)
+                shutil.copy2(str(blob_path), tmp_path)
+                import cv2 as _cv2
+                cap = _cv2.VideoCapture(tmp_path)
+                ret, frame = cap.read()
+                cap.release()
+                try: os.unlink(tmp_path)
+                except OSError: pass
+                tmp_path = None
+                if not ret or frame is None:
+                    return None
+                frame_resized = _cv2.resize(frame, (190, 140))
+                frame_rgb = _cv2.cvtColor(frame_resized, _cv2.COLOR_BGR2RGB)
+                pil_image = Image.fromarray(frame_rgb)
+            else:
+                pil_image = Image.open(str(blob_path))
+                pil_image.thumbnail((190, 140), Image.Resampling.LANCZOS)
+            photo = ImageTk.PhotoImage(pil_image)
             item.thumbnail_image = photo
+            return photo
+        except Exception:
+            if tmp_path:
+                try: os.unlink(tmp_path)
+                except OSError: pass
+            return None
 
-            try:
-                os.unlink(temp_path)
-            except:
-                pass
+    def _display_thumbnail_from_data(self, label, thumbnail_data, item, video_path_norm=None):
+        """Decode a base64 sentinel string ("IMAGE:…" / "VIDEO:…") into a PhotoImage.
+        Only called as a fallback when no blob_path is available."""
+        import tempfile, base64 as _b64
+        tmp_path = None
+        try:
+            is_vid = thumbnail_data.startswith("VIDEO:")
+            raw_b64 = thumbnail_data[6:]   # strip 6-char prefix
 
-            self.root.after(0, lambda: self._set_thumbnail(label, photo))
+            if is_vid:
+                video_data = _b64.b64decode(raw_b64)
+                with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tf:
+                    tf.write(video_data)
+                    tmp_path = tf.name
+                import cv2 as _cv2
+                cap = _cv2.VideoCapture(tmp_path)
+                ret, frame = cap.read()
+                cap.release()
+                try: os.unlink(tmp_path)
+                except OSError: pass
+                tmp_path = None
+                if ret and frame is not None:
+                    fr = _cv2.resize(frame, (190, 140))
+                    fr_rgb = _cv2.cvtColor(fr, _cv2.COLOR_BGR2RGB)
+                    pil_image = Image.fromarray(fr_rgb)
+                    photo = ImageTk.PhotoImage(pil_image)
+                    item.thumbnail_image = photo
+                    if video_path_norm:
+                        self._photo_cache[video_path_norm] = photo
+                    self.root.after(0, lambda: self._set_thumbnail(label, photo))
+                    return
+            else:
+                image_data = _b64.b64decode(raw_b64)
+                with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tf:
+                    tf.write(image_data)
+                    tmp_path = tf.name
+                img = Image.open(tmp_path)
+                img.thumbnail((190, 140), Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(img)
+                item.thumbnail_image = photo
+                if video_path_norm:
+                    self._photo_cache[video_path_norm] = photo
+                try: os.unlink(tmp_path)
+                except OSError: pass
+                tmp_path = None
+                self.root.after(0, lambda: self._set_thumbnail(label, photo))
+                return
 
-        except Exception as e:
-            self.root.after(0, lambda: label.configure(text="Error"))
+        except Exception:
+            if tmp_path:
+                try: os.unlink(tmp_path)
+                except OSError: pass
+            self.root.after(0, lambda: label.winfo_exists() and label.configure(text="Error"))
 
     def _set_thumbnail(self, label, photo):
         try:
-            label.configure(image=photo, text="")
-            label.image = photo
+            if label.winfo_exists():
+                label.configure(image=photo, text="")
+                label.image = photo
         except:
             pass
 
@@ -1153,6 +1235,7 @@ class GridViewManager:
 
         info_frame = None
         name_label = None
+        drag_label = None
         thumb_container = None
 
         for child in card.winfo_children():
@@ -1163,7 +1246,10 @@ class GridViewManager:
                     info_frame = child
                     for label in child.winfo_children():
                         if isinstance(label, tk.Label):
-                            name_label = label
+                            if drag_label is None:
+                                name_label = label
+                            else:
+                                drag_label = label
 
         if is_selected:
             card.configure(
@@ -1179,6 +1265,8 @@ class GridViewManager:
                     fg="white",
                     font=(self.theme_provider.normal_font.actual()['family'], 9, 'bold')
                 )
+            if drag_label:
+                drag_label.configure(bg=self.theme_provider.accent_color)
             if thumb_container:
                 thumb_container.configure(
                     highlightbackground=self.theme_provider.accent_color,
@@ -1198,6 +1286,8 @@ class GridViewManager:
                     fg="#888888",
                     font=(self.theme_provider.normal_font.actual()['family'], 9, 'normal')
                 )
+            if drag_label:
+                drag_label.configure(bg=self.theme_provider.listbox_bg)
             if thumb_container:
                 thumb_container.configure(
                     highlightbackground="#cc4444",
@@ -1218,6 +1308,8 @@ class GridViewManager:
                     fg=self.theme_provider.text_color,
                     font=(self.theme_provider.normal_font.actual()['family'], 9, 'normal')
                 )
+            if drag_label:
+                drag_label.configure(bg=self.theme_provider.listbox_bg)
             if thumb_container:
                 thumb_container.configure(
                     highlightbackground=self.theme_provider.frame_border,
