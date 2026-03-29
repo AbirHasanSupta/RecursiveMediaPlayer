@@ -913,7 +913,9 @@ class GridViewManager:
                     self.video_preview_manager.tooltip.show_preview(video_path, thumbnail.thumbnail_data, event.x_root,
                                                                     event.y_root)
                     return
-            if video_path_norm not in self.video_preview_manager._generation_queue:
+            with self.video_preview_manager._lock:
+                already_queued = video_path_norm in self.video_preview_manager._generation_queue
+            if not already_queued:
                 self.video_preview_manager._generate_thumbnail_async(video_path_norm, event.x_root, event.y_root)
             return
         self._show_context_menu(event, video_path)
@@ -1083,7 +1085,7 @@ class GridViewManager:
                         return
 
                 # ── Level 3: generate fresh blob ────────────────────────────
-                result = vpm.generator.generate_thumbnail(item.video_path)
+                result = vpm.generator.generate_thumbnail(video_path_norm)
                 if result:
                     raw_bytes, is_vid = result
                     try:
@@ -1132,12 +1134,12 @@ class GridViewManager:
                 tmp_path = None
                 if not ret or frame is None:
                     return None
-                frame_resized = _cv2.resize(frame, (190, 140))
+                frame_resized = _cv2.resize(frame, (240, 135))
                 frame_rgb = _cv2.cvtColor(frame_resized, _cv2.COLOR_BGR2RGB)
                 pil_image = Image.fromarray(frame_rgb)
             else:
                 pil_image = Image.open(str(blob_path))
-                pil_image.thumbnail((190, 140), Image.Resampling.LANCZOS)
+                pil_image.thumbnail((240, 135), Image.Resampling.LANCZOS)
             photo = ImageTk.PhotoImage(pil_image)
             item.thumbnail_image = photo
             return photo
@@ -1169,7 +1171,7 @@ class GridViewManager:
                 except OSError: pass
                 tmp_path = None
                 if ret and frame is not None:
-                    fr = _cv2.resize(frame, (190, 140))
+                    fr = _cv2.resize(frame, (240, 135))
                     fr_rgb = _cv2.cvtColor(fr, _cv2.COLOR_BGR2RGB)
                     pil_image = Image.fromarray(fr_rgb)
                     photo = ImageTk.PhotoImage(pil_image)
@@ -1184,7 +1186,7 @@ class GridViewManager:
                     tf.write(image_data)
                     tmp_path = tf.name
                 img = Image.open(tmp_path)
-                img.thumbnail((190, 140), Image.Resampling.LANCZOS)
+                img.thumbnail((240, 135), Image.Resampling.LANCZOS)
                 photo = ImageTk.PhotoImage(img)
                 item.thumbnail_image = photo
                 if video_path_norm:
