@@ -561,6 +561,19 @@ def select_multiple_folders_and_play():
                     videos, _, directories = res
                     self.update_console(
                         f"Found {len(videos)} videos in '{os.path.basename(dir_path)}' ({len(directories)} subdirs)")
+
+                    # Kick off background thumbnail prefetch so Grid View
+                    # opens instantly instead of generating on demand.
+                    # Delayed 500 ms so the UI finishes updating first.
+                    if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+                        self.root.after(
+                            500,
+                            lambda vids=list(videos), d=dir_path: (
+                                self.video_preview_manager.prefetch_for_directory(d, vids)
+                                if hasattr(self, 'video_preview_manager') and self.video_preview_manager
+                                else None
+                            )
+                        )
                 except Exception as e:
                     self.update_console(f"Error scanning {dir_path}: {e}")
                 finally:
@@ -3805,6 +3818,10 @@ def select_multiple_folders_and_play():
                     self.scan_cache.delete(dir_to_remove)
                 if hasattr(self, 'pending_scans'):
                     self.pending_scans.discard(dir_to_remove)
+
+                # Remove cached thumbnail blobs for this directory
+                if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+                    self.video_preview_manager.evict_for_directory(dir_to_remove)
 
                 self.dir_listbox.delete(i)
                 self.selected_dirs.pop(i)

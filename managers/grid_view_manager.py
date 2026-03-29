@@ -289,6 +289,8 @@ class GridViewManager:
                 except:
                     pass
             self._photo_cache.clear()
+            # Note: do NOT clear vpm.lru_cache here — it should survive
+            # across grid view open/close so re-opens are instant.
             try:
                 self.grid_window.destroy()
             except:
@@ -785,14 +787,19 @@ class GridViewManager:
                 )
                 excluded_badge.place(relx=0.0, rely=0.0, anchor='nw')
 
-            # --- Thumbnail loading: reuse cached PhotoImage if available,
-            #     otherwise submit a background load task.
+            # --- Thumbnail loading: 3-level cache lookup, then background
             video_path_norm = os.path.normpath(video_path)
+            # Level 1: local _photo_cache (survives grid rebuild within session)
             cached_photo = self._photo_cache.get(video_path_norm)
+            # Level 2: shared LRU RAM cache (survives grid close/reopen)
+            if cached_photo is None and self.video_preview_manager and hasattr(self.video_preview_manager, 'lru_cache'):
+                cached_photo = self.video_preview_manager.lru_cache.get(video_path_norm)
+                if cached_photo is not None:
+                    self._photo_cache[video_path_norm] = cached_photo  # promote to local
             if cached_photo is not None:
-                # Restore thumbnail immediately — no background task needed
                 self._set_thumbnail(thumb_label, cached_photo)
             else:
+                # Level 3: background decode/generate
                 self.thumbnail_executor.submit(self._load_thumbnail, item, thumb_label, video_path_norm)
 
             info_frame = tk.Frame(
@@ -1040,7 +1047,7 @@ class GridViewManager:
             self._update_card_selection(vp)
 
     def _load_thumbnail(self, item, label, video_path_norm=None):
-        """Load thumbnail in background using raw binary blobs — no base64 on disk."""
+        """Load thumbnail — 3-level cache: LRU RAM → blob file → generate."""
         try:
             with self.loading_lock:
                 if not self.is_loading:
@@ -1048,24 +1055,34 @@ class GridViewManager:
             if video_path_norm is None:
                 video_path_norm = os.path.normpath(item.video_path)
 
+            # ── Level 1: LRU in-memory PhotoImage cache (zero I/O) ──────────
             vpm = self.video_preview_manager
+            if vpm and hasattr(vpm, 'lru_cache'):
+                photo = vpm.lru_cache.get(video_path_norm)
+                if photo is not None:
+                    self._photo_cache[video_path_norm] = photo
+                    self.root.after(0, lambda lbl=label, p=photo: self._set_thumbnail(lbl, p))
+                    return
+
+            # ── Level 2: blob file on disk (no base64) ───────────────────────
             if vpm:
                 th = vpm._thumbnails.get(video_path_norm)
-                if th and th.is_valid():
-                    # Fast path: read directly from blob file — zero base64 cost
-                    if hasattr(th, 'blob_path') and th.blob_path and th.blob_path.exists():
-                        photo = self._photo_from_blob(th.blob_path, getattr(th, 'is_video', False), item)
-                        if photo:
-                            self._photo_cache[video_path_norm] = photo
-                            self.root.after(0, lambda lbl=label, p=photo: self._set_thumbnail(lbl, p))
-                            return
-                    # Fallback to sentinel string (old-style cache entries)
-                    td = th.thumbnail_data
-                    if td:
-                        self._display_thumbnail_from_data(label, td, item, video_path_norm)
+                if th and th.is_valid() and hasattr(th, 'blob_path') and th.blob_path and th.blob_path.exists():
+                    photo = self._photo_from_blob(th.blob_path, getattr(th, 'is_video', False), item)
+                    if photo:
+                        # Populate both caches so future access is instant
+                        if hasattr(vpm, 'lru_cache'):
+                            vpm.lru_cache.put(video_path_norm, photo)
+                        self._photo_cache[video_path_norm] = photo
+                        self.root.after(0, lambda lbl=label, p=photo: self._set_thumbnail(lbl, p))
+                        return
+                    # Blob decode failed — fall through to generation
+                    # Sentinel-string fallback (old cache entries)
+                    if th.thumbnail_data:
+                        self._display_thumbnail_from_data(label, th.thumbnail_data, item, video_path_norm)
                         return
 
-                # Generate fresh thumbnail
+                # ── Level 3: generate fresh blob ────────────────────────────
                 result = vpm.generator.generate_thumbnail(item.video_path)
                 if result:
                     raw_bytes, is_vid = result
@@ -1079,12 +1096,14 @@ class GridViewManager:
                         vpm._save_thumbnails()
                         photo = self._photo_from_blob(blob_path, is_vid, item)
                         if photo:
+                            if hasattr(vpm, 'lru_cache'):
+                                vpm.lru_cache.put(video_path_norm, photo)
                             self._photo_cache[video_path_norm] = photo
                             self.root.after(0, lambda lbl=label, p=photo: self._set_thumbnail(lbl, p))
                             return
                     except Exception:
                         pass
-                    # Last resort: build sentinel string in-memory (never written to disk)
+                    # Last resort: in-memory sentinel string only
                     import base64
                     prefix = "VIDEO:" if is_vid else "IMAGE:"
                     td = prefix + base64.b64encode(raw_bytes).decode("ascii")
