@@ -445,37 +445,39 @@ class VideoPreviewTooltip:
             self.tooltip_window.wm_overrideredirect(True)
             self.tooltip_window.configure(bg="black", relief="solid", bd=1)
 
-            # --- Determine actual media dimensions for aspect-correct display ---
-            MAX_W, MAX_H = 480, 360   # maximum tooltip content area
+            # --- Fixed square canvas; video/image letterboxed/pillarboxed inside ---
+            SQUARE = 300  # fixed tooltip content size (pixels)
+
+            # Compute fitted dimensions that preserve the media's aspect ratio
+            # while fitting entirely within the SQUARE × SQUARE canvas.
             if is_video:
                 try:
-                    # Read dimensions from the ORIGINAL video, not the blob
-                    # (blob is always encoded at 240×135 regardless of source ratio)
                     _cap = cv2.VideoCapture(video_path)
                     vid_w = int(_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                     vid_h = int(_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                     _cap.release()
                     if vid_w > 0 and vid_h > 0:
-                        scale = min(MAX_W / vid_w, MAX_H / vid_h, 1.0)
-                        disp_w = max(1, int(vid_w * scale))
-                        disp_h = max(1, int(vid_h * scale))
+                        scale = min(SQUARE / vid_w, SQUARE / vid_h)
+                        fit_w = max(2, int(vid_w * scale) & ~1)
+                        fit_h = max(2, int(vid_h * scale) & ~1)
                     else:
-                        disp_w, disp_h = 480, 270
+                        fit_w = fit_h = SQUARE
                 except Exception:
-                    disp_w, disp_h = 480, 270
+                    fit_w = fit_h = SQUARE
             else:
                 try:
                     _img = Image.open(tmp_path)
                     img_w, img_h = _img.size
-                    scale = min(MAX_W / img_w, MAX_H / img_h, 1.0)
-                    disp_w = max(1, int(img_w * scale))
-                    disp_h = max(1, int(img_h * scale))
+                    scale = min(SQUARE / img_w, SQUARE / img_h)
+                    fit_w = max(1, int(img_w * scale))
+                    fit_h = max(1, int(img_h * scale))
                 except Exception:
-                    disp_w, disp_h = 320, 180
+                    fit_w = fit_h = SQUARE
 
             sw = self.parent.winfo_screenwidth()
             sh = self.parent.winfo_screenheight()
-            tw, th = disp_w + 20, disp_h + 40   # padding + filename label
+            tw = SQUARE + 20          # outer padding (padx=5 × 2 + bd=1 × 2 + some slack)
+            th = SQUARE + 42          # square canvas + filename label row
             x = min(x, sw - tw - 10)
             y = min(y, sh - th - 10)
             self.tooltip_window.geometry(f"+{x + 10}+{y + 10}")
@@ -490,9 +492,19 @@ class VideoPreviewTooltip:
                     player = inst.media_player_new()
                     player.audio_set_mute(True)
                     player.audio_set_volume(0)
-                    vf = tk.Frame(frame, bg="black", width=disp_w, height=disp_h)
-                    vf.pack()
+
+                    # Outer black container — always SQUARE × SQUARE
+                    container = tk.Frame(frame, bg="black", width=SQUARE, height=SQUARE)
+                    container.pack()
+                    container.pack_propagate(False)
+
+                    # Inner player frame — fitted size, centred inside the container
+                    pad_x = (SQUARE - fit_w) // 2
+                    pad_y = (SQUARE - fit_h) // 2
+                    vf = tk.Frame(container, bg="black", width=fit_w, height=fit_h)
+                    vf.place(x=pad_x, y=pad_y)
                     vf.pack_propagate(False)
+
                     if os.name == "nt":
                         player.set_hwnd(vf.winfo_id())
                     else:
@@ -515,8 +527,13 @@ class VideoPreviewTooltip:
                     _safe_unlink(tmp_path)
                     tk.Label(frame, text="VLC not available", bg="black", fg="yellow").pack()
             else:
-                img = Image.open(tmp_path).resize((disp_w, disp_h), Image.Resampling.LANCZOS)
-                photo = ImageTk.PhotoImage(img)
+                # Letterbox/pillarbox: paste fitted image onto a black SQUARE canvas
+                canvas_img = Image.new("RGB", (SQUARE, SQUARE), (0, 0, 0))
+                src = Image.open(tmp_path).resize((fit_w, fit_h), Image.Resampling.LANCZOS)
+                offset_x = (SQUARE - fit_w) // 2
+                offset_y = (SQUARE - fit_h) // 2
+                canvas_img.paste(src, (offset_x, offset_y))
+                photo = ImageTk.PhotoImage(canvas_img)
                 lbl = tk.Label(frame, image=photo, bg="black")
                 lbl.image = photo
                 lbl.pack()
@@ -526,7 +543,7 @@ class VideoPreviewTooltip:
             if len(name) > 40:
                 name = name[:37] + "…"
             tk.Label(frame, text=name, bg="black", fg="white",
-                     font=("Arial", 9), wraplength=disp_w).pack(pady=(5, 0))
+                     font=("Arial", 9), wraplength=SQUARE).pack(pady=(5, 0))
             self.is_visible = True
         except Exception as e:
             print(f"[Tooltip] error: {e}")
