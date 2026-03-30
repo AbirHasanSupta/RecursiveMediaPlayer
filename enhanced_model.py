@@ -1185,7 +1185,7 @@ def main():
     parser = argparse.ArgumentParser(description="High-Accuracy Video Search with Resource Management")
     parser.add_argument("--mode", choices=["preprocess", "search"], required=True)
     parser.add_argument("--videos_dir", default=None, help="Video directory (will prompt if not provided)")
-    parser.add_argument("--out_dir", default=r"C:\Users\Abir\Documents\Recursive Media Player\index_data",
+    parser.add_argument("--out_dir", default=str(__import__("pathlib").Path(__import__("os").environ.get("LOCALAPPDATA", __import__("pathlib").Path.home() / "AppData" / "Local")) / "Recursive Media Player" / "index_data"),
                         help="Output directory for index files")
     parser.add_argument("--workers", type=int, default=3, help="Number of workers (recommend 1-3 for high accuracy)")
     parser.add_argument("--max_frames", type=int, default=60, help="Max frames per video")
@@ -1290,7 +1290,7 @@ def main():
             print("Provide --query for search")
             return
 
-        default_out_dir = r"C:\Users\Abir\Documents\Recursive Media Player\index_data"
+        default_out_dir = str(__import__("pathlib").Path(__import__("os").environ.get("LOCALAPPDATA", __import__("pathlib").Path.home() / "AppData" / "Local")) / "Recursive Media Player" / "index_data")
         out_dir_to_use = args.out_dir if args.out_dir != "./index_data" else default_out_dir
         clip_index_path = str(Path(out_dir_to_use) / "clip_index.faiss")
         text_index_path = str(Path(out_dir_to_use) / "text_index.faiss")

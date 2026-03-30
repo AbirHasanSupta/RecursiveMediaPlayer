@@ -38,7 +38,7 @@ class GoogleDriveManager:
         # Use local app data on Windows, else home directory
         if cache_root is None:
             base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
-            cache_root = os.path.join(base, "RecursiveMediaPlayer", "drive_cache")
+            cache_root = os.path.join(base, "Recursive Media Player", "drive_cache")
         self.cache_root = cache_root
         os.makedirs(self.cache_root, exist_ok=True)
         # In-memory cache for last scraped folder tree and names

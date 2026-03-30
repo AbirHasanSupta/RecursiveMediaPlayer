@@ -1,18 +1,35 @@
 import json
+import os
 import os.path
+import sys
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
 import base64
 
 
+def _get_app_dirs():
+    """Return (appdata_dir, localappdata_dir) for Recursive Media Player."""
+    APP = "Recursive Media Player"
+    if os.name == "nt":
+        settings = Path(os.environ.get("APPDATA",  Path.home() / "AppData" / "Roaming")) / APP
+        local    = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))  / APP
+    elif sys.platform == "darwin":
+        settings = Path.home() / "Library" / "Application Support" / APP
+        local    = Path.home() / "Library" / "Caches" / APP
+    else:
+        settings = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP
+        local    = Path(os.environ.get("XDG_CACHE_HOME",  Path.home() / ".cache"))  / APP
+    return settings, local
+
+
 class ConfigHandler:
 
     @property
     def config_path(self):
-        documents_dir = Path.home() / "Documents" / "Recursive Media Player"
-        documents_dir.mkdir(parents=True, exist_ok=True)
-        return documents_dir / "config.json"
+        config_dir, _ = _get_app_dirs()
+        config_dir.mkdir(parents=True, exist_ok=True)
+        return config_dir / "config.json"
 
     def load_preferences(self):
         try:

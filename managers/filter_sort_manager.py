@@ -23,6 +23,24 @@ import cv2
 
 from managers.resource_manager import get_resource_manager
 
+def _get_app_dirs():
+    """Return (appdata_dir, localappdata_dir) for Recursive Media Player."""
+    import os, sys
+    from pathlib import Path
+    APP = "Recursive Media Player"
+    if os.name == "nt":
+        settings = Path(os.environ.get("APPDATA",  Path.home() / "AppData" / "Roaming")) / APP
+        local    = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))  / APP
+    elif sys.platform == "darwin":
+        settings = Path.home() / "Library" / "Application Support" / APP
+        local    = Path.home() / "Library" / "Caches" / APP
+    else:
+        settings = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP
+        local    = Path(os.environ.get("XDG_CACHE_HOME",  Path.home() / ".cache"))  / APP
+    return settings, local
+
+
+
 
 # ---------------------------------------------------------------------------
 # VideoMetadata  (unchanged)
@@ -156,9 +174,8 @@ class VideoMetadataCache:
     """
 
     def __init__(self):
-        self.cache_dir = (
-            Path.home() / "Documents" / "Recursive Media Player" / "Cache"
-        )
+        _, _local_dir = _get_app_dirs()
+        self.cache_dir = _local_dir / "Cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.cache_file = self.cache_dir / "video_metadata_cache.pkl"
         # Keep the old JSON path around only for migration

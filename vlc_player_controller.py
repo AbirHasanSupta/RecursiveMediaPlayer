@@ -15,6 +15,29 @@ from managers.resource_manager import get_resource_manager
 from video_position_overlay import VideoPositionOverlay
 
 
+def _get_pictures_dir():
+    """Return the OS Pictures directory for saving screenshots."""
+    import os, sys
+    from pathlib import Path
+    if os.name == "nt":
+        # Windows: use SHGetKnownFolderPath if available, else fall back
+        try:
+            import ctypes, ctypes.wintypes
+            FOLDERID_Pictures = "{33E28130-4E1E-4676-835A-98395C3BC3BB}"
+            buf = ctypes.create_unicode_buffer(ctypes.wintypes.MAX_PATH)
+            ctypes.windll.shell32.SHGetFolderPathW(None, 0x0027, None, 0, buf)
+            base = Path(buf.value) if buf.value else Path.home() / "Pictures"
+        except Exception:
+            base = Path.home() / "Pictures"
+    elif sys.platform == "darwin":
+        base = Path.home() / "Pictures"
+    else:
+        # Linux: respect XDG
+        xdg = os.environ.get("XDG_PICTURES_DIR")
+        base = Path(xdg) if xdg else Path.home() / "Pictures"
+    return base
+
+
 class MonitorInfo:
     def __init__(self):
         monitors = get_monitors()
@@ -147,7 +170,6 @@ class BaseVLCPlayerController:
                 return
             self._is_cleanup = True
 
-
         self.running = False
 
         self._trigger_config_save()
@@ -203,7 +225,7 @@ class BaseVLCPlayerController:
                 self.player.audio_set_mute(self.is_muted)
                 if not self.is_muted:
                     self.player.audio_set_volume(self.volume)
-                
+
                 if self.logger:
                     self.logger(f"Audio {'Muted' if self.is_muted else 'Unmuted'}")
                 self._trigger_config_save()
@@ -437,7 +459,7 @@ class BaseVLCPlayerController:
         with self.lock:
             try:
                 current_video = self.videos[self.index]
-                video_dir = Path.home() / "Documents" / "Recursive Media Player" / "Screenshots"
+                video_dir = _get_pictures_dir() / "Recursive Media Player" / "Screenshots"
                 video_dir.mkdir(parents=True, exist_ok=True)
 
                 video_name = os.path.splitext(os.path.basename(current_video))[0]
@@ -617,7 +639,6 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
                 self._notify_video_change()
             return result
 
-
     def set_loop_mode(self, mode):
         self.loop_mode = mode
         if mode == "shuffle" and not hasattr(self, 'played_indices'):
@@ -673,7 +694,6 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
             self.play_video(self.index)
         else:
             self.player.pause()
-
 
     def _next_video_shuffle(self):
         self.played_indices.add(self.index)

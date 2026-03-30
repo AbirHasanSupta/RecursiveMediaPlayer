@@ -7,6 +7,24 @@ from pathlib import Path
 from typing import List, Optional, Callable
 import uuid
 
+def _get_app_dirs():
+    """Return (appdata_dir, localappdata_dir) for Recursive Media Player."""
+    import os, sys
+    from pathlib import Path
+    APP = "Recursive Media Player"
+    if os.name == "nt":
+        settings = Path(os.environ.get("APPDATA",  Path.home() / "AppData" / "Roaming")) / APP
+        local    = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))  / APP
+    elif sys.platform == "darwin":
+        settings = Path.home() / "Library" / "Application Support" / APP
+        local    = Path.home() / "Library" / "Caches" / APP
+    else:
+        settings = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP
+        local    = Path(os.environ.get("XDG_CACHE_HOME",  Path.home() / ".cache"))  / APP
+    return settings, local
+
+
+
 
 class QueueEntry:
     def __init__(self, video_path: str, queue_id: str = None, added_from: str = "manual"):
@@ -37,7 +55,7 @@ class QueueEntry:
 
 class QueueStorage:
     def __init__(self):
-        self.queue_dir = Path.home() / "Documents" / "Recursive Media Player" / "Queue"
+        self.queue_dir = _get_app_dirs()[1] / "Queue"
         self.queue_dir.mkdir(parents=True, exist_ok=True)
         self.queue_file = self.queue_dir / "playback_queue.json"
 

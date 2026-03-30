@@ -9,12 +9,31 @@ import subprocess
 import sys
 import queue
 
+def _get_app_dirs():
+    """Return (appdata_dir, localappdata_dir) for Recursive Media Player."""
+    import os, sys
+    from pathlib import Path
+    APP = "Recursive Media Player"
+    if os.name == "nt":
+        settings = Path(os.environ.get("APPDATA",  Path.home() / "AppData" / "Roaming")) / APP
+        local    = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))  / APP
+    elif sys.platform == "darwin":
+        settings = Path.home() / "Library" / "Application Support" / APP
+        local    = Path.home() / "Library" / "Caches" / APP
+    else:
+        settings = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP
+        local    = Path(os.environ.get("XDG_CACHE_HOME",  Path.home() / ".cache"))  / APP
+    return settings, local
+
+
+
 
 class SettingsData:
     """Data class for application settings following Single Responsibility Principle"""
 
     def __init__(self):
-        self.ai_index_path = r"C:\Users\Abir\Documents\Recursive Media Player\index_data"
+        _, _local = _get_app_dirs()
+        self.ai_index_path = str(_local / "index_data")
         self.preprocessing_workers = 3
         self.max_frames_per_video = 60
         self.auto_cleanup_days = 30
@@ -62,7 +81,8 @@ class SettingsStorage:
     """Handles settings persistence following Single Responsibility Principle"""
 
     def __init__(self):
-        self.settings_dir = Path.home() / "Documents" / "Recursive Media Player"
+        _settings_dir, _local_dir = _get_app_dirs()
+        self.settings_dir = _settings_dir
         self.settings_dir.mkdir(parents=True, exist_ok=True)
         self.settings_file = self.settings_dir / "app_settings.json"
 

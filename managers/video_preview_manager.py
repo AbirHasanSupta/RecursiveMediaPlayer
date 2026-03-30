@@ -182,7 +182,7 @@ class ThumbnailStorage:
         else:
             base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
 
-        self.thumbnails_dir = base / "RecursiveMediaPlayer" / "Thumbnails"
+        self.thumbnails_dir = base / "Recursive Media Player" / "Thumbnails"
         self.blobs_dir = self.thumbnails_dir / "blobs"
         self.blobs_dir.mkdir(parents=True, exist_ok=True)
         self.index_file = self.thumbnails_dir / "index.pkl"
