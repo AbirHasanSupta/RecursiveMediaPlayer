@@ -175,9 +175,14 @@ class ThumbnailStorage:
     MAX_ENTRIES = 1000
 
     def __init__(self):
-        self.thumbnails_dir = (
-            Path.home() / "Documents" / "Recursive Media Player" / "Thumbnails"
-        )
+        if os.name == "nt":
+            base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+        elif os.sys.platform == "darwin":
+            base = Path.home() / "Library" / "Caches"
+        else:
+            base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+
+        self.thumbnails_dir = base / "RecursiveMediaPlayer" / "Thumbnails"
         self.blobs_dir = self.thumbnails_dir / "blobs"
         self.blobs_dir.mkdir(parents=True, exist_ok=True)
         self.index_file = self.thumbnails_dir / "index.pkl"
