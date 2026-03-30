@@ -633,6 +633,24 @@ class PrefetchQueue:
         for priority, vp in enumerate(video_paths):
             self._q.put((priority, vp, token))
 
+    def prioritize(self, video_paths: List[str]):
+        """
+        Jump a list of videos to the front of the current queue without
+        cancelling it.  Each path is re-inserted at a negative priority so
+        it sorts ahead of all normally-enqueued items (which start at 0).
+        Paths that already have a valid blob are skipped.
+        Already-running workers finish their current item first (unavoidable),
+        but the next item they pull will be from the priority list.
+        """
+        with self._lock:
+            token = self._active_token
+        if token is None:
+            return
+        # Use large negative numbers so they sort before anything already queued
+        for i, vp in enumerate(reversed(video_paths)):
+            priority = -(len(video_paths) - i)   # -N, -(N-1), ..., -1
+            self._q.put((priority, vp, token))
+
     def stop(self):
         self._running = False
         # Unblock workers
@@ -867,6 +885,21 @@ class VideoPreviewManager:
 
         if needed:
             self._prefetch.enqueue_batch(needed)
+
+    def prioritize_for_grid(self, video_paths: List[str]):
+        """
+        Called when a grid view opens for a directory.
+        Re-queues only the uncached videos in that directory at the front of
+        the prefetch queue so they are generated before videos in other
+        directories that are already waiting.
+        """
+        needed = [
+            p for p in video_paths
+            if os.path.isfile(p)
+            and not self._has_valid_blob(os.path.normpath(p))
+        ]
+        if needed:
+            self._prefetch.prioritize(needed)
 
     def _has_valid_blob(self, norm_path: str) -> bool:
         th = self._thumbnails.get(norm_path)

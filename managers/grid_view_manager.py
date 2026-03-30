@@ -329,6 +329,15 @@ class GridViewManager:
 
             self.all_items = self.items.copy()
 
+            # Prioritize these videos in the prefetch queue so they jump
+            # ahead of other directories currently being prefetched.
+            if self.video_preview_manager:
+                grid_videos = [
+                    it['path'] for it in self.items if it['type'] == 'video'
+                ]
+                if grid_videos:
+                    self.video_preview_manager.prioritize_for_grid(grid_videos)
+
             self.root.after(0, self._rebuild_grid)
         except Exception as e:
             with self.loading_lock:
