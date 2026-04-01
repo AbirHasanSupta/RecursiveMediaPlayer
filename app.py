@@ -17,7 +17,7 @@ from managers.grid_view_manager import GridViewManager
 from managers.resource_manager import ThreadSafeDict, get_resource_manager, ManagedExecutor, ManagedThread, \
     MemoryMonitor
 from theme import ThemeSelector
-from utils import gather_videos_with_directories, is_video
+from utils import gather_videos_with_directories, is_video, gather_videos
 from vlc_player_controller import VLCPlayerControllerForMultipleDirectory
 from managers.playlist_manager import PlaylistManager
 from managers.watch_history_manager import WatchHistoryManager
@@ -26,9 +26,11 @@ from managers.settings_manager import SettingsManager
 from managers.video_preview_manager import VideoPreviewManager
 from managers.video_queue_manager import VideoQueueManager
 from managers.google_drive_manager import GoogleDriveManager
+from managers.dual_player_manager import DualPlayerManager
 import win32clipboard as wcb
 import win32con
 import struct
+import socket
 try:
     from managers.voice_command_manager import VoiceCommandManager, SPEECH_RECOGNITION_AVAILABLE
 except ImportError:
@@ -37,6 +39,36 @@ except ImportError:
 
 
 def select_multiple_folders_and_play():
+    port_file = os.path.expanduser("~/.rmp_instance_port")
+
+    if len(sys.argv) > 1:
+        arg_path = sys.argv[1]
+        if os.path.isdir(arg_path):
+            if os.path.exists(port_file):
+                try:
+                    with open(port_file, 'r') as f:
+                        port = int(f.read().strip())
+
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    result = sock.connect_ex(("127.0.0.1", port))
+                    sock.close()
+
+                    if result == 0:
+                        import win32gui
+                        hwnd = win32gui.FindWindow(None, "Recursive Video Player")
+                        if hwnd:
+                            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                            win32gui.SetForegroundWindow(hwnd)
+                            time.sleep(0.5)
+
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sock.connect(("127.0.0.1", port))
+                        sock.send(arg_path.encode())
+                        sock.close()
+                        return
+                except:
+                    pass
+
     class DirectorySelector(ThemeSelector):
         def __init__(self, root):
             super().__init__()
@@ -112,6 +144,33 @@ def select_multiple_folders_and_play():
             self.setup_status_section()
             self.setup_console_section()
             self.setup_action_buttons()
+
+            def start_ipc_server():
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind(("127.0.0.1", 0))
+                port = sock.getsockname()[1]
+
+                port_file = os.path.expanduser("~/.rmp_instance_port")
+                with open(port_file, 'w') as f:
+                    f.write(str(port))
+
+                sock.listen(1)
+
+                def accept_connections():
+                    while True:
+                        try:
+                            conn, addr = sock.accept()
+                            data = conn.recv(1024).decode()
+                            conn.close()
+                            if data and os.path.isdir(data):
+                                self.root.after(0, lambda: self._add_directory_from_ipc(data))
+                        except:
+                            break
+
+                threading.Thread(target=accept_connections, daemon=True).start()
+
+            start_ipc_server()
 
             self.scan_cache = ThreadSafeDict()
             self.pending_scans = set()
@@ -191,6 +250,13 @@ def select_multiple_folders_and_play():
             self.favorites_manager.set_video_preview_manager(self.video_preview_manager)
             self.favorites_manager.set_grid_view_manager(self.grid_view_manager)
 
+            self.dual_player_manager = DualPlayerManager(
+                self.root,
+                self,
+                self.update_console,
+                watch_history_callback=self.watch_history_manager.track_video_playback
+            )
+
             self.filter_sort_manager = AdvancedFilterSortManager(
                 watch_history_manager=self.watch_history_manager
             )
@@ -215,6 +281,7 @@ def select_multiple_folders_and_play():
             self.settings_manager.ui.get_metadata_info_callback = lambda: self._get_metadata_cache_info()
             self.settings_manager.ui.filter_sort_manager = self.filter_sort_manager
 
+            self.settings_manager.ui.dual_player_manager = self.dual_player_manager
             self._setup_periodic_cleanup()
             self.resource_manager.register_cleanup_callback(self._cleanup_managers)
 
@@ -239,6 +306,7 @@ def select_multiple_folders_and_play():
                 'filter_sort_manager',
                 'settings_manager',
                 'resume_manager',
+                'dual_player_manager',
                 'voice_manager'
             ]
 
@@ -609,7 +677,7 @@ def select_multiple_folders_and_play():
 
             self.dir_listbox = tk.Listbox(
                 list_container,
-                selectmode=tk.SINGLE,
+                selectmode=tk.MULTIPLE,
                 yscrollcommand=self.scrollbar.set,
                 font=self.normal_font,
                 bg="white",
@@ -626,6 +694,11 @@ def select_multiple_folders_and_play():
             self.dir_listbox.bind('<<ListboxSelect>>', self.on_directory_select)
             self.dir_listbox.bind('<FocusOut>', self.on_directory_focus_out)
             self.dir_listbox.bind('<FocusIn>', self.on_directory_focus_in)
+            self.dir_listbox.bind('<Control-a>', self._select_all_main_dirs)
+            self.dir_listbox.bind('<Button-1>', self._on_main_dir_left_click)
+            self.dir_listbox.bind('<B1-Motion>', self._on_drag)
+            self.dir_listbox.bind('<ButtonRelease-1>', self._on_drop)
+            self.dir_listbox.bind('<Button-3>', self._show_main_dir_context_menu)
             self.scrollbar.config(command=self.dir_listbox.yview)
 
             media_section = tk.Frame(self.dir_section, bg=self.bg_color)
@@ -3287,6 +3360,15 @@ def select_multiple_folders_and_play():
                 )
                 self.voice_button.pack(side=tk.LEFT, padx=(0, 10))
 
+            self.dual_player_button = self.create_button(
+              theme_frame,
+              text="Dual Player",
+              command=self._open_dual_player,
+              variant="primary",
+              size="md"
+            )
+            self.dual_player_button.pack(side=tk.LEFT, padx=(0, 10))
+
             action_buttons_frame = tk.Frame(self.button_frame, bg=self.bg_color)
             action_buttons_frame.pack(side=tk.RIGHT)
 
@@ -3468,6 +3550,206 @@ def select_multiple_folders_and_play():
         def setup_status_section(self):
             self.status_frame = tk.Frame(self.main_frame, bg=self.bg_color)
             self.status_frame.pack(fill=tk.X)
+
+        def _add_directory_from_ipc(self, directory):
+            if directory not in self.selected_dirs:
+                self.selected_dirs.append(directory)
+                display_name = directory
+                if len(directory) > 60:
+                    display_name = os.path.basename(directory)
+                    parent = os.path.dirname(directory)
+                    if parent:
+                        display_name = f"{os.path.basename(parent)}/{display_name}"
+                    display_name = f".../{display_name}"
+                self.dir_listbox.insert(tk.END, display_name)
+                self.update_console(f"Added directory from IPC: {directory}")
+                self._submit_scan(directory)
+                self.update_video_count()
+                self.save_preferences()
+
+        def _open_dual_player(self):
+            if hasattr(self, 'dual_player_manager'):
+                self.dual_player_manager.show()
+
+                selected_dir = self.get_current_selected_directory()
+                if selected_dir:
+                    cache = self.scan_cache.get(selected_dir)
+                    if cache:
+                        videos, _, _ = cache
+                        filtered = [v for v in videos
+                                    if not self.is_video_excluded(selected_dir, v)]
+                        if filtered:
+                            self.root.after(
+                                400,
+                                lambda: self.dual_player_manager.preload(
+                                    videos1=filtered[:200]
+                                )
+                            )
+
+        def _select_all_main_dirs(self, event=None):
+            self.dir_listbox.selection_set(0, tk.END)
+            self.on_directory_select(None)
+            return "break"
+
+        def _on_main_dir_left_click(self, event):
+            index = self.dir_listbox.nearest(event.y)
+            if index < 0 or index >= self.dir_listbox.size():
+                return
+
+            self._drag_start_index = index
+            ctrl_held = bool(event.state & 0x4)
+            shift_held = bool(event.state & 0x1)
+            current_selection = list(self.dir_listbox.curselection())
+
+            if not ctrl_held and not shift_held:
+                if current_selection == [index]:
+                    self.dir_listbox.selection_clear(0, tk.END)
+                    self.current_selected_dir_index = None
+                    self.clear_exclusion_list()
+                    self._is_filtered_mode = False
+                    return "break"
+
+            if shift_held:
+                if not hasattr(self, '_main_dir_anchor') or self._main_dir_anchor is None:
+                    self._main_dir_anchor = current_selection[0] if current_selection else 0
+                self.dir_listbox.selection_clear(0, tk.END)
+                start = min(self._main_dir_anchor, index)
+                end = max(self._main_dir_anchor, index)
+                for i in range(start, end + 1):
+                    self.dir_listbox.selection_set(i)
+                self.dir_listbox.activate(index)
+                self.on_directory_select(None)
+                return "break"
+            elif ctrl_held:
+                if index in current_selection:
+                    self.dir_listbox.selection_clear(index)
+                else:
+                    self.dir_listbox.selection_set(index)
+                self._main_dir_anchor = index
+                self.dir_listbox.activate(index)
+                self.on_directory_select(None)
+                return "break"
+            else:
+                if current_selection == [index]:
+                    self.dir_listbox.selection_clear(0, tk.END)
+                    self.current_selected_dir_index = None
+                    self._is_filtered_mode = False
+                    self.clear_exclusion_list()
+                    return "break"
+
+                self.dir_listbox.selection_clear(0, tk.END)
+                self.dir_listbox.selection_set(index)
+                self.dir_listbox.activate(index)
+                self._main_dir_anchor = index
+                self.on_directory_select(None)
+                return "break"
+
+        def _on_drag(self, event):
+            pass
+
+        def _on_drop(self, event):
+            if not hasattr(self, '_drag_start_index') or self._drag_start_index is None:
+                return
+
+            drop_index = self.dir_listbox.nearest(event.y)
+            if drop_index < 0:
+                drop_index = self.dir_listbox.size() - 1
+
+            if drop_index != self._drag_start_index:
+                # Reorder selected_dirs
+                item = self.selected_dirs.pop(self._drag_start_index)
+                self.selected_dirs.insert(drop_index, item)
+
+                # Reorder listbox display
+                display_item = self.dir_listbox.get(self._drag_start_index)
+                self.dir_listbox.delete(self._drag_start_index)
+                self.dir_listbox.insert(drop_index, display_item)
+
+                # Update selection
+                self.dir_listbox.selection_clear(0, tk.END)
+                self.dir_listbox.selection_set(drop_index)
+                self.dir_listbox.activate(drop_index)
+                self.current_selected_dir_index = drop_index
+
+                # Trigger directory select to update other UI parts
+                self.on_directory_select(None)
+
+            self._drag_start_index = None
+
+        def _show_main_dir_context_menu(self, event):
+            index = self.dir_listbox.nearest(event.y)
+            selection = self.dir_listbox.curselection()
+
+            if index >= 0 and index not in selection:
+                self.dir_listbox.selection_clear(0, tk.END)
+                self.dir_listbox.selection_set(index)
+                self.dir_listbox.activate(index)
+                self._main_dir_anchor = index
+                self.on_directory_select(None)
+                selection = self.dir_listbox.curselection()
+
+            if not selection:
+                return
+
+            context_menu = tk.Menu(self.root, tearoff=0)
+            context_menu.add_command(label="Play Selected", command=self._play_selected_main_dirs)
+            context_menu.add_command(label="Open in Grid View", command=self._open_grid_view_main_dirs)
+            context_menu.add_separator()
+            context_menu.add_command(label="Remove Selected", command=self.remove_directory)
+
+            context_menu.post(event.x_root, event.y_root)
+
+        def _play_selected_main_dirs(self):
+            selection = self.dir_listbox.curselection()
+            if not selection:
+                return
+
+            all_videos = []
+            for i in selection:
+                if i < len(self.selected_dirs):
+                    root_dir = self.selected_dirs[i]
+                    excluded_subdirs = self.excluded_subdirs.get(root_dir, [])
+                    excluded_files = self.excluded_videos.get(root_dir, [])
+
+                    videos = gather_videos(root_dir)
+                    filtered_videos = []
+                    for v_path in videos:
+                        if not self.is_video_in_excluded_directory(v_path, excluded_subdirs) and \
+                           v_path not in excluded_files:
+                            filtered_videos.append(v_path)
+                    all_videos.extend(filtered_videos)
+
+            if not all_videos:
+                messagebox.showinfo("Information", "No videos found in selected directories.")
+                return
+
+            self._play_grid_videos(all_videos)
+
+        def _open_grid_view_main_dirs(self):
+            selection = self.dir_listbox.curselection()
+            if not selection:
+                return
+
+            all_videos = []
+            for i in selection:
+                if i < len(self.selected_dirs):
+                    root_dir = self.selected_dirs[i]
+                    excluded_subdirs = self.excluded_subdirs.get(root_dir, [])
+                    excluded_files = self.excluded_videos.get(root_dir, [])
+
+                    videos = gather_videos(root_dir)
+                    filtered_videos = []
+                    for v_path in videos:
+                        if not self.is_video_in_excluded_directory(v_path, excluded_subdirs) and \
+                           v_path not in excluded_files:
+                            filtered_videos.append(v_path)
+                    all_videos.extend(filtered_videos)
+
+            if not all_videos:
+                messagebox.showinfo("Information", "No videos found in selected directories.")
+                return
+
+            self._open_grid_view(all_videos)
 
         def add_directory(self):
             directory = filedialog.askdirectory(title="Select a Directory")
