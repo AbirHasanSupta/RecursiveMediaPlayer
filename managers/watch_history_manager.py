@@ -483,15 +483,16 @@ class WatchHistoryUI:
         right_buttons = tk.Frame(button_frame, bg=self.theme_provider.bg_color)
         right_buttons.pack(side=tk.RIGHT)
 
-        self.refresh_btn = self.theme_provider.create_button(
-            right_buttons, "Refresh", self._refresh_history_list, "secondary", "md"
-        )
-        self.refresh_btn.pack(side=tk.RIGHT, padx=(5, 0))
 
         self.close_btn = self.theme_provider.create_button(
             right_buttons, "Close", self.history_window.destroy, "secondary", "md"
         )
-        self.close_btn.pack(side=tk.RIGHT)
+        self.close_btn.pack(side=tk.RIGHT, padx=(5, 0))
+
+        self.refresh_btn = self.theme_provider.create_button(
+            right_buttons, "Refresh", self._refresh_history_list, "secondary", "md"
+        )
+        self.refresh_btn.pack(side=tk.RIGHT)
 
     def _refresh_history_list(self):
         """Refresh the history list display"""

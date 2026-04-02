@@ -405,7 +405,7 @@ def select_multiple_folders_and_play():
             self.button_variants = {
                 "primary": {"bg": "#2d89ef", "fg": "white", "active": "#1e70cf"},
                 "success": {"bg": "#27ae60", "fg": "white", "active": "#229954"},
-                "danger":  {"bg": "#e74c3c", "fg": "white", "active": "#c0392b"},
+                "danger": {"bg": "#e74c3c", "fg": "white", "active": "#c0392b"},
                 "warning": {"bg": "#f39c12", "fg": "white", "active": "#e67e22"},
                 "secondary": {"bg": "#95a5a6", "fg": "white", "active": "#7f8c8d"},
                 "dark": {"bg": "#34495e", "fg": "white", "active": "#2c3e50"}
@@ -465,8 +465,10 @@ def select_multiple_folders_and_play():
 
             def on_enter(e):
                 btn.configure(bg=active_bg)
+
             def on_leave(e):
                 btn.configure(bg=bg)
+
             btn.bind("<Enter>", on_enter)
             btn.bind("<Leave>", on_leave)
 
@@ -483,9 +485,21 @@ def select_multiple_folders_and_play():
             console_section = tk.Frame(self.main_frame, bg=self.bg_color)
             console_section.pack(fill=tk.X, pady=(0, 15))
 
-            console_header = tk.Label(console_section, text="Player Console",
+            console_header_frame = tk.Frame(console_section, bg=self.bg_color)
+            console_header_frame.pack(fill=tk.X, pady=(0, 10))
+
+            console_header = tk.Label(console_header_frame, text="Player Console",
                                       font=self.header_font, bg=self.bg_color, fg=self.text_color)
-            console_header.pack(anchor='w', pady=(0, 10))
+            console_header.pack(side=tk.LEFT, anchor='w')
+
+            self.clear_console_button = self.create_button(
+                console_header_frame,
+                text="Clear Console",
+                command=self.clear_console,
+                variant="dark",
+                size="sm"
+            )
+            self.clear_console_button.pack(side=tk.LEFT, padx=(10, 0), anchor='w')
 
             console_container = tk.Frame(console_section, bg=self.bg_color,
                                          highlightbackground="#cccccc",
@@ -517,18 +531,6 @@ def select_multiple_folders_and_play():
             )
             self.console_text.pack(fill=tk.BOTH, expand=True)
             self.console_scrollbar.config(command=self.console_text.yview)
-
-            console_button_frame = tk.Frame(console_section, bg=self.bg_color)
-            console_button_frame.pack(fill=tk.X)
-
-            self.clear_console_button = self.create_button(
-                console_button_frame,
-                text="Clear Console",
-                command=self.clear_console,
-                variant="dark",
-                size="sm"
-            )
-            self.clear_console_button.pack(side=tk.LEFT)
 
             self.update_console("Video Player Console Ready")
             self.update_console("Select directories and click 'Play Videos' to start")
@@ -612,8 +614,6 @@ def select_multiple_folders_and_play():
             self.scrollbar = tk.Scrollbar(list_container)
             self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-
-
             self.dir_listbox = tk.Listbox(
                 list_container,
                 selectmode=tk.EXTENDED,
@@ -641,7 +641,41 @@ def select_multiple_folders_and_play():
             self.dir_listbox.bind('<ButtonRelease-1>', self._on_drop)
             self.scrollbar.config(command=self.dir_listbox.yview)
 
+            media_section = tk.Frame(self.dir_section, bg=self.bg_color)
+            media_section.pack(fill=tk.X, pady=(10, 0))
 
+            media_label = tk.Label(
+                media_section,
+                text="Media:",
+                font=self.small_font,
+                bg=self.bg_color,
+                fg="#666666"
+            )
+            media_label.pack(side=tk.LEFT, padx=(0, 8))
+
+            self.manage_playlist_button = self.create_button(
+                media_section, "Manage Playlists",
+                self._manage_playlists, "playlist", "sm"
+            )
+            self.manage_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
+
+            self.queue_manager_button = self.create_button(
+                media_section, "Manage Queue",
+                self._show_queue_manager, "primary", "sm"
+            )
+            self.queue_manager_button.pack(side=tk.LEFT, padx=(0, 5))
+
+            self.favorites_button = self.create_button(
+                media_section, "Favorites",
+                self._show_favorites_manager, "warning", "sm"
+            )
+            self.favorites_button.pack(side=tk.LEFT, padx=(0, 5))
+
+            self.watch_history_button = self.create_button(
+                media_section, "Watch History",
+                self._show_watch_history, "history", "sm"
+            )
+            self.watch_history_button.pack(side=tk.LEFT)
 
         def on_directory_focus_out(self, event):
             selection = self.dir_listbox.curselection()
@@ -658,9 +692,21 @@ def select_multiple_folders_and_play():
             self.exclusion_section = tk.Frame(self.content_frame, bg=self.bg_color)
             self.exclusion_section.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(10, 0))
 
-            exclusion_header = tk.Label(self.exclusion_section, text="Exclude Subdirectories and Videos",
+            exclusion_header_frame = tk.Frame(self.exclusion_section, bg=self.bg_color)
+            exclusion_header_frame.pack(fill=tk.X, pady=(0, 10))
+
+            exclusion_header = tk.Label(exclusion_header_frame, text="Subdirectories and Videos",
                                         font=self.header_font, bg=self.bg_color, fg=self.text_color)
-            exclusion_header.pack(anchor='w', pady=(0, 10))
+            exclusion_header.pack(side=tk.LEFT, anchor='w')
+
+            self.video_count_label = tk.Label(
+                exclusion_header_frame,
+                text="  —  0 videos",
+                font=self.normal_font,
+                bg=self.bg_color,
+                fg="#888888"
+            )
+            self.video_count_label.pack(side=tk.LEFT, anchor='w')
 
             self.selected_dir_label = tk.Label(
                 self.exclusion_section,
@@ -737,7 +783,6 @@ def select_multiple_folders_and_play():
             self.exclusion_buttons_frame = tk.Frame(self.exclusion_section, bg=self.bg_color)
             self.exclusion_buttons_frame.pack(fill=tk.X, pady=(10, 0))
 
-
             self.normal_mode_frame = tk.Frame(self.exclusion_buttons_frame, bg=self.bg_color)
             self.normal_mode_frame.pack(fill=tk.X)
 
@@ -751,7 +796,6 @@ def select_multiple_folders_and_play():
             self.excluded_only_var = tk.BooleanVar(value=self.show_only_excluded)
             self.expand_all_var = tk.BooleanVar(value=self.expand_all_default)
             self.save_directories_var = tk.BooleanVar(value=self.save_directories)
-
 
             self.toggle_videos_check = ttk.Checkbutton(
                 checkboxes_row,
@@ -799,143 +843,7 @@ def select_multiple_folders_and_play():
             )
             self.smart_resume_check.pack(side=tk.LEFT, padx=(0, 0))
 
-            buttons_row = tk.Frame(self.exclusion_buttons_frame, bg=self.bg_color)
-            buttons_row.pack(fill=tk.X, pady=(5, 0))
-
-            self.exclude_button = self.create_button(
-                buttons_row,
-                text="Exclude Selected",
-                command=self.exclude_subdirectories,
-                variant="danger",
-                size="sm"
-            )
-            self.exclude_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.include_button = self.create_button(
-                buttons_row,
-                text="Include Selected",
-                command=self.include_subdirectories,
-                variant="success",
-                size="sm"
-            )
-            self.include_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.exclude_all_button = self.create_button(
-                buttons_row,
-                text="Exclude All",
-                command=self.exclude_all_subdirectories,
-                variant="warning",
-                size="sm"
-            )
-            self.exclude_all_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.clear_exclusions_button = self.create_button(
-                buttons_row,
-                text="Clear All Exclusions",
-                command=self.clear_all_exclusions,
-                variant="secondary",
-                size="sm"
-            )
-            self.clear_exclusions_button.pack(side=tk.LEFT)
-
-            buttons_row3 = tk.Frame(self.exclusion_buttons_frame, bg=self.bg_color)
-            buttons_row3.pack(fill=tk.X, pady=(10, 0))
-
-            speed_container = tk.Frame(buttons_row3, bg=self.bg_color, relief=tk.FLAT)
-            speed_container.pack(fill=tk.X)
-
-            speed_label = tk.Label(speed_container, text="Speed:",
-                                   font=self.small_font, bg=self.bg_color, fg="#666666")
-            speed_label.pack(side=tk.LEFT, padx=(0, 8))
-
-            slider_frame = tk.Frame(speed_container, bg=self.bg_color, height=30)
-            slider_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
-            slider_frame.pack_propagate(False)
-
             self.speed_var = tk.DoubleVar(value=1.0)
-            self.speed_canvas = tk.Canvas(
-                slider_frame,
-                height=6,
-                bg=self.bg_color,
-                highlightthickness=0,
-                relief=tk.FLAT
-            )
-            self.speed_canvas.pack(fill=tk.X, pady=12)
-
-            self.slider_width = 200
-            self.slider_min = 0.25
-            self.slider_max = 2.0
-            self.slider_current = 1.0
-            self.dragging = False
-
-            self.speed_canvas.bind("<Button-1>", self.on_slider_click)
-            self.speed_canvas.bind("<B1-Motion>", self.on_slider_drag)
-            self.speed_canvas.bind("<ButtonRelease-1>", self.on_slider_release)
-            self.speed_canvas.bind("<Configure>", self.on_slider_configure)
-
-            self.speed_display = tk.Label(
-                speed_container,
-                text="1.0×",
-                font=Font(family=self.small_font.actual().get("family", "Segoe UI"),
-                          size=self.small_font.actual().get("size", 9), weight="bold"),
-                bg=self.bg_color,
-                fg=self.accent_color,
-                width=5
-            )
-            self.speed_display.pack(side=tk.LEFT, padx=(0, 8))
-
-            self.reset_speed_button = self.create_button(
-                speed_container,
-                text="1×",
-                command=self.reset_speed,
-                variant="secondary",
-                size="sm"
-            )
-            self.reset_speed_button.pack(side=tk.LEFT)
-
-            media_section = tk.Frame(self.exclusion_buttons_frame, bg=self.bg_color)
-            media_section.pack(fill=tk.X, pady=(10, 0))
-
-            media_label = tk.Label(
-                media_section,
-                text="Media:",
-                font=self.small_font,
-                bg=self.bg_color,
-                fg="#666666"
-            )
-            media_label.pack(side=tk.LEFT, padx=(0, 8))
-
-            # self.add_to_playlist_button = self.create_button(
-            #     media_section, "Add to Playlist",
-            #     self._add_to_playlist, "playlist", "sm"
-            # )
-            # self.add_to_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.manage_playlist_button = self.create_button(
-                media_section, "Manage Playlists",
-                self._manage_playlists, "playlist", "sm"
-            )
-            self.manage_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.queue_manager_button = self.create_button(
-                media_section, "Manage Queue",
-                self._show_queue_manager, "primary", "sm"
-            )
-            self.queue_manager_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.favorites_button = self.create_button(
-                media_section, "Favorites",
-                self._show_favorites_manager, "warning", "sm"
-            )
-            self.favorites_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.watch_history_button = self.create_button(
-                media_section, "Watch History",
-                self._show_watch_history, "history", "sm"
-            )
-            self.watch_history_button.pack(side=tk.LEFT)
-
-            self.root.after(100, self.draw_slider)
 
 
         def _create_context_menu(self):
@@ -1021,13 +929,13 @@ def select_multiple_folders_and_play():
                 text = self.dir_listbox.get(self._drag_start_index)
                 self.dir_listbox.delete(self._drag_start_index)
                 self.dir_listbox.insert(drop_index, text)
-                
+
                 # Keep the moved item selected
                 self.dir_listbox.selection_clear(0, tk.END)
                 self.dir_listbox.selection_set(drop_index)
                 self.dir_listbox.activate(drop_index)
                 self.current_selected_dir_index = drop_index
-                
+
                 # Trigger directory select to update other UI parts
                 self.on_directory_select(None)
 
@@ -1053,29 +961,29 @@ def select_multiple_folders_and_play():
             context_menu.add_command(label="Open in Grid View", command=self._open_grid_view_main_dirs)
             context_menu.add_separator()
             context_menu.add_command(label="Remove Selected", command=self.remove_directory)
-            
+
             context_menu.post(event.x_root, event.y_root)
 
         def _play_selected_main_dirs(self):
             selection = self.dir_listbox.curselection()
             if not selection:
                 return
-            
+
             all_videos = []
             for i in selection:
                 if i < len(self.selected_dirs):
                     root_dir = self.selected_dirs[i]
                     excluded_subdirs = self.excluded_subdirs.get(root_dir, [])
                     excluded_files = self.excluded_videos.get(root_dir, [])
-                    
+
                     videos = gather_videos(root_dir)
                     filtered_videos = []
                     for v_path in videos:
                         if not self.is_video_in_excluded_directory(v_path, excluded_subdirs) and \
-                           v_path not in excluded_files:
+                                v_path not in excluded_files:
                             filtered_videos.append(v_path)
                     all_videos.extend(filtered_videos)
-            
+
             if not all_videos:
                 messagebox.showinfo("Information", "No videos found in selected directories.")
                 return
@@ -1086,22 +994,22 @@ def select_multiple_folders_and_play():
             selection = self.dir_listbox.curselection()
             if not selection:
                 return
-                
+
             all_videos = []
             for i in selection:
                 if i < len(self.selected_dirs):
                     root_dir = self.selected_dirs[i]
                     excluded_subdirs = self.excluded_subdirs.get(root_dir, [])
                     excluded_files = self.excluded_videos.get(root_dir, [])
-                    
+
                     videos = gather_videos(root_dir)
                     filtered_videos = []
                     for v_path in videos:
                         if not self.is_video_in_excluded_directory(v_path, excluded_subdirs) and \
-                           v_path not in excluded_files:
+                                v_path not in excluded_files:
                             filtered_videos.append(v_path)
                     all_videos.extend(filtered_videos)
-            
+
             if not all_videos:
                 messagebox.showinfo("Information", "No videos found in selected directories.")
                 return
@@ -1209,6 +1117,14 @@ def select_multiple_folders_and_play():
             context_menu.add_command(
                 label="Include Selected",
                 command=self.include_subdirectories
+            )
+            context_menu.add_command(
+                label="Exclude All",
+                command=self.exclude_all_subdirectories
+            )
+            context_menu.add_command(
+                label="Clear All Exclusions",
+                command=self.clear_all_exclusions
             )
 
             context_menu.add_separator()
@@ -1685,8 +1601,8 @@ def select_multiple_folders_and_play():
                     total_videos += len(videos)
 
             self.video_count = total_videos
-            suffix = f" (scanning {pending} dir(s)...)" if pending else ""
-            self.video_count_label.config(text=f"Total Videos: {self.video_count}{suffix}")
+            suffix = f" (scanning {pending}…)" if pending else ""
+            self.video_count_label.config(text=f"  —  {self.video_count} videos{suffix}")
 
             if total_excluded > 0:
                 self.update_console(
@@ -2192,7 +2108,8 @@ def select_multiple_folders_and_play():
                     self.update_console(f"Playing from {len(all_directories)} directories")
                     self.controller = VLCPlayerControllerForMultipleDirectory(all_videos, all_video_to_dir,
                                                                               all_directories, self.update_console,
-                                                                              volume=self.volume, is_muted=self.is_muted)
+                                                                              volume=self.volume,
+                                                                              is_muted=self.is_muted)
                     self.controller.set_loop_mode(self.loop_mode)
                     self.controller.set_volume_save_callback(self._save_volume_callback)
                     self.controller.set_watch_history_callback(
@@ -2969,11 +2886,11 @@ def select_multiple_folders_and_play():
             self.settings_button.pack(side=tk.LEFT, padx=(0, 10))
 
             self.dual_player_button = self.create_button(
-              theme_frame,
-              text="Dual Player",
-              command=self._open_dual_player,
-              variant="primary",
-              size="md"
+                theme_frame,
+                text="Dual Player",
+                command=self._open_dual_player,
+                variant="primary",
+                size="md"
             )
             self.dual_player_button.pack(side=tk.LEFT, padx=(0, 10))
 
@@ -3010,17 +2927,8 @@ def select_multiple_folders_and_play():
             self.play_button.pack(side=tk.LEFT)
 
         def setup_status_section(self):
-            self.status_frame = tk.Frame(self.main_frame, bg=self.bg_color)
-            self.status_frame.pack(fill=tk.X)
-
-            self.video_count_label = tk.Label(
-                self.status_frame,
-                text="Total Videos: 0",
-                font=self.normal_font,
-                bg=self.bg_color,
-                fg=self.text_color
-            )
-            self.video_count_label.pack(side=tk.LEFT)
+            # Video count is now shown inline in the exclusion section header
+            pass
 
         def _show_filter_dialog(self):
             self.filter_sort_ui.show_filter_dialog()
@@ -3609,22 +3517,22 @@ def select_multiple_folders_and_play():
             self.settings_manager.show_settings()
 
         def _open_dual_player(self):
-          self.dual_player_manager.show()
+            self.dual_player_manager.show()
 
-          selected_dir = self.get_current_selected_directory()
-          if selected_dir:
-              cache = self.scan_cache.get(selected_dir)
-              if cache:
-                  videos, _, _ = cache
-                  filtered = [v for v in videos
-                              if not self.is_video_excluded(selected_dir, v)]
-                  if filtered:
-                      self.root.after(
-                          400,
-                          lambda: self.dual_player_manager.preload(
-                              videos1=filtered[:200]
-                          )
-                      )
+            selected_dir = self.get_current_selected_directory()
+            if selected_dir:
+                cache = self.scan_cache.get(selected_dir)
+                if cache:
+                    videos, _, _ = cache
+                    filtered = [v for v in videos
+                                if not self.is_video_excluded(selected_dir, v)]
+                    if filtered:
+                        self.root.after(
+                            400,
+                            lambda: self.dual_player_manager.preload(
+                                videos1=filtered[:200]
+                            )
+                        )
 
         def _save_volume_callback(self, volume, is_muted=None):
             self.volume = volume

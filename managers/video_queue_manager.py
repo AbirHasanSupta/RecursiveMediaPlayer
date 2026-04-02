@@ -433,6 +433,11 @@ class QueueUI:
         right_buttons = tk.Frame(button_frame, bg=self.theme_provider.bg_color)
         right_buttons.pack(side=tk.RIGHT)
 
+        self.close_btn = self.theme_provider.create_button(
+            right_buttons, "Close", self.queue_window.destroy, "secondary", "md"
+        )
+        self.close_btn.pack(side=tk.RIGHT, padx=(5, 0))
+
         self.clear_btn = self.theme_provider.create_button(
             right_buttons, "Clear All", self._clear_queue, "warning", "md"
         )
@@ -441,12 +446,8 @@ class QueueUI:
         self.play_btn = self.theme_provider.create_button(
             right_buttons, "▶ Play Queue", self._play_queue, "success", "md"
         )
-        self.play_btn.pack(side=tk.RIGHT, padx=(5, 0))
+        self.play_btn.pack(side=tk.RIGHT)
 
-        self.close_btn = self.theme_provider.create_button(
-            right_buttons, "Close", self.queue_window.destroy, "secondary", "md"
-        )
-        self.close_btn.pack(side=tk.RIGHT)
 
     def _refresh_queue(self):
         def refresh():

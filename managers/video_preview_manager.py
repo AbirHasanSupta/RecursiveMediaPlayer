@@ -211,7 +211,7 @@ class ThumbnailStorage:
         self.thumbnails_dir = base / "Recursive Media Player" / "Thumbnails"
         self.blobs_dir = self.thumbnails_dir / "blobs"
         self.blobs_dir.mkdir(parents=True, exist_ok=True)
-        _hide_file(self.blobs_dir)
+        # _hide_file(self.blobs_dir)
         self.index_file = self.thumbnails_dir / "index.pkl"
         self._index_lock = threading.Lock()
 
@@ -237,7 +237,7 @@ class ThumbnailStorage:
     def write_blob(self, key: str, data: bytes, ext: str) -> Path:
         blob_path = self.blobs_dir / (key + ext)
         blob_path.write_bytes(data)
-        blob_path = _hide_file(blob_path)
+        # blob_path = _hide_file(blob_path)
         return blob_path
 
     def delete_blob(self, blob_path: Optional[Path]):
