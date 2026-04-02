@@ -54,6 +54,32 @@ def _safe_unlink(path):
         pass
 
 
+def _hide_file(path: Path):
+    try:
+        if os.name == "nt":
+            import ctypes
+            FILE_ATTRIBUTE_HIDDEN = 0x02
+            ctypes.windll.kernel32.SetFileAttributesW(str(path), FILE_ATTRIBUTE_HIDDEN)
+
+        elif os.sys.platform == "darwin":
+            import ctypes, ctypes.util
+            libc_name = ctypes.util.find_library("c")
+            if libc_name:
+                libc = ctypes.CDLL(libc_name, use_errno=True)
+                libc.chflags(str(path).encode(), 0x8000)
+
+        else:
+            if path.name and not path.name.startswith("."):
+                hidden = path.with_name("." + path.name)
+                path.rename(hidden)
+                return hidden
+
+    except Exception:
+        pass
+
+    return path
+
+
 # ---------------------------------------------------------------------------
 # LRU PhotoImage cache
 # ---------------------------------------------------------------------------
@@ -185,6 +211,7 @@ class ThumbnailStorage:
         self.thumbnails_dir = base / "Recursive Media Player" / "Thumbnails"
         self.blobs_dir = self.thumbnails_dir / "blobs"
         self.blobs_dir.mkdir(parents=True, exist_ok=True)
+        _hide_file(self.blobs_dir)
         self.index_file = self.thumbnails_dir / "index.pkl"
         self._index_lock = threading.Lock()
 
@@ -210,6 +237,7 @@ class ThumbnailStorage:
     def write_blob(self, key: str, data: bytes, ext: str) -> Path:
         blob_path = self.blobs_dir / (key + ext)
         blob_path.write_bytes(data)
+        blob_path = _hide_file(blob_path)
         return blob_path
 
     def delete_blob(self, blob_path: Optional[Path]):
