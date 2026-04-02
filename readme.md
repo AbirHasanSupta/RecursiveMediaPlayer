@@ -8,12 +8,19 @@ A sophisticated video player application with AI-powered semantic search capabil
 - **Recursive Directory Scanning**: Automatically discovers videos in directory trees
 - **Multi-Monitor Support**: Switch between monitors during playback
 - **Advanced Exclusion System**: Exclude specific subdirectories and videos from playback
-- **Resume Playback**: Continue from where you last left off
-- **Theme Support**: Light and dark mode themes
-- **Playlist Management**: Create and manage video playlists
-- **Watch History Tracking**: Tracks watched videos and playback positions
-- **Video Preview Generation**: Preview videos before playback
-- **Settings Management**: Save and load user/app preferences
+- **Resume Playback**: Continue from where you last left off with smart resume capabilities
+- **Theme Support**: Light, dark, and custom themes
+- **Playlist Management**: Create, edit, and manage multiple video playlists
+- **Watch History Tracking**: Detailed tracking of watched videos and playback positions
+- **Video Preview Generation**: Hover-based video previews and visual thumbnails
+- **Advanced Grid View**: Visual explorer for browsing video collections
+- **Advanced Filter & Sort**: Filter by resolution, size, or date, and sort by various criteria
+- **Google Drive Support**: Stream and download videos directly from public Google Drive folders or links
+- **Voice Commands**: Control playback and navigation using natural voice commands
+- **Dual Player Mode**: Play and compare two videos side-by-side
+- **Favorites System**: Bookmark and organize your favorite videos for quick access
+- **Video Queue**: Manual queue management for fine-tuned playback order
+- **Settings Management**: Persistent save/load for all user and application preferences
 
 ### AI-Powered Search
 - **Semantic Video Search**: Find videos using natural language descriptions
@@ -44,11 +51,12 @@ pip install -r requirements\ai_requirements.txt
 - vlc-python
 - screeninfo
 - tkinter (usually included with Python)
-- win32clipboard
-- win32con
+- pywin32 (for win32clipboard, win32con)
 - keyboard
 - opencv-python
 - numpy
+- SpeechRecognition (for voice commands)
+- PyAudio (for voice commands)
 
 #### AI Search Dependencies (Optional)
 - torch
@@ -64,7 +72,7 @@ pip install -r requirements\ai_requirements.txt
 2. Install Python dependencies: `pip install -r requirements\requirements.txt`
 3. (Optional) For AI search: `pip install -r requirements\ai_requirements.txt`
 4. Ensure VLC Media Player is installed and accessible
-5. Run the application: `python exe_app.py`
+5. Run the application: `python app.py`
 
 ## Usage
 
@@ -72,7 +80,7 @@ pip install -r requirements\ai_requirements.txt
 
 1. **Launch the application**:
    ```cmd
-   python exe_app.py
+   python app.py
    ```
 2. **Add directories**: Click "Add Directory" to select folders containing videos
 3. **Configure exclusions** (optional): Select directories/videos to exclude from playback
@@ -100,6 +108,7 @@ pip install -r requirements\ai_requirements.txt
 | `-`           | Decrease playback speed |
 | `0`           | Reset speed to 1.0x     |
 | `T`           | Take screenshot         |
+| `V`           | Toggle voice commands   |
 | `Ctrl+C`      | Copy current video path |
 | `Esc`         | Stop playback           |
 
@@ -179,32 +188,50 @@ The application saves preferences automatically:
 - UI layout preferences
 
 ### Configuration Files
-- Config: `~/Documents/Recursive Media Player/config.json`
-- Screenshots: `~/Documents/Recursive Media Player/Screenshots/`
-- AI Indices: `~/Documents/Recursive Media Player/index_data/` (default)
+
+The application uses specific locations for different types of data:
+
+#### Application Settings
+- **Main Settings**: `%APPDATA%\Recursive Media Player\app_settings.json` (Windows)
+- **Linux/macOS**: `~/.config/Recursive Media Player/app_settings.json` or `~/Library/Application Support/...`
+
+#### Session & History Data
+- **Resume Positions**: `%LOCALAPPDATA%\Recursive Media Player\Resume\playback_positions.json`
+- **Watch History**: `%LOCALAPPDATA%\Recursive Media Player\History\watch_history.json`
+- **AI Search Indices**: `%LOCALAPPDATA%\Recursive Media Player\index_data\` (Default, configurable in Settings)
+- **Screenshots**: `~/Documents/Recursive Media Player/Screenshots/`
+
+#### User Content
+- **Playlists**: `~/Documents/Recursive Media Player/Playlists/playlists.json`
+- **Favorites**: `~/Documents/Recursive Media Player/Favorites/favorites.json`
 
 ## File Structure
 
 ```
 Recursive Video Player/
-├── exe_app.py                # Main GUI application
-├── enhanced_model.py         # AI search system
-├── vlc_player_controller.py  # Video playback controller
-├── key_press.py              # Keyboard input handling
-├── theme.py                  # Theme and configuration management  
-├── utils.py                  # Utility functions
-├── managers/                 # Playlist, history, resume, settings, preview managers
-│   ├── playlist_manager.py
-│   ├── resume_playback_manager.py
-│   ├── settings_manager.py
-│   ├── video_preview_manager.py
-│   └── watch_history_manager.py
+├── app.py                    # Main GUI application entry point
+├── build_app.py              # Extended application features and UI
+├── enhanced_model.py         # AI search system and model logic
+├── vlc_player_controller.py  # Video playback controller and VLC integration
+├── key_press.py              # Global keyboard hotkey handling
+├── theme.py                  # Theme and UI styling configuration
+├── utils.py                  # Utility functions for file and video processing
+├── managers/                 # Specialized management systems
+│   ├── dual_player_manager.py     # Side-by-side video playback
+│   ├── favorites_manager.py       # Favorites system and UI
+│   ├── filter_sort_manager.py     # Advanced filtering/sorting logic
+│   ├── google_drive_manager.py    # Google Drive integration
+│   ├── grid_view_manager.py       # Visual video browser
+│   ├── playlist_manager.py        # Playlist creation and management
+│   ├── resume_playback_manager.py # Playback session recovery
+│   ├── settings_manager.py        # Persistent application settings
+│   ├── video_preview_manager.py   # Thumbnail and hover-preview logic
+│   ├── video_queue_manager.py     # Manual video queue
+│   ├── voice_command_manager.py   # Voice recognition and control
+│   └── watch_history_manager.py   # Playback history tracking
 ├── requirements/
 │   ├── requirements.txt      # Core dependencies
 │   └── ai_requirements.txt   # AI/ML dependencies
-├── build/                    # Build artifacts and executable
-│   └── video_player/
-│       └── RecursiveVideoPlayer.exe
 └── README.md                 # This file
 ```
 
