@@ -507,13 +507,15 @@ class VideoPreviewTooltip:
                 except Exception:
                     fit_w = fit_h = SQUARE
 
-            sw = self.parent.winfo_screenwidth()
-            sh = self.parent.winfo_screenheight()
-            tw = SQUARE + 20          # outer padding (padx=5 × 2 + bd=1 × 2 + some slack)
-            th = SQUARE + 42          # square canvas + filename label row
-            x = min(x, sw - tw - 10)
-            y = min(y, sh - th - 10)
-            self.tooltip_window.geometry(f"+{x + 10}+{y + 10}")
+            tw = SQUARE + 20
+            th = SQUARE + 42
+
+            mon_x, mon_y, mon_w, mon_h = self._get_monitor_geometry(x, y)
+            tip_x = min(x + 10, mon_x + mon_w - tw - 10)
+            tip_y = min(y + 10, mon_y + mon_h - th - 10)
+            tip_x = max(tip_x, mon_x + 2)
+            tip_y = max(tip_y, mon_y + 2)
+            self.tooltip_window.geometry(f"+{tip_x}+{tip_y}")
 
             frame = tk.Frame(self.tooltip_window, bg="black", padx=5, pady=5)
             frame.pack()
@@ -581,6 +583,74 @@ class VideoPreviewTooltip:
         except Exception as e:
             print(f"[Tooltip] error: {e}")
             self.hide_preview()
+
+    # ------------------------------------------------------------------
+    # Monitor geometry helper
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _get_monitor_geometry(cursor_x: int, cursor_y: int):
+        """
+        Return (x, y, width, height) of the monitor that contains the given
+        screen-absolute cursor position.
+
+        Tries the platform-specific APIs first (Windows: ctypes EnumDisplayMonitors;
+        other: screeninfo or Gdk).  Falls back to Tkinter's virtual-screen origin
+        + winfo_screenwidth/height if nothing else is available (single-monitor
+        equivalent, keeps old behaviour).
+        """
+        # --- Windows ---
+        if os.name == "nt":
+            try:
+                import ctypes
+                import ctypes.wintypes as wt
+
+                MONITOR_DEFAULTTONEAREST = 2
+
+                class RECT(ctypes.Structure):
+                    _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                                 ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+                class MONITORINFO(ctypes.Structure):
+                    _fields_ = [("cbSize", ctypes.c_ulong),
+                                 ("rcMonitor", RECT),
+                                 ("rcWork", RECT),
+                                 ("dwFlags", ctypes.c_ulong)]
+
+                pt = wt.POINT(cursor_x, cursor_y)
+                hmon = ctypes.windll.user32.MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST)
+                info = MONITORINFO()
+                info.cbSize = ctypes.sizeof(MONITORINFO)
+                ctypes.windll.user32.GetMonitorInfoW(hmon, ctypes.byref(info))
+                r = info.rcMonitor
+                return r.left, r.top, r.right - r.left, r.bottom - r.top
+            except Exception:
+                pass
+
+        try:
+            from screeninfo import get_monitors
+            for m in get_monitors():
+                if m.x <= cursor_x < m.x + m.width and m.y <= cursor_y < m.y + m.height:
+                    return m.x, m.y, m.width, m.height
+            best = min(get_monitors(),
+                       key=lambda m: abs(m.x + m.width // 2 - cursor_x) +
+                                     abs(m.y + m.height // 2 - cursor_y))
+            return best.x, best.y, best.width, best.height
+        except ImportError:
+            pass
+
+        try:
+            import tkinter as _tk
+            _r = _tk.Tk()
+            _r.withdraw()
+            sw = _r.winfo_screenwidth()
+            sh = _r.winfo_screenheight()
+            vx = _r.winfo_vrootx()
+            vy = _r.winfo_vrooty()
+            _r.destroy()
+            return vx, vy, sw, sh
+        except Exception:
+            return 0, 0, 1920, 1080
 
     def hide_preview(self):
         if self.tooltip_window:
