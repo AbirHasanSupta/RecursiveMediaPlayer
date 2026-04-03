@@ -1154,6 +1154,16 @@ def select_multiple_folders_and_play():
             )
 
             context_menu.add_separator()
+            context_menu.add_command(
+                label="▶ Play in Dual Player 1",
+                command=lambda: self._context_play_in_dual_player(selection, slot=1)
+            )
+            context_menu.add_command(
+                label="▶ Play in Dual Player 2",
+                command=lambda: self._context_play_in_dual_player(selection, slot=2)
+            )
+
+            context_menu.add_separator()
 
             context_menu.add_command(
                 label=f"Copy ({len(selection)} item{'s' if len(selection) > 1 else ''})",
@@ -1182,6 +1192,26 @@ def select_multiple_folders_and_play():
                     self.root.after(100, lambda: context_menu.destroy())
                 except:
                     pass
+
+        def _context_play_in_dual_player(self, selection, slot: int):
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                return
+
+            final_videos = self._resolve_selection_indices_to_videos(selected_dir, selection)
+            if not final_videos:
+                messagebox.showwarning("No Videos", "No valid non-excluded videos found in selection.")
+                return
+
+            self.dual_player_manager.show()
+
+            if slot == 1:
+                self.root.after(400, lambda: self.dual_player_manager._window.slot1.load_videos(final_videos))
+            else:
+                self.root.after(400, lambda: self.dual_player_manager._window.slot2.load_videos(final_videos))
+
+            self.update_console(
+                f"Sent {len(final_videos)} video(s) to Dual Player — Player {slot}")
 
         def _show_favorites_manager(self):
             selected_dir = self.get_current_selected_directory()
@@ -3529,8 +3559,8 @@ def select_multiple_folders_and_play():
                     if filtered:
                         self.root.after(
                             400,
-                            lambda: self.dual_player_manager.preload(
-                                videos1=filtered[:200]
+                            lambda: self.dual_player_manager._window.slot1.load_videos(
+                                filtered[:200]
                             )
                         )
 
