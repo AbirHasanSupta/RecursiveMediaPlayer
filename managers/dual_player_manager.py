@@ -180,7 +180,7 @@ class DualPlayerSlot:
         self.spd_label.bind("<Button-3>",        lambda e: self._decrease_speed())
         self.spd_label.bind("<Double-Button-1>", lambda e: self._reset_speed())
 
-        tk.Label(ctrl, text="Spd:", font=Font(family="Segoe UI", size=8),
+        tk.Label(ctrl, text="", font=Font(family="Segoe UI", size=8),
                  bg=PANEL_BG, fg=TEXT_DIM).pack(side=tk.RIGHT)
 
         # time label — right of Spd

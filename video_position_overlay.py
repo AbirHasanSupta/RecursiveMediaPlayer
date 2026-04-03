@@ -284,7 +284,7 @@ class VideoPositionOverlay:
         self._spd_label.bind("<Double-Button-1>", lambda e: self.reset_speed())
         self._spd_label.bind("<MouseWheel>",      self._on_spd_scroll)
 
-        tk.Label(ctrl, text="Spd:", font=Font(family="Segoe UI", size=8),
+        tk.Label(ctrl, text="", font=Font(family="Segoe UI", size=8),
                  bg=PANEL_BG, fg=TEXT_DIM).pack(side=tk.RIGHT)
 
         # keep overlay shown while mouse is over it
