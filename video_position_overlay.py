@@ -1,797 +1,627 @@
-import tkinter as tk
-from tkinter import ttk
-import threading
-import time
-from datetime import timedelta
+import os
 import ctypes
 import ctypes.wintypes
+import threading
+import tkinter as tk
+from tkinter.font import Font
+
+
+def _fmt_time(ms: int) -> str:
+    s = max(0, int(ms / 1000))
+    h = s // 3600
+    m = (s % 3600) // 60
+    sec = s % 60
+    return f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
+
+
+# ── Win32 helpers ─────────────────────────────────────────────────────────────
+
+def _get_vlc_hwnd():
+    """Return the HWND of the running VLC window, or None."""
+    user32 = ctypes.windll.user32
+    found = []
+
+    def _cb(hwnd, _):
+        if user32.IsWindowVisible(hwnd):
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length > 0:
+                buf = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, buf, length + 1)
+                if "vlc" in buf.value.lower():
+                    found.append(hwnd)
+        return True
+
+    WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool,
+                                     ctypes.POINTER(ctypes.c_int),
+                                     ctypes.POINTER(ctypes.c_int))
+    user32.EnumWindows(WNDENUMPROC(_cb), ctypes.pointer(ctypes.c_int(0)))
+    return found[0] if found else None
+
+
+def _window_rect(hwnd):
+    """Return (x, y, w, h) for the given HWND, or None."""
+    try:
+        rect = ctypes.wintypes.RECT()
+        ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        return rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+    except Exception:
+        return None
+
+
+def _cursor_pos():
+    """Return (x, y) absolute mouse position."""
+    pt = ctypes.wintypes.POINT()
+    ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+    return pt.x, pt.y
+
+
+# ── Overlay ───────────────────────────────────────────────────────────────────
+
+OVERLAY_H   = 120   # height of the floating panel in pixels
+OVERLAY_W   = 680   # fixed width
+PANEL_BG    = "#1c1c1c"
+ACCENT      = "#E50914"
+TEXT_DIM    = "#888888"
+TEXT_BRIGHT = "#dddddd"
+BTN_BG      = "#2e2e2e"
+BTN_HOVER   = "#555555"
 
 
 class VideoPositionOverlay:
+    """
+    A hover-triggered floating control panel for the main VLC player.
+
+    Behaviour
+    ---------
+    * Invisible by default.
+    * While the mouse is anywhere inside the VLC window, the panel slides in
+      at the bottom of that window (mouse-position polled every 120 ms so it
+      works even when VLC owns the HWND).
+    * Fades out 500 ms after the cursor leaves the VLC window.
+    * Fully interactive — seek bar, play/pause, prev/next, volume, speed.
+    """
+
     def __init__(self, controller, logger=None):
-        self.controller = controller
-        self.logger = logger
-        self.overlay_window = None
+        self.controller   = controller
+        self.logger       = logger
+
+        # state
+        self._vlc_hwnd        = None
+        self._visible         = False
+        self._hide_job        = None
+        self._poll_job        = None
+        self._update_job      = None
+        self._is_dragging     = False
+        self._is_hovering_bar = False
+        # When True the user explicitly toggled the overlay OFF — suppress
+        # the mouse-poll auto-show until the user toggles it ON again.
+        self._user_hidden     = False
+
+        # tk widgets (created lazily on first show)
+        self.overlay_window   = None
+        self._seek_canvas     = None
+        self._play_btn        = None
+        self._vol_label       = None
+        self._vol_value       = None
+        self._spd_label       = None
+        self._title_label     = None
+        self._time_label      = None
+
+        # public compat shim (old code checks is_visible)
         self.is_visible = False
-        self.is_dragging = False
-        self.update_timer = None
-        self.position_update_timer = None
-        self.position_lock_timer = None
-        self.is_hovering = False
-        self.last_player_hwnd = None
-        self.target_x = 0
-        self.target_y = 0
-        self.position_locked = False
 
-        self.bg_color = "#000000"
-        self.overlay_alpha = 0.85
-        self.progress_bg = "#404040"
-        self.progress_fg = "#E50914"
-        self.buffered_color = "#808080"
-        self.text_color = "#FFFFFF"
-        self.handle_color = "#FFFFFF"
-
-    def get_vlc_window_position(self):
-        """Get VLC player window position and size"""
-        try:
-            user32 = ctypes.windll.user32
-
-            hwnd = user32.GetForegroundWindow()
-
-            if not hwnd:
-                hwnd = user32.FindWindowW(None, "VLC media player")
-
-            if not hwnd:
-                def enum_windows_callback(hwnd, windows):
-                    if user32.IsWindowVisible(hwnd):
-                        length = user32.GetWindowTextLengthW(hwnd)
-                        if length > 0:
-                            buff = ctypes.create_unicode_buffer(length + 1)
-                            user32.GetWindowTextW(hwnd, buff, length + 1)
-                            title = buff.value
-                            if "vlc" in title.lower():
-                                windows.append(hwnd)
-                    return True
-
-                windows = []
-                EnumWindowsProc = ctypes.WINFUNCTYPE(
-                    ctypes.c_bool,
-                    ctypes.POINTER(ctypes.c_int),
-                    ctypes.POINTER(ctypes.c_int))
-                user32.EnumWindows(EnumWindowsProc(enum_windows_callback), ctypes.pointer(ctypes.c_int(0)))
-
-                if windows:
-                    hwnd = windows[0]
-
-            if hwnd and user32.IsWindowVisible(hwnd):
-                self.last_player_hwnd = hwnd
-                rect = ctypes.wintypes.RECT()
-                user32.GetWindowRect(hwnd, ctypes.byref(rect))
-
-                return {
-                    'x': rect.left,
-                    'y': rect.top,
-                    'width': rect.right - rect.left,
-                    'height': rect.bottom - rect.top,
-                    'hwnd': hwnd
-                }
-
-            if self.last_player_hwnd and user32.IsWindowVisible(self.last_player_hwnd):
-                rect = ctypes.wintypes.RECT()
-                user32.GetWindowRect(self.last_player_hwnd, ctypes.byref(rect))
-                return {
-                    'x': rect.left,
-                    'y': rect.top,
-                    'width': rect.right - rect.left,
-                    'height': rect.bottom - rect.top,
-                    'hwnd': self.last_player_hwnd
-                }
-
-        except Exception as e:
-            if self.logger:
-                self.logger(f"Error getting VLC window: {e}")
-
-        return None
-
-    def get_monitor_from_position(self, x, y):
-        """Determine which monitor a position is on"""
-        try:
-            from screeninfo import get_monitors
-            monitors = get_monitors()
-
-            for i, monitor in enumerate(monitors, 1):
-                if (monitor.x <= x < monitor.x + monitor.width and
-                        monitor.y <= y < monitor.y + monitor.height):
-                    return i, monitor
-
-            if monitors:
-                return 1, monitors[0]
-        except Exception as e:
-            if self.logger:
-                self.logger(f"Error detecting monitor: {e}")
-
-        return 1, None
+    # ── public API (matches old VideoPositionOverlay) ─────────────────────────
 
     def create_overlay(self):
-        """Create the floating overlay window"""
-        if self.overlay_window:
+        """Build the Toplevel window (hidden).  Safe to call multiple times."""
+        if self.overlay_window and self.overlay_window.winfo_exists():
             return
+        self._build_window()
 
-        self.overlay_window = tk.Toplevel()
-        self.overlay_window.title("Video Controls")
-
-        self.overlay_window.overrideredirect(True)
-        self.overlay_window.attributes('-topmost', True)
-
+    def _run_on_main(self, fn):
+        """Schedule fn() on the Tk main thread. Safe to call from any thread."""
         try:
-            self.overlay_window.attributes('-alpha', self.overlay_alpha)
-        except:
-            pass
-
-        self.container = tk.Frame(
-            self.overlay_window,
-            bg=self.bg_color,
-            padx=20,
-            pady=15
-        )
-        self.container.pack(fill=tk.BOTH, expand=True)
-
-        info_frame = tk.Frame(self.container, bg=self.bg_color)
-        info_frame.pack(fill=tk.X, pady=(0, 10))
-
-        self.title_label = tk.Label(
-            info_frame,
-            text="Video Title",
-            font=("Segoe UI", 11, "bold"),
-            bg=self.bg_color,
-            fg=self.text_color,
-            anchor='w'
-        )
-        self.title_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        progress_frame = tk.Frame(self.container, bg=self.bg_color)
-        progress_frame.pack(fill=tk.X, pady=(0, 8))
-
-        time_frame = tk.Frame(progress_frame, bg=self.bg_color)
-        time_frame.pack(fill=tk.X, pady=(0, 5))
-
-        self.current_time_label = tk.Label(
-            time_frame,
-            text="0:00",
-            font=("Segoe UI", 9),
-            bg=self.bg_color,
-            fg=self.text_color
-        )
-        self.current_time_label.pack(side=tk.LEFT)
-
-        self.duration_label = tk.Label(
-            time_frame,
-            text="0:00",
-            font=("Segoe UI", 9),
-            bg=self.bg_color,
-            fg=self.text_color
-        )
-        self.duration_label.pack(side=tk.RIGHT)
-
-        self.progress_canvas = tk.Canvas(
-            progress_frame,
-            height=8,
-            bg=self.bg_color,
-            highlightthickness=0,
-            cursor="hand2"
-        )
-        self.progress_canvas.pack(fill=tk.X)
-
-        self.progress_canvas.bind("<Button-1>", self.on_progress_click)
-        self.progress_canvas.bind("<B1-Motion>", self.on_progress_drag)
-        self.progress_canvas.bind("<ButtonRelease-1>", self.on_progress_release)
-        self.progress_canvas.bind("<Enter>", self.on_progress_enter)
-        self.progress_canvas.bind("<Leave>", self.on_progress_leave)
-        self.progress_canvas.bind("<Motion>", self.on_progress_hover)
-        self.progress_canvas.bind("<Configure>", lambda e: self.draw_progress())
-
-        controls_frame = tk.Frame(self.container, bg=self.bg_color)
-        controls_frame.pack(fill=tk.X)
-
-        self.play_pause_btn = tk.Button(
-            controls_frame,
-            text="⏸",
-            font=("Segoe UI", 14),
-            bg="#303030",
-            fg=self.text_color,
-            activebackground="#404040",
-            bd=0,
-            padx=10,
-            pady=5,
-            cursor="hand2",
-            command=self.toggle_pause
-        )
-        self.play_pause_btn.pack(side=tk.LEFT, padx=(0, 5))
-
-        prev_btn = tk.Button(
-            controls_frame,
-            text="⏮",
-            font=("Segoe UI", 12),
-            bg="#303030",
-            fg=self.text_color,
-            activebackground="#404040",
-            bd=0,
-            padx=8,
-            pady=5,
-            cursor="hand2",
-            command=self.previous_video
-        )
-        prev_btn.pack(side=tk.LEFT, padx=(0, 5))
-
-        next_btn = tk.Button(
-            controls_frame,
-            text="⏭",
-            font=("Segoe UI", 12),
-            bg="#303030",
-            fg=self.text_color,
-            activebackground="#404040",
-            bd=0,
-            padx=8,
-            pady=5,
-            cursor="hand2",
-            command=self.next_video
-        )
-        next_btn.pack(side=tk.LEFT, padx=(0, 5))
-
-        volume_frame = tk.Frame(controls_frame, bg=self.bg_color)
-        volume_frame.pack(side=tk.LEFT, padx=(10, 0))
-
-        self.volume_label = tk.Label(
-            volume_frame,
-            text="🔊",
-            font=("Segoe UI", 11),
-            bg=self.bg_color,
-            fg=self.text_color,
-            cursor="hand2"
-        )
-        self.volume_label.pack(side=tk.LEFT, padx=(0, 5))
-        self.volume_label.bind("<Button-1>", lambda e: self.volume_up())
-        self.volume_label.bind("<Button-3>", lambda e: self.volume_down())
-        self.volume_label.bind("<MouseWheel>", self.on_volume_scroll)
-
-        self.volume_value_label = tk.Label(
-            volume_frame,
-            text="50%",
-            font=("Segoe UI", 9),
-            bg=self.bg_color,
-            fg=self.text_color,
-            width=4
-        )
-        self.volume_value_label.pack(side=tk.LEFT)
-
-        speed_frame = tk.Frame(controls_frame, bg=self.bg_color)
-        speed_frame.pack(side=tk.RIGHT)
-
-        self.speed_label = tk.Label(
-            speed_frame,
-            text="1.0×",
-            font=("Segoe UI", 9, "bold"),
-            bg=self.bg_color,
-            fg=self.text_color,
-            cursor="hand2"
-        )
-        self.speed_label.pack(side=tk.LEFT)
-        self.speed_label.bind("<Button-1>", lambda e: self.increase_speed())
-        self.speed_label.bind("<Button-3>", lambda e: self.decrease_speed())
-        self.speed_label.bind("<Double-Button-1>", lambda e: self.reset_speed())
-        self.speed_label.bind("<MouseWheel>", self.on_speed_scroll)
-
-        self.create_tooltip()
-
-        self.overlay_window.withdraw()
-
-    def create_tooltip(self):
-        """Create hover tooltip for preview time"""
-        self.tooltip = tk.Toplevel(self.overlay_window)
-        self.tooltip.overrideredirect(True)
-        self.tooltip.attributes('-topmost', True)
-
-        try:
-            self.tooltip.attributes('-alpha', 0.9)
-        except:
-            pass
-
-        self.tooltip_label = tk.Label(
-            self.tooltip,
-            text="0:00",
-            font=("Segoe UI", 9, "bold"),
-            bg="#202020",
-            fg=self.text_color,
-            padx=8,
-            pady=4
-        )
-        self.tooltip_label.pack()
-
-        self.tooltip.withdraw()
-
-    def position_window(self):
-        """Position overlay in top-left of the monitor where VLC is playing"""
-        if not self.overlay_window:
-            return
-
-        self.overlay_window.update_idletasks()
-
-        overlay_width = 600
-        overlay_height = self.overlay_window.winfo_reqheight()
-
-        x = 20
-        y = 20
-
-        vlc_pos = self.get_vlc_window_position()
-        if vlc_pos:
-            vlc_center_x = vlc_pos['x'] + vlc_pos['width'] // 2
-            vlc_center_y = vlc_pos['y'] + vlc_pos['height'] // 2
-
-            monitor_num, monitor = self.get_monitor_from_position(vlc_center_x, vlc_center_y)
-
-            if monitor:
-                x = monitor.x + 20
-                y = monitor.y + 20
-
-        self.target_x = x
-        self.target_y = y
-
-        self.overlay_window.geometry(f"{overlay_width}x{overlay_height}+{x}+{y}")
-
-    def lock_position(self):
-        """Continuously enforce the window position"""
-        if not self.is_visible or not self.overlay_window or not self.position_locked:
-            return
-
-        try:
-            current_x = self.overlay_window.winfo_x()
-            current_y = self.overlay_window.winfo_y()
-
-            if abs(current_x - self.target_x) > 2 or abs(current_y - self.target_y) > 2:
-                self.overlay_window.geometry(f"+{self.target_x}+{self.target_y}")
-        except:
-            pass
-
-        if self.is_visible and self.position_locked:
-            self.position_lock_timer = self.overlay_window.after(50, self.lock_position)
-
-    def show(self):
-        """Show the overlay"""
-        if not self.overlay_window:
-            self.create_overlay()
-
-        self.is_visible = True
-        self.overlay_window.deiconify()
-        self.overlay_window.update()
-
-        self.position_window()
-        self.overlay_window.update()
-
-        self.position_locked = True
-        self.lock_position()
-
-        self.update_display()
-        self.start_updates()
-        self.start_position_tracking()
-
-    def hide(self):
-        """Hide the overlay"""
-        self.is_visible = False
-        self.position_locked = False
-
-        if self.position_lock_timer:
-            try:
-                self.overlay_window.after_cancel(self.position_lock_timer)
-            except:
-                pass
-            self.position_lock_timer = None
-
-        if self.overlay_window:
-            self.overlay_window.withdraw()
-        if self.tooltip:
-            self.tooltip.withdraw()
-        self.stop_updates()
-        self.stop_position_tracking()
-
-    def toggle(self):
-        """Toggle overlay visibility"""
-        if self.is_visible:
-            self.hide()
-        else:
-            self.show()
-
-    def update_display(self):
-        """Update all display elements"""
-        if not self.is_visible or not self.controller:
-            return
-
-        try:
-            if self.controller.index < len(self.controller.videos):
-                import os
-                video_path = self.controller.videos[self.controller.index]
-                video_name = os.path.basename(video_path)
-                if len(video_name) > 50:
-                    video_name = video_name[:47] + "..."
-                self.title_label.config(text=video_name)
-
-            if self.controller.player.is_playing():
-                self.play_pause_btn.config(text="⏸")
+            if self.overlay_window and self.overlay_window.winfo_exists():
+                self.overlay_window.after(0, fn)
             else:
-                self.play_pause_btn.config(text="▶")
-
-            volume = self.controller.volume
-            self.volume_value_label.config(text=f"{volume}%")
-
-            if getattr(self.controller, 'is_muted', False):
-                self.volume_label.config(text="🔇")
-            elif volume == 0:
-                self.volume_label.config(text="🔇")
-            elif volume < 30:
-                self.volume_label.config(text="🔈")
-            elif volume < 70:
-                self.volume_label.config(text="🔉")
-            else:
-                self.volume_label.config(text="🔊")
-
-            try:
-                speed = self.controller.player.get_rate()
-                self.speed_label.config(text=f"{speed:.2f}×")
-            except:
-                pass
-
-            self.draw_progress()
-
-        except Exception as e:
-            if self.logger:
-                self.logger(f"Error updating overlay: {e}")
-
-    def draw_progress(self):
-        """Draw the progress bar"""
-        if not self.progress_canvas:
-            return
-
-        try:
-            self.progress_canvas.delete("all")
-
-            canvas_width = self.progress_canvas.winfo_width()
-            if canvas_width <= 1:
-                return
-
-            canvas_height = self.progress_canvas.winfo_height()
-
-            current_time = self.controller.player.get_time()
-            duration = self.controller.player.get_length()
-
-            if duration <= 0:
-                duration = 1
-
-            self.current_time_label.config(text=self.format_time(current_time))
-            self.duration_label.config(text=self.format_time(duration))
-
-            progress = current_time / duration if duration > 0 else 0
-            progress_x = int(progress * canvas_width)
-
-            track_height = 4
-            track_y = canvas_height // 2
-            self.progress_canvas.create_rectangle(
-                0, track_y - track_height // 2,
-                canvas_width, track_y + track_height // 2,
-                fill=self.progress_bg,
-                outline="",
-                tags="track"
-            )
-
-            if progress_x > 0:
-                self.progress_canvas.create_rectangle(
-                    0, track_y - track_height // 2,
-                    progress_x, track_y + track_height // 2,
-                    fill=self.progress_fg,
-                    outline="",
-                    tags="progress"
-                )
-
-            handle_radius = 6 if self.is_hovering else 4
-            self.progress_canvas.create_oval(
-                progress_x - handle_radius,
-                track_y - handle_radius,
-                progress_x + handle_radius,
-                track_y + handle_radius,
-                fill=self.handle_color,
-                outline="",
-                tags="handle"
-            )
-
-        except Exception as e:
-            if self.logger:
-                self.logger(f"Error drawing progress: {e}")
-
-    def format_time(self, milliseconds):
-        """Format time in MM:SS or HH:MM:SS"""
-        seconds = int(milliseconds / 1000)
-        hours = seconds // 3600
-        minutes = (seconds % 3600) // 60
-        secs = seconds % 60
-
-        if hours > 0:
-            return f"{hours}:{minutes:02d}:{secs:02d}"
-        else:
-            return f"{minutes}:{secs:02d}"
-
-    def on_progress_click(self, event):
-        """Handle progress bar click"""
-        self.is_dragging = True
-        self.seek_to_position(event.x)
-
-    def on_progress_drag(self, event):
-        """Handle progress bar drag"""
-        if self.is_dragging:
-            self.seek_to_position(event.x)
-
-    def on_progress_release(self, event):
-        """Handle progress bar release"""
-        self.is_dragging = False
-
-    def on_progress_enter(self, event):
-        """Handle mouse enter progress bar"""
-        self.is_hovering = True
-        self.draw_progress()
-
-    def on_progress_leave(self, event):
-        """Handle mouse leave progress bar"""
-        self.is_hovering = False
-        self.tooltip.withdraw()
-        self.draw_progress()
-
-    def on_progress_hover(self, event):
-        """Handle mouse hover on progress bar"""
-        if not self.is_hovering:
-            return
-
-        try:
-            canvas_width = self.progress_canvas.winfo_width()
-            if canvas_width <= 1:
-                return
-
-            duration = self.controller.player.get_length()
-            hover_time = int((event.x / canvas_width) * duration)
-
-            self.tooltip_label.config(text=self.format_time(hover_time))
-
-            x = self.progress_canvas.winfo_rootx() + event.x - 20
-            y = self.progress_canvas.winfo_rooty() - 30
-
-            self.tooltip.geometry(f"+{x}+{y}")
-            self.tooltip.deiconify()
-
+                # window not built yet — use the controller's root if available
+                root = getattr(self.controller, '_tk_root', None)
+                if root:
+                    root.after(0, fn)
+                else:
+                    fn()   # last resort: call directly (should rarely happen)
         except Exception:
             pass
 
-    def seek_to_position(self, x):
-        """Seek video to position based on x coordinate"""
+    def show(self):
+        self._run_on_main(self._show_main)
+
+    def _show_main(self):
+        if not self.overlay_window or not self.overlay_window.winfo_exists():
+            self._build_window()
+        self._do_show()
+        self._start_poll()
+        self._schedule_update()
+
+    def hide(self):
+        self._run_on_main(self._hide_main)
+
+    def _hide_main(self):
+        self._do_hide()
+
+    def toggle(self):
+        self._run_on_main(self._toggle_main)
+
+    def _toggle_main(self):
+        if self._visible:
+            # User is explicitly hiding — suppress the poll's auto-show.
+            self._user_hidden = True
+            self._do_hide()
+            self._cancel_poll()        # stop auto-show loop while hidden
+            self._cancel_update()
+        else:
+            # User is explicitly showing — re-enable auto-show.
+            self._user_hidden = False
+            if not self.overlay_window or not self.overlay_window.winfo_exists():
+                self._build_window()
+            self._do_show()
+            self._start_poll()
+            self._schedule_update()
+
+    def cleanup(self):
+        self._visible   = False
+        self.is_visible = False
+        self._cancel_poll()
+        self._cancel_update()
+        if self._hide_job and self.overlay_window:
+            try:
+                self.overlay_window.after_cancel(self._hide_job)
+            except Exception:
+                pass
+        self._hide_job = None
+        if self.overlay_window:
+            try:
+                self.overlay_window.destroy()
+            except Exception:
+                pass
+            self.overlay_window = None
+
+    # keep old names working
+    def init_overlay(self):
+        """Called from controller — may be on a background thread."""
+        # Store a tk root reference on the controller so _run_on_main works
+        # even before the Toplevel is created.
         try:
-            canvas_width = self.progress_canvas.winfo_width()
-            if canvas_width <= 1:
+            import tkinter as tk
+            if not getattr(self.controller, '_tk_root', None):
+                self.controller._tk_root = tk._default_root
+        except Exception:
+            pass
+        self._run_on_main(self.create_overlay)
+
+    # ── window construction ───────────────────────────────────────────────────
+
+    def _build_window(self):
+        self.overlay_window = tk.Toplevel()
+        self.overlay_window.overrideredirect(True)      # no title bar
+        self.overlay_window.attributes("-topmost", True)
+        self.overlay_window.attributes("-alpha", 0.92)
+        self.overlay_window.configure(bg=PANEL_BG)
+        self.overlay_window.withdraw()                  # hidden until hover
+
+        root = self.overlay_window
+
+        # ── title row ────────────────────────────────────────────────────────
+        title_row = tk.Frame(root, bg=PANEL_BG)
+        title_row.pack(fill=tk.X, padx=12, pady=(8, 2))
+
+        self._title_label = tk.Label(
+            title_row, text="", anchor="w",
+            font=Font(family="Segoe UI", size=9),
+            bg=PANEL_BG, fg=TEXT_BRIGHT)
+        self._title_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self._time_label = tk.Label(
+            title_row, text="0:00 / 0:00",
+            font=Font(family="Segoe UI", size=8),
+            bg=PANEL_BG, fg=TEXT_DIM)
+        self._time_label.pack(side=tk.RIGHT)
+
+        # ── seek bar ─────────────────────────────────────────────────────────
+        seek_row = tk.Frame(root, bg=PANEL_BG)
+        seek_row.pack(fill=tk.X, padx=12, pady=(2, 4))
+
+        self._seek_canvas = tk.Canvas(
+            seek_row, height=16, bg=PANEL_BG,
+            highlightthickness=0, cursor="hand2")
+        self._seek_canvas.pack(fill=tk.X, expand=True)
+        self._seek_canvas.bind("<Button-1>",        self._on_seek_click)
+        self._seek_canvas.bind("<B1-Motion>",       self._on_seek_drag)
+        self._seek_canvas.bind("<ButtonRelease-1>", self._on_seek_release)
+        self._seek_canvas.bind("<Enter>",           lambda e: self._set_hover(True))
+        self._seek_canvas.bind("<Leave>",           lambda e: self._set_hover(False))
+        self._seek_canvas.bind("<Configure>",       lambda e: self._draw_seek())
+
+        # ── control row ───────────────────────────────────────────────────────
+        ctrl = tk.Frame(root, bg=PANEL_BG)
+        ctrl.pack(fill=tk.X, padx=12, pady=(0, 8))
+
+        btn_kw = dict(
+            bg=BTN_BG, fg="white", bd=0, padx=8, pady=3,
+            relief=tk.FLAT, cursor="hand2",
+            activebackground=BTN_HOVER, activeforeground="white",
+            font=Font(family="Segoe UI", size=11))
+
+        tk.Button(ctrl, text="⏮", command=self.previous_video, **btn_kw).pack(side=tk.LEFT, padx=2)
+        self._play_btn = tk.Button(ctrl, text="⏸", command=self.toggle_pause, **btn_kw)
+        self._play_btn.pack(side=tk.LEFT, padx=2)
+        tk.Button(ctrl, text="⏭", command=self.next_video, **btn_kw).pack(side=tk.LEFT, padx=2)
+
+        # volume
+        tk.Frame(ctrl, width=16, bg=PANEL_BG).pack(side=tk.LEFT)
+        self._vol_label = tk.Label(
+            ctrl, text="🔊", cursor="hand2",
+            font=Font(family="Segoe UI", size=11),
+            bg=PANEL_BG, fg=TEXT_BRIGHT)
+        self._vol_label.pack(side=tk.LEFT, padx=(0, 2))
+        self._vol_label.bind("<Button-1>",   lambda e: self._vol_click())
+        self._vol_label.bind("<MouseWheel>", self._on_vol_scroll)
+
+        self._vol_value = tk.Label(
+            ctrl, text="50%", width=4,
+            font=Font(family="Segoe UI", size=8),
+            bg=PANEL_BG, fg=TEXT_DIM)
+        self._vol_value.pack(side=tk.LEFT)
+
+        # speed (right-aligned)
+        self._spd_label = tk.Label(
+            ctrl, text="1.00×", cursor="hand2",
+            font=Font(family="Segoe UI", size=8, weight="bold"),
+            bg=PANEL_BG, fg=ACCENT)
+        self._spd_label.pack(side=tk.RIGHT, padx=(4, 0))
+        self._spd_label.bind("<Button-1>",        lambda e: self.increase_speed())
+        self._spd_label.bind("<Button-3>",        lambda e: self.decrease_speed())
+        self._spd_label.bind("<Double-Button-1>", lambda e: self.reset_speed())
+        self._spd_label.bind("<MouseWheel>",      self._on_spd_scroll)
+
+        tk.Label(ctrl, text="Spd:", font=Font(family="Segoe UI", size=8),
+                 bg=PANEL_BG, fg=TEXT_DIM).pack(side=tk.RIGHT)
+
+        # keep overlay shown while mouse is over it
+        for w in [root, title_row, seek_row, ctrl,
+                  self._title_label, self._time_label,
+                  self._seek_canvas, self._play_btn,
+                  self._vol_label, self._vol_value, self._spd_label]:
+            w.bind("<Enter>", lambda e: self._cancel_hide(), add="+")
+            w.bind("<Leave>", lambda e: self._schedule_hide(), add="+")
+
+    # ── show / hide ───────────────────────────────────────────────────────────
+
+    def _do_show(self):
+        if not self.overlay_window or not self.overlay_window.winfo_exists():
+            return
+        self._cancel_hide()
+        self._user_hidden = False  # explicit show always clears the suppression flag
+        if not self._visible:
+            self._visible   = True
+            self.is_visible = True
+            self._position_panel()
+            self.overlay_window.deiconify()
+            self.overlay_window.lift()
+
+    def _do_hide(self):
+        self._hide_job = None
+        self._visible   = False
+        self.is_visible = False
+        if self.overlay_window and self.overlay_window.winfo_exists():
+            self.overlay_window.withdraw()
+
+    def _schedule_hide(self):
+        if self._hide_job or not self.overlay_window:
+            return
+        self._hide_job = self.overlay_window.after(500, self._do_hide)
+
+    def _cancel_hide(self):
+        if self._hide_job and self.overlay_window:
+            try:
+                self.overlay_window.after_cancel(self._hide_job)
+            except Exception:
+                pass
+        self._hide_job = None
+
+    # ── position panel at bottom of VLC window ────────────────────────────────
+
+    def _position_panel(self):
+        if not self.overlay_window:
+            return
+        hwnd = self._get_or_find_hwnd()
+        if hwnd:
+            r = _window_rect(hwnd)
+            if r:
+                wx, wy, ww, wh = r
+                x = wx + (ww - OVERLAY_W) // 2
+                y = wy + wh - OVERLAY_H - 10
+                self.overlay_window.geometry(f"{OVERLAY_W}x{OVERLAY_H}+{x}+{y}")
+                return
+        # fallback: top-left corner
+        self.overlay_window.geometry(f"{OVERLAY_W}x{OVERLAY_H}+20+20")
+
+    def _get_or_find_hwnd(self):
+        if self._vlc_hwnd:
+            try:
+                if ctypes.windll.user32.IsWindowVisible(self._vlc_hwnd):
+                    return self._vlc_hwnd
+            except Exception:
+                pass
+        self._vlc_hwnd = _get_vlc_hwnd()
+        return self._vlc_hwnd
+
+    # ── mouse-position polling (works even when VLC owns HWND) ───────────────
+
+    def _start_poll(self):
+        self._cancel_poll()
+        self._poll()
+
+    def _cancel_poll(self):
+        if self._poll_job and self.overlay_window:
+            try:
+                self.overlay_window.after_cancel(self._poll_job)
+            except Exception:
+                pass
+        self._poll_job = None
+
+    def _poll(self):
+        if not self.overlay_window or not self.overlay_window.winfo_exists():
+            return
+        try:
+            hwnd = self._get_or_find_hwnd()
+            if hwnd:
+                r = _window_rect(hwnd)
+                if r:
+                    wx, wy, ww, wh = r
+                    mx, my = _cursor_pos()
+                    inside_vlc = (wx <= mx <= wx + ww) and (wy <= my <= wy + wh)
+                    if inside_vlc:
+                        # Only auto-show when the user hasn't explicitly hidden it via toggle.
+                        if not self._user_hidden:
+                            self._do_show()
+                        # keep panel bottom-aligned as VLC window moves/resizes
+                        if self._visible:
+                            self._position_panel()
+                    else:
+                        if self._visible and not self._hide_job:
+                            self._schedule_hide()
+            else:
+                # VLC window gone
+                if self._visible:
+                    self._do_hide()
+        except Exception:
+            pass
+        self._poll_job = self.overlay_window.after(120, self._poll)
+
+    # ── periodic display update ───────────────────────────────────────────────
+
+    def _schedule_update(self):
+        self._cancel_update()
+        if self.overlay_window and self.overlay_window.winfo_exists():
+            self._update_job = self.overlay_window.after(500, self._update_tick)
+
+    def _cancel_update(self):
+        if self._update_job and self.overlay_window:
+            try:
+                self.overlay_window.after_cancel(self._update_job)
+            except Exception:
+                pass
+        self._update_job = None
+
+    def _update_tick(self):
+        if not self.overlay_window or not self.overlay_window.winfo_exists():
+            return
+        if not self._is_player_active():
+            self._do_hide()
+            return
+        if self._visible and not self._is_dragging:
+            self.update_display()
+        self._update_job = self.overlay_window.after(500, self._update_tick)
+
+    def _is_player_active(self):
+        try:
+            return (self.controller and
+                    getattr(self.controller, 'running', False) and
+                    getattr(self.controller, 'player', None) is not None)
+        except Exception:
+            return False
+
+    # ── seek bar drawing ──────────────────────────────────────────────────────
+
+    def _draw_seek(self):
+        if not self._seek_canvas:
+            return
+        try:
+            c = self._seek_canvas
+            c.delete("all")
+            w = c.winfo_width()
+            h = c.winfo_height()
+            if w <= 1:
+                return
+            cy = h // 2
+            # track
+            c.create_rectangle(0, cy - 2, w, cy + 2, fill="#404040", outline="")
+            cur, dur = 0, 1
+            if self.controller and self.controller.player:
+                cur = max(0, self.controller.player.get_time()   or 0)
+                dur = max(1, self.controller.player.get_length() or 1)
+            px = int((cur / dur) * w)
+            # progress
+            c.create_rectangle(0, cy - 2, px, cy + 2, fill=ACCENT, outline="")
+            # handle
+            r = 6 if self._is_hovering_bar else 4
+            c.create_oval(px - r, cy - r, px + r, cy + r, fill="white", outline="")
+        except Exception:
+            pass
+
+    def _set_hover(self, val: bool):
+        self._is_hovering_bar = val
+        self._draw_seek()
+
+    def _seek_from_x(self, x: int):
+        try:
+            w = self._seek_canvas.winfo_width()
+            if w <= 1 or not self.controller or not self.controller.player:
+                return
+            frac = max(0.0, min(1.0, x / w))
+            self.controller.player.set_time(
+                int(frac * (self.controller.player.get_length() or 0)))
+            self._draw_seek()
+        except Exception:
+            pass
+
+    def _on_seek_click(self, e):
+        self._is_dragging = True
+        self._seek_from_x(e.x)
+
+    def _on_seek_drag(self, e):
+        if self._is_dragging:
+            self._seek_from_x(e.x)
+
+    def _on_seek_release(self, e):
+        self._is_dragging = False
+
+    # ── display update ────────────────────────────────────────────────────────
+
+    def update_display(self):
+        if not self.overlay_window or not self.overlay_window.winfo_exists():
+            return
+        try:
+            c = self.controller
+            if not c:
                 return
 
-            progress = max(0, min(1, x / canvas_width))
-            duration = self.controller.player.get_length()
-            new_time = int(progress * duration)
+            # title
+            if c.index < len(c.videos):
+                name = os.path.basename(c.videos[c.index])
+                if len(name) > 60:
+                    name = name[:57] + "..."
+                self._title_label.config(text=name)
 
-            self.controller.player.set_time(new_time)
+            # play/pause icon
+            try:
+                playing = c.player.is_playing()
+                self._play_btn.config(text="⏸" if playing else "▶")
+            except Exception:
+                pass
 
-            self.draw_progress()
+            # time
+            try:
+                cur = c.player.get_time()  or 0
+                dur = c.player.get_length() or 0
+                self._time_label.config(text=f"{_fmt_time(cur)} / {_fmt_time(dur)}")
+            except Exception:
+                pass
+
+            # volume icon
+            vol    = getattr(c, 'volume', 50)
+            muted  = getattr(c, 'is_muted', False)
+            if muted or vol == 0:
+                icon = "🔇"
+            elif vol < 30:
+                icon = "🔈"
+            elif vol < 70:
+                icon = "🔉"
+            else:
+                icon = "🔊"
+            self._vol_label.config(text=icon)
+            self._vol_value.config(text=f"{vol}%")
+
+            # speed
+            try:
+                spd = c.player.get_rate()
+                self._spd_label.config(text=f"{spd:.2f}×")
+            except Exception:
+                pass
+
+            self._draw_seek()
 
         except Exception as e:
             if self.logger:
-                self.logger(f"Error seeking: {e}")
+                self.logger(f"Overlay update error: {e}")
 
-    def set_speed_from_position(self, x):
-        """Set playback speed based on slider position"""
-        try:
-            canvas_width = self.speed_canvas.winfo_width()
-            if canvas_width <= 1:
-                return
-
-            min_speed = 0.25
-            max_speed = 2.0
-
-            progress = max(0, min(1, x / canvas_width))
-            new_speed = min_speed + progress * (max_speed - min_speed)
-
-            new_speed = round(new_speed * 4) / 4
-            new_speed = max(min_speed, min(max_speed, new_speed))
-
-            self.controller.set_playback_rate(new_speed)
-            self.speed_label.config(text=f"{new_speed:.2f}×")
-
-        except Exception as e:
-            if self.logger:
-                self.logger(f"Error setting speed: {e}")
-
-    def volume_up(self):
-        """Increase volume"""
-        if self.controller:
-            self.controller.volume_up()
-            self.update_display()
-
-    def volume_down(self):
-        """Decrease volume"""
-        if self.controller:
-            self.controller.volume_down()
-            self.update_display()
-
-    def on_volume_scroll(self, event):
-        """Handle mouse wheel on volume label"""
-        if event.delta > 0:
-            self.volume_up()
-        else:
-            self.volume_down()
-
-    def increase_speed(self):
-        """Increase playback speed"""
-        if self.controller:
-            self.controller.increase_speed()
-            self.update_display()
-
-    def decrease_speed(self):
-        """Decrease playback speed"""
-        if self.controller:
-            self.controller.decrease_speed()
-            self.update_display()
-
-    def reset_speed(self):
-        """Reset speed to 1.0x"""
-        if self.controller:
-            self.controller.set_playback_rate(1.0)
-            self.update_display()
-
-    def on_speed_scroll(self, event):
-        """Handle mouse wheel on speed label"""
-        if event.delta > 0:
-            self.increase_speed()
-        else:
-            self.decrease_speed()
+    # ── controls ──────────────────────────────────────────────────────────────
 
     def toggle_pause(self):
-        """Toggle play/pause"""
         if self.controller:
             self.controller.toggle_pause()
             self.update_display()
 
     def previous_video(self):
-        """Play previous video"""
         if self.controller:
-            if hasattr(self.controller, 'previous_video'):
+            try:
                 self.controller.previous_video()
-            else:
+            except AttributeError:
                 self.controller.prev_video()
             self.update_display()
 
     def next_video(self):
-        """Play next video"""
         if self.controller:
             self.controller.next_video()
             self.update_display()
 
-    def start_updates(self):
-        """Start periodic updates"""
-        self.stop_updates()
-        self.update_loop()
-
-    def update_loop(self):
-        """Update loop for progress bar"""
-        if self.is_visible and not self.is_dragging:
-            if not self._is_player_active():
-                self.hide()
-                return
+    def volume_up(self):
+        if self.controller:
+            self.controller.volume_up()
             self.update_display()
 
-        if self.is_visible:
-            self.update_timer = threading.Timer(0.5, self.update_loop)
-            self.update_timer.daemon = True
-            self.update_timer.start()
+    def volume_down(self):
+        if self.controller:
+            self.controller.volume_down()
+            self.update_display()
 
-    def _is_player_active(self):
-        """Check if the player is still active"""
-        try:
-            if not self.controller:
-                return False
-            if not hasattr(self.controller, 'running') or not self.controller.running:
-                return False
-            if not hasattr(self.controller, 'player') or not self.controller.player:
-                return False
-            return True
-        except:
-            return False
+    def increase_speed(self):
+        if self.controller:
+            self.controller.increase_speed()
+            self.update_display()
+
+    def decrease_speed(self):
+        if self.controller:
+            self.controller.decrease_speed()
+            self.update_display()
+
+    def reset_speed(self):
+        if self.controller:
+            self.controller.set_playback_rate(1.0)
+            self.update_display()
+
+    def _vol_click(self):
+        """Left-click volume icon = toggle mute."""
+        if self.controller:
+            self.controller.toggle_mute()
+            self.update_display()
+
+    def _on_vol_scroll(self, e):
+        if e.delta > 0:
+            self.volume_up()
+        else:
+            self.volume_down()
+
+    def _on_spd_scroll(self, e):
+        if e.delta > 0:
+            self.increase_speed()
+        else:
+            self.decrease_speed()
+
+    # ── legacy compat stubs (called by vlc_player_controller.py) ─────────────
+
+    def position_window(self):
+        self._position_panel()
+
+    def start_updates(self):
+        self._schedule_update()
 
     def stop_updates(self):
-        """Stop periodic updates"""
-        if self.update_timer:
-            self.update_timer.cancel()
-            self.update_timer = None
+        self._cancel_update()
 
     def start_position_tracking(self):
-        """Start tracking VLC window position"""
-        self.stop_position_tracking()
-        self.position_tracking_loop()
-
-    def position_tracking_loop(self):
-        """Loop to track VLC window position and update overlay position when monitor changes"""
-        if self.is_visible:
-            if not self._is_player_active():
-                self.hide()
-                return
-
-            vlc_pos = self.get_vlc_window_position()
-            if vlc_pos:
-                vlc_center_x = vlc_pos['x'] + vlc_pos['width'] // 2
-                vlc_center_y = vlc_pos['y'] + vlc_pos['height'] // 2
-
-                monitor_num, monitor = self.get_monitor_from_position(vlc_center_x, vlc_center_y)
-                if monitor:
-                    new_x = monitor.x + 20
-                    new_y = monitor.y + 20
-
-                    if abs(self.target_x - new_x) > 100 or abs(self.target_y - new_y) > 100:
-                        self.target_x = new_x
-                        self.target_y = new_y
-                        try:
-                            self.overlay_window.geometry(f"+{new_x}+{new_y}")
-                        except:
-                            pass
-
-            self.position_update_timer = threading.Timer(1.0, self.position_tracking_loop)
-            self.position_update_timer.daemon = True
-            self.position_update_timer.start()
+        self._start_poll()
 
     def stop_position_tracking(self):
-        """Stop tracking VLC window position"""
-        if self.position_update_timer:
-            self.position_update_timer.cancel()
-            self.position_update_timer = None
-
-    def cleanup(self):
-        self.position_locked = False
-        self.is_visible = False
-        self.running = False
-
-        if self.update_timer:
-            try:
-                self.update_timer.cancel()
-            except:
-                pass
-            self.update_timer = None
-
-        if self.position_update_timer:
-            try:
-                self.position_update_timer.cancel()
-            except:
-                pass
-            self.position_update_timer = None
-
-        if self.position_lock_timer:
-            try:
-                if self.overlay_window and self.overlay_window.winfo_exists():
-                    self.overlay_window.after_cancel(self.position_lock_timer)
-            except:
-                pass
-            self.position_lock_timer = None
-
-        self.stop_updates()
-        self.stop_position_tracking()
-
-        if self.tooltip:
-            try:
-                self.tooltip.withdraw()
-                self.tooltip.destroy()
-            except:
-                pass
-            self.tooltip = None
-
-        if self.overlay_window:
-            try:
-                self.overlay_window.withdraw()
-                self.overlay_window.destroy()
-            except:
-                pass
-            self.overlay_window = None
+        self._cancel_poll()

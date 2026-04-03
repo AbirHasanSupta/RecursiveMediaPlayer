@@ -5,6 +5,7 @@ import keyboard
 from managers.resource_manager import get_resource_manager
 
 hotkey_refs = []
+_mouse_scroll_hook = None
 
 _user32 = ctypes.windll.user32 if hasattr(ctypes, 'windll') else None
 _kernel32 = ctypes.windll.kernel32 if hasattr(ctypes, 'windll') else None
@@ -47,9 +48,32 @@ def _guarded(fn):
 
 
 def listen_keys(controller):
-    global hotkey_refs
+    global hotkey_refs, _mouse_scroll_hook
 
     cleanup_hotkeys()
+
+    # ── mouse-wheel volume control ──────────────────────────────────────────
+    def _on_mouse_scroll(event):
+        if not _is_app_in_foreground():
+            return
+        try:
+            if getattr(controller, 'running', False) and getattr(controller, 'player', None):
+                if event.delta > 0:
+                    controller.volume_up()
+                else:
+                    controller.volume_down()
+        except Exception:
+            pass
+
+    _mouse_scroll_hook = keyboard.on_press(lambda e: None)  # placeholder replaced below
+    try:
+        import mouse as _mouse_lib
+        _mouse_scroll_hook = _mouse_lib.hook(
+            lambda e: _on_mouse_scroll(e)
+            if isinstance(e, _mouse_lib.WheelEvent) else None
+        )
+    except Exception:
+        pass  # 'mouse' package not available; wheel via overlay only
 
     hotkey_refs.append(keyboard.add_hotkey('esc', _guarded(lambda: controller.stop_video())))
     hotkey_refs.append(keyboard.add_hotkey('d', _guarded(lambda: controller.next_video())))
@@ -75,7 +99,7 @@ def listen_keys(controller):
 
 
 def cleanup_hotkeys():
-    global hotkey_refs
+    global hotkey_refs, _mouse_scroll_hook
 
     for ref in hotkey_refs:
         try:
@@ -90,5 +114,13 @@ def cleanup_hotkeys():
         keyboard.unhook_all()
     except:
         pass
+
+    if _mouse_scroll_hook is not None:
+        try:
+            import mouse as _mouse_lib
+            _mouse_lib.unhook(_mouse_scroll_hook)
+        except Exception:
+            pass
+    _mouse_scroll_hook = None
 
 get_resource_manager().register_cleanup_callback(cleanup_hotkeys)
