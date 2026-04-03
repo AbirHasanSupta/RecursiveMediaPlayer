@@ -63,34 +63,10 @@ class DualPlayerSlot:
         accent = self.theme.accent_color
         text_c = self.theme.text_color
 
-        # title row
-        title_row = tk.Frame(self.parent_frame, bg=bg)
-        title_row.pack(fill=tk.X, padx=8, pady=(6, 0))
-
-        tk.Label(title_row,
-                 text=f"Player {self.slot_id}",
-                 font=Font(family="Segoe UI", size=11, weight="bold"),
-                 bg=bg, fg=accent).pack(side=tk.LEFT)
-
-        self.status_label = tk.Label(title_row, text="No video loaded",
-                                     font=Font(family="Segoe UI", size=9),
-                                     bg=bg, fg="#888888")
-        self.status_label.pack(side=tk.LEFT, padx=(10, 0))
-
-        self.loop_btn = tk.Button(
-            title_row, text="Loop ON",
-            font=Font(family="Segoe UI", size=8),
-            bg=self.theme.get_button_colors("warning")["bg"],
-            fg="white", bd=0, padx=6, pady=2,
-            cursor="hand2", relief=tk.FLAT,
-            command=self._cycle_loop_mode)
-        self.loop_btn.pack(side=tk.RIGHT, padx=(4, 0))
-
-        # embedded video canvas
         vid_container = tk.Frame(self.parent_frame, bg="black",
                                  highlightthickness=2,
                                  highlightbackground=accent)
-        vid_container.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+        vid_container.pack(fill=tk.BOTH, expand=True, padx=8, pady=(6, 2))
 
         self.video_canvas = tk.Canvas(vid_container, bg="black",
                                       highlightthickness=0)
@@ -103,79 +79,89 @@ class DualPlayerSlot:
             bg="black", fg="#555555")
         self._no_video_label.place(relx=0.5, rely=0.5, anchor="center")
 
-        # video name
-        self.video_name_label = tk.Label(self.parent_frame, text="",
-                                         font=Font(family="Segoe UI", size=9),
-                                         bg=bg, fg=text_c, anchor="w")
-        self.video_name_label.pack(fill=tk.X, padx=10)
+        info_row = tk.Frame(self.parent_frame, bg=bg)
+        info_row.pack(fill=tk.X, padx=8, pady=(1, 0))
 
-        # seek bar
+        self.loop_btn = tk.Button(
+            info_row, text="Loop ON",
+            font=Font(family="Segoe UI", size=7),
+            bg=self.theme.get_button_colors("warning")["bg"],
+            fg="white", bd=0, padx=4, pady=1,
+            cursor="hand2", relief=tk.FLAT,
+            command=self._cycle_loop_mode)
+        self.loop_btn.pack(side=tk.RIGHT, padx=(4, 0))
+
+        self.status_label = tk.Label(info_row, text=f"Player {self.slot_id} · No video",
+                                     font=Font(family="Segoe UI", size=8),
+                                     bg=bg, fg="#888888")
+        self.status_label.pack(side=tk.RIGHT, padx=(6, 4))
+
+        self.video_name_label = tk.Label(info_row, text="",
+                                         font=Font(family="Segoe UI", size=8),
+                                         bg=bg, fg=text_c, anchor="w")
+        self.video_name_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
         seek_frame = tk.Frame(self.parent_frame, bg=bg)
-        seek_frame.pack(fill=tk.X, padx=8, pady=(4, 0))
+        seek_frame.pack(fill=tk.X, padx=8, pady=(2, 0))
 
         self.time_label = tk.Label(seek_frame, text="0:00 / 0:00",
-                                   font=Font(family="Segoe UI", size=8),
+                                   font=Font(family="Segoe UI", size=7),
                                    bg=bg, fg="#888888")
         self.time_label.pack(side=tk.LEFT)
 
-        self.seek_canvas = tk.Canvas(seek_frame, height=14, bg=bg,
+        self.seek_canvas = tk.Canvas(seek_frame, height=12, bg=bg,
                                      highlightthickness=0, cursor="hand2")
-        self.seek_canvas.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
+        self.seek_canvas.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
         self.seek_canvas.bind("<Button-1>",   self._on_seek_click)
         self.seek_canvas.bind("<B1-Motion>",  self._on_seek_drag)
         self.seek_canvas.bind("<Configure>",  lambda e: self._draw_seek_bar())
 
-        # playback controls
         ctrl = tk.Frame(self.parent_frame, bg=bg)
-        ctrl.pack(fill=tk.X, padx=8, pady=4)
+        ctrl.pack(fill=tk.X, padx=8, pady=(2, 4))
 
-        btn_kw = dict(bg="#303030", fg="white", bd=0, padx=8, pady=4,
+        btn_kw = dict(bg="#303030", fg="white", bd=0, padx=5, pady=2,
                       cursor="hand2", relief=tk.FLAT,
                       activebackground="#505050", activeforeground="white",
-                      font=Font(family="Segoe UI", size=12))
+                      font=Font(family="Segoe UI", size=9))
 
-        tk.Button(ctrl, text="Prev", command=self._prev, **btn_kw).pack(side=tk.LEFT, padx=2)
+        tk.Button(ctrl, text="Prev", command=self._prev, **btn_kw).pack(side=tk.LEFT, padx=1)
         self.play_btn = tk.Button(ctrl, text="Play", command=self._toggle_pause, **btn_kw)
-        self.play_btn.pack(side=tk.LEFT, padx=2)
-        tk.Button(ctrl, text="Next", command=self._next, **btn_kw).pack(side=tk.LEFT, padx=2)
-        tk.Button(ctrl, text="Stop", command=self._stop_playback, **btn_kw).pack(side=tk.LEFT, padx=2)
+        self.play_btn.pack(side=tk.LEFT, padx=1)
+        tk.Button(ctrl, text="Next", command=self._next, **btn_kw).pack(side=tk.LEFT, padx=1)
+        tk.Button(ctrl, text="Stop", command=self._stop_playback, **btn_kw).pack(side=tk.LEFT, padx=1)
 
-        # MUTE button
         self.mute_btn = tk.Button(ctrl, text="Mute", command=self._toggle_mute, **btn_kw)
-        self.mute_btn.pack(side=tk.LEFT, padx=(10, 2))
+        self.mute_btn.pack(side=tk.LEFT, padx=(6, 1))
 
-        # VOLUME slider - plain tk.Scale, command= receives the string value
-        # _vol_updating flag prevents the callback firing on programmatic .set()
         self.vol_scale = tk.Scale(
             ctrl, from_=0, to=100, orient=tk.HORIZONTAL,
-            length=80, showvalue=False,
+            length=70, showvalue=False,
             bg=bg, fg=text_c, troughcolor="#404040",
             highlightthickness=0, bd=0,
             command=self._on_vol_scale)
         self.vol_scale.set(self.volume)
-        self.vol_scale.pack(side=tk.LEFT, padx=2)
+        self.vol_scale.pack(side=tk.LEFT, padx=1)
 
         self.vol_label = tk.Label(ctrl, text=f"{self.volume}%",
-                                  font=Font(family="Segoe UI", size=8),
+                                  font=Font(family="Segoe UI", size=7),
                                   bg=bg, fg=text_c, width=4)
         self.vol_label.pack(side=tk.LEFT)
 
-        # SPEED slider  (25-200 represents 0.25x-2.00x)
-        tk.Label(ctrl, text="  Speed:",
-                 font=Font(family="Segoe UI", size=8),
+        tk.Label(ctrl, text=" Spd:",
+                 font=Font(family="Segoe UI", size=7),
                  bg=bg, fg=text_c).pack(side=tk.LEFT)
 
         self.spd_scale = tk.Scale(
             ctrl, from_=25, to=200, orient=tk.HORIZONTAL,
-            length=70, showvalue=False,
+            length=60, showvalue=False,
             bg=bg, fg=text_c, troughcolor="#404040",
             highlightthickness=0, bd=0,
             command=self._on_spd_scale)
         self.spd_scale.set(100)
-        self.spd_scale.pack(side=tk.LEFT, padx=2)
+        self.spd_scale.pack(side=tk.LEFT, padx=1)
 
         self.spd_label = tk.Label(ctrl, text="1.00x",
-                                  font=Font(family="Segoe UI", size=8),
+                                  font=Font(family="Segoe UI", size=7),
                                   bg=bg, fg=accent, width=5)
         self.spd_label.pack(side=tk.LEFT)
 
@@ -237,11 +223,6 @@ class DualPlayerSlot:
                 pass
 
     def _make_vlc_instance(self) -> vlc.Instance:
-        """
-        Create a fully isolated VLC instance.
-        '--aout=directsound' on Windows forces each instance to open its own
-        audio output stream so audio_set_volume() is per-player, not global.
-        """
         args = ['--quiet', '--no-video-title-show']
         if os.name == 'nt':
             args += ['--aout=directsound']
@@ -334,9 +315,9 @@ class DualPlayerSlot:
 
             name = os.path.basename(path)
             self.video_name_label.config(
-                text=(name[:60] + "...") if len(name) > 60 else name)
+                text=(name[:55] + "...") if len(name) > 55 else name)
             self.status_label.config(
-                text=f"Playing ({self.index+1}/{len(self.videos)})")
+                text=f"P{self.slot_id} · {self.index+1}/{len(self.videos)}")
             self._log(f"Player {self.slot_id}: {name}")
 
             if self.on_video_changed:
@@ -380,10 +361,10 @@ class DualPlayerSlot:
                 if state == vlc.State.Playing:
                     self.play_btn.config(text="Pause")
                     self.status_label.config(
-                        text=f"Playing ({self.index+1}/{len(self.videos)})")
+                        text=f"P{self.slot_id} · {self.index+1}/{len(self.videos)}")
                 elif state == vlc.State.Paused:
                     self.play_btn.config(text="Play")
-                    self.status_label.config(text="Paused")
+                    self.status_label.config(text=f"P{self.slot_id} · Paused")
                 elif state == vlc.State.Ended:
                     self._on_ended()
                     return
@@ -403,7 +384,7 @@ class DualPlayerSlot:
                 self.index += 1
                 self._play_current()
             else:
-                self.status_label.config(text="Finished")
+                self.status_label.config(text=f"P{self.slot_id} · Finished")
                 self.play_btn.config(text="Play")
                 return
         else:  # shuffle
@@ -427,7 +408,7 @@ class DualPlayerSlot:
             px = int((cur / dur) * w)
             c.create_rectangle(0, cy-2, px, cy+2,
                                 fill=self.theme.accent_color, outline="")
-            c.create_oval(px-5, cy-5, px+5, cy+5, fill="white", outline="")
+            c.create_oval(px-4, cy-4, px+4, cy+4, fill="white", outline="")
             self.time_label.config(text=f"{_fmt_time(cur)} / {_fmt_time(dur)}")
         except Exception:
             pass
@@ -451,7 +432,7 @@ class DualPlayerSlot:
         if self.player.is_playing():
             self.player.pause()
             self.play_btn.config(text="Play")
-            self.status_label.config(text="Paused")
+            self.status_label.config(text=f"P{self.slot_id} · Paused")
         else:
             self.player.play()
             self.play_btn.config(text="Pause")
@@ -462,7 +443,7 @@ class DualPlayerSlot:
         if self.player:
             self.player.stop()
         self.play_btn.config(text="Play")
-        self.status_label.config(text="Stopped")
+        self.status_label.config(text=f"P{self.slot_id} · Stopped")
 
     def _next(self):
         if not self.videos:
@@ -532,31 +513,32 @@ class DualPlayerWindow:
         bg     = self.theme.bg_color
         accent = self.theme.accent_color
 
-        toolbar = tk.Frame(self.window, bg=bg, pady=6)
+        # ── CHANGE 1: Smaller toolbar height (pady=3, font size 10)
+        toolbar = tk.Frame(self.window, bg=bg, pady=3)
         toolbar.pack(fill=tk.X, padx=10)
 
         tk.Label(toolbar, text="Dual Video Player",
-                 font=Font(family="Segoe UI", size=13, weight="bold"),
+                 font=Font(family="Segoe UI", size=10, weight="bold"),
                  bg=bg, fg=accent).pack(side=tk.LEFT)
 
         for sid in (1, 2):
             self._make_btn(
                 toolbar,
-                f"Load -> Player {sid}",
+                f"Load → Player {sid}",
                 lambda s=sid: self._load_videos(s),
                 "primary"
-            ).pack(side=tk.LEFT, padx=(16 if sid == 1 else 4, 0))
+            ).pack(side=tk.LEFT, padx=(12 if sid == 1 else 3, 0))
 
         self._make_btn(toolbar, "Pause Both",
-                       self._pause_both, "secondary").pack(side=tk.LEFT, padx=4)
+                       self._pause_both, "secondary").pack(side=tk.LEFT, padx=3)
         self._make_btn(toolbar, "Play Both",
-                       self._play_both,  "success" ).pack(side=tk.LEFT, padx=4)
+                       self._play_both,  "success" ).pack(side=tk.LEFT, padx=3)
         self._make_btn(toolbar, "Stop Both",
-                       self._stop_both,  "danger"  ).pack(side=tk.LEFT, padx=4)
+                       self._stop_both,  "danger"  ).pack(side=tk.LEFT, padx=3)
 
         self.layout_btn = self._make_btn(
             toolbar, "Stack View", self._toggle_layout, "secondary")
-        self.layout_btn.pack(side=tk.RIGHT, padx=4)
+        self.layout_btn.pack(side=tk.RIGHT, padx=3)
 
         tk.Frame(self.window, height=1, bg="#444444").pack(fill=tk.X, padx=10)
 
@@ -674,10 +656,10 @@ class DualPlayerWindow:
     def _make_btn(self, parent, text, command, variant="primary"):
         c = self.theme.get_button_colors(variant)
         return tk.Button(parent, text=text, command=command,
-                         font=Font(family="Segoe UI", size=9),
+                         font=Font(family="Segoe UI", size=8),
                          bg=c["bg"], fg=c["fg"],
                          activebackground=c["active"], activeforeground=c["fg"],
-                         bd=0, padx=8, pady=4, cursor="hand2", relief=tk.FLAT)
+                         bd=0, padx=6, pady=3, cursor="hand2", relief=tk.FLAT)
 
     def is_open(self) -> bool:
         return bool(self.window and self.window.winfo_exists())
