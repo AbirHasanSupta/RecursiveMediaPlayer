@@ -51,6 +51,7 @@ class DualPlayerSlot:
 
         # misc
         self._poll_job = None
+        self._mouse_poll_job = None
         self._vol_updating = False   # re-entrancy guard for volume slider
 
         self.on_video_changed:         Optional[Callable] = None
@@ -64,12 +65,13 @@ class DualPlayerSlot:
         accent = self.theme.accent_color
         text_c = self.theme.text_color
 
-        vid_container = tk.Frame(self.parent_frame, bg="black",
-                                 highlightthickness=2,
-                                 highlightbackground=accent)
-        vid_container.pack(fill=tk.BOTH, expand=True, padx=8, pady=(6, 2))
+        # ── video container fills everything ──────────────────────────────────
+        self.vid_container = tk.Frame(self.parent_frame, bg="black",
+                                      highlightthickness=2,
+                                      highlightbackground=accent)
+        self.vid_container.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-        self.video_canvas = tk.Canvas(vid_container, bg="black",
+        self.video_canvas = tk.Canvas(self.vid_container, bg="black",
                                       highlightthickness=0)
         self.video_canvas.pack(fill=tk.BOTH, expand=True)
 
@@ -80,8 +82,29 @@ class DualPlayerSlot:
             bg="black", fg="#555555")
         self._no_video_label.place(relx=0.5, rely=0.5, anchor="center")
 
-        info_row = tk.Frame(self.parent_frame, bg=bg)
-        info_row.pack(fill=tk.X, padx=8, pady=(1, 0))
+        # ── floating overlay — child of vid_container, NOT video_canvas ─────
+        # VLC owns video_canvas's HWND; anything inside it gets buried.
+        # vid_container is a plain tk.Frame that VLC never touches, so
+        # children placed on it always render above the video surface.
+        self._overlay = tk.Frame(self.vid_container, bg="#1c1c1c",
+                                 highlightthickness=0)
+        self._overlay_visible = False
+        self._hide_job = None
+
+        # ── top strip of overlay: video name + status + loop ─────────────────
+        info_row = tk.Frame(self._overlay, bg="#1c1c1c")
+        info_row.pack(fill=tk.X, padx=8, pady=(6, 2))
+
+        self.video_name_label = tk.Label(info_row, text="",
+                                         font=Font(family="Segoe UI", size=8),
+                                         bg="#1c1c1c", fg="#dddddd", anchor="w")
+        self.video_name_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self.status_label = tk.Label(info_row,
+                                     text=f"Player {self.slot_id} · No video",
+                                     font=Font(family="Segoe UI", size=8),
+                                     bg="#1c1c1c", fg="#888888")
+        self.status_label.pack(side=tk.RIGHT, padx=(6, 0))
 
         self.loop_btn = tk.Button(
             info_row, text="Loop ON",
@@ -90,54 +113,46 @@ class DualPlayerSlot:
             fg="white", bd=0, padx=4, pady=1,
             cursor="hand2", relief=tk.FLAT,
             command=self._cycle_loop_mode)
-        self.loop_btn.pack(side=tk.RIGHT, padx=(4, 0))
+        self.loop_btn.pack(side=tk.RIGHT, padx=(6, 0))
 
-        self.status_label = tk.Label(info_row, text=f"Player {self.slot_id} · No video",
-                                     font=Font(family="Segoe UI", size=8),
-                                     bg=bg, fg="#888888")
-        self.status_label.pack(side=tk.RIGHT, padx=(6, 4))
-
-        self.video_name_label = tk.Label(info_row, text="",
-                                         font=Font(family="Segoe UI", size=8),
-                                         bg=bg, fg=text_c, anchor="w")
-        self.video_name_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        seek_frame = tk.Frame(self.parent_frame, bg=bg)
-        seek_frame.pack(fill=tk.X, padx=8, pady=(2, 0))
+        # ── seek bar row ──────────────────────────────────────────────────────
+        seek_frame = tk.Frame(self._overlay, bg="#1c1c1c")
+        seek_frame.pack(fill=tk.X, padx=8, pady=(2, 2))
 
         self.time_label = tk.Label(seek_frame, text="0:00 / 0:00",
                                    font=Font(family="Segoe UI", size=7),
-                                   bg=bg, fg="#888888")
+                                   bg="#1c1c1c", fg="#888888")
         self.time_label.pack(side=tk.LEFT)
 
-        self.seek_canvas = tk.Canvas(seek_frame, height=12, bg=bg,
+        self.seek_canvas = tk.Canvas(seek_frame, height=14, bg="#1c1c1c",
                                      highlightthickness=0, cursor="hand2")
         self.seek_canvas.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
-        self.seek_canvas.bind("<Button-1>",   self._on_seek_click)
-        self.seek_canvas.bind("<B1-Motion>",  self._on_seek_drag)
-        self.seek_canvas.bind("<Configure>",  lambda e: self._draw_seek_bar())
+        self.seek_canvas.bind("<Button-1>",  self._on_seek_click)
+        self.seek_canvas.bind("<B1-Motion>", self._on_seek_drag)
+        self.seek_canvas.bind("<Configure>", lambda e: self._draw_seek_bar())
 
-        ctrl = tk.Frame(self.parent_frame, bg=bg)
-        ctrl.pack(fill=tk.X, padx=8, pady=(2, 4))
+        # ── control buttons row ───────────────────────────────────────────────
+        ctrl = tk.Frame(self._overlay, bg="#1c1c1c")
+        ctrl.pack(fill=tk.X, padx=8, pady=(2, 8))
 
-        btn_kw = dict(bg="#303030", fg="white", bd=0, padx=5, pady=2,
+        btn_kw = dict(bg="#2e2e2e", fg="white", bd=0, padx=7, pady=3,
                       cursor="hand2", relief=tk.FLAT,
-                      activebackground="#505050", activeforeground="white",
+                      activebackground="#555555", activeforeground="white",
                       font=Font(family="Segoe UI", size=9))
 
-        tk.Button(ctrl, text="Prev", command=self._prev, **btn_kw).pack(side=tk.LEFT, padx=1)
-        self.play_btn = tk.Button(ctrl, text="Play", command=self._toggle_pause, **btn_kw)
-        self.play_btn.pack(side=tk.LEFT, padx=1)
-        tk.Button(ctrl, text="Next", command=self._next, **btn_kw).pack(side=tk.LEFT, padx=1)
-        tk.Button(ctrl, text="Stop", command=self._stop_playback, **btn_kw).pack(side=tk.LEFT, padx=1)
+        tk.Button(ctrl, text="⏮", command=self._prev,           **btn_kw).pack(side=tk.LEFT, padx=2)
+        self.play_btn = tk.Button(ctrl, text="▶", command=self._toggle_pause, **btn_kw)
+        self.play_btn.pack(side=tk.LEFT, padx=2)
+        tk.Button(ctrl, text="⏭", command=self._next,           **btn_kw).pack(side=tk.LEFT, padx=2)
+        tk.Button(ctrl, text="■", command=self._stop_playback,  **btn_kw).pack(side=tk.LEFT, padx=2)
 
-        self.mute_btn = tk.Button(ctrl, text="Mute", command=self._toggle_mute, **btn_kw)
-        self.mute_btn.pack(side=tk.LEFT, padx=(6, 1))
+        self.mute_btn = tk.Button(ctrl, text="🔊", command=self._toggle_mute, **btn_kw)
+        self.mute_btn.pack(side=tk.LEFT, padx=(10, 2))
 
         self.vol_scale = tk.Scale(
             ctrl, from_=0, to=100, orient=tk.HORIZONTAL,
             length=70, showvalue=False,
-            bg=bg, fg=text_c, troughcolor="#404040",
+            bg="#1c1c1c", fg=text_c, troughcolor="#404040",
             highlightthickness=0, bd=0,
             command=self._on_vol_scale)
         self.vol_scale.set(self.volume)
@@ -145,17 +160,17 @@ class DualPlayerSlot:
 
         self.vol_label = tk.Label(ctrl, text=f"{self.volume}%",
                                   font=Font(family="Segoe UI", size=7),
-                                  bg=bg, fg=text_c, width=4)
+                                  bg="#1c1c1c", fg=text_c, width=4)
         self.vol_label.pack(side=tk.LEFT)
 
-        tk.Label(ctrl, text=" Spd:",
+        tk.Label(ctrl, text="Spd:",
                  font=Font(family="Segoe UI", size=7),
-                 bg=bg, fg=text_c).pack(side=tk.LEFT)
+                 bg="#1c1c1c", fg=text_c).pack(side=tk.LEFT, padx=(8, 0))
 
         self.spd_scale = tk.Scale(
             ctrl, from_=25, to=200, orient=tk.HORIZONTAL,
             length=60, showvalue=False,
-            bg=bg, fg=text_c, troughcolor="#404040",
+            bg="#1c1c1c", fg=text_c, troughcolor="#404040",
             highlightthickness=0, bd=0,
             command=self._on_spd_scale)
         self.spd_scale.set(100)
@@ -163,18 +178,120 @@ class DualPlayerSlot:
 
         self.spd_label = tk.Label(ctrl, text="1.00x",
                                   font=Font(family="Segoe UI", size=7),
-                                  bg=bg, fg=accent, width=5)
+                                  bg="#1c1c1c", fg=accent, width=5)
         self.spd_label.pack(side=tk.LEFT)
 
         # Stack/Side-by-side layout toggle — wired up by DualPlayerWindow for slot1 only
         self.layout_btn = tk.Button(
             ctrl, text="Stack View",
             font=Font(family="Segoe UI", size=8),
-            bg="#444444", fg="white", bd=0, padx=6, pady=2,
+            bg="#444444", fg="white", bd=0, padx=6, pady=3,
             cursor="hand2", relief=tk.FLAT,
             activebackground="#666666", activeforeground="white",
             command=self._on_layout_toggle)
         self.layout_btn.pack(side=tk.RIGHT, padx=(4, 0))
+
+        # ── hover bindings on overlay widgets (for grace-period cancellation) ──
+        for widget in [self._overlay, info_row, seek_frame, ctrl,
+                       self.seek_canvas, self.video_name_label, self.status_label,
+                       self.loop_btn, self.time_label, self.play_btn,
+                       self.mute_btn, self.vol_scale, self.spd_scale,
+                       self.spd_label, self.vol_label, self.layout_btn]:
+            widget.bind("<Enter>", self._on_hover_enter, add="+")
+            widget.bind("<Leave>", self._on_hover_leave, add="+")
+
+        # position overlay whenever the container resizes
+        self.vid_container.bind("<Configure>", self._reposition_overlay, add="+")
+
+        # hide overlay on startup
+        self._overlay.place_forget()
+
+        # poll mouse position to detect hover over the video area
+        self._start_mouse_poll()
+
+    # ── overlay show / hide ───────────────────────────────────────────────────
+
+    def _reposition_overlay(self, event=None):
+        """Keep overlay pinned to bottom of vid_container."""
+        try:
+            w = self.vid_container.winfo_width()
+            h = self.vid_container.winfo_height()
+            if w < 2 or h < 2:
+                return
+            oh = 110
+            if self._overlay_visible:
+                self._overlay.place(x=0, y=max(0, h - oh), width=w, height=oh)
+                self._overlay.lift()
+        except Exception:
+            pass
+
+    def _show_overlay(self):
+        if self._hide_job:
+            try:
+                self.parent_frame.after_cancel(self._hide_job)
+            except Exception:
+                pass
+            self._hide_job = None
+        if not self._overlay_visible:
+            self._overlay_visible = True
+            self._reposition_overlay()
+            try:
+                self._overlay.lift()
+            except Exception:
+                pass
+
+    def _hide_overlay(self):
+        if self._hide_job:
+            return
+        self._hide_job = self.parent_frame.after(400, self._do_hide)
+
+    def _do_hide(self):
+        self._hide_job = None
+        self._overlay_visible = False
+        try:
+            self._overlay.place_forget()
+        except Exception:
+            pass
+
+    def _on_hover_enter(self, event=None):
+        """Called when mouse enters any overlay widget — cancel pending hide."""
+        self._show_overlay()
+
+    def _on_hover_leave(self, event=None):
+        """Called when mouse leaves an overlay widget — start hide timer."""
+        self._hide_overlay()
+
+    def _start_mouse_poll(self):
+        """Poll mouse position every 120ms; show/hide overlay based on whether
+        the cursor is inside vid_container. Works even when VLC owns the HWND."""
+        self._mouse_poll_job = None
+        self._do_mouse_poll()
+
+    def _do_mouse_poll(self):
+        try:
+            # absolute mouse position
+            mx = self.vid_container.winfo_pointerx()
+            my = self.vid_container.winfo_pointery()
+            # absolute position + size of the video container
+            wx = self.vid_container.winfo_rootx()
+            wy = self.vid_container.winfo_rooty()
+            ww = self.vid_container.winfo_width()
+            wh = self.vid_container.winfo_height()
+
+            inside = (wx <= mx <= wx + ww) and (wy <= my <= wy + wh)
+            if inside:
+                self._show_overlay()
+            else:
+                # only hide if not already scheduled (avoid spamming)
+                if self._overlay_visible and not self._hide_job:
+                    self._hide_overlay()
+        except Exception:
+            pass
+        # reschedule — use parent_frame so it survives canvas HWND takeover
+        try:
+            self._mouse_poll_job = self.parent_frame.after(120, self._do_mouse_poll)
+        except Exception:
+            pass
 
 
     def _on_vol_scale(self, val_str: str):
@@ -195,7 +312,7 @@ class DualPlayerSlot:
                 if self.is_muted and val > 0:
                     self.is_muted = False
                     self.player.audio_set_mute(False)
-                    self.mute_btn.config(text="Mute")
+                    self.mute_btn.config(text="🔊")
             except Exception:
                 pass
 
@@ -293,6 +410,20 @@ class DualPlayerSlot:
         self.running = False
         self._cancel_poll()
 
+        # stop mouse-position poll
+        try:
+            if self._mouse_poll_job:
+                self.parent_frame.after_cancel(self._mouse_poll_job)
+                self._mouse_poll_job = None
+        except Exception:
+            pass
+        if self._hide_job:
+            try:
+                self.parent_frame.after_cancel(self._hide_job)
+            except Exception:
+                pass
+            self._hide_job = None
+
         if self.player:
             try:
                 self.player.stop()
@@ -382,11 +513,11 @@ class DualPlayerSlot:
             if self.player:
                 state = self.player.get_state()
                 if state == vlc.State.Playing:
-                    self.play_btn.config(text="Pause")
+                    self.play_btn.config(text="⏸")
                     self.status_label.config(
                         text=f"P{self.slot_id} · {self.index+1}/{len(self.videos)}")
                 elif state == vlc.State.Paused:
-                    self.play_btn.config(text="Play")
+                    self.play_btn.config(text="▶")
                     self.status_label.config(text=f"P{self.slot_id} · Paused")
                 elif state == vlc.State.Ended:
                     self._on_ended()
@@ -454,18 +585,17 @@ class DualPlayerSlot:
             return
         if self.player.is_playing():
             self.player.pause()
-            self.play_btn.config(text="Play")
+            self.play_btn.config(text="▶")
             self.status_label.config(text=f"P{self.slot_id} · Paused")
         else:
             self.player.play()
-            self.play_btn.config(text="Pause")
-            # Re-apply volume after resume (VLC can drift on some drivers)
+            self.play_btn.config(text="⏸")
             threading.Timer(0.2, self._apply_volume).start()
 
     def _stop_playback(self):
         if self.player:
             self.player.stop()
-        self.play_btn.config(text="Play")
+        self.play_btn.config(text="▶")
         self.status_label.config(text=f"P{self.slot_id} · Stopped")
 
     def _next(self):
@@ -489,7 +619,7 @@ class DualPlayerSlot:
         self.player.audio_set_mute(self.is_muted)
         if not self.is_muted:
             self.player.audio_set_volume(self.volume)
-        self.mute_btn.config(text="Unmute" if self.is_muted else "Mute")
+        self.mute_btn.config(text="🔇" if self.is_muted else "🔊")
 
     def _cycle_loop_mode(self):
         modes = ["loop_on", "loop_off", "shuffle"]
@@ -632,13 +762,13 @@ class DualPlayerWindow:
         for s in (self.slot1, self.slot2):
             if s and s.player and s.player.is_playing():
                 s.player.pause()
-                s.play_btn.config(text="Play")
+                s.play_btn.config(text="▶")
 
     def _play_both(self):
         for s in (self.slot1, self.slot2):
             if s and s.player and not s.player.is_playing():
                 s.player.play()
-                s.play_btn.config(text="Pause")
+                s.play_btn.config(text="⏸")
 
     def _stop_both(self):
         for s in (self.slot1, self.slot2):
