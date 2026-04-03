@@ -1851,13 +1851,13 @@ def select_multiple_folders_and_play():
                             all_video_to_dir[video_path] = os.path.dirname(video_path)
 
                         all_directories = sorted(list(set(all_video_to_dir.values())))
-                        
+
                         dir_selection = self.dir_listbox.curselection()
                         if dir_selection:
                             start_idx = dir_selection[0]
                             dirs_order = list(self.selected_dirs)
                             dirs_order = dirs_order[start_idx:] + dirs_order[:start_idx]
-                            
+
                             ordered_dirs = []
                             all_dirs_set = set(all_directories)
                             for d in dirs_order:
@@ -2124,7 +2124,7 @@ def select_multiple_folders_and_play():
                 for d in dirs_to_process:
                     if d in all_directories_unordered:
                         all_directories.append(d)
-                
+
                 for d in sorted(list(all_directories_unordered)):
                     if d not in all_directories:
                         all_directories.append(d)
@@ -2915,14 +2915,6 @@ def select_multiple_folders_and_play():
             )
             self.settings_button.pack(side=tk.LEFT, padx=(0, 10))
 
-            self.dual_player_button = self.create_button(
-                theme_frame,
-                text="Dual Player",
-                command=self._open_dual_player,
-                variant="primary",
-                size="md"
-            )
-            self.dual_player_button.pack(side=tk.LEFT, padx=(0, 10))
 
             action_buttons_frame = tk.Frame(self.button_frame, bg=self.bg_color)
             action_buttons_frame.pack(side=tk.RIGHT)

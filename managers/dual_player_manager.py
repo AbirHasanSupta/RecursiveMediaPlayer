@@ -53,8 +53,9 @@ class DualPlayerSlot:
         self._poll_job = None
         self._vol_updating = False   # re-entrancy guard for volume slider
 
-        self.on_video_changed:       Optional[Callable] = None
-        self.watch_history_callback: Optional[Callable] = None
+        self.on_video_changed:         Optional[Callable] = None
+        self.watch_history_callback:   Optional[Callable] = None
+        self.layout_toggle_callback:   Optional[Callable] = None  # set by DualPlayerWindow for slot1
 
         self._build_ui()
 
@@ -165,6 +166,16 @@ class DualPlayerSlot:
                                   bg=bg, fg=accent, width=5)
         self.spd_label.pack(side=tk.LEFT)
 
+        # Stack/Side-by-side layout toggle — wired up by DualPlayerWindow for slot1 only
+        self.layout_btn = tk.Button(
+            ctrl, text="Stack View",
+            font=Font(family="Segoe UI", size=8),
+            bg="#444444", fg="white", bd=0, padx=6, pady=2,
+            cursor="hand2", relief=tk.FLAT,
+            activebackground="#666666", activeforeground="white",
+            command=self._on_layout_toggle)
+        self.layout_btn.pack(side=tk.RIGHT, padx=(4, 0))
+
 
     def _on_vol_scale(self, val_str: str):
         """Called by THIS slot's tk.Scale only - never touches the other slot."""
@@ -235,6 +246,12 @@ class DualPlayerSlot:
         self.instance = self._make_vlc_instance()
         self.player   = self.instance.media_player_new()
         _embed(self.player, self.video_canvas)
+        # Each slot gets its own independent aspect ratio (native/auto)
+        try:
+            self.player.video_set_aspect_ratio(None)
+            self.player.video_set_scale(0)
+        except Exception:
+            pass
         self._apply_volume()
 
     def _destroy_player(self):
@@ -308,6 +325,12 @@ class DualPlayerSlot:
                 self._apply_volume()
                 try:
                     self.player.set_rate(self.speed)
+                except Exception:
+                    pass
+                # Restore native aspect ratio for this player independently
+                try:
+                    self.player.video_set_aspect_ratio(None)
+                    self.player.video_set_scale(0)       # 0 = fit to window preserving AR
                 except Exception:
                     pass
 
@@ -481,6 +504,10 @@ class DualPlayerSlot:
             except Exception:
                 pass
 
+    def _on_layout_toggle(self):
+        if self.layout_toggle_callback:
+            self.layout_toggle_callback()
+
 
 class DualPlayerWindow:
 
@@ -510,37 +537,7 @@ class DualPlayerWindow:
         self._build_window()
 
     def _build_window(self):
-        bg     = self.theme.bg_color
-        accent = self.theme.accent_color
-
-        # ── CHANGE 1: Smaller toolbar height (pady=3, font size 10)
-        toolbar = tk.Frame(self.window, bg=bg, pady=3)
-        toolbar.pack(fill=tk.X, padx=10)
-
-        tk.Label(toolbar, text="Dual Video Player",
-                 font=Font(family="Segoe UI", size=10, weight="bold"),
-                 bg=bg, fg=accent).pack(side=tk.LEFT)
-
-        for sid in (1, 2):
-            self._make_btn(
-                toolbar,
-                f"Load → Player {sid}",
-                lambda s=sid: self._load_videos(s),
-                "primary"
-            ).pack(side=tk.LEFT, padx=(12 if sid == 1 else 3, 0))
-
-        self._make_btn(toolbar, "Pause Both",
-                       self._pause_both, "secondary").pack(side=tk.LEFT, padx=3)
-        self._make_btn(toolbar, "Play Both",
-                       self._play_both,  "success" ).pack(side=tk.LEFT, padx=3)
-        self._make_btn(toolbar, "Stop Both",
-                       self._stop_both,  "danger"  ).pack(side=tk.LEFT, padx=3)
-
-        self.layout_btn = self._make_btn(
-            toolbar, "Stack View", self._toggle_layout, "secondary")
-        self.layout_btn.pack(side=tk.RIGHT, padx=3)
-
-        tk.Frame(self.window, height=1, bg="#444444").pack(fill=tk.X, padx=10)
+        bg = self.theme.bg_color
 
         self.player_area = tk.Frame(self.window, bg=bg)
         self.player_area.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
@@ -548,12 +545,30 @@ class DualPlayerWindow:
 
     def _build_player_frames(self):
         bg = self.theme.bg_color
-        if self.slot1:
-            self.slot1.stop()
-        if self.slot2:
-            self.slot2.stop()
+
+        # Snapshot old slots, cancel their polls, detach from UI — don't block
+        old_slots = [s for s in (self.slot1, self.slot2) if s]
+        self.slot1 = None
+        self.slot2 = None
+        for s in old_slots:
+            try:
+                s.running = False
+                s._cancel_poll()
+            except Exception:
+                pass
+
+        # Destroy old UI frames
         for c in self.player_area.winfo_children():
             c.destroy()
+
+        # Release old VLC instances in background so UI never freezes
+        def _release_old():
+            for s in old_slots:
+                try:
+                    s._destroy_player()
+                except Exception:
+                    pass
+        threading.Thread(target=_release_old, daemon=True).start()
 
         kw = dict(bg=bg, highlightthickness=1, highlightbackground="#555555")
         if self._layout == "side_by_side":
@@ -569,6 +584,14 @@ class DualPlayerWindow:
 
         self.slot1 = DualPlayerSlot(f1, 1, self.theme, self.logger)
         self.slot2 = DualPlayerSlot(f2, 2, self.theme, self.logger)
+
+        # Wire the Stack View button (lives in slot1's ctrl row) to the toggle
+        self.slot1.layout_toggle_callback = self._toggle_layout
+        # Keep slot2's layout button hidden — only slot1 shows it
+        try:
+            self.slot2.layout_btn.pack_forget()
+        except Exception:
+            pass
 
         if self.watch_history_callback:
             self.slot1.watch_history_callback = self.watch_history_callback
@@ -624,26 +647,52 @@ class DualPlayerWindow:
 
     def _toggle_layout(self):
         self._layout = "stacked" if self._layout == "side_by_side" else "side_by_side"
-        self.layout_btn.config(
-            text="Side by Side" if self._layout == "stacked" else "Stack View")
         v1 = (self.slot1.videos[:], self.slot1.index) if self.slot1 else ([], 0)
         v2 = (self.slot2.videos[:], self.slot2.index) if self.slot2 else ([], 0)
         self._build_player_frames()
+        # Update the button label to reflect the current layout
+        new_label = "Side by Side" if self._layout == "stacked" else "Stack View"
+        try:
+            self.slot1.layout_btn.config(text=new_label)
+        except Exception:
+            pass
         if v1[0]:
             self.window.after(200, lambda: self.slot1.load_videos(v1[0], v1[1]))
         if v2[0]:
             self.window.after(200, lambda: self.slot2.load_videos(v2[0], v2[1]))
 
     def _on_close(self):
-        for s in (self.slot1, self.slot2):
-            if s:
-                s.stop()
-        if self.window:
+        # Grab slot references and detach from UI immediately
+        slots = [s for s in (self.slot1, self.slot2) if s]
+        self.slot1 = None
+        self.slot2 = None
+
+        # Cancel all polling jobs so nothing touches the destroyed window
+        for s in slots:
             try:
-                self.window.destroy()
+                s.running = False
+                s._cancel_poll()
             except Exception:
                 pass
+
+        # Destroy the window right away — UI stays responsive
+        win = self.window
         self.window = None
+        if win:
+            try:
+                win.destroy()
+            except Exception:
+                pass
+
+        # Release VLC players in the background so the UI never blocks
+        def _release():
+            for s in slots:
+                try:
+                    s._destroy_player()
+                except Exception:
+                    pass
+
+        threading.Thread(target=_release, daemon=True).start()
 
     def preload(self, videos1: List[str] = None, videos2: List[str] = None):
         if not self.window:
