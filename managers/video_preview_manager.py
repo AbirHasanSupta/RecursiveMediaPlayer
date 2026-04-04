@@ -2,7 +2,7 @@
 VideoPreviewManager — fast binary thumbnail cache + LRU in-memory cache + background prefetch.
 
 Changes vs previous version:
-1. LRU in-memory PhotoImage cache (configurable size, default 1000 entries).
+1. LRU in-memory PhotoImage cache (configurable size, default 2000 entries).
    Decoded PhotoImage objects live in RAM so grid re-opens / re-renders need
    zero disk I/O and zero decode work.
 2. Background prefetch queue.  When a directory scan completes (or any caller
@@ -94,7 +94,7 @@ class LRUPhotoCache:
     correctly in Tkinter — holding them here serves that purpose as well.
     """
 
-    def __init__(self, maxsize: int = 1000):
+    def __init__(self, maxsize: int = 2000):
         self._maxsize = maxsize
         self._cache: OrderedDict[str, ImageTk.PhotoImage] = OrderedDict()
         self._lock = threading.Lock()
@@ -198,7 +198,7 @@ class VideoThumbnail:
 # ---------------------------------------------------------------------------
 
 class ThumbnailStorage:
-    MAX_ENTRIES = 1000
+    MAX_ENTRIES = 2000
 
     def __init__(self):
         if os.name == "nt":
@@ -827,14 +827,14 @@ class VideoPreviewManager:
     Public API is identical to the original.
 
     New capabilities:
-    - lru_cache: LRU in-memory PhotoImage cache (default 1000 slots)
+    - lru_cache: LRU in-memory PhotoImage cache (default 2000 slots)
     - prefetch_for_videos(paths): kick off background blob generation
     - prefetch_for_directory(dir_path, video_list): called by app when a
       directory scan completes
     """
 
     # How many decoded PhotoImages to keep in RAM
-    LRU_SIZE = 1000
+    LRU_SIZE = 2000
     # Background worker threads for prefetch (raised from 2 → 4 for faster bulk gen)
     PREFETCH_WORKERS = 4
 
@@ -1232,7 +1232,7 @@ class VideoPreviewManager:
                 th = self._thumbnails.pop(k)
                 self.storage.delete_blob(th.blob_path)
 
-        self.lru_cache.discard_prefix(root_norm)
+        # self.lru_cache.discard_prefix(root_norm)
 
         if to_remove:
             self._flush_index()
