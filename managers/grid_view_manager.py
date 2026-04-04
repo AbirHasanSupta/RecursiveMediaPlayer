@@ -40,6 +40,10 @@ class GridViewManager:
         # Cache for PhotoImage objects keyed by video_path (norm) so they survive grid rebuilds
         self._photo_cache = {}
 
+        # Pagination
+        self._page = 0
+        self._page_size = 50
+
         get_resource_manager().register_cleanup_callback(self._cleanup)
 
     def _cleanup(self):
@@ -85,6 +89,8 @@ class GridViewManager:
         self.excluded_items = set()
         # Clear photo cache when opening a fresh grid window
         self._photo_cache.clear()
+        self._page = 0
+        self._pages_cache = None
 
         header_frame = tk.Frame(self.grid_window, bg=self.theme_provider.bg_color, pady=15)
         header_frame.pack(fill=tk.X, padx=20, pady=(10, 0))
@@ -226,6 +232,11 @@ class GridViewManager:
         )
         close_btn.pack(side=tk.RIGHT, padx=(0, 10))
 
+        # ── Pagination bar ────────────────────────────────────────────────────
+        self._pagination_frame = tk.Frame(self.grid_window, bg=self.theme_provider.bg_color)
+        self._pagination_frame.pack(fill=tk.X, padx=20, pady=(0, 8))
+        self._build_pagination_bar()
+
         container = tk.Frame(
             self.grid_window,
             bg=self.theme_provider.bg_color,
@@ -328,6 +339,7 @@ class GridViewManager:
                     self.items.append({'type': 'video', 'path': video, 'video_item': GridViewItem(video)})
 
             self.all_items = self.items.copy()
+            self._pages_cache = None
 
             # Prioritize these videos in the prefetch queue so they jump
             # ahead of other directories currently being prefetched.
@@ -430,6 +442,7 @@ class GridViewManager:
                 new_items.append(by_dir[d]['header'])
                 new_items.extend(by_dir[d]['videos'])
         self.items = new_items
+        self._pages_cache = None
         if not self.search_var.get():
             self.all_items = self.items.copy()
 
@@ -580,11 +593,176 @@ class GridViewManager:
             self.items.append(item)
         else:
             self.items.insert(tgt_idx, item)
+        self._pages_cache = None
         if not self.search_var.get():
             self.all_items = self.items.copy()
 
+    # ── Pagination ────────────────────────────────────────────────────────────
+
+    def _get_page_items(self):
+        """Return items for the current page, never splitting a folder across pages."""
+        target = self._page_size
+        pages = []
+        current_page = []
+        current_count = 0
+
+        i = 0
+        all_items = self.items
+        while i < len(all_items):
+            item = all_items[i]
+            if item['type'] == 'header':
+                # Collect this folder's header + all its videos
+                folder_block = [item]
+                i += 1
+                while i < len(all_items) and all_items[i]['type'] == 'video':
+                    folder_block.append(all_items[i])
+                    i += 1
+                folder_video_count = len(folder_block) - 1  # exclude header
+
+                # If adding this folder would exceed the target AND we already have
+                # videos on the current page, start a new page
+                if current_count > 0 and current_count + folder_video_count > target:
+                    pages.append(current_page)
+                    current_page = []
+                    current_count = 0
+
+                current_page.extend(folder_block)
+                current_count += folder_video_count
+            else:
+                i += 1
+
+        if current_page:
+            pages.append(current_page)
+
+        self._pages_cache = pages
+        total = len(pages)
+        if total == 0:
+            return []
+
+        self._page = max(0, min(self._page, total - 1))
+        return pages[self._page]
+
+    def _total_pages(self):
+        # Always recompute — cache is set fresh by _get_page_items each rebuild
+        if not hasattr(self, '_pages_cache') or self._pages_cache is None:
+            self._get_page_items()
+        return max(1, len(self._pages_cache))
+
+    def _next_page(self):
+        if self._page < self._total_pages() - 1:
+            self._page += 1
+            self._rebuild_grid()
+            if hasattr(self, 'canvas') and self.canvas.winfo_exists():
+                self.canvas.yview_moveto(0)
+
+    def _prev_page(self):
+        if self._page > 0:
+            self._page -= 1
+            self._rebuild_grid()
+            if hasattr(self, 'canvas') and self.canvas.winfo_exists():
+                self.canvas.yview_moveto(0)
+
+    def _jump_to_page(self):
+        try:
+            p = int(self._jump_var.get()) - 1
+            p = max(0, min(p, self._total_pages() - 1))
+            self._page = p
+            self._rebuild_grid()
+            if hasattr(self, 'canvas') and self.canvas.winfo_exists():
+                self.canvas.yview_moveto(0)
+        except ValueError:
+            pass
+
+    def _build_pagination_bar(self):
+        if not hasattr(self, '_pagination_frame') or not self._pagination_frame.winfo_exists():
+            return
+        for w in self._pagination_frame.winfo_children():
+            w.destroy()
+
+        # Force pages to be calculated so _total_pages() is accurate
+        self._get_page_items()
+        total_pages = self._total_pages()
+        total_videos = sum(1 for i in self.items if i['type'] == 'video')
+
+        # Page size selector
+        tk.Label(
+            self._pagination_frame,
+            text="Per page:",
+            bg=self.theme_provider.bg_color,
+            fg=self.theme_provider.text_color,
+            font=self.theme_provider.small_font
+        ).pack(side=tk.LEFT, padx=(0, 4))
+
+        self._page_size_var = tk.StringVar(value=str(self._page_size))
+        size_menu = tk.OptionMenu(
+            self._pagination_frame,
+            self._page_size_var,
+            "25", "50", "100", "200", "500", "1000",
+            command=self._on_page_size_changed
+        )
+        size_menu.configure(
+            font=self.theme_provider.small_font,
+            bg=self.theme_provider.bg_color,
+            fg=self.theme_provider.text_color,
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightbackground="#e0e0e0"
+        )
+        size_menu.pack(side=tk.LEFT, padx=(0, 16))
+
+        prev_btn = self.theme_provider.create_button(
+            self._pagination_frame, "◀ Prev", self._prev_page, "secondary", "sm"
+        )
+        prev_btn.pack(side=tk.LEFT, padx=(0, 6))
+
+        self._page_label = tk.Label(
+            self._pagination_frame,
+            text=f"Page {self._page + 1} of {total_pages}  ({total_videos} videos)",
+            font=self.theme_provider.small_font,
+            bg=self.theme_provider.bg_color,
+            fg=self.theme_provider.text_color
+        )
+        self._page_label.pack(side=tk.LEFT, padx=(0, 6))
+
+        next_btn = self.theme_provider.create_button(
+            self._pagination_frame, "Next ▶", self._next_page, "secondary", "sm"
+        )
+        next_btn.pack(side=tk.LEFT, padx=(0, 16))
+
+        tk.Label(
+            self._pagination_frame,
+            text="Go:",
+            font=self.theme_provider.small_font,
+            bg=self.theme_provider.bg_color,
+            fg=self.theme_provider.text_color
+        ).pack(side=tk.LEFT, padx=(0, 4))
+
+        self._jump_var = tk.StringVar(value=str(self._page + 1))
+        jump_entry = tk.Entry(
+            self._pagination_frame,
+            textvariable=self._jump_var,
+            width=4,
+            font=self.theme_provider.small_font,
+            bg=self.theme_provider.bg_color,
+            fg=self.theme_provider.text_color,
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightbackground="#e0e0e0"
+        )
+        jump_entry.pack(side=tk.LEFT, padx=(0, 4))
+        jump_entry.bind("<Return>", lambda e: self._jump_to_page())
+
+    def _on_page_size_changed(self, value):
+        self._page_size = int(value)
+        self._page = 0
+        self._pages_cache = None
+        self._rebuild_grid()
+        if hasattr(self, 'canvas') and self.canvas.winfo_exists():
+            self.canvas.yview_moveto(0)
 
     def _filter_directories(self):
+        self._page = 0
+        self._pages_cache = None
         search_term = self.search_var.get().lower()
 
         if not hasattr(self, 'all_items'):
@@ -626,6 +804,8 @@ class GridViewManager:
         self.card_widgets.clear()
         cols = self.grid_size_var.get()
 
+        self._build_pagination_bar()
+
         if not self.items:
             no_videos_label = tk.Label(
                 self.grid_frame,
@@ -637,10 +817,12 @@ class GridViewManager:
             no_videos_label.pack(pady=50)
             return
 
+        page_items = self._get_page_items()
+
         grid_row = -1
         video_col = 0
 
-        for idx, item_data in enumerate(self.items):
+        for idx, item_data in enumerate(page_items):
             if item_data['type'] == 'header':
                 grid_row += 1
                 video_col = 0
@@ -1366,7 +1548,8 @@ class GridViewManager:
             badge.place(relx=0.0, rely=0.0, anchor='nw')
 
     def _select_all(self):
-        for item_data in self.items:
+        page_items = self._pages_cache[self._page] if hasattr(self, '_pages_cache') and self._pages_cache else self.items
+        for item_data in page_items:
             if item_data['type'] == 'video':
                 video_path = item_data['path']
                 self.selected_items.add(video_path)
