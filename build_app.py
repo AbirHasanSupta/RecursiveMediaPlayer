@@ -248,6 +248,37 @@ def select_multiple_folders_and_play():
             )
             self.filter_sort_ui.app_instance = self
 
+            self.grid_view_manager.set_add_to_playlist_callback(
+                lambda videos: self.playlist_manager.add_videos_to_playlist([], videos)
+            )
+            self.grid_view_manager.set_add_to_favourites_callback(
+                lambda videos: self.favorites_manager.add_to_favorites(videos, self.get_current_selected_directory())
+            )
+            self.grid_view_manager.set_remove_from_favourites_callback(
+                lambda videos: self.favorites_manager.remove_from_favorites(videos,
+                                                                            self.get_current_selected_directory())
+            )
+            self.grid_view_manager.set_is_favourite_callback(
+                lambda video_path: self.favorites_manager.is_favorite(video_path, self.get_current_selected_directory())
+            )
+            self.grid_view_manager.set_add_to_queue_callback(
+                lambda videos: self.queue_manager.add_to_queue(videos, added_from="grid_view")
+            )
+            self.grid_view_manager.set_play_in_dual_player1_callback(
+                lambda videos: (
+                    self.dual_player_manager.show(),
+                    self.root.after(400, lambda: self.dual_player_manager._window.slot1.load_videos(videos))
+                )
+            )
+            self.grid_view_manager.set_play_in_dual_player2_callback(
+                lambda videos: (
+                    self.dual_player_manager.show(),
+                    self.root.after(400, lambda: self.dual_player_manager._window.slot2.load_videos(videos))
+                )
+            )
+            self.grid_view_manager.set_open_file_location_callback(self._context_open_location)
+            self.grid_view_manager.set_show_properties_callback(self._context_show_properties)
+
             self.settings_manager.ui.cleanup_resume_callback = lambda: self.resume_manager.service.cleanup_old_positions(
                 self.settings_manager.get_settings().auto_cleanup_days)
             self.settings_manager.ui.cleanup_history_callback = lambda: self.watch_history_manager.service.cleanup_old_entries(

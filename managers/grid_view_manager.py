@@ -27,6 +27,15 @@ class GridViewManager:
         self.selected_items = set()
         self.card_widgets = {}
         self.play_callback = None
+        self.add_to_playlist_callback = None
+        self.add_to_favourites_callback = None
+        self.remove_from_favourites_callback = None
+        self.is_favourite_callback = None
+        self.add_to_queue_callback = None
+        self.play_in_dual_player1_callback = None
+        self.play_in_dual_player2_callback = None
+        self.open_file_location_callback = None
+        self.show_properties_callback = None
         self.excluded_items = set()
         self.is_loading = False
         self.loading_lock = threading.Lock()
@@ -70,6 +79,34 @@ class GridViewManager:
 
     def set_play_callback(self, callback):
         self.play_callback = callback
+
+    def set_add_to_playlist_callback(self, callback):
+        self.add_to_playlist_callback = callback
+
+    def set_add_to_favourites_callback(self, callback):
+        self.add_to_favourites_callback = callback
+
+    def set_remove_from_favourites_callback(self, callback):
+        self.remove_from_favourites_callback = callback
+
+    def set_is_favourite_callback(self, callback):
+        """callback(video_path) -> bool"""
+        self.is_favourite_callback = callback
+
+    def set_add_to_queue_callback(self, callback):
+        self.add_to_queue_callback = callback
+
+    def set_play_in_dual_player1_callback(self, callback):
+        self.play_in_dual_player1_callback = callback
+
+    def set_play_in_dual_player2_callback(self, callback):
+        self.play_in_dual_player2_callback = callback
+
+    def set_open_file_location_callback(self, callback):
+        self.open_file_location_callback = callback
+
+    def set_show_properties_callback(self, callback):
+        self.show_properties_callback = callback
 
     def show_grid_view(self, videos, video_preview_manager=None):
         if self.grid_window and self.grid_window.winfo_exists():
@@ -1174,6 +1211,7 @@ class GridViewManager:
         if not self.selected_items:
             return
 
+        # ── Play ──────────────────────────────────────────────────────────────
         if video_path in self.selected_items:
             context_menu.add_command(
                 label=f"Play Selected ({len(self.selected_items)} items)",
@@ -1187,6 +1225,7 @@ class GridViewManager:
 
         context_menu.add_separator()
 
+        # ── Exclude / Include ─────────────────────────────────────────────────
         selected_excluded = [vp for vp in self.selected_items if vp in self.excluded_items]
         selected_not_excluded = [vp for vp in self.selected_items if vp not in self.excluded_items]
 
@@ -1224,10 +1263,177 @@ class GridViewManager:
             command=self._clear_selection
         )
 
+        context_menu.add_separator()
+
+        # ── Add to Playlist ───────────────────────────────────────────────────
+        context_menu.add_command(
+            label="Add to Playlist",
+            command=self._context_add_to_playlist
+        )
+
+        # ── Favourites ────────────────────────────────────────────────────────
+        # Determine favourite state for the right-clicked video (or first selected)
+        target = video_path if video_path in self.selected_items else next(iter(self.selected_items))
+        is_fav = self.is_favourite_callback(target) if self.is_favourite_callback else False
+
+        if is_fav:
+            context_menu.add_command(
+                label="★ Remove from Favourites",
+                command=self._context_remove_from_favourites
+            )
+        else:
+            context_menu.add_command(
+                label="⭐ Add to Favourites",
+                command=self._context_add_to_favourites
+            )
+
+        context_menu.add_separator()
+
+        # ── Queue ─────────────────────────────────────────────────────────────
+        context_menu.add_command(
+            label="Add to Queue",
+            command=self._context_add_to_queue
+        )
+
+        context_menu.add_separator()
+
+        # ── Dual Player ───────────────────────────────────────────────────────
+        context_menu.add_command(
+            label="▶ Play in Dual Player 1",
+            command=lambda: self._context_play_in_dual_player(slot=1)
+        )
+        context_menu.add_command(
+            label="▶ Play in Dual Player 2",
+            command=lambda: self._context_play_in_dual_player(slot=2)
+        )
+
+        context_menu.add_separator()
+
+        # ── File actions (single-selection only) ──────────────────────────────
+        single = video_path if len(self.selected_items) == 1 else None
+
+        if single and os.path.isfile(single):
+            context_menu.add_command(
+                label="Open File Location",
+                command=lambda: self._context_open_file_location(single)
+            )
+            context_menu.add_command(
+                label="Properties",
+                command=lambda: self._context_show_properties(single)
+            )
+
         try:
             context_menu.tk_popup(event.x_root, event.y_root)
         finally:
             context_menu.grab_release()
+
+    # ── New context-menu action helpers ───────────────────────────────────────
+
+    def _get_selected_videos(self):
+        """Return selected non-excluded videos in page order."""
+        return [
+            it['path'] for it in self.items
+            if it['type'] == 'video'
+            and it['path'] in self.selected_items
+            and it['path'] not in self.excluded_items
+        ]
+
+    def _context_add_to_playlist(self):
+        videos = self._get_selected_videos()
+        if not videos:
+            return
+        if self.add_to_playlist_callback:
+            self.add_to_playlist_callback(videos)
+
+    def _context_add_to_favourites(self):
+        videos = self._get_selected_videos()
+        if not videos:
+            return
+        if self.add_to_favourites_callback:
+            self.add_to_favourites_callback(videos)
+
+    def _context_remove_from_favourites(self):
+        # Include all selected (even excluded) for removal
+        videos = [
+            it['path'] for it in self.items
+            if it['type'] == 'video' and it['path'] in self.selected_items
+        ]
+        if not videos:
+            return
+        if self.remove_from_favourites_callback:
+            self.remove_from_favourites_callback(videos)
+
+    def _context_add_to_queue(self):
+        videos = self._get_selected_videos()
+        if not videos:
+            return
+        if self.add_to_queue_callback:
+            self.add_to_queue_callback(videos)
+
+    def _context_play_in_dual_player(self, slot: int):
+        videos = self._get_selected_videos()
+        if not videos:
+            return
+        if slot == 1 and self.play_in_dual_player1_callback:
+            self.play_in_dual_player1_callback(videos)
+        elif slot == 2 and self.play_in_dual_player2_callback:
+            self.play_in_dual_player2_callback(videos)
+
+    def _context_open_file_location(self, file_path):
+        if self.open_file_location_callback:
+            self.open_file_location_callback(file_path)
+            return
+        # Fallback: mirrors build_app._context_open_location
+        try:
+            import subprocess, sys as _sys
+            if os.name == 'nt':
+                subprocess.Popen(f'explorer /select,"{file_path}"')
+            elif os.name == 'posix':
+                if _sys.platform == 'darwin':
+                    subprocess.Popen(['open', '-R', file_path])
+                else:
+                    subprocess.Popen(['xdg-open', os.path.dirname(file_path)])
+        except Exception as e:
+            if self.console_callback:
+                self.console_callback(f"Error opening file location: {e}")
+
+    def _context_show_properties(self, file_path):
+        if self.show_properties_callback:
+            self.show_properties_callback(file_path)
+            return
+        # Fallback: mirrors build_app._context_show_properties
+        try:
+            from datetime import datetime as _dt
+            stat_info = os.stat(file_path)
+            size_mb = stat_info.st_size / (1024 * 1024)
+            modified = _dt.fromtimestamp(stat_info.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+
+            info = f"File: {os.path.basename(file_path)}\n\n"
+            info += f"Path: {file_path}\n\n"
+            info += f"Size: {size_mb:.2f} MB ({stat_info.st_size:,} bytes)\n\n"
+            info += f"Modified: {modified}\n\n"
+
+            try:
+                import cv2
+                cap = cv2.VideoCapture(file_path)
+                if cap.isOpened():
+                    fps = cap.get(cv2.CAP_PROP_FPS)
+                    frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                    duration = frame_count / fps if fps > 0 else 0
+                    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    info += f"Duration: {int(duration // 60)}:{int(duration % 60):02d}\n"
+                    info += f"Resolution: {width}x{height}\n"
+                    info += f"FPS: {fps:.2f}\n"
+                    cap.release()
+            except Exception:
+                pass
+
+            import tkinter.messagebox as _mb
+            _mb.showinfo("Properties", info)
+        except Exception as e:
+            if self.console_callback:
+                self.console_callback(f"Error showing properties: {e}")
 
     def _exclude_selected(self):
         for vp in list(self.selected_items):
