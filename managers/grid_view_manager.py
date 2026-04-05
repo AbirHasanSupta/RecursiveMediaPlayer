@@ -1271,25 +1271,7 @@ class GridViewManager:
             command=self._context_add_to_playlist
         )
 
-        # ── Favourites ────────────────────────────────────────────────────────
-        # Determine favourite state for the right-clicked video (or first selected)
-        target = video_path if video_path in self.selected_items else next(iter(self.selected_items))
-        is_fav = self.is_favourite_callback(target) if self.is_favourite_callback else False
 
-        if is_fav:
-            context_menu.add_command(
-                label="★ Remove from Favourites",
-                command=self._context_remove_from_favourites
-            )
-        else:
-            context_menu.add_command(
-                label="⭐ Add to Favourites",
-                command=self._context_add_to_favourites
-            )
-
-        context_menu.add_separator()
-
-        # ── Queue ─────────────────────────────────────────────────────────────
         context_menu.add_command(
             label="Add to Queue",
             command=self._context_add_to_queue
