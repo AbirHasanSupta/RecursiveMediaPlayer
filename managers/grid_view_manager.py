@@ -1362,6 +1362,7 @@ class GridViewManager:
             self.play_in_dual_player2_callback(videos)
 
     def _context_open_file_location(self, file_path):
+        file_path = os.path.normpath(file_path)
         if self.open_file_location_callback:
             self.open_file_location_callback(file_path)
             return
