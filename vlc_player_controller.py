@@ -80,10 +80,17 @@ class BaseVLCPlayerController:
         self.video_change_callback = None
         self.position_overlay = None
 
+        self._rotation_index = 0
+        self._zoom_level = 1.0
+
         self.resource_manager = get_resource_manager()
         self._is_cleanup = False
         self._cleanup_lock = threading.RLock()
         self.resource_manager.register_vlc_instance(self.instance)
+
+    _ROTATION_STEPS = [0, 90, 180, 270]
+    _TRANSFORM_MAP = {0: "identity", 90: "90", 180: "180", 270: "270"}
+
 
     def set_initial_playback_rate(self, rate):
         self.initial_playback_rate = rate
@@ -150,13 +157,11 @@ class BaseVLCPlayerController:
         self.play_video(prev_index)
 
     def set_volume_save_callback(self, callback):
-        """Set callback to save volume and mute state when they change or player stops"""
         self._volume_save_callback = callback
 
     def _trigger_config_save(self):
         if hasattr(self, '_volume_save_callback') and self._volume_save_callback:
             try:
-                # Assuming callback takes (volume, is_muted) or we'll adjust it in DirectorySelector
                 self._volume_save_callback(self.volume, self.is_muted)
             except Exception:
                 try:
@@ -171,9 +176,7 @@ class BaseVLCPlayerController:
             self._is_cleanup = True
 
         self.running = False
-
         self._trigger_config_save()
-
         self.stop_position_tracking()
 
         if self.position_overlay:
@@ -189,12 +192,10 @@ class BaseVLCPlayerController:
                 time.sleep(0.2)
             except Exception:
                 pass
-
             try:
                 self.player.release()
             except Exception:
                 pass
-
             self.player = None
 
         try:
@@ -225,7 +226,6 @@ class BaseVLCPlayerController:
                 self.player.audio_set_mute(self.is_muted)
                 if not self.is_muted:
                     self.player.audio_set_volume(self.volume)
-
                 if self.logger:
                     self.logger(f"Audio {'Muted' if self.is_muted else 'Unmuted'}")
                 self._trigger_config_save()
@@ -243,7 +243,6 @@ class BaseVLCPlayerController:
                         self.logger("Audio Unmuted via Volume Up")
                 except Exception:
                     pass
-
             self.volume = min(100, self.volume + 10)
             self.player.audio_set_volume(self.volume)
             if self.logger:
@@ -260,7 +259,6 @@ class BaseVLCPlayerController:
                         self.logger("Audio Unmuted via Volume Down")
                 except Exception:
                     pass
-
             self.volume = max(0, self.volume - 10)
             self.player.audio_set_volume(self.volume)
             if self.logger:
@@ -271,7 +269,6 @@ class BaseVLCPlayerController:
         with self.lock:
             self.fullscreen_enabled = not self.fullscreen_enabled
             self.player.set_fullscreen(self.fullscreen_enabled)
-
             if self.logger:
                 self.logger(f"Fullscreen Mode is {'On' if self.fullscreen_enabled else 'Off'}")
 
@@ -339,17 +336,14 @@ class BaseVLCPlayerController:
                 self.logger("Speed reset to 1.0×")
 
     def set_resume_manager(self, resume_manager):
-        """Set the resume playback manager"""
         self.resume_manager = resume_manager
 
     def check_resume_position(self, video_path: str) -> tuple:
-        """Check if video should be resumed and apply position"""
         if not hasattr(self, 'resume_manager') or not self.resume_manager:
             return False, False
 
         position_data = self.resume_manager.should_resume_video(video_path)
         if position_data:
-            # Ask user if they want to resume from position
             try:
                 from tkinter import messagebox
                 result = messagebox.askyesno(
@@ -361,9 +355,8 @@ class BaseVLCPlayerController:
                 )
 
                 if result:
-                    # Set position after video starts playing
                     def set_resume_position():
-                        max_attempts = 50  # 5 seconds max
+                        max_attempts = 50
                         attempt = 0
                         while attempt < max_attempts and self.running:
                             try:
@@ -378,32 +371,37 @@ class BaseVLCPlayerController:
                             attempt += 1
 
                     threading.Thread(target=set_resume_position, daemon=True).start()
-                    return True, True  # Resume with position
+                    return True, True
                 else:
-                    # User chose to play from beginning but keep this as last played video
                     self.resume_manager.clear_video_position(video_path)
-                    return True, False  # Resume video but from beginning
+                    return True, False
             except:
                 pass
 
         return False, False
 
     def start_position_tracking(self, video_path: str):
-        """Start tracking position for resume functionality"""
         if hasattr(self, 'resume_manager') and self.resume_manager:
             self.resume_manager.start_tracking_video(self.player, video_path)
 
     def stop_position_tracking(self):
-        """Stop tracking position"""
         if hasattr(self, 'resume_manager') and self.resume_manager:
             self.resume_manager.stop_tracking_video()
 
     def run(self):
         self.play_video(self.start_index)
         while self.running:
-            state = self.player.get_state()
-            if state == vlc.State.Ended:
-                self.next_video()
+            try:
+                player = self.player  # re-fetch each iteration
+                if player is None:
+                    time.sleep(0.1)
+                    continue
+                state = player.get_state()
+                if state == vlc.State.Ended:
+                    self.next_video()
+            except Exception:
+                pass
+            time.sleep(0.1)
 
     def switch_to_monitor(self, monitor_number):
         with self.lock:
@@ -417,7 +415,17 @@ class BaseVLCPlayerController:
             else:
                 x, y, height, width = self.monitor_info.monitor2
 
-            self.instance = vlc.Instance(f'--video-x={x}', f'--video-y={y}')
+            angle = self._ROTATION_STEPS[self._rotation_index]
+            transform_type = self._TRANSFORM_MAP[angle]
+
+            instance_args = [f'--video-x={x}', f'--video-y={y}']
+            if transform_type != "identity":
+                instance_args += [
+                    '--video-filter=transform',
+                    f'--transform-type={transform_type}',
+                ]
+
+            self.instance = vlc.Instance(*instance_args)
             self.player = self.instance.media_player_new()
             try:
                 self.player.audio_set_mute(self.is_muted)
@@ -452,7 +460,6 @@ class BaseVLCPlayerController:
                     time.sleep(0.5)
                     if self.position_overlay:
                         self.position_overlay.position_window()
-
                 threading.Thread(target=update_overlay_position, daemon=True).start()
 
     def take_screenshot(self):
@@ -463,7 +470,6 @@ class BaseVLCPlayerController:
                 video_dir.mkdir(parents=True, exist_ok=True)
 
                 video_name = os.path.splitext(os.path.basename(current_video))[0]
-
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 screenshot_filename = f"{video_name}_screenshot_{timestamp}.png"
                 screenshot_path = video_dir / screenshot_filename
@@ -471,7 +477,6 @@ class BaseVLCPlayerController:
                 self.player.video_take_snapshot(0, str(screenshot_path), 0, 0)
                 if self.logger:
                     self.logger(f"Screenshot saved: {screenshot_path}")
-
             except Exception as e:
                 if self.logger:
                     self.logger(f"Error taking screenshot: {e}")
@@ -491,7 +496,6 @@ class BaseVLCPlayerController:
 
                 if self.logger:
                     self.logger(f"Copied to clipboard: {current_video}")
-
             except Exception as e:
                 if self.logger:
                     self.logger(f"Error copying video: {e}")
@@ -528,6 +532,131 @@ class BaseVLCPlayerController:
         self.position_overlay.toggle()
 
 
+    def rotate_video(self, direction: str = "right"):
+        with self.lock:
+            if direction == "right":
+                self._rotation_index = (self._rotation_index + 1) % 4
+            elif direction == "left":
+                self._rotation_index = (self._rotation_index - 1) % 4
+            elif direction == "reset":
+                self._rotation_index = 0
+                self._zoom_level = 1.0
+
+            angle = self._ROTATION_STEPS[self._rotation_index]
+
+            if direction == "flip_h":
+                transform_type = "hflip"
+                label = "Flip horizontal"
+            elif direction == "flip_v":
+                transform_type = "vflip"
+                label = "Flip vertical"
+            elif direction == "reset":
+                transform_type = "identity"
+                label = "0° (reset)"
+            else:
+                transform_type = self._TRANSFORM_MAP[angle]
+                label = f"{angle}°" if angle else "0° (reset)"
+
+            current_video  = self.videos[self.index]
+            snap_volume    = self.volume
+            snap_muted     = self.is_muted
+            snap_fullscreen = self.fullscreen_enabled
+
+        try:
+            position_ms = self.player.get_time()
+            was_playing = self.player.is_playing()
+            rate        = self.player.get_rate()
+        except Exception:
+            position_ms = 0
+            was_playing = True
+            rate        = 1.0
+
+        try:
+            x, y, w, h = (self.monitor_info.monitor1
+                          if self.current_monitor == 1
+                          else self.monitor_info.monitor2)
+
+            instance_args = [f'--video-x={x}', f'--video-y={y}']
+            if transform_type != "identity":
+                instance_args += [
+                    '--video-filter=transform',
+                    f'--transform-type={transform_type}',
+                ]
+            else:
+                pass
+
+            new_instance = self.instance.__class__(*instance_args)
+            new_player = new_instance.media_player_new()
+            media = new_instance.media_new(current_video)
+
+            new_player.set_media(media)
+            new_player.play()
+
+            for _ in range(60):
+                if new_player.get_state() == vlc.State.Playing:
+                    break
+                time.sleep(0.05)
+
+            if position_ms > 0:
+                new_player.set_time(position_ms)
+            new_player.set_rate(rate)
+            try:
+                new_player.audio_set_mute(snap_muted)
+                if not snap_muted:
+                    new_player.audio_set_volume(snap_volume)
+            except Exception:
+                pass
+            if not was_playing:
+                new_player.pause()
+            new_player.set_fullscreen(snap_fullscreen)
+
+            try:
+                self.player.stop()
+                self.player.release()
+            except Exception:
+                pass
+            try:
+                self.instance.release()
+            except Exception:
+                pass
+
+            self.instance = new_instance
+            self.player = new_player
+            self.resource_manager.register_vlc_instance(self.instance)
+
+            if self.logger:
+                self.logger(f"Rotation: {label}")
+        except Exception as e:
+            if self.logger:
+                self.logger(f"Rotation error: {e}")
+
+    def zoom_video(self, delta: float):
+        with self.lock:
+            try:
+                if delta == 0:
+                    self._zoom_level = 1.0
+                    self.player.video_set_scale(0.0)
+                    if self.logger:
+                        self.logger("Zoom reset")
+                    return
+
+                if self._zoom_level <= 0:
+                    current = self.player.video_get_scale()
+                    self._zoom_level = current if current > 0 else 1.0
+
+                step = 0.1 * (1 if delta > 0 else -1)
+                self._zoom_level = round(
+                    max(0.25, min(4.0, self._zoom_level + step)), 2
+                )
+                self.player.video_set_scale(self._zoom_level)
+
+                if self.logger:
+                    self.logger(f"Zoom: {self._zoom_level:.2f}×")
+            except Exception as e:
+                if self.logger:
+                    self.logger(f"Zoom error: {e}")
+
+
 class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
     def __init__(self, videos, video_to_dir, directories, logger=None, volume=50, is_muted=False):
         super(VLCPlayerControllerForMultipleDirectory, self).__init__(videos, logger, volume, is_muted)
@@ -539,7 +668,6 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
         self.played_indices = set()
 
     def set_watch_history_callback(self, callback):
-        """Set callback for tracking watch history"""
         self.watch_history_callback = callback
 
     def _track_video_playback(self, video_path):
@@ -569,7 +697,6 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
             current_dir_index = self.directories.index(current_dir)
             next_dir_index = (current_dir_index + 1) % len(self.directories)
             next_dir = self.directories[next_dir_index]
-
             for i, video in enumerate(self.videos):
                 if self.video_to_dir[video] == next_dir:
                     return i
@@ -585,7 +712,6 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
             current_dir_index = self.directories.index(current_dir)
             prev_dir_index = (current_dir_index - 1) % len(self.directories)
             prev_dir = self.directories[prev_dir_index]
-
             for i, video in enumerate(self.videos):
                 if self.video_to_dir[video] == prev_dir:
                     return i
@@ -622,6 +748,9 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
 
             self.stop_position_tracking()
 
+            self._rotation_index = 0
+            self._zoom_level = 1.0
+
             self.index = index
             current_video = self.videos[self.index]
             current_dir = self.video_to_dir[current_video]
@@ -630,7 +759,6 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
                 self.logger(f"Playing: {os.path.basename(current_video)} from {current_dir}")
 
             media = self.instance.media_new(current_video)
-
             resume_video, resume_position = self.check_resume_position(current_video)
 
             result = self._play_video(media)
@@ -697,14 +825,11 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
 
     def _next_video_shuffle(self):
         self.played_indices.add(self.index)
-
         unplayed = [i for i in range(len(self.videos)) if i not in self.played_indices]
-
         if not unplayed:
             self.played_indices.clear()
             self.player.pause()
             return
-
         self.index = random.choice(unplayed)
         self.play_video(self.index)
 

@@ -97,6 +97,12 @@ def listen_keys(controller):
     hotkey_refs.append(keyboard.add_hotkey('q', _guarded(lambda: controller.prev_directory())))
     hotkey_refs.append(keyboard.add_hotkey('v', _guarded(lambda: controller.toggle_voice_commands() if hasattr(controller, 'toggle_voice_commands') else None)))
 
+    hotkey_refs.append(keyboard.add_hotkey('r', _guarded(lambda: controller.rotate_video('right'))))
+    hotkey_refs.append(keyboard.add_hotkey('ctrl+=', _guarded(lambda: controller.zoom_video(1))))
+    hotkey_refs.append(keyboard.add_hotkey('ctrl+shift+equal', _guarded(lambda: controller.zoom_video(1))))
+    hotkey_refs.append(keyboard.add_hotkey('ctrl+-', _guarded(lambda: controller.zoom_video(-1))))
+    hotkey_refs.append(keyboard.add_hotkey('ctrl+0',  _guarded(lambda: controller.zoom_video(0))))
+
 
 def cleanup_hotkeys():
     global hotkey_refs, _mouse_scroll_hook
