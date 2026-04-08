@@ -101,6 +101,7 @@ class VideoPositionOverlay:
         self.overlay_window   = None
         self._seek_canvas     = None
         self._play_btn        = None
+        self._rotate_btn = None
         self._vol_label       = None
         self._vol_value       = None
         self._spd_label       = None
@@ -256,6 +257,10 @@ class VideoPositionOverlay:
         self._play_btn = tk.Button(ctrl, text="⏸", command=self.toggle_pause, **btn_kw)
         self._play_btn.pack(side=tk.LEFT, padx=2)
         tk.Button(ctrl, text="⏭", command=self.next_video, **btn_kw).pack(side=tk.LEFT, padx=2)
+        self._rotate_btn = tk.Button(ctrl, text="⟳", command=self._rotate, **btn_kw)
+        self._rotate_btn.pack(side=tk.LEFT, padx=2)
+
+        # volume
 
         # volume
         tk.Frame(ctrl, width=16, bg=PANEL_BG).pack(side=tk.LEFT)
@@ -290,7 +295,7 @@ class VideoPositionOverlay:
         # keep overlay shown while mouse is over it
         for w in [root, title_row, seek_row, ctrl,
                   self._title_label, self._time_label,
-                  self._seek_canvas, self._play_btn,
+                  self._seek_canvas, self._play_btn, self._rotate_btn,
                   self._vol_label, self._vol_value, self._spd_label]:
             w.bind("<Enter>", lambda e: self._cancel_hide(), add="+")
             w.bind("<Leave>", lambda e: self._schedule_hide(), add="+")
@@ -590,6 +595,10 @@ class VideoPositionOverlay:
         if self.controller:
             self.controller.set_playback_rate(1.0)
             self.update_display()
+
+    def _rotate(self):
+        if self.controller:
+            self.controller.rotate_video('right')
 
     def _vol_click(self):
         """Left-click volume icon = toggle mute."""
