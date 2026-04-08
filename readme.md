@@ -107,6 +107,10 @@ pip install -r requirements\ai_requirements.txt
 | `+/=`         | Increase playback speed |
 | `-`           | Decrease playback speed |
 | `0`           | Reset speed to 1.0x     |
+| `R`           | Rotate video 90° clockwise (cycles 0→90→180→270) |
+| `Ctrl+=`      | Zoom in (+10%)          |
+| `Ctrl+-`      | Zoom out (-10%)         |
+| `Ctrl+0`      | Reset zoom to 100%      |
 | `T`           | Take screenshot         |
 | `V`           | Toggle voice commands   |
 | `Ctrl+C`      | Copy current video path |

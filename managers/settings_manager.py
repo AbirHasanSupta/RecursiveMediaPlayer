@@ -258,6 +258,9 @@ class SettingsUI:
         ai_frame = self._create_ai_settings_tab(notebook)
         notebook.add(ai_frame, text="AI & Preprocessing")
 
+        shortcuts_frame = self._create_shortcuts_tab(notebook)
+        notebook.add(shortcuts_frame, text="⌨ Keyboard Shortcuts")
+
         self._create_action_buttons()
 
     def _create_ai_settings_tab(self, parent):
@@ -696,6 +699,183 @@ class SettingsUI:
             self._cleanup_watch_history, "warning", "sm"
         )
         self.cleanup_history_btn.pack(side=tk.LEFT)
+
+        return frame
+
+    def _create_shortcuts_tab(self, parent):
+        """Create Keyboard Shortcuts reference tab"""
+        frame = ttk.Frame(parent)
+
+        main_container = tk.Frame(frame, bg=self.theme_provider.bg_color)
+        main_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+        # ── header ─────────────────────────────────────────────────────────
+        header_label = tk.Label(
+            main_container,
+            text="All keyboard shortcuts are active whenever the player window is in focus.",
+            font=self.theme_provider.small_font,
+            bg=self.theme_provider.bg_color,
+            fg="#666666",
+            wraplength=620,
+            justify=tk.LEFT
+        )
+        header_label.pack(anchor='w', pady=(0, 12))
+
+        # ── scrollable canvas ───────────────────────────────────────────────
+        canvas_frame = tk.Frame(main_container, bg=self.theme_provider.bg_color)
+        canvas_frame.pack(fill=tk.BOTH, expand=True)
+
+        canvas = tk.Canvas(
+            canvas_frame,
+            bg=self.theme_provider.bg_color,
+            highlightthickness=0
+        )
+        scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        inner = tk.Frame(canvas, bg=self.theme_provider.bg_color)
+        canvas_window = canvas.create_window((0, 0), window=inner, anchor='nw')
+
+        def _on_frame_configure(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_canvas_configure(event):
+            canvas.itemconfig(canvas_window, width=event.width)
+
+        inner.bind("<Configure>", _on_frame_configure)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        # ── shortcut data ───────────────────────────────────────────────────
+        SHORTCUT_GROUPS = [
+            ("▶  Playback", [
+                ("Space",           "Pause / Resume"),
+                ("Esc",             "Stop playback"),
+                ("Right Arrow",     "Fast-forward 200 ms"),
+                ("Left Arrow",      "Rewind 200 ms"),
+            ]),
+            ("📁  Navigation", [
+                ("D",               "Next video"),
+                ("A",               "Previous video"),
+                ("E",               "Next directory"),
+                ("Q",               "Previous directory"),
+            ]),
+            ("🔊  Audio", [
+                ("W",               "Volume up (+10)"),
+                ("S",               "Volume down (-10)"),
+                ("M",               "Toggle mute"),
+                ("Mouse Wheel",     "Volume up / down"),
+            ]),
+            ("⚡  Playback Speed", [
+                ("=  or  +",        "Increase speed (+0.25×)"),
+                ("-",               "Decrease speed (−0.25×)"),
+                ("0",               "Reset speed to 1.0×"),
+            ]),
+            ("🖼  Video & Display", [
+                ("F",               "Toggle fullscreen"),
+                ("1",               "Switch to monitor 1"),
+                ("2",               "Switch to monitor 2"),
+                ("I",               "Toggle info overlay"),
+                ("R",               "Rotate video 90° clockwise"),
+                ("Ctrl  +  =",      "Zoom in (+10%)"),
+                ("Ctrl  +  -",      "Zoom out (−10%)"),
+                ("Ctrl  +  0",      "Reset zoom to 100%"),
+            ]),
+            ("🛠  Tools & Misc", [
+                ("T",               "Take screenshot"),
+                ("Ctrl  +  C",      "Copy current video path"),
+                ("V",               "Toggle voice commands"),
+            ]),
+        ]
+
+        # ── column widths ───────────────────────────────────────────────────
+        KEY_COL_W   = 22   # characters
+        ACTION_COL_W = 42
+
+        # ── helper to build one group ───────────────────────────────────────
+        def _add_group(parent_frame, title, rows):
+            section = tk.LabelFrame(
+                parent_frame,
+                text=title,
+                font=self.theme_provider.normal_font,
+                bg=self.theme_provider.bg_color,
+                fg=self.theme_provider.text_color,
+                padx=10,
+                pady=6
+            )
+            section.pack(fill=tk.X, pady=(0, 12))
+
+            # column headers
+            hdr_frame = tk.Frame(section, bg=self.theme_provider.bg_color)
+            hdr_frame.pack(fill=tk.X, pady=(0, 4))
+
+            tk.Label(
+                hdr_frame,
+                text="Key / Combo",
+                font=self.theme_provider.small_font,
+                bg=self.theme_provider.bg_color,
+                fg="#999999",
+                width=KEY_COL_W,
+                anchor='w'
+            ).pack(side=tk.LEFT)
+
+            tk.Label(
+                hdr_frame,
+                text="Action",
+                font=self.theme_provider.small_font,
+                bg=self.theme_provider.bg_color,
+                fg="#999999",
+                anchor='w'
+            ).pack(side=tk.LEFT)
+
+            # separator
+            sep = tk.Frame(section, bg="#dddddd", height=1)
+            sep.pack(fill=tk.X, pady=(0, 6))
+
+            for i, (key, action) in enumerate(rows):
+                row_bg = self.theme_provider.bg_color
+                # subtle alternating shade
+                if hasattr(self.theme_provider, 'alt_row_color'):
+                    row_bg = self.theme_provider.alt_row_color if i % 2 else self.theme_provider.bg_color
+
+                row_frame = tk.Frame(section, bg=row_bg)
+                row_frame.pack(fill=tk.X, pady=1)
+
+                # key badge
+                key_lbl = tk.Label(
+                    row_frame,
+                    text=key,
+                    font=self.theme_provider.normal_font,
+                    bg="#e8e8e8" if not hasattr(self.theme_provider, 'badge_bg') else self.theme_provider.badge_bg,
+                    fg="#333333" if not hasattr(self.theme_provider, 'badge_fg') else self.theme_provider.badge_fg,
+                    relief=tk.GROOVE,
+                    bd=1,
+                    padx=6,
+                    pady=2,
+                    width=KEY_COL_W,
+                    anchor='w'
+                )
+                key_lbl.pack(side=tk.LEFT, padx=(0, 10))
+
+                action_lbl = tk.Label(
+                    row_frame,
+                    text=action,
+                    font=self.theme_provider.normal_font,
+                    bg=row_bg,
+                    fg=self.theme_provider.text_color,
+                    anchor='w'
+                )
+                action_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        for group_title, group_rows in SHORTCUT_GROUPS:
+            _add_group(inner, group_title, group_rows)
 
         return frame
 
