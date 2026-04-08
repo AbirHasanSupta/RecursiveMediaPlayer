@@ -30,6 +30,9 @@ class DualPlayerSlot:
     SPEED_MIN = 0.25
     SPEED_MAX = 2.0
 
+    _ROTATION_STEPS = [0, 90, 180, 270]
+    _TRANSFORM_MAP = {0: "identity", 90: "90", 180: "180", 270: "270"}
+
     def __init__(self, parent_frame: tk.Frame, slot_id: int,
                  theme_provider, logger: Callable = None):
         self.parent_frame = parent_frame
@@ -48,6 +51,7 @@ class DualPlayerSlot:
         self.is_muted:  bool = False
         self.speed:     float = 1.0
         self.loop_mode: str  = "loop_on"
+        self._rotation_index: int = 0
 
         # misc
         self._poll_job = None
@@ -152,6 +156,9 @@ class DualPlayerSlot:
         tk.Button(ctrl, text="⏭", command=self._next,          **btn_kw).pack(side=tk.LEFT, padx=2)
         tk.Button(ctrl, text="■", command=self._stop_playback, **btn_kw).pack(side=tk.LEFT, padx=2)
 
+        self.rotate_btn = tk.Button(ctrl, text="⟳", command=self._rotate, **btn_kw)
+        self.rotate_btn.pack(side=tk.LEFT, padx=2)
+
         # ── volume: mute icon + scroll-wheel + numeric label ──────────────────
         tk.Frame(ctrl, width=16, bg=PANEL_BG).pack(side=tk.LEFT)
         self.mute_btn = tk.Label(
@@ -204,7 +211,8 @@ class DualPlayerSlot:
         for widget in [self._overlay, info_row, seek_frame, ctrl,
                        self.seek_canvas, self.video_name_label, self.status_label,
                        self.loop_btn, self.time_label, self.play_btn,
-                       self.mute_btn, self.spd_label, self.vol_label, self.layout_btn]:
+                       self.mute_btn, self.spd_label, self.vol_label, self.layout_btn,
+                       self.rotate_btn]:
             widget.bind("<Enter>", self._on_hover_enter, add="+")
             widget.bind("<Leave>", self._on_hover_leave, add="+")
 
@@ -216,6 +224,76 @@ class DualPlayerSlot:
 
         # poll mouse position to detect hover over the video area
         self._start_mouse_poll()
+
+    def _rotate(self):
+        """Cycle rotation clockwise 0→90→180→270→0 by recreating the VLC instance."""
+        if not self.player or not self.videos:
+            return
+        try:
+            # Advance rotation state
+            self._rotation_index = (self._rotation_index + 1) % 4
+            angle = self._ROTATION_STEPS[self._rotation_index]
+            transform_type = self._TRANSFORM_MAP[angle]
+
+            # Snapshot live playback state before touching VLC
+            position_ms = self.player.get_time() or 0
+            was_playing = self.player.is_playing()
+            path = self.videos[self.index]
+
+            # Build new instance args — bake in the transform filter
+            base_args = ['--quiet', '--no-video-title-show']
+            if os.name == 'nt':
+                base_args += ['--aout=directsound']
+            else:
+                base_args += ['--aout=pulse']
+
+            if transform_type != "identity":
+                base_args += [
+                    '--video-filter=transform',
+                    f'--transform-type={transform_type}',
+                ]
+
+            # Tear down old player
+            try:
+                self.player.stop()
+                self.player.release()
+            except Exception:
+                pass
+            try:
+                self.instance.release()
+            except Exception:
+                pass
+
+            # Create fresh instance + player with rotation baked in
+            self.instance = vlc.Instance(*base_args)
+            self.player = self.instance.media_player_new()
+            _embed(self.player, self.video_canvas)
+
+            media = self.instance.media_new(path)
+            self.player.set_media(media)
+            self.player.play()
+
+            def _settle_after_rotate():
+                if not self.player:
+                    return
+                deadline = time.time() + 3.0
+                while time.time() < deadline:
+                    if self.player.get_state() == vlc.State.Playing:
+                        break
+                    time.sleep(0.05)
+                try:
+                    if position_ms > 0:
+                        self.player.set_time(position_ms)
+                    self.player.set_rate(self.speed)
+                    self._apply_volume()
+                    if not was_playing:
+                        self.player.pause()
+                except Exception:
+                    pass
+
+            threading.Thread(target=_settle_after_rotate, daemon=True).start()
+        except Exception as e:
+            self._log(f"Player {self.slot_id} rotate error: {e}")
 
     # ── overlay show / hide ───────────────────────────────────────────────────
 

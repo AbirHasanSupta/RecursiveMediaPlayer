@@ -623,9 +623,6 @@ class BaseVLCPlayerController:
             self.instance = new_instance
             self.player = new_player
             self.resource_manager.register_vlc_instance(self.instance)
-
-            if self.logger:
-                self.logger(f"Rotation: {label}")
         except Exception as e:
             if self.logger:
                 self.logger(f"Rotation error: {e}")
@@ -636,8 +633,6 @@ class BaseVLCPlayerController:
                 if delta == 0:
                     self._zoom_level = 1.0
                     self.player.video_set_scale(0.0)
-                    if self.logger:
-                        self.logger("Zoom reset")
                     return
 
                 if self._zoom_level <= 0:
@@ -650,8 +645,6 @@ class BaseVLCPlayerController:
                 )
                 self.player.video_set_scale(self._zoom_level)
 
-                if self.logger:
-                    self.logger(f"Zoom: {self._zoom_level:.2f}×")
             except Exception as e:
                 if self.logger:
                     self.logger(f"Zoom error: {e}")
