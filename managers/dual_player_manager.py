@@ -33,6 +33,9 @@ class DualPlayerSlot:
     _ROTATION_STEPS = [0, 90, 180, 270]
     _TRANSFORM_MAP = {0: "identity", 90: "90", 180: "180", 270: "270"}
 
+    # Seconds of mouse stillness before overlay auto-hides
+    _INACTIVITY_TIMEOUT = 2.0
+
     def __init__(self, parent_frame: tk.Frame, slot_id: int,
                  theme_provider, logger: Callable = None):
         self.parent_frame = parent_frame
@@ -56,11 +59,15 @@ class DualPlayerSlot:
         # misc
         self._poll_job = None
         self._mouse_poll_job = None
-        self._vol_updating = False   # kept for compat; no longer used by slider
+        self._vol_updating = False
+
+        # Inactivity tracking
+        self._last_mouse_pos = (None, None)
+        self._last_mouse_move_time = 0.0
 
         self.on_video_changed:         Optional[Callable] = None
         self.watch_history_callback:   Optional[Callable] = None
-        self.layout_toggle_callback:   Optional[Callable] = None  # set by DualPlayerWindow for slot1
+        self.layout_toggle_callback:   Optional[Callable] = None
 
         self._build_ui()
 
@@ -69,7 +76,6 @@ class DualPlayerSlot:
         accent = self.theme.accent_color
         text_c = self.theme.text_color
 
-        # ── video container fills everything ──────────────────────────────────
         self.vid_container = tk.Frame(self.parent_frame, bg="black",
                                       highlightthickness=2,
                                       highlightbackground=accent)
@@ -86,16 +92,12 @@ class DualPlayerSlot:
             bg="black", fg="#555555")
         self._no_video_label.place(relx=0.5, rely=0.5, anchor="center")
 
-        # ── floating overlay — child of vid_container, NOT video_canvas ─────
-        # VLC owns video_canvas's HWND; anything inside it gets buried.
-        # vid_container is a plain tk.Frame that VLC never touches, so
-        # children placed on it always render above the video surface.
+        # Floating overlay — child of vid_container, NOT video_canvas
         self._overlay = tk.Frame(self.vid_container, bg="#1c1c1c",
                                  highlightthickness=0)
         self._overlay_visible = False
         self._hide_job = None
 
-        # ── shared style constants (mirror video_position_overlay.py) ─────────
         PANEL_BG    = "#1c1c1c"
         ACCENT      = self.theme.accent_color
         TEXT_DIM    = "#888888"
@@ -108,7 +110,6 @@ class DualPlayerSlot:
             activebackground=BTN_HOVER, activeforeground="white",
             font=Font(family="Segoe UI", size=11))
 
-        # ── top strip: video name (left) · status (right) ────────────────────
         info_row = tk.Frame(self._overlay, bg=PANEL_BG)
         info_row.pack(fill=tk.X, padx=12, pady=(8, 2))
 
@@ -124,7 +125,6 @@ class DualPlayerSlot:
             bg=PANEL_BG, fg=TEXT_DIM)
         self.status_label.pack(side=tk.RIGHT, padx=(6, 0))
 
-        # Loop mode button — right-aligned, subtle
         self.loop_btn = tk.Button(
             info_row, text="↺ Loop",
             font=Font(family="Segoe UI", size=7, weight="bold"),
@@ -134,7 +134,6 @@ class DualPlayerSlot:
             command=self._cycle_loop_mode)
         self.loop_btn.pack(side=tk.RIGHT, padx=(8, 0))
 
-        # ── seek bar row ──────────────────────────────────────────────────────
         seek_frame = tk.Frame(self._overlay, bg=PANEL_BG)
         seek_frame.pack(fill=tk.X, padx=12, pady=(2, 4))
 
@@ -146,7 +145,6 @@ class DualPlayerSlot:
         self.seek_canvas.bind("<B1-Motion>", self._on_seek_drag)
         self.seek_canvas.bind("<Configure>", lambda e: self._draw_seek_bar())
 
-        # ── control buttons row ───────────────────────────────────────────────
         ctrl = tk.Frame(self._overlay, bg=PANEL_BG)
         ctrl.pack(fill=tk.X, padx=12, pady=(0, 8))
 
@@ -159,7 +157,6 @@ class DualPlayerSlot:
         self.rotate_btn = tk.Button(ctrl, text="⟳", command=self._rotate, **btn_kw)
         self.rotate_btn.pack(side=tk.LEFT, padx=2)
 
-        # ── volume: mute icon + scroll-wheel + numeric label ──────────────────
         tk.Frame(ctrl, width=16, bg=PANEL_BG).pack(side=tk.LEFT)
         self.mute_btn = tk.Label(
             ctrl, text="🔊", cursor="hand2",
@@ -176,7 +173,6 @@ class DualPlayerSlot:
         self.vol_label.pack(side=tk.LEFT)
         self.vol_label.bind("<MouseWheel>", self._on_vol_scroll)
 
-        # ── speed: label scrolls, click resets ───────────────────────────────
         self.spd_label = tk.Label(
             ctrl, text="1.00×", cursor="hand2",
             font=Font(family="Segoe UI", size=8, weight="bold"),
@@ -190,14 +186,12 @@ class DualPlayerSlot:
         tk.Label(ctrl, text="", font=Font(family="Segoe UI", size=8),
                  bg=PANEL_BG, fg=TEXT_DIM).pack(side=tk.RIGHT)
 
-        # time label — right of Spd
         self.time_label = tk.Label(
             ctrl, text="0:00 / 0:00",
             font=Font(family="Segoe UI", size=8),
             bg=PANEL_BG, fg=TEXT_DIM)
         self.time_label.pack(side=tk.RIGHT, padx=(0, 12))
 
-        # Stack/Side-by-side layout toggle — wired up by DualPlayerWindow for slot1 only
         self.layout_btn = tk.Button(
             ctrl, text="Stack View",
             font=Font(family="Segoe UI", size=8),
@@ -207,7 +201,7 @@ class DualPlayerSlot:
             command=self._on_layout_toggle)
         self.layout_btn.pack(side=tk.RIGHT, padx=(4, 12))
 
-        # ── hover bindings on overlay widgets (for grace-period cancellation) ──
+        # Hover bindings for grace-period cancellation
         for widget in [self._overlay, info_row, seek_frame, ctrl,
                        self.seek_canvas, self.video_name_label, self.status_label,
                        self.loop_btn, self.time_label, self.play_btn,
@@ -216,13 +210,9 @@ class DualPlayerSlot:
             widget.bind("<Enter>", self._on_hover_enter, add="+")
             widget.bind("<Leave>", self._on_hover_leave, add="+")
 
-        # position overlay whenever the container resizes
         self.vid_container.bind("<Configure>", self._reposition_overlay, add="+")
 
-        # hide overlay on startup
         self._overlay.place_forget()
-
-        # poll mouse position to detect hover over the video area
         self._start_mouse_poll()
 
     def _rotate(self):
@@ -230,17 +220,14 @@ class DualPlayerSlot:
         if not self.player or not self.videos:
             return
         try:
-            # Advance rotation state
             self._rotation_index = (self._rotation_index + 1) % 4
             angle = self._ROTATION_STEPS[self._rotation_index]
             transform_type = self._TRANSFORM_MAP[angle]
 
-            # Snapshot live playback state before touching VLC
             position_ms = self.player.get_time() or 0
             was_playing = self.player.is_playing()
             path = self.videos[self.index]
 
-            # Build new instance args — bake in the transform filter
             base_args = ['--quiet', '--no-video-title-show']
             if os.name == 'nt':
                 base_args += ['--aout=directsound']
@@ -253,7 +240,6 @@ class DualPlayerSlot:
                     f'--transform-type={transform_type}',
                 ]
 
-            # Tear down old player
             try:
                 self.player.stop()
                 self.player.release()
@@ -264,7 +250,6 @@ class DualPlayerSlot:
             except Exception:
                 pass
 
-            # Create fresh instance + player with rotation baked in
             self.instance = vlc.Instance(*base_args)
             self.player = self.instance.media_player_new()
             _embed(self.player, self.video_canvas)
@@ -347,38 +332,55 @@ class DualPlayerSlot:
         """Called when mouse leaves an overlay widget — start hide timer."""
         self._hide_overlay()
 
+    # ── mouse polling with inactivity detection ───────────────────────────────
+
     def _start_mouse_poll(self):
-        """Poll mouse position every 120ms; show/hide overlay based on whether
-        the cursor is inside vid_container. Works even when VLC owns the HWND."""
         self._mouse_poll_job = None
+        self._last_mouse_pos = (None, None)
+        self._last_mouse_move_time = time.monotonic()
         self._do_mouse_poll()
 
     def _do_mouse_poll(self):
         try:
-            # absolute mouse position
             mx = self.vid_container.winfo_pointerx()
             my = self.vid_container.winfo_pointery()
-            # absolute position + size of the video container
             wx = self.vid_container.winfo_rootx()
             wy = self.vid_container.winfo_rooty()
             ww = self.vid_container.winfo_width()
             wh = self.vid_container.winfo_height()
 
             inside = (wx <= mx <= wx + ww) and (wy <= my <= wy + wh)
+
             if inside:
-                self._show_overlay()
+                # Detect mouse movement
+                prev_pos = self._last_mouse_pos
+                if (mx, my) != prev_pos:
+                    self._last_mouse_pos = (mx, my)
+                    self._last_mouse_move_time = time.monotonic()
+                    # Mouse moved — show overlay
+                    self._show_overlay()
+                else:
+                    # Mouse is stationary inside the container
+                    idle_secs = time.monotonic() - self._last_mouse_move_time
+                    if idle_secs >= self._INACTIVITY_TIMEOUT:
+                        # Auto-hide after inactivity
+                        if self._overlay_visible and not self._hide_job:
+                            self._hide_overlay()
+                    else:
+                        # Still within grace period — keep visible
+                        if not self._overlay_visible and not self._hide_job:
+                            self._show_overlay()
             else:
-                # only hide if not already scheduled (avoid spamming)
+                # Mouse left the container
                 if self._overlay_visible and not self._hide_job:
                     self._hide_overlay()
         except Exception:
             pass
-        # reschedule — use parent_frame so it survives canvas HWND takeover
+
         try:
             self._mouse_poll_job = self.parent_frame.after(120, self._do_mouse_poll)
         except Exception:
             pass
-
 
     def _on_vol_scroll(self, e):
         """Mouse-wheel on the volume icon or label — adjust by ±5."""
@@ -424,7 +426,6 @@ class DualPlayerSlot:
         self.vol_label.config(text=f"{self.volume}%")
         self._update_vol_icon()
 
-
     def _on_spd_scroll(self, e):
         """Mouse-wheel on speed label."""
         if e.delta > 0:
@@ -465,7 +466,6 @@ class DualPlayerSlot:
         self.instance = self._make_vlc_instance()
         self.player   = self.instance.media_player_new()
         _embed(self.player, self.video_canvas)
-        # Each slot gets its own independent aspect ratio (native/auto)
         try:
             self.player.video_set_aspect_ratio(None)
             self.player.video_set_scale(0)
@@ -512,7 +512,6 @@ class DualPlayerSlot:
         self.running = False
         self._cancel_poll()
 
-        # stop mouse-position poll
         try:
             if self._mouse_poll_job:
                 self.parent_frame.after_cancel(self._mouse_poll_job)
@@ -546,7 +545,6 @@ class DualPlayerSlot:
             self.player.set_media(media)
             self.player.play()
 
-            # Re-apply audio & speed once VLC settles
             def _settle():
                 if not self.player:
                     return
@@ -560,10 +558,9 @@ class DualPlayerSlot:
                     self.player.set_rate(self.speed)
                 except Exception:
                     pass
-                # Restore native aspect ratio for this player independently
                 try:
                     self.player.video_set_aspect_ratio(None)
-                    self.player.video_set_scale(0)       # 0 = fit to window preserving AR
+                    self.player.video_set_scale(0)
                 except Exception:
                     pass
 
@@ -782,7 +779,6 @@ class DualPlayerWindow:
     def _build_player_frames(self):
         bg = self.theme.bg_color
 
-        # Snapshot old slots, cancel their polls, detach from UI — don't block
         old_slots = [s for s in (self.slot1, self.slot2) if s]
         self.slot1 = None
         self.slot2 = None
@@ -793,11 +789,9 @@ class DualPlayerWindow:
             except Exception:
                 pass
 
-        # Destroy old UI frames
         for c in self.player_area.winfo_children():
             c.destroy()
 
-        # Release old VLC instances in background so UI never freezes
         def _release_old():
             for s in old_slots:
                 try:
@@ -821,9 +815,7 @@ class DualPlayerWindow:
         self.slot1 = DualPlayerSlot(f1, 1, self.theme, self.logger)
         self.slot2 = DualPlayerSlot(f2, 2, self.theme, self.logger)
 
-        # Wire the Stack View button (lives in slot1's ctrl row) to the toggle
         self.slot1.layout_toggle_callback = self._toggle_layout
-        # Keep slot2's layout button hidden — only slot1 shows it
         try:
             self.slot2.layout_btn.pack_forget()
         except Exception:
@@ -886,7 +878,6 @@ class DualPlayerWindow:
         v1 = (self.slot1.videos[:], self.slot1.index) if self.slot1 else ([], 0)
         v2 = (self.slot2.videos[:], self.slot2.index) if self.slot2 else ([], 0)
         self._build_player_frames()
-        # Update the button label to reflect the current layout
         new_label = "Side by Side" if self._layout == "stacked" else "Stack View"
         try:
             self.slot1.layout_btn.config(text=new_label)
@@ -898,12 +889,10 @@ class DualPlayerWindow:
             self.window.after(200, lambda: self.slot2.load_videos(v2[0], v2[1]))
 
     def _on_close(self):
-        # Grab slot references and detach from UI immediately
         slots = [s for s in (self.slot1, self.slot2) if s]
         self.slot1 = None
         self.slot2 = None
 
-        # Cancel all polling jobs so nothing touches the destroyed window
         for s in slots:
             try:
                 s.running = False
@@ -911,7 +900,6 @@ class DualPlayerWindow:
             except Exception:
                 pass
 
-        # Destroy the window right away — UI stays responsive
         win = self.window
         self.window = None
         if win:
@@ -920,7 +908,6 @@ class DualPlayerWindow:
             except Exception:
                 pass
 
-        # Release VLC players in the background so the UI never blocks
         def _release():
             for s in slots:
                 try:

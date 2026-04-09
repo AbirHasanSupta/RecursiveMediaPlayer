@@ -1004,15 +1004,19 @@ def select_multiple_folders_and_play():
             for i in selection:
                 if i < len(self.selected_dirs):
                     root_dir = self.selected_dirs[i]
-                    excluded_subdirs = self.excluded_subdirs.get(root_dir, [])
-                    excluded_files = self.excluded_videos.get(root_dir, [])
-
-                    videos = gather_videos(root_dir)
-                    filtered_videos = []
-                    for v_path in videos:
-                        if not self.is_video_in_excluded_directory(v_path, excluded_subdirs) and \
-                                v_path not in excluded_files:
-                            filtered_videos.append(v_path)
+                    cache = self.scan_cache.get(root_dir)
+                    if cache:
+                        videos, _, _ = cache
+                        filtered_videos = [
+                            v for v in videos
+                            if not self.is_video_excluded(root_dir, v)
+                        ]
+                    else:
+                        videos = gather_videos(root_dir)
+                        filtered_videos = [
+                            v for v in videos
+                            if not self.is_video_excluded(root_dir, v)
+                        ]
                     all_videos.extend(filtered_videos)
 
             if not all_videos:
@@ -1030,15 +1034,19 @@ def select_multiple_folders_and_play():
             for i in selection:
                 if i < len(self.selected_dirs):
                     root_dir = self.selected_dirs[i]
-                    excluded_subdirs = self.excluded_subdirs.get(root_dir, [])
-                    excluded_files = self.excluded_videos.get(root_dir, [])
-
-                    videos = gather_videos(root_dir)
-                    filtered_videos = []
-                    for v_path in videos:
-                        if not self.is_video_in_excluded_directory(v_path, excluded_subdirs) and \
-                                v_path not in excluded_files:
-                            filtered_videos.append(v_path)
+                    cache = self.scan_cache.get(root_dir)
+                    if cache:
+                        videos, _, _ = cache
+                        filtered_videos = [
+                            v for v in videos
+                            if not self.is_video_excluded(root_dir, v)
+                        ]
+                    else:
+                        videos = gather_videos(root_dir)
+                        filtered_videos = [
+                            v for v in videos
+                            if not self.is_video_excluded(root_dir, v)
+                        ]
                     all_videos.extend(filtered_videos)
 
             if not all_videos:
