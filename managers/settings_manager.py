@@ -44,6 +44,7 @@ class SettingsData:
         self.preview_duration = 3
         self.use_video_preview = True
         self.enable_watch_history = True
+        self.dual_player_count = 2
 
     def to_dict(self) -> dict:
         return {
@@ -57,7 +58,8 @@ class SettingsData:
             'preprocessing_batch_size': self.preprocessing_batch_size,
             'preview_duration': self.preview_duration,
             'use_video_preview': self.use_video_preview,
-            'enable_watch_history': self.enable_watch_history
+            'enable_watch_history': self.enable_watch_history,
+            'dual_player_count': self.dual_player_count
         }
 
     @classmethod
@@ -74,6 +76,7 @@ class SettingsData:
         settings.preview_duration = data.get('preview_duration', settings.preview_duration)
         settings.use_video_preview = data.get('use_video_preview', settings.use_video_preview)
         settings.enable_watch_history = data.get('enable_watch_history', settings.enable_watch_history)
+        settings.dual_player_count = data.get('dual_player_count', settings.dual_player_count)
         return settings
 
 
@@ -239,7 +242,7 @@ class SettingsUI:
 
         self.settings_window = tk.Toplevel(self.parent)
         self.settings_window.title("Application Settings")
-        self.settings_window.geometry("700x800")
+        self.settings_window.geometry("700x880")
         self.settings_window.configure(bg=self.theme_provider.bg_color)
         self.settings_window.resizable(True, True)
 
@@ -562,6 +565,56 @@ class SettingsUI:
             style="Modern.TCheckbutton"
         )
         watch_history_check.pack(anchor='w', pady=2)
+
+        # ── Dual / Triple player segment ──────────────────────────────────────
+        player_count_section = tk.LabelFrame(
+            main_container,
+            text="Multi-Player Mode",
+            font=self.theme_provider.normal_font,
+            bg=self.theme_provider.bg_color,
+            fg=self.theme_provider.text_color,
+            padx=10,
+            pady=6
+        )
+        player_count_section.pack(fill=tk.X, pady=(0, 10))
+
+        self.dual_player_count_var = tk.IntVar(value=self.settings.dual_player_count)
+
+        seg_frame = tk.Frame(player_count_section, bg=self.theme_provider.bg_color)
+        seg_frame.pack(anchor='w')
+
+        SEG_ACTIVE_BG   = self.theme_provider.accent_color if hasattr(self.theme_provider, 'accent_color') else "#4a90d9"
+        SEG_ACTIVE_FG   = "#ffffff"
+        SEG_INACTIVE_BG = self.theme_provider.bg_color
+        SEG_INACTIVE_FG = self.theme_provider.text_color
+
+        self._player_seg_btns = {}
+
+        def _select_player_count(val):
+            self.dual_player_count_var.set(val)
+            for v, btn in self._player_seg_btns.items():
+                if v == val:
+                    btn.configure(bg=SEG_ACTIVE_BG, fg=SEG_ACTIVE_FG, relief=tk.SUNKEN)
+                else:
+                    btn.configure(bg=SEG_INACTIVE_BG, fg=SEG_INACTIVE_FG, relief=tk.GROOVE)
+
+        for label, val in [("  2 Players  ", 2), ("  3 Players  ", 3)]:
+            btn = tk.Button(
+                seg_frame,
+                text=label,
+                font=self.theme_provider.small_font,
+                bd=1,
+                padx=6,
+                pady=3,
+                cursor="hand2",
+                relief=tk.GROOVE,
+                command=lambda v=val: _select_player_count(v)
+            )
+            btn.pack(side=tk.LEFT)
+            self._player_seg_btns[val] = btn
+
+        # Apply initial selection highlight
+        _select_player_count(self.settings.dual_player_count)
 
         thumbnail_btn_frame = tk.Frame(preview_section, bg=self.theme_provider.bg_color)
         thumbnail_btn_frame.pack(fill=tk.X, pady=10)
@@ -1095,6 +1148,15 @@ class SettingsUI:
         self.preview_duration_var.set(settings.preview_duration)
         self.use_video_preview_var.set(settings.use_video_preview)
         self.enable_watch_history_var.set(settings.enable_watch_history)
+        if hasattr(self, 'dual_player_count_var'):
+            self.dual_player_count_var.set(settings.dual_player_count)
+            SEG_ACTIVE_BG = self.theme_provider.accent_color if hasattr(self.theme_provider, 'accent_color') else "#4a90d9"
+            SEG_INACTIVE_BG = self.theme_provider.bg_color
+            for v, btn in self._player_seg_btns.items():
+                if v == settings.dual_player_count:
+                    btn.configure(bg=SEG_ACTIVE_BG, fg="#ffffff", relief=tk.SUNKEN)
+                else:
+                    btn.configure(bg=SEG_INACTIVE_BG, fg=self.theme_provider.text_color, relief=tk.GROOVE)
         self._update_index_info()
 
     def _apply_current_settings(self):
@@ -1109,6 +1171,8 @@ class SettingsUI:
         self.settings.preview_duration = self.preview_duration_var.get()
         self.settings.use_video_preview = self.use_video_preview_var.get()
         self.settings.enable_watch_history = self.enable_watch_history_var.get()
+        if hasattr(self, 'dual_player_count_var'):
+            self.settings.dual_player_count = self.dual_player_count_var.get()
 
     def _save_settings(self):
         """Save current settings"""

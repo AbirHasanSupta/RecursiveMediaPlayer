@@ -67,7 +67,6 @@ class DualPlayerSlot:
 
         self.on_video_changed:         Optional[Callable] = None
         self.watch_history_callback:   Optional[Callable] = None
-        self.layout_toggle_callback:   Optional[Callable] = None
 
         self._build_ui()
 
@@ -192,20 +191,11 @@ class DualPlayerSlot:
             bg=PANEL_BG, fg=TEXT_DIM)
         self.time_label.pack(side=tk.RIGHT, padx=(0, 12))
 
-        self.layout_btn = tk.Button(
-            ctrl, text="Stack View",
-            font=Font(family="Segoe UI", size=8),
-            bg=BTN_BG, fg=TEXT_DIM, bd=0, padx=6, pady=3,
-            cursor="hand2", relief=tk.FLAT,
-            activebackground=BTN_HOVER, activeforeground="white",
-            command=self._on_layout_toggle)
-        self.layout_btn.pack(side=tk.RIGHT, padx=(4, 12))
-
         # Hover bindings for grace-period cancellation
         for widget in [self._overlay, info_row, seek_frame, ctrl,
                        self.seek_canvas, self.video_name_label, self.status_label,
                        self.loop_btn, self.time_label, self.play_btn,
-                       self.mute_btn, self.spd_label, self.vol_label, self.layout_btn,
+                       self.mute_btn, self.spd_label, self.vol_label,
                        self.rotate_btn]:
             widget.bind("<Enter>", self._on_hover_enter, add="+")
             widget.bind("<Leave>", self._on_hover_leave, add="+")
@@ -737,33 +727,31 @@ class DualPlayerSlot:
             except Exception:
                 pass
 
-    def _on_layout_toggle(self):
-        if self.layout_toggle_callback:
-            self.layout_toggle_callback()
-
-
 class DualPlayerWindow:
 
     def __init__(self, parent: tk.Tk, theme_provider,
                  logger: Callable = None,
-                 watch_history_callback: Callable = None):
+                 watch_history_callback: Callable = None,
+                 player_count: int = 2):
         self.parent   = parent
         self.theme    = theme_provider
         self.logger   = logger
         self.watch_history_callback = watch_history_callback
+        self.player_count = max(2, min(3, player_count))
 
         self.window: Optional[tk.Toplevel] = None
         self.slot1:  Optional[DualPlayerSlot] = None
         self.slot2:  Optional[DualPlayerSlot] = None
-        self._layout = "side_by_side"
+        self.slot3:  Optional[DualPlayerSlot] = None
 
     def show(self):
         if self.window and self.window.winfo_exists():
             self.window.lift()
             return
         bg = self.theme.bg_color
+        title = "Triple Video Player" if self.player_count == 3 else "Dual Video Player"
         self.window = tk.Toplevel(self.parent)
-        self.window.title("Dual Video Player")
+        self.window.title(title)
         self.window.geometry("1500x900")
         self.window.configure(bg=bg)
         self.window.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -771,17 +759,15 @@ class DualPlayerWindow:
 
     def _build_window(self):
         bg = self.theme.bg_color
-
         self.player_area = tk.Frame(self.window, bg=bg)
-        self.player_area.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
+        self.player_area.pack(fill=tk.BOTH, expand=True, padx=0, pady=4)
         self._build_player_frames()
 
     def _build_player_frames(self):
         bg = self.theme.bg_color
 
-        old_slots = [s for s in (self.slot1, self.slot2) if s]
-        self.slot1 = None
-        self.slot2 = None
+        old_slots = [s for s in (self.slot1, self.slot2, self.slot3) if s]
+        self.slot1 = self.slot2 = self.slot3 = None
         for s in old_slots:
             try:
                 s.running = False
@@ -801,37 +787,47 @@ class DualPlayerWindow:
         threading.Thread(target=_release_old, daemon=True).start()
 
         kw = dict(bg=bg, highlightthickness=1, highlightbackground="#555555")
-        if self._layout == "side_by_side":
+        if self.player_count == 2:
             f1 = tk.Frame(self.player_area, **kw)
             f1.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 3))
             f2 = tk.Frame(self.player_area, **kw)
             f2.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(3, 0))
-        else:
+
+            self.slot1 = DualPlayerSlot(f1, 1, self.theme, self.logger)
+            self.slot2 = DualPlayerSlot(f2, 2, self.theme, self.logger)
+
+            if self.watch_history_callback:
+                self.slot1.watch_history_callback = self.watch_history_callback
+                self.slot2.watch_history_callback = self.watch_history_callback
+
+        else:  # triple player
             f1 = tk.Frame(self.player_area, **kw)
-            f1.pack(fill=tk.BOTH, expand=True, pady=(0, 3))
+            f1.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 3))
             f2 = tk.Frame(self.player_area, **kw)
-            f2.pack(fill=tk.BOTH, expand=True, pady=(3, 0))
+            f2.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(3, 3))
+            f3 = tk.Frame(self.player_area, **kw)
+            f3.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(3, 0))
 
-        self.slot1 = DualPlayerSlot(f1, 1, self.theme, self.logger)
-        self.slot2 = DualPlayerSlot(f2, 2, self.theme, self.logger)
+            self.slot1 = DualPlayerSlot(f1, 1, self.theme, self.logger)
+            self.slot2 = DualPlayerSlot(f2, 2, self.theme, self.logger)
+            self.slot3 = DualPlayerSlot(f3, 3, self.theme, self.logger)
 
-        self.slot1.layout_toggle_callback = self._toggle_layout
-        try:
-            self.slot2.layout_btn.pack_forget()
-        except Exception:
-            pass
+            if self.watch_history_callback:
+                for s in (self.slot1, self.slot2, self.slot3):
+                    s.watch_history_callback = self.watch_history_callback
 
-        if self.watch_history_callback:
-            self.slot1.watch_history_callback = self.watch_history_callback
-            self.slot2.watch_history_callback = self.watch_history_callback
+    def _get_slot(self, slot_id: int) -> Optional[DualPlayerSlot]:
+        return {1: self.slot1, 2: self.slot2, 3: self.slot3}.get(slot_id)
 
     def _load_videos(self, slot_id: int):
+        slot = self._get_slot(slot_id)
+        if not slot:
+            return
         answer = messagebox.askquestion(
             "Load Videos",
             "Load a directory (all videos inside)?\n\n"
             "Yes = pick a folder\nNo = pick individual video files",
             parent=self.window)
-        slot = self.slot1 if slot_id == 1 else self.slot2
 
         if answer == "yes":
             d = filedialog.askdirectory(
@@ -856,42 +852,31 @@ class DualPlayerWindow:
                 return
             slot.load_videos(list(files))
 
-    def _pause_both(self):
-        for s in (self.slot1, self.slot2):
+    def _pause_all(self):
+        for s in (self.slot1, self.slot2, self.slot3):
             if s and s.player and s.player.is_playing():
                 s.player.pause()
                 s.play_btn.config(text="▶")
 
-    def _play_both(self):
-        for s in (self.slot1, self.slot2):
+    def _play_all(self):
+        for s in (self.slot1, self.slot2, self.slot3):
             if s and s.player and not s.player.is_playing():
                 s.player.play()
                 s.play_btn.config(text="⏸")
 
-    def _stop_both(self):
-        for s in (self.slot1, self.slot2):
+    def _stop_all(self):
+        for s in (self.slot1, self.slot2, self.slot3):
             if s:
                 s._stop_playback()
 
-    def _toggle_layout(self):
-        self._layout = "stacked" if self._layout == "side_by_side" else "side_by_side"
-        v1 = (self.slot1.videos[:], self.slot1.index) if self.slot1 else ([], 0)
-        v2 = (self.slot2.videos[:], self.slot2.index) if self.slot2 else ([], 0)
-        self._build_player_frames()
-        new_label = "Side by Side" if self._layout == "stacked" else "Stack View"
-        try:
-            self.slot1.layout_btn.config(text=new_label)
-        except Exception:
-            pass
-        if v1[0]:
-            self.window.after(200, lambda: self.slot1.load_videos(v1[0], v1[1]))
-        if v2[0]:
-            self.window.after(200, lambda: self.slot2.load_videos(v2[0], v2[1]))
+    # Keep old names as aliases for backward compatibility
+    def _pause_both(self): self._pause_all()
+    def _play_both(self):  self._play_all()
+    def _stop_both(self):  self._stop_all()
 
     def _on_close(self):
-        slots = [s for s in (self.slot1, self.slot2) if s]
-        self.slot1 = None
-        self.slot2 = None
+        slots = [s for s in (self.slot1, self.slot2, self.slot3) if s]
+        self.slot1 = self.slot2 = self.slot3 = None
 
         for s in slots:
             try:
@@ -917,13 +902,16 @@ class DualPlayerWindow:
 
         threading.Thread(target=_release, daemon=True).start()
 
-    def preload(self, videos1: List[str] = None, videos2: List[str] = None):
+    def preload(self, videos1: List[str] = None, videos2: List[str] = None,
+                videos3: List[str] = None):
         if not self.window:
             return
         if videos1:
             self.window.after(300, lambda: self.slot1.load_videos(videos1))
-        if videos2:
+        if videos2 and self.slot2:
             self.window.after(300, lambda: self.slot2.load_videos(videos2))
+        if videos3 and self.slot3:
+            self.window.after(300, lambda: self.slot3.load_videos(videos3))
 
     def _make_btn(self, parent, text, command, variant="primary"):
         c = self.theme.get_button_colors(variant)
@@ -935,6 +923,17 @@ class DualPlayerWindow:
 
     def is_open(self) -> bool:
         return bool(self.window and self.window.winfo_exists())
+
+    def set_player_count(self, count: int):
+        """Update player count and rebuild if window is open."""
+        count = max(2, min(3, count))
+        if count == self.player_count:
+            return
+        self.player_count = count
+        if self.window and self.window.winfo_exists():
+            title = "Triple Video Player" if count == 3 else "Dual Video Player"
+            self.window.title(title)
+            self._build_player_frames()
 
 
 class DualPlayerManager:
@@ -949,15 +948,25 @@ class DualPlayerManager:
 
     def __init__(self, root: tk.Tk, theme_provider,
                  logger: Callable = None,
-                 watch_history_callback: Callable = None):
+                 watch_history_callback: Callable = None,
+                 player_count: int = 2):
         self._window = DualPlayerWindow(root, theme_provider,
-                                        logger, watch_history_callback)
+                                        logger, watch_history_callback,
+                                        player_count=player_count)
+
+    @property
+    def player_count(self) -> int:
+        return self._window.player_count
+
+    def set_player_count(self, count: int):
+        self._window.set_player_count(count)
 
     def show(self):
         self._window.show()
 
-    def preload(self, videos1: List[str] = None, videos2: List[str] = None):
-        self._window.preload(videos1, videos2)
+    def preload(self, videos1: List[str] = None, videos2: List[str] = None,
+                videos3: List[str] = None):
+        self._window.preload(videos1, videos2, videos3)
 
     def cleanup(self):
         self._window._on_close()

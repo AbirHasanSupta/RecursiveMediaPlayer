@@ -233,7 +233,8 @@ def select_multiple_folders_and_play():
                 self.root,
                 self,
                 self.update_console,
-                watch_history_callback=self.watch_history_manager.track_video_playback
+                watch_history_callback=self.watch_history_manager.track_video_playback,
+                player_count=self.settings_manager.get_settings().dual_player_count
             )
 
             self.filter_sort_manager = AdvancedFilterSortManager(
@@ -276,6 +277,22 @@ def select_multiple_folders_and_play():
                     self.root.after(400, lambda: self.dual_player_manager._window.slot2.load_videos(videos))
                 )
             )
+
+            # Provide the grid view with a live player-count query so its context menu
+            # always reflects the current setting (2 vs 3 players).
+            self.grid_view_manager.set_get_player_count_callback(
+                lambda: self.dual_player_manager.player_count
+                if getattr(self, 'dual_player_manager', None) else 2
+            )
+
+            if getattr(self, 'dual_player_manager', None) and self.dual_player_manager.player_count == 3:
+                self.grid_view_manager.set_play_in_dual_player3_callback(
+                    lambda videos: (
+                        self.dual_player_manager.show(),
+                        self.root.after(400, lambda: self.dual_player_manager._window.slot3.load_videos(videos))
+                    )
+                )
+
             self.grid_view_manager.set_open_file_location_callback(self._context_open_location)
             self.grid_view_manager.set_show_properties_callback(self._context_show_properties)
 
@@ -1194,13 +1211,18 @@ def select_multiple_folders_and_play():
 
             context_menu.add_separator()
             context_menu.add_command(
-                label="▶ Play in Dual Player 1",
+                label="▶ Play in Player 1",
                 command=lambda: self._context_play_in_dual_player(selection, slot=1)
             )
             context_menu.add_command(
-                label="▶ Play in Dual Player 2",
+                label="▶ Play in Player 2",
                 command=lambda: self._context_play_in_dual_player(selection, slot=2)
             )
+            if getattr(self, 'dual_player_manager', None) and self.dual_player_manager.player_count == 3:
+                context_menu.add_command(
+                    label="▶ Play in Player 3",
+                    command=lambda: self._context_play_in_dual_player(selection, slot=3)
+                )
 
             context_menu.add_separator()
 
@@ -1244,13 +1266,18 @@ def select_multiple_folders_and_play():
 
             self.dual_player_manager.show()
 
-            if slot == 1:
-                self.root.after(400, lambda: self.dual_player_manager._window.slot1.load_videos(final_videos))
+            slot_obj = self.dual_player_manager._window._get_slot(slot)
+            if slot_obj:
+                self.root.after(400, lambda: slot_obj.load_videos(final_videos))
             else:
-                self.root.after(400, lambda: self.dual_player_manager._window.slot2.load_videos(final_videos))
+                messagebox.showwarning(
+                    "Player Not Available",
+                    f"Player {slot} is not available in the current mode.\n"
+                    "Switch to Triple Player mode in Settings to enable Player 3.")
+                return
 
             self.update_console(
-                f"Sent {len(final_videos)} video(s) to Dual Player — Player {slot}")
+                f"Sent {len(final_videos)} video(s) to Player {slot}")
 
         def _show_favorites_manager(self):
             selected_dir = self.get_current_selected_directory()
@@ -3973,6 +4000,23 @@ def select_multiple_folders_and_play():
 
             if hasattr(self, 'resume_manager'):
                 self.resume_manager._auto_cleanup_days = new_settings.auto_cleanup_days
+
+            if hasattr(self, 'dual_player_manager'):
+                self.dual_player_manager.set_player_count(new_settings.dual_player_count)
+
+            # Keep the grid view Player 3 callback in sync with the new player count.
+            # Set it when switching to 3 players; clear it when switching back to 2 so
+            # the context menu item disappears and no NoneType error can occur.
+            if hasattr(self, 'grid_view_manager') and hasattr(self, 'dual_player_manager'):
+                if new_settings.dual_player_count == 3:
+                    self.grid_view_manager.set_play_in_dual_player3_callback(
+                        lambda videos: (
+                            self.dual_player_manager.show(),
+                            self.root.after(400, lambda: self.dual_player_manager._window.slot3.load_videos(videos))
+                        )
+                    )
+                else:
+                    self.grid_view_manager.set_play_in_dual_player3_callback(None)
 
 
         def _clear_thumbnail_cache(self):
