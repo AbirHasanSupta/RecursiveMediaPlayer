@@ -149,14 +149,6 @@ class DualPlayerSlot:
         self.rotate_btn = tk.Button(ctrl, text="⟳", command=self._rotate, **btn_kw)
         self.rotate_btn.pack(side=tk.LEFT, padx=2)
 
-        eject_btn = tk.Button(ctrl, text="✕ Close",
-                              font=Font(family="Segoe UI", size=8),
-                              bg="#3a1a1a", fg="#ff6666", bd=0, padx=6, pady=3,
-                              cursor="hand2", relief=tk.FLAT,
-                              activebackground="#551111", activeforeground="#ff9999",
-                              command=self._eject)
-        eject_btn.pack(side=tk.LEFT, padx=(8, 0))
-
         tk.Frame(ctrl, width=16, bg=PANEL_BG).pack(side=tk.LEFT)
         self.mute_btn = tk.Label(
             ctrl, text="🔊", cursor="hand2",
@@ -172,6 +164,14 @@ class DualPlayerSlot:
             bg=PANEL_BG, fg=TEXT_DIM)
         self.vol_label.pack(side=tk.LEFT)
         self.vol_label.bind("<MouseWheel>", self._on_vol_scroll)
+
+        eject_btn = tk.Button(ctrl, text="✕ Close",
+                              font=Font(family="Segoe UI", size=8),
+                              bg="#3a1a1a", fg="#ff6666", bd=0, padx=6, pady=3,
+                              cursor="hand2", relief=tk.FLAT,
+                              activebackground="#551111", activeforeground="#ff9999",
+                              command=self._eject)
+        eject_btn.pack(side=tk.LEFT, padx=(8, 0))
 
         self.spd_label = tk.Label(
             ctrl, text="1.00×", cursor="hand2",
@@ -816,10 +816,40 @@ class DualPlayerWindow:
         self.window.configure(bg=bg)
         self.window.protocol("WM_DELETE_WINDOW", self._on_close)
 
+        self._borderless = False
+
+        self.window.bind("<F>", lambda e: self._toggle_borderless())
+        self.window.bind("<Escape>", lambda e: self._exit_borderless())
+
         self._player_area = tk.Frame(self.window, bg=bg)
         self._player_area.pack(fill=tk.BOTH, expand=True)
 
         self._show_placeholder()
+
+    def _toggle_borderless(self):
+        self._borderless = not self._borderless
+        self._apply_borderless()
+
+    def _exit_borderless(self):
+        if self._borderless:
+            self._borderless = False
+            self._apply_borderless()
+
+    def _apply_borderless(self):
+        if not self.window or not self.window.winfo_exists():
+            return
+        if self._borderless:
+            self._pre_borderless_geo = self.window.geometry()
+            self.window.overrideredirect(True)
+            sw = self.window.winfo_screenwidth()
+            sh = self.window.winfo_screenheight()
+            self.window.geometry(f"{sw}x{sh}+0+0")
+        else:
+            self.window.overrideredirect(False)
+            geo = getattr(self, '_pre_borderless_geo', "1200x700")
+            self.window.geometry(geo)
+        self.window.lift()
+        self.window.focus_force()
 
     def _show_placeholder(self):
         """Show a friendly empty-state message when no slots are active."""
