@@ -266,16 +266,10 @@ def select_multiple_folders_and_play():
                 lambda videos: self.queue_manager.add_to_queue(videos, added_from="grid_view")
             )
             self.grid_view_manager.set_play_in_dual_player1_callback(
-                lambda videos: (
-                    self.dual_player_manager.show(),
-                    self.root.after(400, lambda: self.dual_player_manager._window.slot1.load_videos(videos))
-                )
+                lambda videos: self.dual_player_manager.load_videos_into_slot(1, videos)
             )
             self.grid_view_manager.set_play_in_dual_player2_callback(
-                lambda videos: (
-                    self.dual_player_manager.show(),
-                    self.root.after(400, lambda: self.dual_player_manager._window.slot2.load_videos(videos))
-                )
+                lambda videos: self.dual_player_manager.load_videos_into_slot(2, videos)
             )
 
             # Provide the grid view with a live player-count query so its context menu
@@ -287,10 +281,7 @@ def select_multiple_folders_and_play():
 
             if getattr(self, 'dual_player_manager', None) and self.dual_player_manager.player_count == 3:
                 self.grid_view_manager.set_play_in_dual_player3_callback(
-                    lambda videos: (
-                        self.dual_player_manager.show(),
-                        self.root.after(400, lambda: self.dual_player_manager._window.slot3.load_videos(videos))
-                    )
+                    lambda videos: self.dual_player_manager.load_videos_into_slot(3, videos)
                 )
 
             self.grid_view_manager.set_open_file_location_callback(self._context_open_location)
@@ -1259,25 +1250,21 @@ def select_multiple_folders_and_play():
             if not selected_dir:
                 return
 
+            # Enforce max-slot limit
+            if slot == 3 and self.dual_player_manager.player_count < 3:
+                messagebox.showwarning(
+                    "Player Not Available",
+                    "Player 3 is only available in Triple Player mode.\n"
+                    "Enable it in Settings.")
+                return
+
             final_videos = self._resolve_selection_indices_to_videos(selected_dir, selection)
             if not final_videos:
                 messagebox.showwarning("No Videos", "No valid non-excluded videos found in selection.")
                 return
 
-            self.dual_player_manager.show()
-
-            slot_obj = self.dual_player_manager._window._get_slot(slot)
-            if slot_obj:
-                self.root.after(400, lambda: slot_obj.load_videos(final_videos))
-            else:
-                messagebox.showwarning(
-                    "Player Not Available",
-                    f"Player {slot} is not available in the current mode.\n"
-                    "Switch to Triple Player mode in Settings to enable Player 3.")
-                return
-
-            self.update_console(
-                f"Sent {len(final_videos)} video(s) to Player {slot}")
+            self.dual_player_manager.load_videos_into_slot(slot, final_videos)
+            self.update_console(f"Sent {len(final_videos)} video(s) to Player {slot}")
 
         def _show_favorites_manager(self):
             selected_dir = self.get_current_selected_directory()
@@ -3605,8 +3592,6 @@ def select_multiple_folders_and_play():
             self.settings_manager.show_settings()
 
         def _open_dual_player(self):
-            self.dual_player_manager.show()
-
             selected_dir = self.get_current_selected_directory()
             if selected_dir:
                 cache = self.scan_cache.get(selected_dir)
@@ -3615,12 +3600,9 @@ def select_multiple_folders_and_play():
                     filtered = [v for v in videos
                                 if not self.is_video_excluded(selected_dir, v)]
                     if filtered:
-                        self.root.after(
-                            400,
-                            lambda: self.dual_player_manager._window.slot1.load_videos(
-                                filtered[:200]
-                            )
-                        )
+                        self.dual_player_manager.load_videos_into_slot(1, filtered[:200])
+                        return
+            self.dual_player_manager.show()
 
         def _save_volume_callback(self, volume, is_muted=None):
             self.volume = volume
@@ -4010,10 +3992,7 @@ def select_multiple_folders_and_play():
             if hasattr(self, 'grid_view_manager') and hasattr(self, 'dual_player_manager'):
                 if new_settings.dual_player_count == 3:
                     self.grid_view_manager.set_play_in_dual_player3_callback(
-                        lambda videos: (
-                            self.dual_player_manager.show(),
-                            self.root.after(400, lambda: self.dual_player_manager._window.slot3.load_videos(videos))
-                        )
+                        lambda videos: self.dual_player_manager.load_videos_into_slot(3, videos)
                     )
                 else:
                     self.grid_view_manager.set_play_in_dual_player3_callback(None)
