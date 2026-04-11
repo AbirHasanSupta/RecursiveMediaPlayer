@@ -88,33 +88,34 @@ pip install -r requirements\ai_requirements.txt
 
 ### Keyboard Controls During Playback
 
-| Key           | Action                  |
-|---------------|-------------------------|
-| `Space`       | Pause/Resume            |
-| `D`           | Next video              |
-| `A`           | Previous video          |
-| `E`           | Next directory          |
-| `Q`           | Previous directory      |
-| `W`           | Volume up               |
-| `S`           | Volume down             |
-| `M`           | Toggle Mute             |
-| `I`           | Toggle Overlay          |
-| `Right Arrow` | Fast forward (200ms)    |
-| `Left Arrow`  | Rewind (200ms)          |
-| `F`           | Toggle fullscreen       |
-| `1`           | Switch to monitor 1     |
-| `2`           | Switch to monitor 2     |
-| `+/=`         | Increase playback speed |
-| `-`           | Decrease playback speed |
-| `0`           | Reset speed to 1.0x     |
+| Key           | Action                                           |
+|---------------|--------------------------------------------------|
+| `Space`       | Pause/Resume                                     |
+| `D`           | Next video                                       |
+| `A`           | Previous video                                   |
+| `E`           | Next directory                                   |
+| `Q`           | Previous directory                               |
+| `W`           | Volume up                                        |
+| `S`           | Volume down                                      |
+| `M`           | Toggle Mute                                      |
+| `I`           | Toggle Overlay                                   |
+| `Right Arrow` | Fast forward (200ms)                             |
+| `Left Arrow`  | Rewind (200ms)                                   |
+| `F`           | Toggle fullscreen                                |
+| `1`           | Switch to monitor 1                              |
+| `2`           | Switch to monitor 2                              |
+| `+/=`         | Increase playback speed                          |
+| `-`           | Decrease playback speed                          |
+| `0`           | Reset speed to 1.0x                              |
 | `R`           | Rotate video 90° clockwise (cycles 0→90→180→270) |
-| `Ctrl+=`      | Zoom in (+10%)          |
-| `Ctrl+-`      | Zoom out (-10%)         |
-| `Ctrl+0`      | Reset zoom to 100%      |
-| `T`           | Take screenshot         |
-| `V`           | Toggle voice commands   |
-| `Ctrl+C`      | Copy current video path |
-| `Esc`         | Stop playback           |
+| `Ctrl+=`      | Zoom in (+10%)                                   |
+| `Ctrl+-`      | Zoom out (-10%)                                  |
+| `Ctrl+0`      | Reset zoom to 100%                               |
+| `T`           | Take screenshot                                  |
+| `V`           | Toggle voice commands                            |
+| `Ctrl+C`      | Copy current video path                          |
+| `Esc`         | Stop playback + Exit dual player fullscreen      |
+| `Shift+F`     | Toggle dual player fullscreen                    |
 
 ## AI Search System
 

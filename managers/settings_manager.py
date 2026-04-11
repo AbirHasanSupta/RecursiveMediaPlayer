@@ -810,7 +810,7 @@ class SettingsUI:
         SHORTCUT_GROUPS = [
             ("▶  Playback", [
                 ("Space",           "Pause / Resume"),
-                ("Esc",             "Stop playback"),
+                ("Esc",             "Stop playback + Exit dual player fullscreen"),
                 ("Right Arrow",     "Fast-forward 200 ms"),
                 ("Left Arrow",      "Rewind 200 ms"),
             ]),
@@ -840,6 +840,7 @@ class SettingsUI:
                 ("Ctrl  +  =",      "Zoom in (+10%)"),
                 ("Ctrl  +  -",      "Zoom out (−10%)"),
                 ("Ctrl  +  0",      "Reset zoom to 100%"),
+                ("Shift  +  F",      "Toggle dual player fullscreen"),
             ]),
             ("🛠  Tools & Misc", [
                 ("T",               "Take screenshot"),
