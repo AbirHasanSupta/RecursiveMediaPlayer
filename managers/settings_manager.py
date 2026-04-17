@@ -784,9 +784,21 @@ class SettingsUI:
         canvas.bind("<Configure>", _on_canvas_configure)
 
         def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            try:
+                if canvas.winfo_exists():
+                    canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            except Exception:
+                pass
 
         canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        def _unbind_mousewheel(event=None):
+            try:
+                canvas.unbind_all("<MouseWheel>")
+            except Exception:
+                pass
+
+        self.settings_window.bind("<Destroy>", _unbind_mousewheel)
 
         # ── shortcut data ───────────────────────────────────────────────────
         SHORTCUT_GROUPS = [
