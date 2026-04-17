@@ -137,7 +137,7 @@ class BaseVLCPlayerController:
 
         try:
             em = self.player.event_manager()
-            em.event_attach(vlc.EventType.MediaPlayerStopped, self._on_vlc_stopped)
+            em.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_vlc_stopped)
         except Exception:
             pass
 
@@ -148,12 +148,6 @@ class BaseVLCPlayerController:
             return
         if self._is_cleanup:
             return
-        self.running = False
-        if self.stop_callback:
-            try:
-                self.stop_callback()
-            except Exception:
-                pass
 
     def play_video(self, index):
         with self.lock:
