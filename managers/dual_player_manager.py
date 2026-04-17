@@ -223,7 +223,7 @@ class DualPlayerSlot:
     # ── swap logic ────────────────────────────────────────────────────────────
 
     def _show_swap_menu(self):
-        """Show a popup menu listing the other active players to swap with."""
+        """Show a popup menu listing other active players in this window to swap with."""
         if not self.get_other_slots_callback:
             return
 
@@ -231,7 +231,6 @@ class DualPlayerSlot:
         other_slots = {sid: s for sid, s in all_slots.items() if sid != self.slot_id}
 
         if not other_slots:
-            # Nothing to swap with — flash the button briefly as feedback
             self.swap_btn.config(fg="#ff9966")
             self.parent_frame.after(600, lambda: self.swap_btn.config(fg="#5bc8f5"))
             return
@@ -254,7 +253,6 @@ class DualPlayerSlot:
                 command=lambda target=slot: self._do_swap(target))
 
         try:
-            # Post near the swap button
             x = self.swap_btn.winfo_rootx()
             y = self.swap_btn.winfo_rooty() - 4
             menu.tk_popup(x, y)
@@ -263,13 +261,9 @@ class DualPlayerSlot:
 
     def _do_swap(self, other: 'DualPlayerSlot'):
         """
-        Exchange the complete playlist state (videos list + current index +
-        playback position) between *self* and *other*.
-
-        Each player resumes at the same relative seek position it was at
-        before the swap so the footage feels continuous.
+        Exchange the complete playlist state between self and other.
+        Each player resumes at the same seek position it was at before the swap.
         """
-        # Capture current seek positions (ms) before stopping
         self_pos  = 0
         other_pos = 0
         if self.player:
@@ -283,14 +277,10 @@ class DualPlayerSlot:
             except Exception:
                 pass
 
-        # Swap the playlist state
-        self.videos,  other.videos  = other.videos,  self.videos
-        self.index,   other.index   = other.index,   self.index
-
-        # Swap loop modes too so behaviour stays consistent with the content
+        self.videos,    other.videos    = other.videos,    self.videos
+        self.index,     other.index     = other.index,     self.index
         self.loop_mode, other.loop_mode = other.loop_mode, self.loop_mode
 
-        # Re-play both slots from their swapped positions
         def _reload_slot(slot, seek_ms):
             if slot.videos:
                 if not slot.player:
@@ -320,7 +310,6 @@ class DualPlayerSlot:
                 threading.Thread(target=_seek_after_play, daemon=True).start()
                 slot._start_polling()
             else:
-                # Slot now has no videos — stop it
                 slot.stop()
                 try:
                     slot._no_video_label.place(relx=0.5, rely=0.5, anchor="center")
@@ -339,7 +328,6 @@ class DualPlayerSlot:
     # ── eject ─────────────────────────────────────────────────────────────────
 
     def _eject(self):
-        """Stop playback and notify parent to remove this slot."""
         self.stop()
         self.videos = []
         if self.on_empty_callback:
@@ -349,7 +337,6 @@ class DualPlayerSlot:
                 pass
 
     def _reposition_overlay(self, event=None):
-        """Keep overlay pinned to bottom of vid_container."""
         try:
             w = self.vid_container.winfo_width()
             h = self.vid_container.winfo_height()
@@ -559,7 +546,6 @@ class DualPlayerSlot:
             self._no_video_label.place_forget()
         except Exception:
             pass
-
         self._start_polling()
 
     def load_single_video(self, path: str):
@@ -697,7 +683,7 @@ class DualPlayerSlot:
                 self.status_label.config(text=f"P{self.slot_id} · Finished")
                 self.play_btn.config(text="Play")
                 return
-        else:  # shuffle
+        else:
             self.index = random.randint(0, len(self.videos) - 1)
             self._play_current()
         self._poll_job = self.parent_frame.after(500, self._poll)
@@ -858,34 +844,38 @@ class DualPlayerSlot:
             except Exception:
                 pass
 
+
+# ---------------------------------------------------------------------------
+# DualPlayerWindow — one independent Toplevel housing up to 3 slots
+# ---------------------------------------------------------------------------
+
 class DualPlayerWindow:
     """
-    Dynamic multi-player window.
-
-    Slots are created on demand.  The window starts empty with a friendly
-    prompt; slots are added one by one and laid out side-by-side.  When a
-    slot is ejected (✕ Close) or its playlist finishes, the pane is removed
-    and the remaining slots expand to fill the space.
+    One independent player window that houses 1-3 side-by-side slot panes.
+    Two instances can be sent to two separate monitors.
     """
 
     MAX_SLOTS = 3
 
-    def __init__(self, parent: tk.Tk, theme_provider,
+    def __init__(self, parent: tk.Tk, win_id: int, theme_provider,
                  logger: Callable = None,
                  watch_history_callback: Callable = None,
                  player_count: int = 2):
         self.parent                  = parent
+        self.win_id                  = win_id       # 1 or 2
         self.theme                   = theme_provider
         self.logger                  = logger
         self.watch_history_callback  = watch_history_callback
         self.player_count            = max(2, min(3, player_count))
 
-        self._slots: dict            = {}
-        self._slot_frames: dict      = {}
+        self._slots: dict            = {}           # slot_id -> DualPlayerSlot
+        self._slot_frames: dict      = {}           # slot_id -> tk.Frame
 
         self.window: Optional[tk.Toplevel] = None
         self._player_area: Optional[tk.Frame] = None
         self._placeholder: Optional[tk.Frame] = None
+
+    # ── public ────────────────────────────────────────────────────────────────
 
     def show(self):
         if self.window and self.window.winfo_exists():
@@ -893,46 +883,33 @@ class DualPlayerWindow:
             return
         self._build_window()
 
-    def get_slot(self, slot_id: int) -> Optional['DualPlayerSlot']:
+    def get_slot(self, slot_id: int) -> Optional[DualPlayerSlot]:
         return self._slots.get(slot_id)
 
-    def get_or_create_slot(self, slot_id: int) -> 'DualPlayerSlot':
+    def get_or_create_slot(self, slot_id: int) -> DualPlayerSlot:
         self.show()
         if slot_id not in self._slots:
             self._add_slot(slot_id)
         return self._slots[slot_id]
 
     def set_player_count(self, count: int):
-        count = max(2, min(3, count))
-        self.player_count = count
+        self.player_count = max(2, min(3, count))
 
     def is_open(self) -> bool:
         return bool(self.window and self.window.winfo_exists())
 
-    def preload(self, videos1: List[str] = None,
-                videos2: List[str] = None,
-                videos3: List[str] = None):
-        if not self.window:
-            return
-        pairs = [(1, videos1), (2, videos2), (3, videos3)]
-        for sid, vids in pairs:
-            if vids:
-                slot = self.get_or_create_slot(sid)
-                self.window.after(300, lambda s=slot, v=vids: s.load_videos(v))
-
-    # ── window construction ───────────────────────────────────────────────────
+    # ── window build ──────────────────────────────────────────────────────────
 
     def _build_window(self):
         bg = self.theme.bg_color
         self.window = tk.Toplevel(self.parent)
-        self.window.title("Video Player")
+        self.window.title(f"Video Player — Window {self.win_id}")
         self.window.geometry("1200x700")
         self.window.configure(bg=bg)
         self.window.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._borderless = False
-
-        self.window.bind("<F>", lambda e: self._toggle_borderless())
+        self.window.bind("<F>",      lambda e: self._toggle_borderless())
         self.window.bind("<Escape>", lambda e: self._exit_borderless())
 
         self._player_area = tk.Frame(self.window, bg=bg)
@@ -971,11 +948,16 @@ class DualPlayerWindow:
         bg = self.theme.bg_color
         self._placeholder = tk.Frame(self._player_area, bg=bg)
         self._placeholder.place(relx=0.5, rely=0.5, anchor="center")
-        tk.Label(self._placeholder,
-                 text="No videos loaded yet.\n\nUse  \"▶ Play in Player 1/2/3\"  from the main window.",
-                 font=Font(family="Segoe UI", size=13),
-                 bg=bg, fg="#888888",
-                 justify="center").pack()
+        tk.Label(
+            self._placeholder,
+            text=(
+                f"Player Window {self.win_id} — no videos loaded yet.\n\n"
+                f"Right-click a video or folder in the main window\n"
+                f"and choose  ▶ Win {self.win_id} › Player 1 / 2 / 3."
+            ),
+            font=Font(family="Segoe UI", size=13),
+            bg=bg, fg="#888888",
+            justify="center").pack()
 
     def _hide_placeholder(self):
         if self._placeholder and self._placeholder.winfo_exists():
@@ -989,9 +971,7 @@ class DualPlayerWindow:
     # ── slot management ───────────────────────────────────────────────────────
 
     def _add_slot(self, slot_id: int):
-        """Create a new pane + DualPlayerSlot for *slot_id* and repack layout."""
         self._hide_placeholder()
-
         bg = self.theme.bg_color
         frame = tk.Frame(self._player_area, bg=bg,
                          highlightthickness=1,
@@ -1001,8 +981,6 @@ class DualPlayerWindow:
         slot = DualPlayerSlot(
             frame, slot_id, self.theme, self.logger,
             on_empty_callback=self._on_slot_empty,
-            # Provide live access to all current slots so each slot can
-            # enumerate swap targets at click time.
             get_other_slots_callback=lambda: dict(self._slots))
         if self.watch_history_callback:
             slot.watch_history_callback = self.watch_history_callback
@@ -1044,7 +1022,7 @@ class DualPlayerWindow:
     def _repack_slots(self):
         if not self._player_area or not self._player_area.winfo_exists():
             return
-        for sid, frame in self._slot_frames.items():
+        for frame in self._slot_frames.values():
             try:
                 frame.pack_forget()
             except Exception:
@@ -1053,51 +1031,27 @@ class DualPlayerWindow:
         n = len(ordered)
         for i, sid in enumerate(ordered):
             frame = self._slot_frames[sid]
-            padx_left  = 0 if i == 0 else 3
-            padx_right = 0 if i == n - 1 else 3
+            padx_l = 0 if i == 0     else 3
+            padx_r = 0 if i == n - 1 else 3
             frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True,
-                       padx=(padx_left, padx_right))
+                       padx=(padx_l, padx_r))
 
     def _update_title(self):
         n = len(self._slots)
         if n == 0:
-            title = "Video Player"
+            title = f"Video Player — Window {self.win_id}"
         elif n == 1:
             sid = list(self._slots.keys())[0]
-            title = f"Video Player · Player {sid}"
+            title = f"Win {self.win_id} · Player {sid}"
         elif n == 2:
-            title = "Dual Video Player"
+            title = f"Win {self.win_id} · Dual Player"
         else:
-            title = "Triple Video Player"
+            title = f"Win {self.win_id} · Triple Player"
         try:
             if self.window:
                 self.window.title(title)
         except Exception:
             pass
-
-    # ── global transport ──────────────────────────────────────────────────────
-
-    def _pause_all(self):
-        for s in self._slots.values():
-            if s.player and s.player.is_playing():
-                s.player.pause()
-                s.play_btn.config(text="▶")
-
-    def _play_all(self):
-        for s in self._slots.values():
-            if s.player and not s.player.is_playing():
-                s.player.play()
-                s.play_btn.config(text="⏸")
-
-    def _stop_all(self):
-        for s in self._slots.values():
-            s._stop_playback()
-
-    # ── backward-compat aliases ───────────────────────────────────────────────
-
-    def _pause_both(self): self._pause_all()
-    def _play_both(self):  self._play_all()
-    def _stop_both(self):  self._stop_all()
 
     # ── slot accessors ────────────────────────────────────────────────────────
 
@@ -1116,8 +1070,7 @@ class DualPlayerWindow:
     # ── close ─────────────────────────────────────────────────────────────────
 
     def _on_close(self):
-        slots  = list(self._slots.values())
-        frames = list(self._slot_frames.values())
+        slots = list(self._slots.values())
         self._slots.clear()
         self._slot_frames.clear()
 
@@ -1136,58 +1089,95 @@ class DualPlayerWindow:
             except Exception:
                 pass
 
-        def _release():
-            for s in slots:
-                try:
-                    s._destroy_player()
-                except Exception:
-                    pass
-
-        threading.Thread(target=_release, daemon=True).start()
-
-    def _get_slot(self, slot_id: int) -> Optional[DualPlayerSlot]:
-        return self._slots.get(slot_id)
+        threading.Thread(
+            target=lambda: [s._destroy_player() for s in slots],
+            daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
-# DualPlayerManager — thin facade used by build_app.py
+# DualPlayerManager — manages TWO independent player windows
 # ---------------------------------------------------------------------------
 
 class DualPlayerManager:
-    """Facade that build_app.py talks to."""
+    """
+    Manages two completely independent player windows (win_id 1 and 2).
+
+    Each window can hold up to 3 side-by-side slot panes (slot_id 1-3).
+    Windows are fully independent — drag them to different monitors.
+
+    API used by build_app.py
+    ────────────────────────
+    load_videos_into_slot(win_id, slot_id, videos)
+        Open win_id's window (if not visible), create the slot pane
+        (if not present), and load the video list into it.
+
+    player_count                →  slots-per-window setting (2 or 3)
+    set_player_count(n)         →  update for both windows
+    show(win_id=1)              →  open a specific window
+    cleanup()                   →  close both windows
+    is_open(win_id=None)        →  True if the given (or any) window is open
+    """
+
+    NUM_WINDOWS = 2
 
     def __init__(self, root: tk.Tk, theme_provider,
                  logger: Callable = None,
                  watch_history_callback: Callable = None,
                  player_count: int = 2):
-        self._window = DualPlayerWindow(
-            root, theme_provider, logger,
-            watch_history_callback, player_count=player_count)
-        self._root = root
+        self._root   = root
+        self._logger = logger
+
+        # Two independent windows keyed by win_id (1, 2)
+        self._windows: dict = {
+            wid: DualPlayerWindow(
+                root, wid, theme_provider, logger,
+                watch_history_callback, player_count)
+            for wid in range(1, self.NUM_WINDOWS + 1)
+        }
+
+    # ── public API ────────────────────────────────────────────────────────────
 
     @property
     def player_count(self) -> int:
-        return self._window.player_count
+        return self._windows[1].player_count
 
     def set_player_count(self, count: int):
-        self._window.set_player_count(count)
+        for w in self._windows.values():
+            w.set_player_count(count)
 
-    def show(self):
-        self._window.show()
+    def show(self, win_id: int = 1):
+        """Open the given window (default: window 1)."""
+        w = self._windows.get(win_id)
+        if w:
+            w.show()
 
-    def load_videos_into_slot(self, slot_id: int, videos: List[str]):
+    def load_videos_into_slot(self, win_id: int, slot_id: int,
+                              videos: List[str]):
+        """
+        Load *videos* into slot *slot_id* of player window *win_id*.
+        The window and slot pane are created on demand.
+        """
         if not videos:
             return
-        slot = self._window.get_or_create_slot(slot_id)
+        w = self._windows.get(win_id)
+        if not w:
+            return
+        slot = w.get_or_create_slot(slot_id)
         self._root.after(200, lambda s=slot, v=videos: s.load_videos(v))
 
-    def preload(self, videos1: List[str] = None,
-                videos2: List[str] = None,
-                videos3: List[str] = None):
-        self._window.preload(videos1, videos2, videos3)
-
     def cleanup(self):
-        self._window._on_close()
+        for w in self._windows.values():
+            try:
+                w._on_close()
+            except Exception:
+                pass
 
-    def is_open(self) -> bool:
-        return self._window.is_open()
+    def is_open(self, win_id: int = None) -> bool:
+        if win_id is not None:
+            w = self._windows.get(win_id)
+            return w.is_open() if w else False
+        return any(w.is_open() for w in self._windows.values())
+
+    def _get_window(self, win_id: int = 1) -> Optional[DualPlayerWindow]:
+        """Internal access to a window object."""
+        return self._windows.get(win_id)

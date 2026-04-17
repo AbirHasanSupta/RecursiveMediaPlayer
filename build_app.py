@@ -234,7 +234,7 @@ def select_multiple_folders_and_play():
                 self,
                 self.update_console,
                 watch_history_callback=self.watch_history_manager.track_video_playback,
-                player_count=self.settings_manager.get_settings().dual_player_count
+                player_count=3
             )
 
             self.filter_sort_manager = AdvancedFilterSortManager(
@@ -266,22 +266,26 @@ def select_multiple_folders_and_play():
                 lambda videos: self.queue_manager.add_to_queue(videos, added_from="grid_view")
             )
             self.grid_view_manager.set_play_in_dual_player1_callback(
-                lambda videos: self.dual_player_manager.load_videos_into_slot(1, videos)
+                lambda videos: self.dual_player_manager.load_videos_into_slot(1, 1, videos)
             )
             self.grid_view_manager.set_play_in_dual_player2_callback(
-                lambda videos: self.dual_player_manager.load_videos_into_slot(2, videos)
+                lambda videos: self.dual_player_manager.load_videos_into_slot(1, 2, videos)
+            )
+            self.grid_view_manager.set_play_in_dual_player3_callback(
+                lambda videos: self.dual_player_manager.load_videos_into_slot(1, 3, videos)
             )
 
-            # Provide the grid view with a live player-count query so its context menu
-            # always reflects the current setting (2 vs 3 players).
-            self.grid_view_manager.set_get_player_count_callback(
-                lambda: self.dual_player_manager.player_count
-                if getattr(self, 'dual_player_manager', None) else 2
-            )
+            self.grid_view_manager.set_get_player_count_callback(lambda: 3)
 
-            if getattr(self, 'dual_player_manager', None) and self.dual_player_manager.player_count == 3:
-                self.grid_view_manager.set_play_in_dual_player3_callback(
-                    lambda videos: self.dual_player_manager.load_videos_into_slot(3, videos)
+            if self.settings_manager.get_settings().dual_window_enabled:
+                self.grid_view_manager.set_play_in_dual_player_win2_1_callback(
+                    lambda videos: self.dual_player_manager.load_videos_into_slot(2, 1, videos)
+                )
+                self.grid_view_manager.set_play_in_dual_player_win2_2_callback(
+                    lambda videos: self.dual_player_manager.load_videos_into_slot(2, 2, videos)
+                )
+                self.grid_view_manager.set_play_in_dual_player_win2_3_callback(
+                    lambda videos: self.dual_player_manager.load_videos_into_slot(2, 3, videos)
                 )
 
             self.grid_view_manager.set_open_file_location_callback(self._context_open_location)
@@ -1201,18 +1205,33 @@ def select_multiple_folders_and_play():
             )
 
             context_menu.add_separator()
+            # ── Window 1 — always available, always 3 players ─────────────
             context_menu.add_command(
-                label="▶ Play in Player 1",
-                command=lambda: self._context_play_in_dual_player(selection, slot=1)
+                label="▶ Win 1 › Player 1",
+                command=lambda: self._context_play_in_dual_player(selection, win_id=1, slot=1)
             )
             context_menu.add_command(
-                label="▶ Play in Player 2",
-                command=lambda: self._context_play_in_dual_player(selection, slot=2)
+                label="▶ Win 1 › Player 2",
+                command=lambda: self._context_play_in_dual_player(selection, win_id=1, slot=2)
             )
-            if getattr(self, 'dual_player_manager', None) and self.dual_player_manager.player_count == 3:
+            context_menu.add_command(
+                label="▶ Win 1 › Player 3",
+                command=lambda: self._context_play_in_dual_player(selection, win_id=1, slot=3)
+            )
+            if (getattr(self, 'settings_manager', None) and
+                    self.settings_manager.get_settings().dual_window_enabled):
+                context_menu.add_separator()
                 context_menu.add_command(
-                    label="▶ Play in Player 3",
-                    command=lambda: self._context_play_in_dual_player(selection, slot=3)
+                    label="▶ Win 2 › Player 1",
+                    command=lambda: self._context_play_in_dual_player(selection, win_id=2, slot=1)
+                )
+                context_menu.add_command(
+                    label="▶ Win 2 › Player 2",
+                    command=lambda: self._context_play_in_dual_player(selection, win_id=2, slot=2)
+                )
+                context_menu.add_command(
+                    label="▶ Win 2 › Player 3",
+                    command=lambda: self._context_play_in_dual_player(selection, win_id=2, slot=3)
                 )
 
             context_menu.add_separator()
@@ -1245,17 +1264,9 @@ def select_multiple_folders_and_play():
                 except:
                     pass
 
-        def _context_play_in_dual_player(self, selection, slot: int):
+        def _context_play_in_dual_player(self, selection, win_id: int, slot: int):
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
-                return
-
-            # Enforce max-slot limit
-            if slot == 3 and self.dual_player_manager.player_count < 3:
-                messagebox.showwarning(
-                    "Player Not Available",
-                    "Player 3 is only available in Triple Player mode.\n"
-                    "Enable it in Settings.")
                 return
 
             final_videos = self._resolve_selection_indices_to_videos(selected_dir, selection)
@@ -1263,8 +1274,8 @@ def select_multiple_folders_and_play():
                 messagebox.showwarning("No Videos", "No valid non-excluded videos found in selection.")
                 return
 
-            self.dual_player_manager.load_videos_into_slot(slot, final_videos)
-            self.update_console(f"Sent {len(final_videos)} video(s) to Player {slot}")
+            self.dual_player_manager.load_videos_into_slot(win_id, slot, final_videos)
+            self.update_console(f"Sent {len(final_videos)} video(s) to Window {win_id} · Player {slot}")
 
         def _show_favorites_manager(self):
             selected_dir = self.get_current_selected_directory()
@@ -3591,7 +3602,7 @@ def select_multiple_folders_and_play():
         def _show_settings(self):
             self.settings_manager.show_settings()
 
-        def _open_dual_player(self):
+        def _open_dual_player(self, win_id: int = 1):
             selected_dir = self.get_current_selected_directory()
             if selected_dir:
                 cache = self.scan_cache.get(selected_dir)
@@ -3600,9 +3611,9 @@ def select_multiple_folders_and_play():
                     filtered = [v for v in videos
                                 if not self.is_video_excluded(selected_dir, v)]
                     if filtered:
-                        self.dual_player_manager.load_videos_into_slot(1, filtered[:200])
+                        self.dual_player_manager.load_videos_into_slot(win_id, 1, filtered[:200])
                         return
-            self.dual_player_manager.show()
+            self.dual_player_manager.show(win_id)
 
         def _save_volume_callback(self, volume, is_muted=None):
             self.volume = volume
@@ -3984,18 +3995,22 @@ def select_multiple_folders_and_play():
                 self.resume_manager._auto_cleanup_days = new_settings.auto_cleanup_days
 
             if hasattr(self, 'dual_player_manager'):
-                self.dual_player_manager.set_player_count(new_settings.dual_player_count)
-
-            # Keep the grid view Player 3 callback in sync with the new player count.
-            # Set it when switching to 3 players; clear it when switching back to 2 so
-            # the context menu item disappears and no NoneType error can occur.
-            if hasattr(self, 'grid_view_manager') and hasattr(self, 'dual_player_manager'):
-                if new_settings.dual_player_count == 3:
-                    self.grid_view_manager.set_play_in_dual_player3_callback(
-                        lambda videos: self.dual_player_manager.load_videos_into_slot(3, videos)
+                # Player count per window is always 3; no need to call set_player_count.
+                # Toggle Win 2 grid-view callbacks based on the dual_window_enabled setting.
+                if new_settings.dual_window_enabled:
+                    self.grid_view_manager.set_play_in_dual_player_win2_1_callback(
+                        lambda videos: self.dual_player_manager.load_videos_into_slot(2, 1, videos)
+                    )
+                    self.grid_view_manager.set_play_in_dual_player_win2_2_callback(
+                        lambda videos: self.dual_player_manager.load_videos_into_slot(2, 2, videos)
+                    )
+                    self.grid_view_manager.set_play_in_dual_player_win2_3_callback(
+                        lambda videos: self.dual_player_manager.load_videos_into_slot(2, 3, videos)
                     )
                 else:
-                    self.grid_view_manager.set_play_in_dual_player3_callback(None)
+                    self.grid_view_manager.set_play_in_dual_player_win2_1_callback(None)
+                    self.grid_view_manager.set_play_in_dual_player_win2_2_callback(None)
+                    self.grid_view_manager.set_play_in_dual_player_win2_3_callback(None)
 
 
         def _clear_thumbnail_cache(self):

@@ -35,6 +35,9 @@ class GridViewManager:
         self.play_in_dual_player1_callback = None
         self.play_in_dual_player2_callback = None
         self.play_in_dual_player3_callback = None
+        self.play_in_dual_player_win2_1_callback = None
+        self.play_in_dual_player_win2_2_callback = None
+        self.play_in_dual_player_win2_3_callback = None
         self.get_player_count_callback = None
         self.open_file_location_callback = None
         self.show_properties_callback = None
@@ -106,6 +109,15 @@ class GridViewManager:
 
     def set_play_in_dual_player3_callback(self, callback):
         self.play_in_dual_player3_callback = callback
+
+    def set_play_in_dual_player_win2_1_callback(self, callback):
+        self.play_in_dual_player_win2_1_callback = callback
+
+    def set_play_in_dual_player_win2_2_callback(self, callback):
+        self.play_in_dual_player_win2_2_callback = callback
+
+    def set_play_in_dual_player_win2_3_callback(self, callback):
+        self.play_in_dual_player_win2_3_callback = callback
 
     def set_get_player_count_callback(self, callback):
         """callback() -> int: returns the current active player count (2 or 3)"""
@@ -1288,28 +1300,39 @@ class GridViewManager:
 
         context_menu.add_separator()
 
-        # ── Dual Player ───────────────────────────────────────────────────────
         context_menu.add_command(
-            label="▶ Play in Player 1",
+            label="▶ Win 1 › Player 1",
             command=lambda: self._context_play_in_dual_player(slot=1)
         )
         context_menu.add_command(
-            label="▶ Play in Player 2",
+            label="▶ Win 1 › Player 2",
             command=lambda: self._context_play_in_dual_player(slot=2)
         )
 
-        # Only show Player 3 option when the dual player is actually configured for
-        # 3 players. Use get_player_count_callback when available; fall back to checking
-        # the callback itself so the menu item is never shown if player 3 is not active.
-        _player_count = (
-            self.get_player_count_callback()
-            if self.get_player_count_callback
-            else (3 if self.play_in_dual_player3_callback else 2)
+        context_menu.add_command(
+            label="▶ Win 1 › Player 3",
+            command=lambda: self._context_play_in_dual_player(slot=3)
         )
-        if _player_count >= 3 and self.play_in_dual_player3_callback:
+
+        if any([self.play_in_dual_player_win2_1_callback,
+                self.play_in_dual_player_win2_2_callback,
+                self.play_in_dual_player_win2_3_callback]):
+            context_menu.add_separator()
+
+        if self.play_in_dual_player_win2_1_callback:
             context_menu.add_command(
-                label="▶ Play in Player 3",
-                command=lambda: self._context_play_in_dual_player(slot=3)
+                label="▶ Win 2 › Player 1",
+                command=lambda: self._context_play_in_dual_player_win2(slot=1)
+            )
+        if self.play_in_dual_player_win2_2_callback:
+            context_menu.add_command(
+                label="▶ Win 2 › Player 2",
+                command=lambda: self._context_play_in_dual_player_win2(slot=2)
+            )
+        if self.play_in_dual_player_win2_3_callback:
+            context_menu.add_command(
+                label="▶ Win 2 › Player 3",
+                command=lambda: self._context_play_in_dual_player_win2(slot=3)
             )
 
         context_menu.add_separator()
@@ -1385,6 +1408,17 @@ class GridViewManager:
             self.play_in_dual_player2_callback(videos)
         elif slot == 3 and self.play_in_dual_player3_callback:
             self.play_in_dual_player3_callback(videos)
+
+    def _context_play_in_dual_player_win2(self, slot: int):
+        videos = self._get_selected_videos()
+        if not videos:
+            return
+        if slot == 1 and self.play_in_dual_player_win2_1_callback:
+            self.play_in_dual_player_win2_1_callback(videos)
+        elif slot == 2 and self.play_in_dual_player_win2_2_callback:
+            self.play_in_dual_player_win2_2_callback(videos)
+        elif slot == 3 and self.play_in_dual_player_win2_3_callback:
+            self.play_in_dual_player_win2_3_callback(videos)
 
     def _context_open_file_location(self, file_path):
         file_path = os.path.normpath(file_path)
