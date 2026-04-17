@@ -78,6 +78,7 @@ class BaseVLCPlayerController:
         self.initial_playback_rate = 1.0
         self.start_index = 0
         self.video_change_callback = None
+        self.stop_callback = None
         self.position_overlay = None
 
         self._rotation_index = 0
@@ -133,7 +134,26 @@ class BaseVLCPlayerController:
             pass
 
         self.player.set_fullscreen(self.fullscreen_enabled)
+
+        try:
+            em = self.player.event_manager()
+            em.event_attach(vlc.EventType.MediaPlayerStopped, self._on_vlc_stopped)
+        except Exception:
+            pass
+
         return True
+
+    def _on_vlc_stopped(self, event):
+        if not self.running:
+            return
+        if self._is_cleanup:
+            return
+        self.running = False
+        if self.stop_callback:
+            try:
+                self.stop_callback()
+            except Exception:
+                pass
 
     def play_video(self, index):
         with self.lock:
@@ -218,6 +238,12 @@ class BaseVLCPlayerController:
             pass
 
         self.videos = []
+
+        if self.stop_callback:
+            try:
+                self.stop_callback()
+            except Exception:
+                pass
 
     def toggle_mute(self):
         with self.lock:
@@ -506,6 +532,9 @@ class BaseVLCPlayerController:
     def set_video_change_callback(self, callback):
         self.video_change_callback = callback
 
+    def set_stop_callback(self, callback):
+        self.stop_callback = callback
+
     def _notify_video_change(self):
         if self.video_change_callback:
             try:
@@ -520,6 +549,11 @@ class BaseVLCPlayerController:
             if self.logger:
                 self.logger("Video player stopped")
             cleanup_hotkeys()
+        if self.stop_callback:
+            try:
+                self.stop_callback()
+            except Exception:
+                pass
 
     def init_overlay(self):
         if not self.position_overlay:
@@ -815,6 +849,12 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
             self.play_video(self.index)
         else:
             self.player.pause()
+            self.running = False
+            if self.stop_callback:
+                try:
+                    self.stop_callback()
+                except Exception:
+                    pass
 
     def _next_video_shuffle(self):
         self.played_indices.add(self.index)
@@ -822,6 +862,12 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
         if not unplayed:
             self.played_indices.clear()
             self.player.pause()
+            self.running = False
+            if self.stop_callback:
+                try:
+                    self.stop_callback()
+                except Exception:
+                    pass
             return
         self.index = random.choice(unplayed)
         self.play_video(self.index)

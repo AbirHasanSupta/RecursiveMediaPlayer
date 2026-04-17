@@ -275,6 +275,8 @@ def select_multiple_folders_and_play():
                 lambda videos: self.dual_player_manager.load_videos_into_slot(1, 3, videos)
             )
 
+            # Player count per window is always 3 (dynamic/fixed).
+            # Win 2 availability is controlled via dual_window_enabled setting.
             self.grid_view_manager.set_get_player_count_callback(lambda: 3)
 
             if self.settings_manager.get_settings().dual_window_enabled:
@@ -1218,6 +1220,7 @@ def select_multiple_folders_and_play():
                 label="▶ Win 1 › Player 3",
                 command=lambda: self._context_play_in_dual_player(selection, win_id=1, slot=3)
             )
+            # ── Window 2 — only shown when enabled in Settings ────────────
             if (getattr(self, 'settings_manager', None) and
                     self.settings_manager.get_settings().dual_window_enabled):
                 context_menu.add_separator()
@@ -1359,6 +1362,7 @@ def select_multiple_folders_and_play():
 
             self.controller.set_start_index(0)
             self.controller.set_video_change_callback(self.on_video_changed)
+            self.controller.set_stop_callback(self._on_player_stopped)
 
             if self.player_thread and self.player_thread.is_alive():
                 self.controller.running = False
@@ -1952,6 +1956,7 @@ def select_multiple_folders_and_play():
 
                             self.controller.set_start_index(0)
                             self.controller.set_video_change_callback(self.on_video_changed)
+                            self.controller.set_stop_callback(self._on_player_stopped)
 
                             if self.player_thread and self.player_thread.is_alive():
                                 self.controller.running = False
@@ -2029,6 +2034,7 @@ def select_multiple_folders_and_play():
 
                             self.controller.set_start_index(0)
                             self.controller.set_video_change_callback(self.on_video_changed)
+                            self.controller.set_stop_callback(self._on_player_stopped)
 
                             if self.player_thread and self.player_thread.is_alive():
                                 self.controller.running = False
@@ -2106,6 +2112,7 @@ def select_multiple_folders_and_play():
 
                             self.controller.set_start_index(0)
                             self.controller.set_video_change_callback(self.on_video_changed)
+                            self.controller.set_stop_callback(self._on_player_stopped)
 
                             if self.player_thread and self.player_thread.is_alive():
                                 self.controller.running = False
@@ -2229,6 +2236,7 @@ def select_multiple_folders_and_play():
                     self.controller.set_start_index(start_index)
 
                     self.controller.set_video_change_callback(self.on_video_changed)
+                    self.controller.set_stop_callback(self._on_player_stopped)
 
                     if self.player_thread and self.player_thread.is_alive():
                         self.controller.running = False
@@ -2258,6 +2266,43 @@ def select_multiple_folders_and_play():
             self.last_played_video_path = video_path
             if self.smart_resume_var.get():
                 self.save_preferences()
+
+            self.grid_view_manager.mark_now_playing(video_path)
+            self._now_playing_video_path = os.path.normpath(video_path) if video_path else None
+            self._update_tree_now_playing()
+
+        def _on_player_stopped(self):
+            self._now_playing_video_path = None
+            self.root.after(0, self._clear_now_playing)
+
+        def _clear_now_playing(self):
+            self.grid_view_manager.mark_now_playing(None)
+            self._update_tree_now_playing()
+
+        def _update_tree_now_playing(self):
+            try:
+                if not hasattr(self, 'current_subdirs_mapping') or not self.current_subdirs_mapping:
+                    return
+                now = getattr(self, '_now_playing_video_path', None)
+                for idx in range(self.exclusion_listbox.size()):
+                    item_path = self.current_subdirs_mapping.get(idx)
+                    if not item_path:
+                        continue
+                    current_text = self.exclusion_listbox.get(idx)
+                    is_now = (now and os.path.normpath(item_path) == now)
+                    had_tag = " ▶▶▶" in current_text
+                    if is_now and not had_tag:
+                        self.exclusion_listbox.delete(idx)
+                        self.exclusion_listbox.insert(idx, current_text + " ▶▶▶")
+                        self.exclusion_listbox.itemconfig(idx, fg="#00aa44")
+                    elif not is_now and had_tag:
+                        self.exclusion_listbox.delete(idx)
+                        self.exclusion_listbox.insert(idx, current_text.replace(" ▶▶▶", ""))
+                        self.exclusion_listbox.itemconfig(idx, fg=self.text_color)
+                    elif is_now and had_tag:
+                        self.exclusion_listbox.itemconfig(idx, fg="#00aa44")
+            except Exception:
+                pass
 
         def on_directory_select(self, event):
             self._is_filtered_mode = False
@@ -2907,6 +2952,8 @@ def select_multiple_folders_and_play():
                                 if restore_scroll:
                                     self.exclusion_listbox.yview_moveto(restore_scroll[0])
 
+                                self._update_tree_now_playing()
+
                         insert_chunk(0)
 
                     self.root.after(0, post_chunks)
@@ -3280,6 +3327,7 @@ def select_multiple_folders_and_play():
             self.controller.set_resume_manager(self.resume_manager)
             self.controller.set_start_index(0)
             self.controller.set_video_change_callback(self.on_video_changed)
+            self.controller.set_stop_callback(self._on_player_stopped)
 
             if self.player_thread and self.player_thread.is_alive():
                 self.controller.running = False
@@ -3416,6 +3464,7 @@ def select_multiple_folders_and_play():
 
                 self.controller.set_start_index(0)
                 self.controller.set_video_change_callback(self.on_video_changed)
+                self.controller.set_stop_callback(self._on_player_stopped)
 
                 if self.player_thread and self.player_thread.is_alive():
                     self.controller.running = False
@@ -3504,6 +3553,7 @@ def select_multiple_folders_and_play():
 
                 self.controller.set_start_index(0)
                 self.controller.set_video_change_callback(self.on_video_changed)
+                self.controller.set_stop_callback(self._on_player_stopped)
 
                 if self.player_thread and self.player_thread.is_alive():
                     self.controller.running = False
@@ -3577,6 +3627,7 @@ def select_multiple_folders_and_play():
 
                 self.controller.set_start_index(0)
                 self.controller.set_video_change_callback(self.on_video_changed)
+                self.controller.set_stop_callback(self._on_player_stopped)
 
                 if self.player_thread and self.player_thread.is_alive():
                     self.controller.running = False

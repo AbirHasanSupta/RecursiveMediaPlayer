@@ -41,6 +41,8 @@ class GridViewManager:
         self.get_player_count_callback = None
         self.open_file_location_callback = None
         self.show_properties_callback = None
+        self.now_playing_path = None
+        self._now_playing_badge = None
         self.excluded_items = set()
         self.is_loading = False
         self.loading_lock = threading.Lock()
@@ -128,6 +130,67 @@ class GridViewManager:
 
     def set_show_properties_callback(self, callback):
         self.show_properties_callback = callback
+
+    def mark_now_playing(self, video_path):
+        old_path = self.now_playing_path
+        self.now_playing_path = os.path.normpath(video_path) if video_path else None
+        try:
+            if not (self.grid_window and self.grid_window.winfo_exists()):
+                return
+            for path, card in list(self.card_widgets.items()):
+                norm = os.path.normpath(path)
+                is_now = (norm == self.now_playing_path)
+                was_now = (norm == (os.path.normpath(old_path) if old_path else None))
+                if is_now or was_now:
+                    self._refresh_card_playing_state(path, card, is_now)
+        except Exception:
+            pass
+
+    def _refresh_card_playing_state(self, video_path, card, is_playing):
+        try:
+            if not card.winfo_exists():
+                return
+            is_selected = video_path in self.selected_items
+            is_excluded = video_path in self.excluded_items
+            if is_playing:
+                border_color = "#00e676"
+                border_thickness = 3
+            elif is_selected:
+                border_color = self.theme_provider.accent_color
+                border_thickness = 3
+            elif is_excluded:
+                border_color = "#cc4444"
+                border_thickness = 2
+            else:
+                border_color = self.theme_provider.frame_border
+                border_thickness = 1
+            card.config(highlightbackground=border_color, highlightthickness=border_thickness)
+
+            thumb_container = None
+            for child in card.winfo_children():
+                if getattr(child, '_is_thumb', False):
+                    thumb_container = child
+                    break
+            if thumb_container is None:
+                return
+
+            for child in thumb_container.winfo_children():
+                if getattr(child, '_is_now_playing_badge', False):
+                    child.destroy()
+
+            if is_playing:
+                badge = tk.Label(
+                    thumb_container,
+                    text="▶  NOW PLAYING",
+                    bg="#00e676",
+                    fg="#000000",
+                    font=(self.theme_provider.small_font.actual()['family'], 8, 'bold'),
+                    padx=5, pady=2
+                )
+                badge._is_now_playing_badge = True
+                badge.place(relx=0.0, rely=1.0, anchor='sw')
+        except Exception:
+            pass
 
     def show_grid_view(self, videos, video_preview_manager=None):
         if self.grid_window and self.grid_window.winfo_exists():
@@ -358,6 +421,7 @@ class GridViewManager:
                 except:
                     pass
             self._photo_cache.clear()
+            self.now_playing_path = None
             # Note: do NOT clear vpm.lru_cache here — it should survive
             # across grid view open/close so re-opens are instant.
             try:
@@ -378,14 +442,18 @@ class GridViewManager:
             with self.loading_lock:
                 if not self.is_loading:
                     return
-            from collections import defaultdict
-            dir_groups = defaultdict(list)
+            from collections import defaultdict, OrderedDict
+            dir_order = []
+            dir_groups = OrderedDict()
             for video in videos:
                 dir_path = os.path.dirname(video)
+                if dir_path not in dir_groups:
+                    dir_groups[dir_path] = []
+                    dir_order.append(dir_path)
                 dir_groups[dir_path].append(video)
 
             self.items = []
-            for dir_path in sorted(dir_groups.keys()):
+            for dir_path in dir_order:
                 video_count = len(dir_groups[dir_path])
                 self.items.append({
                     'type': 'header',
@@ -393,7 +461,7 @@ class GridViewManager:
                     'name': os.path.basename(dir_path) or dir_path,
                     'video_count': video_count
                 })
-                for video in sorted(dir_groups[dir_path]):
+                for video in dir_groups[dir_path]:
                     self.items.append({'type': 'video', 'path': video, 'video_item': GridViewItem(video)})
 
             self.all_items = self.items.copy()
@@ -1106,6 +1174,9 @@ class GridViewManager:
 
             card.bind("<Enter>", lambda e, vp=video_path: self._on_card_enter(e, vp))
             card.bind("<Leave>", lambda e, vp=video_path: self._on_card_leave(e, vp))
+
+            if self.now_playing_path and os.path.normpath(video_path) == self.now_playing_path:
+                self._refresh_card_playing_state(video_path, card, True)
 
             video_col += 1
             if video_col >= cols:
