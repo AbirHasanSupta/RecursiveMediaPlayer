@@ -774,7 +774,7 @@ class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
 
             self.index = index
             current_video = self.videos[self.index]
-            current_dir = self.video_to_dir[current_video]
+            current_dir = os.path.normpath(self.video_to_dir[current_video])
 
             if self.logger:
                 self.logger(f"Playing: {os.path.basename(current_video)} from {current_dir}")

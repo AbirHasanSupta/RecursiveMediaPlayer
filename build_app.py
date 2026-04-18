@@ -1130,6 +1130,14 @@ def select_multiple_folders_and_play():
             if not selection:
                 return
 
+            if index >= 0 and index < listbox.size() and index not in selection:
+                video_path = self.current_subdirs_mapping.get(index)
+                if video_path and os.path.isfile(video_path) and is_video(video_path):
+                    self.video_preview_manager.right_clicked_item = index
+                    self.video_preview_manager._show_video_preview(video_path, event.x_root, event.y_root)
+                    return
+                return
+
             context_menu = tk.Menu(self.root, tearoff=0)
 
             first_index = selection[0]
