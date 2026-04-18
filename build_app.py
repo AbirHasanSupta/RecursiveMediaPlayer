@@ -102,6 +102,7 @@ def select_multiple_folders_and_play():
             self.volume = preferences.get('volume', 50)
             self.is_muted = preferences.get('is_muted', False)
             self.loop_mode = preferences.get('loop_mode', 'loop_on')
+            self.show_console = preferences.get('show_console', True)
 
             self.setup_theme()
 
@@ -527,8 +528,10 @@ def select_multiple_folders_and_play():
             self.content_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
 
         def setup_console_section(self):
-            console_section = tk.Frame(self.main_frame, bg=self.bg_color)
-            console_section.pack(fill=tk.X, pady=(0, 15))
+            self.console_section = tk.Frame(self.main_frame, bg=self.bg_color)
+            if self.show_console:
+                self.console_section.pack(fill=tk.X, pady=(0, 15))
+            console_section = self.console_section
 
             console_header_frame = tk.Frame(console_section, bg=self.bg_color)
             console_header_frame.pack(fill=tk.X, pady=(0, 10))
@@ -595,6 +598,14 @@ def select_multiple_folders_and_play():
             self.console_text.config(state=tk.NORMAL)
             self.console_text.delete(1.0, tk.END)
             self.console_text.config(state=tk.DISABLED)
+
+        def toggle_console(self):
+            self.show_console = not self.show_console
+            if self.show_console:
+                self.console_section.pack(fill=tk.X, pady=(0, 15), before=self.button_frame)
+            else:
+                self.console_section.pack_forget()
+            self.save_preferences()
 
         def _submit_scan(self, directory):
             cache_result = self.scan_cache.get(directory)

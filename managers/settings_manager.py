@@ -504,9 +504,27 @@ class SettingsUI:
             bg=self.theme_provider.bg_color,
             fg=self.theme_provider.text_color,
             padx=10,
-            pady=10
+            pady=5
         )
-        preview_section.pack(fill=tk.X, pady=(0, 20))
+        preview_section.pack(fill=tk.X, pady=(0, 5))
+
+        self.enable_watch_history_var = tk.BooleanVar(value=self.settings.enable_watch_history)
+        watch_history_check = ttk.Checkbutton(
+            preview_section,
+            text="Enable Watch History tracking",
+            variable=self.enable_watch_history_var,
+            style="Modern.TCheckbutton"
+        )
+        watch_history_check.pack(anchor='w', pady=1)
+
+        self.show_console_var = tk.BooleanVar(value=getattr(self.theme_provider, 'show_console', True))
+        show_console_check = ttk.Checkbutton(
+            preview_section,
+            text="Show Player Console panel",
+            variable=self.show_console_var,
+            style="Modern.TCheckbutton"
+        )
+        show_console_check.pack(anchor='w', pady=(0, 1))
 
         duration_frame = tk.Frame(preview_section, bg=self.theme_provider.bg_color)
         duration_frame.pack(fill=tk.X, pady=5)
@@ -531,7 +549,7 @@ class SettingsUI:
             width=10,
             bg="white"
         )
-        duration_spin.pack(side=tk.LEFT, padx=(0, 5))
+        duration_spin.pack(side=tk.LEFT, padx=(0, 2))
 
         if hasattr(self.theme_provider, 'entry_bg'):
             duration_spin.configure(
@@ -556,15 +574,6 @@ class SettingsUI:
             style="Modern.TCheckbutton"
         )
         video_preview_check.pack(anchor='w', pady=2)
-
-        self.enable_watch_history_var = tk.BooleanVar(value=self.settings.enable_watch_history)
-        watch_history_check = ttk.Checkbutton(
-            preview_section,
-            text="Enable Watch History tracking",
-            variable=self.enable_watch_history_var,
-            style="Modern.TCheckbutton"
-        )
-        watch_history_check.pack(anchor='w', pady=2)
 
         # ── Player Window Settings ─────────────────────────────────────────────
         player_window_section = tk.LabelFrame(
@@ -1145,6 +1154,8 @@ class SettingsUI:
         self.enable_watch_history_var.set(settings.enable_watch_history)
         if hasattr(self, 'dual_window_enabled_var'):
             self.dual_window_enabled_var.set(settings.dual_window_enabled)
+        if hasattr(self, 'show_console_var'):
+            self.show_console_var.set(getattr(settings, 'show_console', True))
         self._update_index_info()
 
     def _apply_current_settings(self):
@@ -1161,6 +1172,12 @@ class SettingsUI:
         self.settings.enable_watch_history = self.enable_watch_history_var.get()
         if hasattr(self, 'dual_window_enabled_var'):
             self.settings.dual_window_enabled = self.dual_window_enabled_var.get()
+
+        if hasattr(self, 'show_console_var'):
+            if hasattr(self.theme_provider, 'toggle_console'):
+                new_val = self.show_console_var.get()
+                if new_val != getattr(self.theme_provider, 'show_console', True):
+                    self.theme_provider.toggle_console()
 
     def _save_settings(self):
         """Save current settings"""

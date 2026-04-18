@@ -97,6 +97,7 @@ class ConfigHandler:
                         'volume': config.get('volume', 50),
                         'is_muted': config.get('is_muted', False),
                         'loop_mode': config.get('loop_mode', 'loop_on'),
+                        'show_console': config.get('show_console', True),
                     }
         except Exception:
             pass
@@ -104,7 +105,7 @@ class ConfigHandler:
                 'save_directories': False, 'start_from_last_played': False,
                 'last_played_video_index': 0, 'last_played_video_path': '',
                 'excluded_subdirs': {}, 'excluded_videos': {}, 'smart_resume_enabled':False, 'volume':50,
-                'is_muted': False, 'loop_mode':'loop_on'}
+                'is_muted': False, 'loop_mode':'loop_on', 'show_console': True}
 
     def save(self, config_dict):
         try:
@@ -159,6 +160,7 @@ class ThemeSelector:
             'volume': getattr(self, 'volume', 50),
             'is_muted': getattr(self, 'is_muted', False),
             'loop_mode': getattr(self, 'loop_mode', 'loop_on'),
+            'show_console': getattr(self, 'show_console', True),
         }
         self.config.save(prefs)
 
