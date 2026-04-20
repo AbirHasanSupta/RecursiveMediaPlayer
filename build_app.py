@@ -3135,42 +3135,47 @@ def select_multiple_folders_and_play():
             if not videos:
                 return
 
-            if self.controller:
-                self.controller.stop()
-                cleanup_hotkeys()
+            from embedded_player import EmbeddedPlayer
 
-            all_video_to_dir = {v: os.path.dirname(v) for v in videos}
-            all_directories = sorted(list(set(all_video_to_dir.values())))
+            if self._active_player is not None:
+                try:
+                    self._active_player._close()
+                except Exception:
+                    pass
+                self._active_player = None
+
+            all_video_to_dir = {}
+            for directory in self.selected_dirs:
+                cache = self.scan_cache.get(directory)
+                if cache:
+                    _, v2d, _ = cache
+                    all_video_to_dir.update(v2d)
+            for v in videos:
+                if v not in all_video_to_dir:
+                    all_video_to_dir[v] = os.path.dirname(v)
+
+            all_directories = list(dict.fromkeys(all_video_to_dir[v] for v in videos))
 
             self.update_console(f"Playing {len(videos)} videos from grid selection")
 
-            self.controller = VLCPlayerControllerForMultipleDirectory(
-                videos, all_video_to_dir, all_directories, self.update_console,
-                volume=self.volume, is_muted=self.is_muted
+            vol      = getattr(self, 'volume', 50)
+            is_muted = getattr(self, 'is_muted', False)
+            loop     = getattr(self, 'loop_mode', 'loop_on')
+
+            player = EmbeddedPlayer(
+                parent=self.root,
+                videos=videos,
+                video_to_dir=all_video_to_dir,
+                directories=all_directories,
+                start_index=0,
+                volume=vol,
+                is_muted=is_muted,
+                loop_mode=loop,
+                logger=self.update_console,
+                on_close=self._on_player_closed,
             )
-            self.controller.set_loop_mode(self.loop_mode)
-            self.controller.set_volume_save_callback(self._save_volume_callback)
-            self.controller.set_watch_history_callback(self.watch_history_manager.track_video_playback)
-            self.controller.set_resume_manager(self.resume_manager)
-            self.controller.set_start_index(0)
-            self.controller.set_video_change_callback(self.on_video_changed)
-            self.controller.set_stop_callback(self._on_player_stopped)
-
-            if self.player_thread and self.player_thread.is_alive():
-                self.controller.running = False
-                self.player_thread.join(timeout=1.0)
-
-            self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
-            self.player_thread.start()
-
-            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
-            self.keys_thread.start()
-
-            def init_overlay_delayed():
-                time.sleep(1)
-                self.controller.init_overlay()
-
-            threading.Thread(target=init_overlay_delayed, daemon=True).start()
+            player.play()
+            self._active_player = player
 
         def _add_to_playlist(self):
             selected_dir = self.get_current_selected_directory()

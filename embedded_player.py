@@ -33,6 +33,10 @@ from pathlib import Path
 from typing import Optional, List, Dict, Callable
 
 import vlc
+try:
+    from screeninfo import get_monitors as _get_monitors
+except Exception:
+    _get_monitors = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -97,6 +101,9 @@ class EmbeddedPlayer:
     VOL_STEP     = 5             # % per scroll / key press
     SPEED_STEPS  = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
+    _ROTATION_STEPS = [0, 90, 180, 270]
+    _TRANSFORM_MAP  = {0: "identity", 90: "90", 180: "180", 270: "270"}
+
     # ------------------------------------------------------------------
     def __init__(
         self,
@@ -126,7 +133,8 @@ class EmbeddedPlayer:
         self._lock           = threading.Lock()
         self._played_indices = set()
         self._speed_idx      = self.SPEED_STEPS.index(1.0)
-        self._rotation       = 0          # degrees: 0 / 90 / 180 / 270
+        self._rotation_index = 0          # index into _ROTATION_STEPS: 0/1/2/3
+        self._current_monitor = 1
         self._borderless     = False
         self._pre_bl_geo     = "1280x720"
 
@@ -280,6 +288,7 @@ class EmbeddedPlayer:
         rg.pack(side=tk.RIGHT, padx=(0, 8), pady=2)
 
         _btn(rg, "⛶", self._toggle_borderless, font=F_ICO).pack(side=tk.RIGHT, padx=(6, 0))
+        _btn(rg, "⬒ Mon", self._switch_monitor, font=F_SM).pack(side=tk.RIGHT, padx=(2, 0))
 
         self._lbl_speed = tk.Label(rg, text="1.00×", cursor="hand2",
                                    font=F_ACC, bg=_CTRL_BG2, fg=_ACCENT)
@@ -415,10 +424,6 @@ class EmbeddedPlayer:
         self.index = idx
         path = self.videos[idx]
 
-        # Reset rotation and scale for each new video
-        self._rotation = 0
-
-        # embed → set_media → play  (identical to DualPlayerSlot._play_current)
         self._embed()
         media = self._instance.media_new(path)
         self._player.set_media(media)
@@ -604,111 +609,81 @@ class EmbeddedPlayer:
     # ═══════════════════════════════════════════════════════════════════
 
     def _rotate_right(self):
-        self._rotation = (self._rotation + 90) % 360
+        self._rotation_index = (self._rotation_index + 1) % 4
         self._apply_rotation()
 
     def _rotate_left(self):
-        self._rotation = (self._rotation - 90) % 360
+        self._rotation_index = (self._rotation_index - 1) % 4
         self._apply_rotation()
 
     def _apply_rotation(self):
-        """
-        Rotation requires recreating the VLC instance with --transform-type.
-        The blocking state-wait is executed on a background thread so the Tk
-        main loop stays responsive.  video_set_scale(0) is always applied so
-        VLC auto-fits to the canvas instead of escaping its boundaries.
-        """
-        _MAP = {0: "identity", 90: "90", 180: "180", 270: "270"}
-        transform = _MAP[self._rotation]
-
+        if not self._player or not self.videos:
+            return
         try:
-            pos_ms      = self._player.get_time()
+            angle          = self._ROTATION_STEPS[self._rotation_index]
+            transform_type = self._TRANSFORM_MAP[angle]
+
+            position_ms = self._player.get_time() or 0
             was_playing = self._player.is_playing()
-            rate        = self._player.get_rate()
-        except Exception:
-            pos_ms, was_playing, rate = 0, True, 1.0
+            path        = self.videos[self.index]
 
-        path      = self.videos[self.index]
-        old_inst  = self._instance
-        old_player = self._player
-
-        args = ["--no-video-title-show", "--quiet"]
-        if transform != "identity":
-            args += ["--video-filter=transform", f"--transform-type={transform}"]
-
-        new_inst   = vlc.Instance(*args)
-        new_player = new_inst.media_player_new()
-
-        # Embed into canvas on the main thread before handing off to the
-        # background thread (winfo_id() must be called on the main thread).
-        try:
-            self._canvas.update_idletasks()
-            wid = self._canvas.winfo_id()
-            if os.name == "nt":
-                new_player.set_hwnd(wid)
+            base_args = ['--quiet', '--no-video-title-show']
+            if os.name == 'nt':
+                base_args += ['--aout=directsound']
             else:
-                new_player.set_xwindow(wid)
-        except Exception:
-            pass
+                base_args += ['--aout=pulse']
+            if transform_type != "identity":
+                base_args += ['--video-filter=transform',
+                              f'--transform-type={transform_type}']
 
-        media = new_inst.media_new(path)
-        new_player.set_media(media)
-        new_player.play()
+            try:
+                self._player.stop()
+                self._player.release()
+            except Exception:
+                pass
+            try:
+                self._instance.release()
+            except Exception:
+                pass
 
-        # Swap instance references immediately so other callbacks use the new player.
-        self._instance = new_inst
-        self._player   = new_player
+            self._instance = vlc.Instance(*base_args)
+            self._player   = self._instance.media_player_new()
+            self._embed()
 
-        # Reattach end-of-media event on new player.
-        em = new_player.event_manager()
-        em.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_media_ended)
+            media = self._instance.media_new(path)
+            self._player.set_media(media)
+            self._player.play()
 
-        rotation_deg = self._rotation
+            # Reattach end-of-media event on new player.
+            em = self._player.event_manager()
+            em.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_media_ended)
 
-        def _finish_in_thread():
-            # Wait for Playing state off the main thread.
-            for _ in range(80):
-                if not self._running:
+            def _settle():
+                if not self._player:
                     return
-                if new_player.get_state() == vlc.State.Playing:
-                    break
-                time.sleep(0.05)
+                deadline = time.time() + 3.0
+                while time.time() < deadline:
+                    if self._player.get_state() == vlc.State.Playing:
+                        break
+                    time.sleep(0.05)
+                try:
+                    if position_ms > 0:
+                        self._player.set_time(position_ms)
+                    self._player.set_rate(self.SPEED_STEPS[self._speed_idx])
+                    self._player.audio_set_mute(self.is_muted)
+                    if not self.is_muted:
+                        self._player.audio_set_volume(self.volume)
+                    if not was_playing:
+                        self._player.pause()
+                    self._player.video_set_aspect_ratio(None)
+                    self._player.video_set_scale(0)
+                except Exception:
+                    pass
 
-            try:
-                if pos_ms > 0:
-                    new_player.set_time(pos_ms)
-                new_player.set_rate(rate)
-                new_player.audio_set_mute(self.is_muted)
-                if not self.is_muted:
-                    new_player.audio_set_volume(self.volume)
-                if not was_playing:
-                    new_player.pause()
-                # Auto-fit: clear any forced aspect ratio then reset scale so
-                # VLC never renders outside the canvas.  Mirroring exactly what
-                # dual_player_manager does in _create_player / _settle — without
-                # clearing the aspect ratio, VLC uses the *original* (pre-rotation)
-                # dimensions as the layout hint, which causes the rotated frame to
-                # overflow the canvas for landscape→portrait or portrait→landscape.
-                new_player.video_set_aspect_ratio(None)
-                new_player.video_set_scale(0.0)
-            except Exception:
-                pass
-
-            # Release the old instance after the new one is running.
-            try:
-                old_player.stop()
-                old_player.release()
-            except Exception:
-                pass
-            try:
-                old_inst.release()
-            except Exception:
-                pass
-
+            threading.Thread(target=_settle, daemon=True).start()
+        except Exception as e:
             if self.logger:
-                self.logger(f"Rotated: {rotation_deg}°")
-
-        threading.Thread(target=_finish_in_thread, daemon=True).start()
+                self.logger(f"Rotate error: {e}")
 
     # ═══════════════════════════════════════════════════════════════════
     # ZOOM
@@ -744,6 +719,122 @@ class EmbeddedPlayer:
     # ═══════════════════════════════════════════════════════════════════
     # FULLSCREEN / BORDERLESS
     # ═══════════════════════════════════════════════════════════════════
+
+    def _get_monitor_geometry(self, monitor_number: int):
+        try:
+            if _get_monitors:
+                monitors = _get_monitors()
+                idx = monitor_number - 1
+                if idx < len(monitors):
+                    m = monitors[idx]
+                    return m.x, m.y, m.width, m.height
+        except Exception:
+            pass
+        return 0, 0, self._win.winfo_screenwidth(), self._win.winfo_screenheight()
+
+    def _switch_monitor(self):
+        try:
+            if _get_monitors:
+                monitors = _get_monitors()
+                total = len(monitors)
+            else:
+                total = 1
+        except Exception:
+            total = 1
+
+        if total < 2:
+            return
+
+        next_monitor = (self._current_monitor % total) + 1
+
+        try:
+            pos_ms      = self._player.get_time() or 0
+            was_playing = self._player.is_playing()
+            rate        = self._player.get_rate()
+        except Exception:
+            pos_ms, was_playing, rate = 0, True, 1.0
+
+        path = self.videos[self.index]
+
+        angle     = self._ROTATION_STEPS[self._rotation_index]
+        transform = self._TRANSFORM_MAP[angle]
+
+        args = ["--no-video-title-show", "--quiet"]
+        if transform != "identity":
+            args += ["--video-filter=transform", f"--transform-type={transform}"]
+        if os.name == "nt":
+            args += ["--aout=directsound"]
+        else:
+            args += ["--aout=pulse"]
+
+        new_inst   = vlc.Instance(*args)
+        new_player = new_inst.media_player_new()
+
+        x, y, w, h = self._get_monitor_geometry(next_monitor)
+
+        old_inst   = self._instance
+        old_player = self._player
+
+        self._instance = new_inst
+        self._player   = new_player
+        self._current_monitor = next_monitor
+
+        em = new_player.event_manager()
+        em.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_media_ended)
+
+        media = new_inst.media_new(path)
+        new_player.set_media(media)
+        new_player.play()
+
+        geo = f"{w}x{h}+{x}+{y}"
+
+        def _finish():
+            for _ in range(80):
+                if not self._running:
+                    return
+                if new_player.get_state() == vlc.State.Playing:
+                    break
+                time.sleep(0.05)
+            try:
+                if pos_ms > 0:
+                    new_player.set_time(pos_ms)
+                new_player.set_rate(rate)
+                new_player.audio_set_mute(self.is_muted)
+                if not self.is_muted:
+                    new_player.audio_set_volume(self.volume)
+                if not was_playing:
+                    new_player.pause()
+                new_player.video_set_aspect_ratio(None)
+                new_player.video_set_scale(0.0)
+            except Exception:
+                pass
+            try:
+                old_player.stop()
+                old_player.release()
+            except Exception:
+                pass
+            try:
+                old_inst.release()
+            except Exception:
+                pass
+
+        def _move_window():
+            try:
+                if self._borderless:
+                    self._win.geometry(geo)
+                else:
+                    self._win.geometry(f"{w}x{h}+{x}+{y}")
+                self._win.lift()
+                self._win.focus_force()
+                self._embed()
+            except Exception:
+                pass
+
+        self._win.after(0, _move_window)
+        threading.Thread(target=_finish, daemon=True).start()
+
+        if self.logger:
+            self.logger(f"Switched to monitor {next_monitor}")
 
     def _toggle_borderless(self):
         self._borderless = not self._borderless
