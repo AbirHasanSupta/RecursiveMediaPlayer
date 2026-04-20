@@ -87,6 +87,7 @@ def select_multiple_folders_and_play():
             self.collapsed_paths = set()
             self.current_max_depth = 20
             self.loop_mode = "loop_on"
+            self._active_player = None
 
             preferences = self.config.load_preferences()
             self.dark_mode = preferences['dark_mode']
@@ -1026,29 +1027,43 @@ def select_multiple_folders_and_play():
                 return
 
             all_videos = []
+            all_video_to_dir = {}
             for i in selection:
                 if i < len(self.selected_dirs):
                     root_dir = self.selected_dirs[i]
                     cache = self.scan_cache.get(root_dir)
                     if cache:
-                        videos, _, _ = cache
-                        filtered_videos = [
-                            v for v in videos
-                            if not self.is_video_excluded(root_dir, v)
-                        ]
+                        videos, video_to_dir, _ = cache
                     else:
-                        videos = gather_videos(root_dir)
-                        filtered_videos = [
-                            v for v in videos
-                            if not self.is_video_excluded(root_dir, v)
-                        ]
+                        from utils import gather_videos_with_directories
+                        videos, video_to_dir, _ = gather_videos_with_directories(root_dir)
+                    filtered_videos = [
+                        v for v in videos
+                        if not self.is_video_excluded(root_dir, v)
+                    ]
                     all_videos.extend(filtered_videos)
+                    all_video_to_dir.update({v: video_to_dir.get(v, os.path.dirname(v)) for v in filtered_videos})
 
             if not all_videos:
                 messagebox.showinfo("Information", "No videos found in selected directories.")
                 return
 
-            self._play_grid_videos(all_videos)
+            from embedded_player import EmbeddedPlayer
+            all_directories = sorted(list(dict.fromkeys(all_video_to_dir[v] for v in all_videos)))
+            player = EmbeddedPlayer(
+                parent=self.root,
+                videos=all_videos,
+                video_to_dir=all_video_to_dir,
+                directories=all_directories,
+                start_index=0,
+                volume=getattr(self, 'volume', 50),
+                is_muted=getattr(self, 'is_muted', False),
+                loop_mode=getattr(self, 'loop_mode', 'loop_on'),
+                logger=self.update_console,
+                on_close=self._on_player_closed,
+            )
+            player.play()
+            self._active_player = player
 
         def _open_grid_view_main_dirs(self):
             selection = self.dir_listbox.curselection()
@@ -1156,7 +1171,7 @@ def select_multiple_folders_and_play():
 
             context_menu.add_command(
                 label="Play Selected",
-                command=self.play_videos
+                command=self.play_selected_videos
             )
             context_menu.add_separator()
 
@@ -1898,385 +1913,178 @@ def select_multiple_folders_and_play():
                 except:
                     pass
 
-        def play_videos(self):
-            if not self.selected_dirs:
-                messagebox.showwarning("No Directories", "Please select at least one directory.")
-                return
-
-            if self.controller:
-                self.controller.stop()
-                cleanup_hotkeys()
-
-            self.root.config(cursor="wait")
-            self.root.update()
-
-            self.update_console("=" * 100)
-            self.update_console("STARTING VIDEO PLAYBACK")
-            self.update_console("=" * 100)
-
-            def _run():
-                is_filtered_mode = hasattr(self, '_is_filtered_mode') and self._is_filtered_mode
-
-                exclusion_selection = self.exclusion_listbox.curselection()
-
-                if is_filtered_mode and not exclusion_selection:
-                    selected_dir = self.get_current_selected_directory()
-                    if selected_dir and hasattr(self, '_filtered_videos'):
-                        filtered_videos = [v for v in self._filtered_videos
-                                           if not self.is_video_excluded(selected_dir, v)]
-
-                        if not filtered_videos:
-                            def _show_no_videos():
-                                messagebox.showwarning("No Videos", "No filtered videos found (all excluded).")
-                                self.root.config(cursor="")
-
-                            self.root.after(0, _show_no_videos)
-                            return
-
-                        all_video_to_dir = {}
-                        for video_path in filtered_videos:
-                            all_video_to_dir[video_path] = os.path.dirname(video_path)
-
-                        all_directories = sorted(list(set(all_video_to_dir.values())))
-
-                        dir_selection = self.dir_listbox.curselection()
-                        if dir_selection:
-                            start_idx = dir_selection[0]
-                            dirs_order = list(self.selected_dirs)
-                            dirs_order = dirs_order[start_idx:] + dirs_order[:start_idx]
-
-                            ordered_dirs = []
-                            all_dirs_set = set(all_directories)
-                            for d in dirs_order:
-                                if d in all_dirs_set:
-                                    ordered_dirs.append(d)
-                            for d in all_directories:
-                                if d not in ordered_dirs:
-                                    ordered_dirs.append(d)
-                            all_directories = ordered_dirs
-
-                        def _start_filtered_player():
-                            self.update_console(f"Playing {len(filtered_videos)} filtered videos")
-                            self.controller = VLCPlayerControllerForMultipleDirectory(
-                                filtered_videos, all_video_to_dir, all_directories, self.update_console,
-                                volume=self.volume, is_muted=self.is_muted
-                            )
-                            self.controller.set_loop_mode(self.loop_mode)
-                            self.controller.set_volume_save_callback(self._save_volume_callback)
-                            self.controller.set_watch_history_callback(
-                                self.watch_history_manager.track_video_playback
-                            )
-                            self.controller.set_resume_manager(self.resume_manager)
-
-                            initial_speed = self.speed_var.get()
-                            if initial_speed != 1.0:
-                                self.controller.set_initial_playback_rate(initial_speed)
-                                self.update_console(f"Initial playback speed set to {initial_speed}x")
-
-                            self.controller.set_start_index(0)
-                            self.controller.set_video_change_callback(self.on_video_changed)
-                            self.controller.set_stop_callback(self._on_player_stopped)
-
-                            if self.player_thread and self.player_thread.is_alive():
-                                self.controller.running = False
-                                self.player_thread.join(timeout=1.0)
-
-                            self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
-                            self.player_thread.start()
-
-                            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller),
-                                                                daemon=True)
-                            self.keys_thread.start()
-                            self.root.config(cursor="")
-
-                        self.root.after(0, _start_filtered_player)
-                        return
-
-                if is_filtered_mode and exclusion_selection:
-                    selected_dir = self.get_current_selected_directory()
-                    if selected_dir:
-                        self.update_console("Playing selected filtered videos...")
-
-                        final_videos = self._resolve_selection_indices_to_videos(selected_dir, exclusion_selection)
-
-                        if not final_videos:
-                            def _show_no_videos():
-                                messagebox.showwarning("No Videos", "No valid non-excluded videos found in selection.")
-                                self.root.config(cursor="")
-
-                            self.root.after(0, _show_no_videos)
-                            return
-
-                        all_video_to_dir = {}
-                        for video_path in final_videos:
-                            if self._is_stream_url(video_path):
-                                all_video_to_dir[video_path] = selected_dir
-                            else:
-                                all_video_to_dir[video_path] = os.path.dirname(video_path)
-
-                        all_directories = sorted(list(set(all_video_to_dir.values())))
-
-                        dir_selection = self.dir_listbox.curselection()
-                        if dir_selection:
-                            start_idx = dir_selection[0]
-                            dirs_order = list(self.selected_dirs)
-                            dirs_order = dirs_order[start_idx:] + dirs_order[:start_idx]
-
-                            ordered_dirs = []
-                            all_dirs_set = set(all_directories)
-                            for d in dirs_order:
-                                if d in all_dirs_set:
-                                    ordered_dirs.append(d)
-                            for d in all_directories:
-                                if d not in ordered_dirs:
-                                    ordered_dirs.append(d)
-                            all_directories = ordered_dirs
-
-                        def _start_selected_player():
-                            self.update_console(
-                                f"Playing {len(final_videos)} selected filtered videos")
-                            self.controller = VLCPlayerControllerForMultipleDirectory(
-                                final_videos, all_video_to_dir, all_directories, self.update_console,
-                                volume=self.volume, is_muted=self.is_muted
-                            )
-                            self.controller.set_loop_mode(self.loop_mode)
-                            self.controller.set_volume_save_callback(self._save_volume_callback)
-                            self.controller.set_watch_history_callback(
-                                self.watch_history_manager.track_video_playback
-                            )
-                            self.controller.set_resume_manager(self.resume_manager)
-
-                            initial_speed = self.speed_var.get()
-                            if initial_speed != 1.0:
-                                self.controller.set_initial_playback_rate(initial_speed)
-                                self.update_console(f"Initial playback speed set to {initial_speed}x")
-
-                            self.controller.set_start_index(0)
-                            self.controller.set_video_change_callback(self.on_video_changed)
-                            self.controller.set_stop_callback(self._on_player_stopped)
-
-                            if self.player_thread and self.player_thread.is_alive():
-                                self.controller.running = False
-                                self.player_thread.join(timeout=1.0)
-
-                            self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
-                            self.player_thread.start()
-
-                            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller),
-                                                                daemon=True)
-                            self.keys_thread.start()
-                            self.root.config(cursor="")
-
-                        self.root.after(0, _start_selected_player)
-                        return
-
-                if exclusion_selection:
-                    selected_dir = self.get_current_selected_directory()
-                    if selected_dir:
-                        self.update_console("Playing selected items only...")
-
-                        final_videos = self._resolve_selection_indices_to_videos(selected_dir, exclusion_selection)
-
-                        if not final_videos:
-                            def _show_no_videos():
-                                messagebox.showwarning("No Videos", "No valid non-excluded videos found in selection.")
-                                self.root.config(cursor="")
-
-                            self.root.after(0, _show_no_videos)
-                            return
-
-                        all_video_to_dir = {}
-                        for video_path in final_videos:
-                            if self._is_stream_url(video_path):
-                                all_video_to_dir[video_path] = selected_dir
-                            else:
-                                all_video_to_dir[video_path] = os.path.dirname(video_path)
-
-                        all_directories = sorted(list(set(all_video_to_dir.values())))
-
-                        dir_selection = self.dir_listbox.curselection()
-                        if dir_selection:
-                            start_idx = dir_selection[0]
-                            dirs_order = list(self.selected_dirs)
-                            dirs_order = dirs_order[start_idx:] + dirs_order[:start_idx]
-
-                            ordered_dirs = []
-                            all_dirs_set = set(all_directories)
-                            for d in dirs_order:
-                                if d in all_dirs_set:
-                                    ordered_dirs.append(d)
-                            for d in all_directories:
-                                if d not in ordered_dirs:
-                                    ordered_dirs.append(d)
-                            all_directories = ordered_dirs
-
-                        def _start_selected_player():
-                            self.update_console(
-                                f"Playing {len(final_videos)} selected videos")
-                            self.controller = VLCPlayerControllerForMultipleDirectory(
-                                final_videos, all_video_to_dir, all_directories, self.update_console,
-                                volume=self.volume, is_muted=self.is_muted
-                            )
-                            self.controller.set_loop_mode(self.loop_mode)
-                            self.controller.set_volume_save_callback(self._save_volume_callback)
-                            self.controller.set_watch_history_callback(
-                                self.watch_history_manager.track_video_playback
-                            )
-                            self.controller.set_resume_manager(self.resume_manager)
-
-                            initial_speed = self.speed_var.get()
-                            if initial_speed != 1.0:
-                                self.controller.set_initial_playback_rate(initial_speed)
-                                self.update_console(f"Initial playback speed set to {initial_speed}x")
-
-                            self.controller.set_start_index(0)
-                            self.controller.set_video_change_callback(self.on_video_changed)
-                            self.controller.set_stop_callback(self._on_player_stopped)
-
-                            if self.player_thread and self.player_thread.is_alive():
-                                self.controller.running = False
-                                self.player_thread.join(timeout=1.0)
-
-                            self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
-                            self.player_thread.start()
-
-                            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller),
-                                                                daemon=True)
-                            self.keys_thread.start()
-                            self.root.config(cursor="")
-
-                        self.root.after(0, _start_selected_player)
-                        return
-
-                futures = {}
+        def _build_video_list(self):
+            """
+            Assemble (videos, video_to_dir, directories) from scan_cache,
+            applying all active exclusions.  In filtered mode the already-
+            filtered list is used but exclusions are still honoured.
+            Returns (videos, video_to_dir, directories) — all three may be
+            empty lists / dicts if no videos are available yet.
+            """
+            if getattr(self, '_is_filtered_mode', False) and getattr(self, '_filtered_videos', None):
+                # Pull video_to_dir entries from cache for these specific paths
+                all_v2d = {}
                 for directory in self.selected_dirs:
-                    if self.scan_cache.get(directory) is None and directory not in self.pending_scans:
-                        self.pending_scans.add(directory)
-                        futures[directory] = self.executor.submit(gather_videos_with_directories, directory)
-                for directory, future in list(futures.items()):
-                    try:
-                        result = future.result()
-                        self.scan_cache.set(directory, result)
-                        self.update_console(f"Scan completed: {directory}")
-                    except Exception as e:
-                        self.update_console(f"Error scanning {directory}: {e}")
-                    finally:
-                        self.pending_scans.discard(directory)
-
-                all_videos = []
-                all_video_to_dir = {}
-                all_directories = []
-
-                dirs_to_process = list(self.selected_dirs)
-                dir_selection = self.dir_listbox.curselection()
-                if dir_selection:
-                    start_idx = dir_selection[0]
-                    dirs_to_process = dirs_to_process[start_idx:] + dirs_to_process[:start_idx]
-
-                for directory in dirs_to_process:
+                    cache = self.scan_cache.get(directory)
+                    if cache:
+                        _, dir_v2d, _ = cache
+                        all_v2d.update(dir_v2d)
+                # Still honour exclusions even inside a filtered view
+                videos = [
+                    v for v in self._filtered_videos
+                    if not any(
+                        self.is_video_excluded(d, v)
+                        for d in self.selected_dirs
+                        if self.scan_cache.get(d)
+                    )
+                ]
+                video_to_dir = {v: all_v2d.get(v, os.path.dirname(v)) for v in videos}
+            else:
+                videos = []
+                video_to_dir = {}
+                for directory in self.selected_dirs:
                     cache = self.scan_cache.get(directory)
                     if not cache:
                         continue
-                    videos, video_to_dir, directories = cache
-                    videos = [v if self._is_stream_url(v) else os.path.normpath(v) for v in videos]
-                    new_map = {}
-                    for k, v in video_to_dir.items():
-                        new_key = k if self._is_stream_url(k) else os.path.normpath(k)
-                        new_map[new_key] = v
-                    video_to_dir = new_map
+                    dir_videos, dir_v2d, _ = cache
+                    for v in dir_videos:
+                        if not self.is_video_excluded(directory, v):
+                            videos.append(v)
+                            video_to_dir[v] = dir_v2d.get(v, os.path.dirname(v))
 
-                    excluded_subdirs = self.excluded_subdirs.get(directory, [])
-                    excluded_videos = self.excluded_videos.get(directory, [])
-                    if excluded_subdirs or excluded_videos:
-                        filtered_videos = []
-                        filtered_video_to_dir = {}
-                        filtered_directories = []
+            directories = list(dict.fromkeys(video_to_dir[v] for v in videos))
+            return videos, video_to_dir, directories
 
-                        for video in videos:
-                            if not self.is_video_excluded(directory, video):
-                                filtered_videos.append(video)
-                                filtered_video_to_dir[video] = video_to_dir[video]
+        def play_videos(self):
+            """Launch EmbeddedPlayer for the full video list."""
+            from embedded_player import EmbeddedPlayer
 
-                        for dir_path in directories:
-                            if not self.is_directory_excluded(dir_path, excluded_subdirs):
-                                filtered_directories.append(dir_path)
+            videos, video_to_dir, directories = self._build_video_list()
 
-                        all_videos.extend(filtered_videos)
-                        all_video_to_dir.update(filtered_video_to_dir)
-                        all_directories.extend(filtered_directories)
-                    else:
-                        all_videos.extend(videos)
-                        all_video_to_dir.update(video_to_dir)
-                        all_directories.extend(directories)
+            if not videos:
+                self.update_console("No videos to play.")
+                return
 
-                all_directories_unordered = set(all_directories)
-                all_directories = []
-                for d in dirs_to_process:
-                    if d in all_directories_unordered:
-                        all_directories.append(d)
+            # Resolve start index: map the selected exclusion_listbox row back
+            # to its position in the assembled flat video list.
+            idx = 0
+            try:
+                sel = self.exclusion_listbox.curselection()
+                if sel:
+                    candidate = self.current_subdirs_mapping.get(int(sel[0]))
+                    if candidate and candidate in videos:
+                        idx = videos.index(candidate)
+            except Exception:
+                pass
 
-                for d in sorted(list(all_directories_unordered)):
-                    if d not in all_directories:
-                        all_directories.append(d)
+            vol      = getattr(self, 'volume', 50)
+            is_muted = getattr(self, 'is_muted', False)
+            loop     = getattr(self, 'loop_mode', 'loop_on')
 
-                def _start_player():
-                    if not all_videos:
-                        messagebox.showwarning("No Videos", "No videos found in the selected directories.")
-                        self.root.config(cursor="")
-                        return
+            player = EmbeddedPlayer(
+                parent=self.root,
+                videos=videos,
+                video_to_dir=video_to_dir,
+                directories=directories,
+                start_index=idx,
+                volume=vol,
+                is_muted=is_muted,
+                loop_mode=loop,
+                logger=self.update_console,
+                on_close=self._on_player_closed,
+            )
+            player.play()
+            self._active_player = player
 
-                    self.update_console(f"Playing from {len(all_directories)} directories")
-                    self.controller = VLCPlayerControllerForMultipleDirectory(all_videos, all_video_to_dir,
-                                                                              all_directories, self.update_console,
-                                                                              volume=self.volume,
-                                                                              is_muted=self.is_muted)
-                    self.controller.set_loop_mode(self.loop_mode)
-                    self.controller.set_volume_save_callback(self._save_volume_callback)
-                    self.controller.set_watch_history_callback(
-                        self.watch_history_manager.track_video_playback
-                    )
-                    self.controller.set_resume_manager(self.resume_manager)
+        def play_selected_videos(self):
+            """Launch EmbeddedPlayer for the videos currently selected in the listbox,
+            honouring all active exclusions and expanding folder selections."""
+            from embedded_player import EmbeddedPlayer
 
-                    initial_speed = self.speed_var.get()
-                    if initial_speed != 1.0:
-                        self.controller.set_initial_playback_rate(initial_speed)
-                        self.update_console(f"Initial playback speed set to {initial_speed}x")
+            selected_dir = self.get_current_selected_directory()
 
-                    start_index = 0
-                    if self.smart_resume_var.get():
-                        if self.last_played_video_path and self.last_played_video_path in all_videos:
-                            start_index = all_videos.index(self.last_played_video_path)
-                            self.update_console(
-                                f"Smart Resume: Starting from last played video: {os.path.basename(self.last_played_video_path)}")
-                        elif self.save_directories and self.last_played_video_index < len(all_videos):
-                            start_index = self.last_played_video_index
-                            self.update_console(f"Smart Resume: Starting from last played index: {start_index}")
+            try:
+                selected_indices = list(self.exclusion_listbox.curselection())
+            except Exception:
+                selected_indices = []
 
-                    self.controller.set_start_index(start_index)
+            if not selected_indices:
+                self.update_console("No videos selected.")
+                return
 
-                    self.controller.set_video_change_callback(self.on_video_changed)
-                    self.controller.set_stop_callback(self._on_player_stopped)
+            selected_videos = []
+            seen = set()
 
-                    if self.player_thread and self.player_thread.is_alive():
-                        self.controller.running = False
-                        self.player_thread.join(timeout=1.0)
+            for i in selected_indices:
+                path = self.current_subdirs_mapping.get(i)
+                if not path:
+                    continue
 
-                    self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
-                    self.player_thread.start()
+                if os.path.isfile(path) and is_video(path):
+                    # Single video — honour exclusion
+                    if selected_dir and self.is_video_excluded(selected_dir, path):
+                        continue
+                    norm = os.path.normpath(path)
+                    if norm not in seen:
+                        seen.add(norm)
+                        selected_videos.append(path)
 
-                    self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
-                    self.keys_thread.start()
-                    self.root.config(cursor="")
+                elif os.path.isdir(path):
+                    # Folder selected — walk it and collect non-excluded videos
+                    try:
+                        for root, dirs, files in os.walk(path):
+                            for f in sorted(files):
+                                full = os.path.join(root, f)
+                                if is_video(full):
+                                    if selected_dir and self.is_video_excluded(selected_dir, full):
+                                        continue
+                                    norm = os.path.normpath(full)
+                                    if norm not in seen:
+                                        seen.add(norm)
+                                        selected_videos.append(full)
+                    except (PermissionError, OSError):
+                        pass
 
-                    def init_overlay_delayed():
-                        time.sleep(1)
-                        self.controller.init_overlay()
+            if not selected_videos:
+                self.update_console("No valid non-excluded video files in selection.")
+                return
 
-                    threading.Thread(target=init_overlay_delayed, daemon=True).start()
+            # Build video_to_dir by looking up each path in scan_cache
+            all_v2d = {}
+            for directory in self.selected_dirs:
+                cache = self.scan_cache.get(directory)
+                if cache:
+                    _, dir_v2d, _ = cache
+                    all_v2d.update(dir_v2d)
 
-                self.root.after(0, _start_player)
+            sel_v2d  = {v: all_v2d.get(v, os.path.dirname(v)) for v in selected_videos}
+            sel_dirs = list(dict.fromkeys(sel_v2d[v] for v in selected_videos))
 
-            ManagedThread(target=_run, name="PlayVideos").start()
+            vol      = getattr(self, 'volume', 50)
+            is_muted = getattr(self, 'is_muted', False)
+            loop     = getattr(self, 'loop_mode', 'loop_on')
+
+            self.update_console(f"Playing {len(selected_videos)} selected video(s)")
+
+            player = EmbeddedPlayer(
+                parent=self.root,
+                videos=selected_videos,
+                video_to_dir=sel_v2d,
+                directories=sel_dirs,
+                start_index=0,
+                volume=vol,
+                is_muted=is_muted,
+                loop_mode=loop,
+                logger=self.update_console,
+                on_close=self._on_player_closed,
+            )
+            player.play()
+            self._active_player = player
+
+        def _on_player_closed(self):
+            """Called when the EmbeddedPlayer window is closed."""
+            self._active_player = None
+            self.update_console("Player closed.")
 
         def on_video_changed(self, video_index, video_path):
             if hasattr(self, 'filter_sort_manager'):
