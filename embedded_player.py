@@ -180,7 +180,6 @@ class EmbeddedPlayer:
         self._win.configure(bg=_BG)
         self._win.minsize(640, 400)
         self._win.protocol("WM_DELETE_WINDOW", self._close)
-        self._win.bind("<Button-3>", self._show_context_menu)
 
         # ── video canvas ──────────────────────────────────────────────
         self._canvas = tk.Canvas(self._win, bg="black",
@@ -300,6 +299,8 @@ class EmbeddedPlayer:
         rg.pack(side=tk.RIGHT, padx=(0, 8), pady=1)
 
         _btn(rg, "⛶", self._toggle_borderless, font=F_ICO).pack(side=tk.RIGHT, padx=(6, 0))
+
+        _btn(rg, "⋮", self._show_context_menu_from_btn, font=F_ICO).pack(side=tk.RIGHT, padx=(2, 0))
 
         self._lbl_speed = tk.Label(rg, text="1.00×", cursor="hand2",
                                    font=F_ACC, bg=_CTRL_BG2, fg=_ACCENT)
@@ -752,6 +753,20 @@ class EmbeddedPlayer:
         except Exception as e:
             if self.logger:
                 self.logger(f"Screenshot error: {e}")
+
+    def _show_context_menu_from_btn(self):
+        try:
+            x = self._win.winfo_pointerx()
+            y = self._win.winfo_pointery()
+        except Exception:
+            x, y = self._win.winfo_rootx() + 100, self._win.winfo_rooty() + 100
+
+        class _FakeEvent:
+            pass
+        e = _FakeEvent()
+        e.x_root = x
+        e.y_root = y
+        self._show_context_menu(e)
 
     def _show_context_menu(self, event):
         if not self.videos:
