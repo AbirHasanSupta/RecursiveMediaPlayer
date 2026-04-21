@@ -230,6 +230,7 @@ def select_multiple_folders_and_play():
             self.favorites_manager.set_play_callback(self._play_favorites_videos)
             self.favorites_manager.set_video_preview_manager(self.video_preview_manager)
             self.favorites_manager.set_grid_view_manager(self.grid_view_manager)
+            self.favorites_manager.set_on_removed_callback(self._refresh_tree_after_fav_change)
 
             self.dual_player_manager = DualPlayerManager(
                 self.root,
@@ -385,6 +386,12 @@ def select_multiple_folders_and_play():
             except Exception as e:
                 self.update_console(f"Error clearing metadata cache: {e}")
                 return 0
+
+        def _refresh_tree_after_fav_change(self):
+            selected_dir = self.get_current_selected_directory()
+            if selected_dir:
+                scroll_pos = self.exclusion_listbox.yview()
+                self.load_subdirectories(selected_dir, max_depth=self.current_max_depth, restore_scroll=scroll_pos)
 
         def _get_metadata_cache_info(self):
             try:
