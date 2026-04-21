@@ -224,6 +224,7 @@ class FavoritesUI:
         self.theme_provider = theme_provider
         self.favorite_service = favorite_service
         self.on_play_callback = on_play_callback
+        self._on_removed_callback = None
 
         self.favorites_window = None
         self.current_directory = None
@@ -686,6 +687,8 @@ class FavoritesUI:
 
             if removed > 0:
                 self._refresh_favorites_list()
+                if self._on_removed_callback:
+                    self._on_removed_callback()
 
     def _clear_all(self):
         if not self.favorite_entries:
@@ -700,6 +703,8 @@ class FavoritesUI:
         if result:
             self.favorite_service.clear_favorites_for_directory(self.current_directory)
             self._refresh_favorites_list()
+            if self._on_removed_callback:
+                self._on_removed_callback()
 
 
 class FavoritesManager:
@@ -709,6 +714,11 @@ class FavoritesManager:
         self.ui = FavoritesUI(parent, theme_provider, self.service)
 
         self._play_callback = None
+        self._on_removed_callback = None
+
+    def set_on_removed_callback(self, callback):
+        self._on_removed_callback = callback
+        self.ui._on_removed_callback = callback
 
     def set_play_callback(self, callback: Callable):
         self._play_callback = callback
@@ -721,7 +731,10 @@ class FavoritesManager:
         return self.service.add_multiple_to_favorites(video_paths, directory_path)
 
     def remove_from_favorites(self, video_paths: List[str], directory_path: str) -> int:
-        return self.service.remove_multiple_from_favorites(video_paths, directory_path)
+        count = self.service.remove_multiple_from_favorites(video_paths, directory_path)
+        if count > 0 and self._on_removed_callback:
+            self._on_removed_callback()
+        return count
 
     def is_favorite(self, video_path: str, directory_path: str) -> bool:
         return self.service.is_favorite(video_path, directory_path)

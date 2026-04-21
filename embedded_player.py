@@ -132,6 +132,7 @@ class EmbeddedPlayer:
         self.on_volume_change = on_volume_change
         self.on_loop_change   = None   # set by caller after construction if needed
         self.on_close_save    = None   # called with (index, path, loop_mode) on close
+        self.on_video_changed = None  # called with (index, path) on every track change
 
         self._running        = True
         self._lock           = threading.Lock()
@@ -431,6 +432,11 @@ class EmbeddedPlayer:
         media = self._instance.media_new(path)
         self._player.set_media(media)
         self._player.play()
+        if self.on_video_changed:
+            try:
+                self._win.after(0, lambda p=path, i=idx: self.on_video_changed(i, p))
+            except Exception:
+                pass
 
         # Audio
         threading.Thread(target=self._post_play_audio, daemon=True).start()

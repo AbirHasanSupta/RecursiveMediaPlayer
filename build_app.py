@@ -230,6 +230,7 @@ def select_multiple_folders_and_play():
             self.favorites_manager.set_play_callback(self._play_favorites_videos)
             self.favorites_manager.set_video_preview_manager(self.video_preview_manager)
             self.favorites_manager.set_grid_view_manager(self.grid_view_manager)
+            self.favorites_manager.set_on_removed_callback(self._refresh_tree_after_fav_change)
 
             self.dual_player_manager = DualPlayerManager(
                 self.root,
@@ -306,6 +307,12 @@ def select_multiple_folders_and_play():
             self.settings_manager.ui.filter_sort_manager = self.filter_sort_manager
             self._setup_periodic_cleanup()
             self.resource_manager.register_cleanup_callback(self._cleanup_managers)
+
+        def _refresh_tree_after_fav_change(self):
+            selected_dir = self.get_current_selected_directory()
+            if selected_dir:
+                scroll_pos = self.exclusion_listbox.yview()
+                self.load_subdirectories(selected_dir, max_depth=self.current_max_depth, restore_scroll=scroll_pos)
 
         def _setup_periodic_cleanup(self):
             self.memory_monitor = MemoryMonitor(threshold_mb=1200)
@@ -1078,6 +1085,7 @@ def select_multiple_folders_and_play():
             )
             player.on_loop_change = self._save_loop_callback
             player.on_close_save  = self._on_player_close_save
+            player.on_video_changed = self.on_video_changed
             player.play()
             self._active_player = player
 
@@ -1414,6 +1422,7 @@ def select_multiple_folders_and_play():
                 on_close=self._on_player_closed,
                 on_volume_change=self._save_volume_callback,
             )
+            player.on_video_changed = self.on_video_changed
             player.play()
             self._active_player = player
 
@@ -2028,6 +2037,7 @@ def select_multiple_folders_and_play():
             )
             player.on_loop_change = self._save_loop_callback
             player.on_close_save  = self._on_player_close_save
+            player.on_video_changed = self.on_video_changed
             player.play()
             self._active_player = player
 
@@ -2116,6 +2126,7 @@ def select_multiple_folders_and_play():
             )
             player.on_loop_change = self._save_loop_callback
             player.on_close_save  = self._on_player_close_save
+            player.on_video_changed = self.on_video_changed
             player.play()
             self._active_player = player
 
@@ -2123,6 +2134,7 @@ def select_multiple_folders_and_play():
             """Called when the EmbeddedPlayer window is closed."""
             self._active_player = None
             self.update_console("Player closed.")
+            self._on_player_stopped()
 
         def _save_loop_callback(self, loop_mode: str):
             """Fired by EmbeddedPlayer whenever the user cycles the loop mode."""
@@ -2148,6 +2160,8 @@ def select_multiple_folders_and_play():
                 except Exception:
                     pass
             self.save_preferences()
+            if hasattr(self, 'watch_history_manager') and path:
+                self.watch_history_manager.track_video_end(path)
 
         def on_video_changed(self, video_index, video_path):
             if hasattr(self, 'filter_sort_manager'):
@@ -2160,6 +2174,8 @@ def select_multiple_folders_and_play():
             self.grid_view_manager.mark_now_playing(video_path)
             self._now_playing_video_path = os.path.normpath(video_path) if video_path else None
             self._update_tree_now_playing()
+            if hasattr(self, 'watch_history_manager'):
+                self.watch_history_manager.track_video_start(video_path)
 
         def _on_player_stopped(self):
             self._now_playing_video_path = None
@@ -3238,6 +3254,7 @@ def select_multiple_folders_and_play():
                 on_close=self._on_player_closed,
                 on_volume_change=self._save_volume_callback,
             )
+            player.on_video_changed = self.on_video_changed
             player.play()
             self._active_player = player
 
@@ -3358,6 +3375,7 @@ def select_multiple_folders_and_play():
                 on_close=self._on_player_closed,
                 on_volume_change=self._save_volume_callback,
             )
+            player.on_video_changed = self.on_video_changed
             player.play()
             self._active_player = player
 
@@ -3429,6 +3447,7 @@ def select_multiple_folders_and_play():
                 on_close=self._on_player_closed,
                 on_volume_change=self._save_volume_callback,
             )
+            player.on_video_changed = self.on_video_changed
             player.play()
             self._active_player = player
 
@@ -3488,6 +3507,7 @@ def select_multiple_folders_and_play():
                 on_close=self._on_player_closed,
                 on_volume_change=self._save_volume_callback,
             )
+            player.on_video_changed = self.on_video_changed
             player.play()
             self._active_player = player
 
