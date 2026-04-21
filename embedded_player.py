@@ -115,8 +115,9 @@ class EmbeddedPlayer:
         volume:        int  = 50,
         is_muted:      bool = False,
         loop_mode:     str  = "loop_on",
-        logger:        Optional[Callable] = None,
-        on_close:      Optional[Callable] = None,
+        logger:          Optional[Callable] = None,
+        on_close:        Optional[Callable] = None,
+        on_volume_change: Optional[Callable] = None,
     ):
         self.parent      = parent
         self.videos      = list(videos)
@@ -128,6 +129,7 @@ class EmbeddedPlayer:
         self.loop_mode   = loop_mode
         self.logger      = logger
         self.on_close    = on_close
+        self.on_volume_change = on_volume_change
 
         self._running        = True
         self._lock           = threading.Lock()
@@ -542,6 +544,11 @@ class EmbeddedPlayer:
         self.volume = max(0, min(100, self.volume + delta))
         self._player.audio_set_volume(self.volume)
         self._refresh_vol()
+        if self.on_volume_change:
+            try:
+                self.on_volume_change(self.volume, self.is_muted)
+            except Exception:
+                pass
 
     def _toggle_mute(self):
         self.is_muted = not self.is_muted
@@ -549,6 +556,11 @@ class EmbeddedPlayer:
         if not self.is_muted:
             self._player.audio_set_volume(self.volume)
         self._refresh_vol()
+        if self.on_volume_change:
+            try:
+                self.on_volume_change(self.volume, self.is_muted)
+            except Exception:
+                pass
 
     def _vol_scroll(self, e):
         self._vol_change(+self.VOL_STEP if e.delta > 0 else -self.VOL_STEP)

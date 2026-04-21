@@ -1061,6 +1061,7 @@ def select_multiple_folders_and_play():
                 loop_mode=getattr(self, 'loop_mode', 'loop_on'),
                 logger=self.update_console,
                 on_close=self._on_player_closed,
+                on_volume_change=self._save_volume_callback,
             )
             player.play()
             self._active_player = player
@@ -1372,47 +1373,34 @@ def select_multiple_folders_and_play():
             if not videos:
                 return
 
-            if self.controller:
-                self.controller.stop()
-                cleanup_hotkeys()
+            if self._active_player is not None:
+                try:
+                    self._active_player._close()
+                except Exception:
+                    pass
+                self._active_player = None
 
             all_video_to_dir = {v: os.path.dirname(v) for v in videos}
             all_directories = sorted(list(set(all_video_to_dir.values())))
 
             self.update_console(f"Playing {len(videos)} videos from favorites")
 
-            self.controller = VLCPlayerControllerForMultipleDirectory(
-                videos, all_video_to_dir, all_directories, self.update_console,
-                volume=self.volume, is_muted=self.is_muted
+            from embedded_player import EmbeddedPlayer
+            player = EmbeddedPlayer(
+                parent=self.root,
+                videos=videos,
+                video_to_dir=all_video_to_dir,
+                directories=all_directories,
+                start_index=0,
+                volume=self.volume,
+                is_muted=self.is_muted,
+                loop_mode=self.loop_mode,
+                logger=self.update_console,
+                on_close=self._on_player_closed,
+                on_volume_change=self._save_volume_callback,
             )
-            self.controller.set_loop_mode(self.loop_mode)
-            self.controller.set_volume_save_callback(self._save_volume_callback)
-            self.controller.set_watch_history_callback(self.watch_history_manager.track_video_playback)
-            self.controller.set_resume_manager(self.resume_manager)
-
-            initial_speed = self.speed_var.get()
-            if initial_speed != 1.0:
-                self.controller.set_initial_playback_rate(initial_speed)
-
-            self.controller.set_start_index(0)
-            self.controller.set_video_change_callback(self.on_video_changed)
-            self.controller.set_stop_callback(self._on_player_stopped)
-
-            if self.player_thread and self.player_thread.is_alive():
-                self.controller.running = False
-                self.player_thread.join(timeout=1.0)
-
-            self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
-            self.player_thread.start()
-
-            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
-            self.keys_thread.start()
-
-            def init_overlay_delayed():
-                time.sleep(1)
-                self.controller.init_overlay()
-
-            ManagedThread(target=init_overlay_delayed, name="InitOverlay").start()
+            player.play()
+            self._active_player = player
 
         def _select_all_items(self, listbox):
             listbox.selection_clear(0, tk.END)
@@ -1992,6 +1980,7 @@ def select_multiple_folders_and_play():
                 loop_mode=loop,
                 logger=self.update_console,
                 on_close=self._on_player_closed,
+                on_volume_change=self._save_volume_callback,
             )
             player.play()
             self._active_player = player
@@ -2077,6 +2066,7 @@ def select_multiple_folders_and_play():
                 loop_mode=loop,
                 logger=self.update_console,
                 on_close=self._on_player_closed,
+                on_volume_change=self._save_volume_callback,
             )
             player.play()
             self._active_player = player
@@ -3173,6 +3163,7 @@ def select_multiple_folders_and_play():
                 loop_mode=loop,
                 logger=self.update_console,
                 on_close=self._on_player_closed,
+                on_volume_change=self._save_volume_callback,
             )
             player.play()
             self._active_player = player
@@ -3246,9 +3237,12 @@ def select_multiple_folders_and_play():
                 messagebox.showwarning("Warning", "Playlist is empty")
                 return
 
-            if self.controller:
-                self.controller.stop()
-                cleanup_hotkeys()
+            if self._active_player is not None:
+                try:
+                    self._active_player._close()
+                except Exception:
+                    pass
+                self._active_player = None
 
             self.update_console("=" * 100)
             self.update_console("STARTING PLAYLIST PLAYBACK")
@@ -3276,41 +3270,23 @@ def select_multiple_folders_and_play():
                 messagebox.showwarning("Warning", "No valid videos found in playlist")
                 return
 
-            def start_playlist_player():
-                self.update_console(f"Playing playlist with {len(valid_videos)} videos")
-                self.controller = VLCPlayerControllerForMultipleDirectory(
-                    valid_videos, all_video_to_dir, all_directories, self.update_console,
-                    volume=self.volume, is_muted=self.is_muted
-                )
-                self.controller.set_loop_mode(self.loop_mode)
-                self.controller.set_volume_save_callback(self._save_volume_callback)
-                self.controller.set_watch_history_callback(
-                    self.watch_history_manager.track_video_playback
-                )
-                self.controller.set_resume_manager(self.resume_manager)
-
-                initial_speed = self.speed_var.get()
-                if initial_speed != 1.0:
-                    self.controller.set_initial_playback_rate(initial_speed)
-                    self.update_console(f"Initial playback speed set to {initial_speed}x")
-
-                self.controller.set_start_index(0)
-                self.controller.set_video_change_callback(self.on_video_changed)
-                self.controller.set_stop_callback(self._on_player_stopped)
-
-                if self.player_thread and self.player_thread.is_alive():
-                    self.controller.running = False
-                    self.player_thread.join(timeout=1.0)
-
-                self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
-                self.player_thread.start()
-
-                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
-                self.keys_thread.start()
-                time.sleep(1)
-                self.controller.init_overlay()
-
-            threading.Thread(target=start_playlist_player, daemon=True).start()
+            self.update_console(f"Playing playlist with {len(valid_videos)} videos")
+            from embedded_player import EmbeddedPlayer
+            player = EmbeddedPlayer(
+                parent=self.root,
+                videos=valid_videos,
+                video_to_dir=all_video_to_dir,
+                directories=all_directories,
+                start_index=0,
+                volume=self.volume,
+                is_muted=self.is_muted,
+                loop_mode=self.loop_mode,
+                logger=self.update_console,
+                on_close=self._on_player_closed,
+                on_volume_change=self._save_volume_callback,
+            )
+            player.play()
+            self._active_player = player
 
         def _show_queue_manager(self):
             self.queue_manager.show_manager()
@@ -3336,9 +3312,12 @@ def select_multiple_folders_and_play():
             if not videos:
                 return
 
-            if self.controller:
-                self.controller.stop()
-                cleanup_hotkeys()
+            if self._active_player is not None:
+                try:
+                    self._active_player._close()
+                except Exception:
+                    pass
+                self._active_player = None
 
             all_video_to_dir = {}
             all_directories = []
@@ -3362,44 +3341,23 @@ def select_multiple_folders_and_play():
                 messagebox.showwarning("Warning", "No valid videos found")
                 return
 
-            def start_queue_player():
-                self.update_console(f"Playing queue with {len(valid_videos)} videos")
-                self.controller = VLCPlayerControllerForMultipleDirectory(
-                    valid_videos, all_video_to_dir, all_directories, self.update_console,
-                    volume=self.volume, is_muted=self.is_muted
-                )
-                self.controller.set_loop_mode("loop_off")
-                self.controller.set_volume_save_callback(self._save_volume_callback)
-                self.controller.set_watch_history_callback(
-                    self.watch_history_manager.track_video_playback
-                )
-                self.controller.set_resume_manager(self.resume_manager)
-
-                self.controller.set_queue_manager(self.queue_manager)
-                self.controller.set_queue_ui_refresh_callback(lambda: self.queue_manager.ui._refresh_queue())
-
-                initial_speed = self.speed_var.get()
-                if initial_speed != 1.0:
-                    self.controller.set_initial_playback_rate(initial_speed)
-                    self.update_console(f"Initial playback speed set to {initial_speed}x")
-
-                self.controller.set_start_index(0)
-                self.controller.set_video_change_callback(self.on_video_changed)
-                self.controller.set_stop_callback(self._on_player_stopped)
-
-                if self.player_thread and self.player_thread.is_alive():
-                    self.controller.running = False
-                    self.player_thread.join(timeout=1.0)
-
-                self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
-                self.player_thread.start()
-
-                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
-                self.keys_thread.start()
-                time.sleep(1)
-                self.controller.init_overlay()
-
-            threading.Thread(target=start_queue_player, daemon=True).start()
+            self.update_console(f"Playing queue with {len(valid_videos)} videos")
+            from embedded_player import EmbeddedPlayer
+            player = EmbeddedPlayer(
+                parent=self.root,
+                videos=valid_videos,
+                video_to_dir=all_video_to_dir,
+                directories=all_directories,
+                start_index=0,
+                volume=self.volume,
+                is_muted=self.is_muted,
+                loop_mode="loop_off",
+                logger=self.update_console,
+                on_close=self._on_player_closed,
+                on_volume_change=self._save_volume_callback,
+            )
+            player.play()
+            self._active_player = player
 
         def _show_watch_history(self):
             self.watch_history_manager.show_manager()
@@ -3409,9 +3367,12 @@ def select_multiple_folders_and_play():
                 messagebox.showwarning("Warning", "No videos to play")
                 return
 
-            if self.controller:
-                self.controller.stop()
-                cleanup_hotkeys()
+            if self._active_player is not None:
+                try:
+                    self._active_player._close()
+                except Exception:
+                    pass
+                self._active_player = None
 
             self.update_console("=" * 100)
             self.update_console("STARTING HISTORY VIDEO PLAYBACK")
@@ -3439,41 +3400,23 @@ def select_multiple_folders_and_play():
                 messagebox.showwarning("Warning", "No valid videos found")
                 return
 
-            def start_history_player():
-                self.update_console(f"Playing {len(valid_videos)} videos from history")
-                self.controller = VLCPlayerControllerForMultipleDirectory(
-                    valid_videos, all_video_to_dir, all_directories, self.update_console,
-                    volume=self.volume, is_muted=self.is_muted
-                )
-                self.controller.set_loop_mode(self.loop_mode)
-                self.controller.set_volume_save_callback(self._save_volume_callback)
-                self.controller.set_watch_history_callback(
-                    self.watch_history_manager.track_video_playback
-                )
-                self.controller.set_resume_manager(self.resume_manager)
-
-                initial_speed = self.speed_var.get()
-                if initial_speed != 1.0:
-                    self.controller.set_initial_playback_rate(initial_speed)
-                    self.update_console(f"Initial playback speed set to {initial_speed}x")
-
-                self.controller.set_start_index(0)
-                self.controller.set_video_change_callback(self.on_video_changed)
-                self.controller.set_stop_callback(self._on_player_stopped)
-
-                if self.player_thread and self.player_thread.is_alive():
-                    self.controller.running = False
-                    self.player_thread.join(timeout=1.0)
-
-                self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
-                self.player_thread.start()
-
-                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
-                self.keys_thread.start()
-                time.sleep(1)
-                self.controller.init_overlay()
-
-            threading.Thread(target=start_history_player, daemon=True).start()
+            self.update_console(f"Playing {len(valid_videos)} videos from history")
+            from embedded_player import EmbeddedPlayer
+            player = EmbeddedPlayer(
+                parent=self.root,
+                videos=valid_videos,
+                video_to_dir=all_video_to_dir,
+                directories=all_directories,
+                start_index=0,
+                volume=self.volume,
+                is_muted=self.is_muted,
+                loop_mode=self.loop_mode,
+                logger=self.update_console,
+                on_close=self._on_player_closed,
+                on_volume_change=self._save_volume_callback,
+            )
+            player.play()
+            self._active_player = player
 
         def toggle_smart_resume(self):
             enabled = bool(self.smart_resume_var.get())
