@@ -1050,12 +1050,25 @@ def select_multiple_folders_and_play():
 
             from embedded_player import EmbeddedPlayer
             all_directories = sorted(list(dict.fromkeys(all_video_to_dir[v] for v in all_videos)))
+
+            # Start from the first selected main directory
+            idx = 0
+            try:
+                if selection and selection[0] < len(self.selected_dirs):
+                    target_dir = os.path.normpath(self.selected_dirs[selection[0]])
+                    for i, v in enumerate(all_videos):
+                        if os.path.normpath(all_video_to_dir.get(v, "")).startswith(target_dir):
+                            idx = i
+                            break
+            except Exception:
+                pass
+
             player = EmbeddedPlayer(
                 parent=self.root,
                 videos=all_videos,
                 video_to_dir=all_video_to_dir,
                 directories=all_directories,
-                start_index=0,
+                start_index=idx,
                 volume=getattr(self, 'volume', 50),
                 is_muted=getattr(self, 'is_muted', False),
                 loop_mode=getattr(self, 'loop_mode', 'loop_on'),
@@ -1063,6 +1076,8 @@ def select_multiple_folders_and_play():
                 on_close=self._on_player_closed,
                 on_volume_change=self._save_volume_callback,
             )
+            player.on_loop_change = self._save_loop_callback
+            player.on_close_save  = self._on_player_close_save
             player.play()
             self._active_player = player
 
@@ -1953,17 +1968,46 @@ def select_multiple_folders_and_play():
                 self.update_console("No videos to play.")
                 return
 
-            # Resolve start index: map the selected exclusion_listbox row back
-            # to its position in the assembled flat video list.
+            # ── Resolve start index ───────────────────────────────────────────
+            # Priority 1: smart-resume — jump back to the last-played video.
+            # Priority 2: start from the first video that belongs to the
+            #             currently selected main directory (dir_listbox selection).
+            # Priority 3: fall back to 0.
             idx = 0
-            try:
-                sel = self.exclusion_listbox.curselection()
-                if sel:
-                    candidate = self.current_subdirs_mapping.get(int(sel[0]))
-                    if candidate and candidate in videos:
-                        idx = videos.index(candidate)
-            except Exception:
-                pass
+
+            if getattr(self, 'start_from_last_played', False) and getattr(self, 'last_played_video_path', ''):
+                resume_path = os.path.normpath(self.last_played_video_path)
+                for i, v in enumerate(videos):
+                    if os.path.normpath(v) == resume_path:
+                        idx = i
+                        break
+                else:
+                    # Path not found — fall through to directory-based start
+                    try:
+                        sel = self.dir_listbox.curselection()
+                        if sel and sel[0] < len(self.selected_dirs):
+                            target_dir = self.selected_dirs[sel[0]]
+                            for i, v in enumerate(videos):
+                                if os.path.normpath(video_to_dir.get(v, "")).startswith(
+                                        os.path.normpath(target_dir)):
+                                    idx = i
+                                    break
+                    except Exception:
+                        pass
+            else:
+                # No smart-resume: start from the selected main directory
+                try:
+                    sel = self.dir_listbox.curselection()
+                    if not sel and self.current_selected_dir_index is not None:
+                        sel = (self.current_selected_dir_index,)
+                    if sel and sel[0] < len(self.selected_dirs):
+                        target_dir = os.path.normpath(self.selected_dirs[sel[0]])
+                        for i, v in enumerate(videos):
+                            if os.path.normpath(video_to_dir.get(v, "")).startswith(target_dir):
+                                idx = i
+                                break
+                except Exception:
+                    pass
 
             vol      = getattr(self, 'volume', 50)
             is_muted = getattr(self, 'is_muted', False)
@@ -1982,6 +2026,8 @@ def select_multiple_folders_and_play():
                 on_close=self._on_player_closed,
                 on_volume_change=self._save_volume_callback,
             )
+            player.on_loop_change = self._save_loop_callback
+            player.on_close_save  = self._on_player_close_save
             player.play()
             self._active_player = player
 
@@ -2068,6 +2114,8 @@ def select_multiple_folders_and_play():
                 on_close=self._on_player_closed,
                 on_volume_change=self._save_volume_callback,
             )
+            player.on_loop_change = self._save_loop_callback
+            player.on_close_save  = self._on_player_close_save
             player.play()
             self._active_player = player
 
@@ -2075,6 +2123,31 @@ def select_multiple_folders_and_play():
             """Called when the EmbeddedPlayer window is closed."""
             self._active_player = None
             self.update_console("Player closed.")
+
+        def _save_loop_callback(self, loop_mode: str):
+            """Fired by EmbeddedPlayer whenever the user cycles the loop mode."""
+            self.loop_mode = loop_mode
+            if hasattr(self, 'loop_toggle_button'):
+                try:
+                    self.loop_toggle_button.config(text=self._get_loop_icon())
+                except Exception:
+                    pass
+            self.save_preferences()
+
+        def _on_player_close_save(self, index: int, path: str,
+                                  loop_mode: str, volume: int, is_muted: bool):
+            """Called by EmbeddedPlayer._close() with the final playback state."""
+            self.loop_mode               = loop_mode
+            self.volume                  = volume
+            self.is_muted                = is_muted
+            self.last_played_video_index = index
+            self.last_played_video_path  = path
+            if hasattr(self, 'loop_toggle_button'):
+                try:
+                    self.loop_toggle_button.config(text=self._get_loop_icon())
+                except Exception:
+                    pass
+            self.save_preferences()
 
         def on_video_changed(self, video_index, video_path):
             if hasattr(self, 'filter_sort_manager'):
@@ -3849,6 +3922,19 @@ def select_multiple_folders_and_play():
                 return False
 
         def cancel(self):
+            # Snapshot state from EmbeddedPlayer if one is open
+            if self._active_player is not None:
+                try:
+                    p = self._active_player
+                    self.last_played_video_index = p.index
+                    self.last_played_video_path  = p.videos[p.index] if p.videos else ""
+                    self.loop_mode               = p.loop_mode
+                    self.volume                  = p.volume
+                    self.is_muted                = p.is_muted
+                    self.save_preferences()
+                except Exception:
+                    pass
+
             if self.controller:
                 if self.start_from_last_played and hasattr(self.controller, 'index'):
                     self.last_played_video_index = self.controller.index

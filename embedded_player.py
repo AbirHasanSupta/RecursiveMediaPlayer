@@ -130,6 +130,8 @@ class EmbeddedPlayer:
         self.logger      = logger
         self.on_close    = on_close
         self.on_volume_change = on_volume_change
+        self.on_loop_change   = None   # set by caller after construction if needed
+        self.on_close_save    = None   # called with (index, path, loop_mode) on close
 
         self._running        = True
         self._lock           = threading.Lock()
@@ -614,6 +616,11 @@ class EmbeddedPlayer:
             self._btn_loop.config(text=labels[self.loop_mode])
         except Exception:
             pass
+        if self.on_loop_change:
+            try:
+                self.on_loop_change(self.loop_mode)
+            except Exception:
+                pass
 
     # ═══════════════════════════════════════════════════════════════════
     # ROTATE
@@ -976,6 +983,16 @@ class EmbeddedPlayer:
     # ═══════════════════════════════════════════════════════════════════
 
     def _close(self):
+        # Snapshot current playback state before any teardown so the host can
+        # persist it (last-played index, path, loop mode, volume, mute).
+        if self.on_close_save:
+            try:
+                cur_path = self.videos[self.index] if self.videos else ""
+                self.on_close_save(self.index, cur_path, self.loop_mode,
+                                   self.volume, self.is_muted)
+            except Exception:
+                pass
+
         self._running = False
         # cancel pending jobs
         for attr in ("_hide_job", "_poll_job", "_update_job"):
