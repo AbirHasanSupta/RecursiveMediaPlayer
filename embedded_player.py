@@ -288,7 +288,6 @@ class EmbeddedPlayer:
         rg.pack(side=tk.RIGHT, padx=(0, 8), pady=2)
 
         _btn(rg, "⛶", self._toggle_borderless, font=F_ICO).pack(side=tk.RIGHT, padx=(6, 0))
-        _btn(rg, "⬒ Mon", self._switch_monitor, font=F_SM).pack(side=tk.RIGHT, padx=(2, 0))
 
         self._lbl_speed = tk.Label(rg, text="1.00×", cursor="hand2",
                                    font=F_ACC, bg=_CTRL_BG2, fg=_ACCENT)
@@ -732,110 +731,6 @@ class EmbeddedPlayer:
             pass
         return 0, 0, self._win.winfo_screenwidth(), self._win.winfo_screenheight()
 
-    def _switch_monitor(self):
-        try:
-            if _get_monitors:
-                monitors = _get_monitors()
-                total = len(monitors)
-            else:
-                total = 1
-        except Exception:
-            total = 1
-
-        if total < 2:
-            return
-
-        next_monitor = (self._current_monitor % total) + 1
-
-        try:
-            pos_ms      = self._player.get_time() or 0
-            was_playing = self._player.is_playing()
-            rate        = self._player.get_rate()
-        except Exception:
-            pos_ms, was_playing, rate = 0, True, 1.0
-
-        path = self.videos[self.index]
-
-        angle     = self._ROTATION_STEPS[self._rotation_index]
-        transform = self._TRANSFORM_MAP[angle]
-
-        args = ["--no-video-title-show", "--quiet"]
-        if transform != "identity":
-            args += ["--video-filter=transform", f"--transform-type={transform}"]
-        if os.name == "nt":
-            args += ["--aout=directsound"]
-        else:
-            args += ["--aout=pulse"]
-
-        new_inst   = vlc.Instance(*args)
-        new_player = new_inst.media_player_new()
-
-        x, y, w, h = self._get_monitor_geometry(next_monitor)
-
-        old_inst   = self._instance
-        old_player = self._player
-
-        self._instance = new_inst
-        self._player   = new_player
-        self._current_monitor = next_monitor
-
-        em = new_player.event_manager()
-        em.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_media_ended)
-
-        media = new_inst.media_new(path)
-        new_player.set_media(media)
-        new_player.play()
-
-        geo = f"{w}x{h}+{x}+{y}"
-
-        def _finish():
-            for _ in range(80):
-                if not self._running:
-                    return
-                if new_player.get_state() == vlc.State.Playing:
-                    break
-                time.sleep(0.05)
-            try:
-                if pos_ms > 0:
-                    new_player.set_time(pos_ms)
-                new_player.set_rate(rate)
-                new_player.audio_set_mute(self.is_muted)
-                if not self.is_muted:
-                    new_player.audio_set_volume(self.volume)
-                if not was_playing:
-                    new_player.pause()
-                new_player.video_set_aspect_ratio(None)
-                new_player.video_set_scale(0.0)
-            except Exception:
-                pass
-            try:
-                old_player.stop()
-                old_player.release()
-            except Exception:
-                pass
-            try:
-                old_inst.release()
-            except Exception:
-                pass
-
-        def _move_window():
-            try:
-                if self._borderless:
-                    self._win.geometry(geo)
-                else:
-                    self._win.geometry(f"{w}x{h}+{x}+{y}")
-                self._win.lift()
-                self._win.focus_force()
-                self._embed()
-            except Exception:
-                pass
-
-        self._win.after(0, _move_window)
-        threading.Thread(target=_finish, daemon=True).start()
-
-        if self.logger:
-            self.logger(f"Switched to monitor {next_monitor}")
-
     def _toggle_borderless(self):
         self._borderless = not self._borderless
         if self._borderless:
@@ -859,7 +754,10 @@ class EmbeddedPlayer:
             self._win.overrideredirect(False)
             self._win.geometry(self._pre_bl_geo)
             self._win.lift()
+            self._win.focus_force()
             self._embed()
+        else:
+            self._close()
 
     # ═══════════════════════════════════════════════════════════════════
     # CONTROL BAR SHOW / HIDE
@@ -929,28 +827,29 @@ class EmbeddedPlayer:
     def _do_poll(self):
         if not self._running or not self._win.winfo_exists():
             return
-        try:
-            mx = self._win.winfo_pointerx()
-            my = self._win.winfo_pointery()
-            wx = self._win.winfo_rootx()
-            wy = self._win.winfo_rooty()
-            ww = self._win.winfo_width()
-            wh = self._win.winfo_height()
-            inside = (wx <= mx <= wx + ww) and (wy <= my <= wy + wh)
-            if inside:
-                if (mx, my) != self._last_mouse:
-                    self._last_mouse  = (mx, my)
-                    self._last_move_t = time.monotonic()
-                    self._show_bar()
+        if self._player is not None:      # skip mouse-tracking during monitor switch
+            try:
+                mx = self._win.winfo_pointerx()
+                my = self._win.winfo_pointery()
+                wx = self._win.winfo_rootx()
+                wy = self._win.winfo_rooty()
+                ww = self._win.winfo_width()
+                wh = self._win.winfo_height()
+                inside = (wx <= mx <= wx + ww) and (wy <= my <= wy + wh)
+                if inside:
+                    if (mx, my) != self._last_mouse:
+                        self._last_mouse  = (mx, my)
+                        self._last_move_t = time.monotonic()
+                        self._show_bar()
+                    else:
+                        idle = time.monotonic() - self._last_move_t
+                        if idle >= self.INACTIVITY_S and self._ctrl_visible and not self._hide_job:
+                            self._schedule_hide(100)
                 else:
-                    idle = time.monotonic() - self._last_move_t
-                    if idle >= self.INACTIVITY_S and self._ctrl_visible and not self._hide_job:
-                        self._schedule_hide(100)
-            else:
-                if self._ctrl_visible and not self._hide_job:
-                    self._schedule_hide(500)
-        except Exception:
-            pass
+                    if self._ctrl_visible and not self._hide_job:
+                        self._schedule_hide(500)
+            except Exception:
+                pass
         try:
             self._poll_job = self._win.after(120, self._do_poll)
         except Exception:
@@ -1016,6 +915,12 @@ class EmbeddedPlayer:
     def _refresh_tick(self):
         if not self._running or not self._win.winfo_exists():
             return
+        if self._player is None:          # mid-monitor-switch — skip this tick
+            try:
+                self._update_job = self._win.after(500, self._refresh_tick)
+            except Exception:
+                pass
+            return
         if self._ctrl_visible and not self._drag_seek:
             self._refresh_display()
         try:
@@ -1068,21 +973,38 @@ class EmbeddedPlayer:
                     self._win.after_cancel(job)
                 except Exception:
                     pass
-        try:
-            self._player.stop()
-            self._player.release()
-        except Exception:
-            pass
-        try:
-            self._instance.release()
-        except Exception:
-            pass
+            setattr(self, attr, None)
+
+        # Snapshot the VLC objects so the teardown thread owns them.
+        player   = self._player
+        instance = self._instance
+        self._player   = None
+        self._instance = None
+
+        # Destroy the Tk window immediately — keeps the UI responsive.
         try:
             self._win.destroy()
         except Exception:
             pass
+
         if self.on_close:
             try:
                 self.on_close()
             except Exception:
                 pass
+
+        # Release VLC off the main thread; stop() can block for several seconds.
+        def _vlc_teardown():
+            try:
+                if player:
+                    player.stop()
+                    player.release()
+            except Exception:
+                pass
+            try:
+                if instance:
+                    instance.release()
+            except Exception:
+                pass
+
+        threading.Thread(target=_vlc_teardown, daemon=True).start()
