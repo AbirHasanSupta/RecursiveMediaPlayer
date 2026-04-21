@@ -133,6 +133,9 @@ class EmbeddedPlayer:
         self.on_loop_change   = None   # set by caller after construction if needed
         self.on_close_save    = None   # called with (index, path, loop_mode) on close
         self.on_video_changed = None  # called with (index, path) on every track change
+        self.on_add_to_playlist = None  # called with (video_path)
+        self.on_add_to_queue = None
+        self.on_add_to_favourites = None
 
         self._running        = True
         self._lock           = threading.Lock()
@@ -177,6 +180,7 @@ class EmbeddedPlayer:
         self._win.configure(bg=_BG)
         self._win.minsize(640, 400)
         self._win.protocol("WM_DELETE_WINDOW", self._close)
+        self._win.bind("<Button-3>", self._show_context_menu)
 
         # ── video canvas ──────────────────────────────────────────────
         self._canvas = tk.Canvas(self._win, bg="black",
@@ -278,7 +282,10 @@ class EmbeddedPlayer:
         _btn(lg, "Dir ▶", self._next_dir, font=F_SM).pack(side=tk.LEFT, padx=(1, 10))
 
         _btn(lg, "⟳ Rotate", self._rotate_right, font=F_SM).pack(side=tk.LEFT, padx=1)
-        _btn(lg, "📸",        self._screenshot,   font=F_MD).pack(side=tk.LEFT, padx=1)
+        _btn(lg, "🔍+", self._zoom_in, font=F_SM).pack(side=tk.LEFT, padx=1)
+        _btn(lg, "🔍−", self._zoom_out, font=F_SM).pack(side=tk.LEFT, padx=1)
+        _btn(lg, "🔍1", lambda: self._zoom(0), font=F_SM).pack(side=tk.LEFT, padx=1)
+        _btn(lg, "📸", self._screenshot, font=F_MD).pack(side=tk.LEFT, padx=1)
 
         # Centre — loop mode
         mg = tk.Frame(btn_row, bg=_CTRL_BG2)
@@ -713,6 +720,12 @@ class EmbeddedPlayer:
     # ZOOM
     # ═══════════════════════════════════════════════════════════════════
 
+    def _zoom_in(self):
+        self._zoom(+0.1)
+
+    def _zoom_out(self):
+        self._zoom(-0.1)
+
     def _zoom(self, delta: float):
         if delta == 0:
             self._player.video_set_scale(0.0)
@@ -739,6 +752,27 @@ class EmbeddedPlayer:
         except Exception as e:
             if self.logger:
                 self.logger(f"Screenshot error: {e}")
+
+    def _show_context_menu(self, event):
+        if not self.videos:
+            return
+        menu = tk.Menu(self._win, tearoff=0, bg=_BTN, fg=_TXT,
+                       activebackground=_BTN_HVR, activeforeground=_TXT,
+                       bd=0, relief=tk.FLAT)
+        path = self.videos[self.index]
+        if self.on_add_to_playlist:
+            menu.add_command(label="➕  Add to Playlist",
+                             command=lambda: self.on_add_to_playlist([path]))
+        if self.on_add_to_queue:
+            menu.add_command(label="🎵  Add to Queue",
+                             command=lambda: self.on_add_to_queue([path]))
+        if self.on_add_to_favourites:
+            menu.add_command(label="★  Add to Favourites",
+                             command=lambda: self.on_add_to_favourites([path]))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
 
     # ═══════════════════════════════════════════════════════════════════
     # FULLSCREEN / BORDERLESS
