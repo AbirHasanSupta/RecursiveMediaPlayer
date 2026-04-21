@@ -154,11 +154,13 @@ class PlaylistService:
 class PlaylistUI:
     """UI components for playlist management following Interface Segregation Principle"""
 
-    def __init__(self, parent, theme_provider, playlist_service: PlaylistService, on_play_callback: Callable = None):
+    def __init__(self, parent, theme_provider, playlist_service: PlaylistService, on_play_callback: Callable = None,
+                 log_callback: Callable = None):
         self.parent = parent
         self.theme_provider = theme_provider
         self.playlist_service = playlist_service
         self.on_play_callback = on_play_callback
+        self.log_callback = log_callback
 
         self.current_playlist: Optional[PlaylistData] = None
         self.playlist_window = None
@@ -716,6 +718,8 @@ class PlaylistUI:
         if result:
             name, description = result
             self.playlist_service.create_playlist(name, description)
+            if self.log_callback:
+                self.log_callback(f"Playlist '{name}' created")
             self._refresh_playlist_list()
 
     def _edit_playlist_info(self):
@@ -754,7 +758,10 @@ class PlaylistUI:
         )
 
         if result:
+            deleted_name = self.current_playlist.name
             self.playlist_service.delete_playlist(self.current_playlist.id)
+            if self.log_callback:
+                self.log_callback(f"Playlist '{deleted_name}' deleted")
             self.current_playlist = None
             self._refresh_playlist_list()
             self._refresh_video_list()
@@ -779,6 +786,9 @@ class PlaylistUI:
             self.current_playlist.id,
             videos=self.current_playlist.videos
         )
+        if self.log_callback:
+            self.log_callback(
+                f"Removed {len(selection)} video{'s' if len(selection) > 1 else ''} from '{self.current_playlist.name}'")
 
         self._refresh_video_list()
 
@@ -934,9 +944,18 @@ class PlaylistManager:
     def __init__(self, parent, theme_provider):
         self.storage = PlaylistStorage()
         self.service = PlaylistService(self.storage)
-        self.ui = PlaylistUI(parent, theme_provider, self.service, self._on_play_playlist)
+        self.ui = PlaylistUI(parent, theme_provider, self.service, self._on_play_playlist, log_callback=self._log)
 
         self._play_callback = None
+        self._log_callback = None
+
+    def set_log_callback(self, callback: Callable):
+        self._log_callback = callback
+        self.ui.log_callback = callback
+
+    def _log(self, message: str):
+        if self._log_callback:
+            self._log_callback(message)
 
     def set_play_callback(self, callback: Callable):
         """Set callback for playing playlists"""
@@ -971,8 +990,7 @@ class PlaylistManager:
             if result:
                 name, description = result
                 self.service.create_playlist(name, description, videos_to_add)
-                messagebox.showinfo("Success", f"Created playlist '{name}' with {len(videos_to_add)} videos",
-                                    parent=self.ui.parent)
+                self._log(f"Playlist '{name}' created with {len(videos_to_add)} videos")
         else:
             self._show_add_to_playlist_dialog(videos_to_add, playlists)
 
@@ -1043,8 +1061,7 @@ class PlaylistManager:
             if result:
                 name, description = result
                 self.service.create_playlist(name, description, videos)
-                messagebox.showinfo("Success", f"Created playlist '{name}' with {len(videos)} videos")
-
+                self._log(f"Playlist '{name}' created with {len(videos)} videos")
         def add_to_existing():
             selection = playlist_listbox.curselection()
             if not selection:
@@ -1053,7 +1070,7 @@ class PlaylistManager:
 
             selected_playlist = playlists[selection[0]]
             self.service.add_videos_to_playlist(selected_playlist.id, videos)
-            messagebox.showinfo("Success", f"Added {len(videos)} videos to '{selected_playlist.name}'", parent=dialog)
+            self._log(f"Added {len(videos)} videos to '{selected_playlist.name}'")
             dialog.destroy()
 
         new_btn = self.ui.theme_provider.create_button(

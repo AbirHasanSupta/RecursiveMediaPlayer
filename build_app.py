@@ -208,6 +208,7 @@ def select_multiple_folders_and_play():
 
             self.playlist_manager = PlaylistManager(self.root, self)
             self.playlist_manager.set_play_callback(self._play_playlist_videos)
+            self.playlist_manager.set_log_callback(self.update_console)
             self.playlist_manager.set_video_preview_manager(self.video_preview_manager)
             self.playlist_manager.set_grid_view_manager(self.grid_view_manager)
             self.playlist_manager.ui.video_preview_manager = self.video_preview_manager
