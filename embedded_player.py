@@ -95,8 +95,8 @@ class EmbeddedPlayer:
     never opens its own window.
     """
 
-    CTRL_H       = 132           # px — height of the slide-up control bar
-    INACTIVITY_S = 3.0           # seconds before auto-hiding the bar
+    CTRL_H       = 100           # px — height of the slide-up control bar
+    INACTIVITY_S = 2.0           # seconds before auto-hiding the bar
     SEEK_PX      = 10_000        # ms per arrow-key seek
     VOL_STEP     = 5             # % per scroll / key press
     SPEED_STEPS  = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
@@ -211,7 +211,7 @@ class EmbeddedPlayer:
 
         # ── info row ──────────────────────────────────────────────────
         info = tk.Frame(bar, bg=_CTRL_BG)
-        info.pack(fill=tk.X, padx=12, pady=(7, 2))
+        info.pack(fill=tk.X, padx=12, pady=(3, 2))
 
         self._lbl_title = tk.Label(info, text="", anchor="w",
                                    font=F_SM, bg=_CTRL_BG, fg=_TXT)
@@ -231,7 +231,7 @@ class EmbeddedPlayer:
 
         # ── seek bar ──────────────────────────────────────────────────
         seek_row = tk.Frame(bar, bg=_CTRL_BG)
-        seek_row.pack(fill=tk.X, padx=12, pady=(2, 5))
+        seek_row.pack(fill=tk.X, padx=12, pady=(2, 3))
 
         self._seek = tk.Canvas(seek_row, height=20, bg=_CTRL_BG,
                                highlightthickness=0, cursor="hand2")
@@ -263,7 +263,7 @@ class EmbeddedPlayer:
 
         # Left — transport
         lg = tk.Frame(btn_row, bg=_CTRL_BG2)
-        lg.pack(side=tk.LEFT, padx=(8, 0), pady=2)
+        lg.pack(side=tk.LEFT, padx=(8, 0), pady=1)
 
         _btn(lg, "⏮", self._prev, font=F_ICO).pack(side=tk.LEFT, padx=1)
         self._btn_play = _btn(lg, "⏸", self._toggle_pause, font=F_ICO)
@@ -279,7 +279,7 @@ class EmbeddedPlayer:
 
         # Centre — loop mode
         mg = tk.Frame(btn_row, bg=_CTRL_BG2)
-        mg.pack(side=tk.LEFT, padx=12, pady=2)
+        mg.pack(side=tk.LEFT, padx=12, pady=1)
 
         self._btn_loop = _btn(mg, "↺  Loop", self._cycle_loop,
                               font=F_ACC, fg=_ACCENT)
@@ -287,7 +287,7 @@ class EmbeddedPlayer:
 
         # Right — volume · speed · fullscreen
         rg = tk.Frame(btn_row, bg=_CTRL_BG2)
-        rg.pack(side=tk.RIGHT, padx=(0, 8), pady=2)
+        rg.pack(side=tk.RIGHT, padx=(0, 8), pady=1)
 
         _btn(rg, "⛶", self._toggle_borderless, font=F_ICO).pack(side=tk.RIGHT, padx=(6, 0))
 
