@@ -692,7 +692,8 @@ def select_multiple_folders_and_play():
                 relief=tk.FLAT,
                 highlightthickness=1,
                 highlightbackground="#e0e0e0",
-                bd=0
+                bd=0,
+                exportselection=0
             )
             self.dir_listbox.pack(fill=tk.BOTH, expand=True)
             self.dir_listbox.bind('<<ListboxSelect>>', self.on_directory_select)
@@ -743,15 +744,10 @@ def select_multiple_folders_and_play():
             self.watch_history_button.pack(side=tk.LEFT)
 
         def on_directory_focus_out(self, event):
-            selection = self.dir_listbox.curselection()
-            if selection:
-                self.current_selected_dir_index = selection[0]
+            pass
 
         def on_directory_focus_in(self, event):
-            if self.current_selected_dir_index is not None and self.current_selected_dir_index < self.dir_listbox.size():
-                self.dir_listbox.selection_clear(0, tk.END)
-                self.dir_listbox.selection_set(self.current_selected_dir_index)
-                self.dir_listbox.activate(self.current_selected_dir_index)
+            pass
 
         def setup_exclusion_section(self):
             self.exclusion_section = tk.Frame(self.content_frame, bg=self.bg_color)
@@ -794,12 +790,27 @@ def select_multiple_folders_and_play():
                 bg="white",
                 fg=self.text_color,
                 relief=tk.FLAT,
-                bd=1,
+                bd=0,
                 highlightthickness=1,
-                highlightbackground="#e0e0e0"
+                highlightbackground="#e0e0e0",
+                highlightcolor="#e0e0e0"
             )
             self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
             self.search_entry.bind('<KeyRelease>', self.on_search_changed)
+            self.search_entry.bind('<FocusIn>', lambda e: self.search_entry.configure(
+                highlightbackground=self.entry_border, highlightcolor=self.entry_border
+            ))
+            self.search_entry.bind('<FocusOut>', lambda e: self.search_entry.configure(
+                highlightbackground=self.entry_border, highlightcolor=self.entry_border
+            ))
+
+            def _defocus_search(event):
+                widget = event.widget
+                if widget in (self.search_entry, self.exclusion_listbox, self.dir_listbox):
+                    return
+                self.root.focus_set()
+
+            self.root.bind_all('<Button-1>', _defocus_search, add='+')
 
             clear_search_btn = self.create_button(
                 self.search_frame,
@@ -834,7 +845,8 @@ def select_multiple_folders_and_play():
                 relief=tk.FLAT,
                 highlightthickness=1,
                 highlightbackground="#e0e0e0",
-                bd=0
+                bd=0,
+                exportselection=0
             )
             self.exclusion_listbox.pack(fill=tk.BOTH, expand=True)
             self.exclusion_scrollbar.config(command=self.exclusion_listbox.yview)
@@ -1127,7 +1139,22 @@ def select_multiple_folders_and_play():
             index = self.exclusion_listbox.nearest(event.y)
 
             if index < 0 or index >= self.exclusion_listbox.size():
-                return
+                self.exclusion_listbox.selection_clear(0, tk.END)
+                self._selection_anchor = None
+                return "break"
+
+            # Also clear selection if click lands in empty space below all items
+            if self.exclusion_listbox.size() > 0:
+                try:
+                    last_item_bbox = self.exclusion_listbox.bbox(self.exclusion_listbox.size() - 1)
+                    if last_item_bbox:
+                        last_item_bottom = last_item_bbox[1] + last_item_bbox[3]
+                        if event.y > last_item_bottom:
+                            self.exclusion_listbox.selection_clear(0, tk.END)
+                            self._selection_anchor = None
+                            return "break"
+                except Exception:
+                    pass
 
             ctrl_held = bool(event.state & 0x4)
             shift_held = bool(event.state & 0x1)
@@ -1199,7 +1226,7 @@ def select_multiple_folders_and_play():
 
             context_menu.add_command(
                 label="Play Selected",
-                command=self.play_selected_videos
+                command=lambda sel=selection: self.play_selected_videos(sel)
             )
             context_menu.add_separator()
 
@@ -1227,11 +1254,11 @@ def select_multiple_folders_and_play():
             context_menu.add_separator()
             context_menu.add_command(
                 label="Exclude Selected",
-                command=self.exclude_subdirectories
+                command=lambda sel=selection: self.exclude_subdirectories(sel)
             )
             context_menu.add_command(
                 label="Include Selected",
-                command=self.include_subdirectories
+                command=lambda sel=selection: self.include_subdirectories(sel)
             )
             context_menu.add_command(
                 label="Exclude All",
@@ -1612,9 +1639,12 @@ def select_multiple_folders_and_play():
 
         def on_search_changed(self, event=None):
             try:
-                self.search_query = self.search_entry.get().strip().lower()
+                new_query = self.search_entry.get().strip().lower()
             except Exception:
-                self.search_query = ""
+                new_query = ""
+            if new_query == self.search_query:
+                return
+            self.search_query = new_query
             selected_dir = self.get_current_selected_directory()
             if selected_dir:
                 self.load_subdirectories(selected_dir)
@@ -2055,7 +2085,7 @@ def select_multiple_folders_and_play():
             player.play()
             self._active_player = player
 
-        def play_selected_videos(self):
+        def play_selected_videos(self, selection=None):
             """Launch EmbeddedPlayer for the videos currently selected in the listbox,
             honouring all active exclusions and expanding folder selections."""
             from embedded_player import EmbeddedPlayer
@@ -2063,7 +2093,7 @@ def select_multiple_folders_and_play():
             selected_dir = self.get_current_selected_directory()
 
             try:
-                selected_indices = list(self.exclusion_listbox.curselection())
+                selected_indices = list(selection) if selection is not None else list(self.exclusion_listbox.curselection())
             except Exception:
                 selected_indices = []
 
@@ -2358,13 +2388,13 @@ def select_multiple_folders_and_play():
 
             ManagedThread(target=worker, name="ExcludeAllWorker").start()
 
-        def exclude_subdirectories(self):
+        def exclude_subdirectories(self, selection=None):
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
                 messagebox.showinfo("Information", "Please select a directory first.")
                 return
 
-            exclusion_selection = self.exclusion_listbox.curselection()
+            exclusion_selection = selection if selection is not None else self.exclusion_listbox.curselection()
 
             if not exclusion_selection:
                 messagebox.showinfo("Information", "Please select items to exclude.")
@@ -2465,13 +2495,13 @@ def select_multiple_folders_and_play():
 
             ManagedThread(target=worker, name="ExcludeWorker").start()
 
-        def include_subdirectories(self):
+        def include_subdirectories(self, selection=None):
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
                 messagebox.showinfo("Information", "Please select a directory first.")
                 return
 
-            exclusion_selection = self.exclusion_listbox.curselection()
+            exclusion_selection = selection if selection is not None else self.exclusion_listbox.curselection()
 
             if not exclusion_selection:
                 messagebox.showinfo("Information", "Please select items to include.")

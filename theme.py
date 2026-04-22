@@ -290,7 +290,8 @@ class ThemeSelector:
                         bg=self.entry_bg,
                         fg=self.entry_fg,
                         insertbackground=self.entry_fg,
-                        highlightbackground=self.entry_border
+                        highlightbackground=self.entry_border,
+                        highlightcolor=self.entry_border
                     )
 
         style.configure("TRadiobutton", background=self.bg_color, foreground=self.text_color)
