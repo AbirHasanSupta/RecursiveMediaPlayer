@@ -1584,9 +1584,12 @@ def select_multiple_folders_and_play():
 
         def on_search_changed(self, event=None):
             try:
-                self.search_query = self.search_entry.get().strip().lower()
+                new_query = self.search_entry.get().strip().lower()
             except Exception:
-                self.search_query = ""
+                new_query = ""
+            if new_query == self.search_query:
+                return
+            self.search_query = new_query
             selected_dir = self.get_current_selected_directory()
             if selected_dir:
                 self.load_subdirectories(selected_dir)
