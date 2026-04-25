@@ -1016,9 +1016,9 @@ class GridViewManager:
                 drag_hint.bind("<ButtonRelease-1>",
                                lambda e, dp=dir_path: self._on_dir_header_release(e, dp))
 
-                # Clicking the header (or its labels) should toggle selection for the directory.
+                # Clicking the header (or its labels) should select the directory.
                 for w in [header, dir_label, count_label, reorder_hint, label_frame]:
-                    w.bind("<Button-1>", lambda e, dp=dir_path: self._toggle_select_directory(dp))
+                    w.bind("<Button-1>", lambda e, dp=dir_path: self._on_dir_click(e, dp))
 
                 separator = tk.Frame(
                     header,
@@ -1192,23 +1192,71 @@ class GridViewManager:
         self._on_card_press(event, video_path, card_widget)
         self._on_card_click(event, video_path)
 
-    def _toggle_select_directory(self, dir_path):
-        video_paths_in_dir = [item_data['path'] for item_data in self.items
-                              if item_data['type'] == 'video' and os.path.dirname(item_data['path']) == dir_path]
+    def _on_dir_click(self, event, dir_path):
+        """Handle a click on a directory header with full Windows-like selection semantics."""
+        if self.video_preview_manager:
+            self.video_preview_manager.tooltip.hide_preview()
 
+        ctrl_held = bool(event.state & 0x4)
+        shift_held = bool(event.state & 0x1)
+
+        video_paths_in_dir = [item_data['path'] for item_data in self.items
+                              if item_data['type'] == 'video'
+                              and os.path.dirname(item_data['path']) == dir_path]
         if not video_paths_in_dir:
             return
 
-        all_selected = all(vp in self.selected_items for vp in video_paths_in_dir)
+        all_video_paths = [item_data['path'] for item_data in self.items
+                           if item_data['type'] == 'video']
 
-        if all_selected:
+        if shift_held and getattr(self, '_last_anchor_path', None) in all_video_paths:
+            # Extend selection from the anchor to all videos in this directory.
+            anchor_index = all_video_paths.index(self._last_anchor_path)
+            dir_indices = [all_video_paths.index(vp) for vp in video_paths_in_dir]
+            target_index = dir_indices[-1] if dir_indices[-1] > anchor_index else dir_indices[0]
+
+            start = min(anchor_index, target_index)
+            end = max(anchor_index, target_index)
+
+            for i in range(start, end + 1):
+                path = all_video_paths[i]
+                self.selected_items.add(path)
+                self._update_card_selection(path)
+
+        elif ctrl_held:
+            # Toggle this directory's videos without touching other selections.
+            all_selected = all(vp in self.selected_items for vp in video_paths_in_dir)
             for vp in video_paths_in_dir:
-                self.selected_items.discard(vp)
+                if all_selected:
+                    self.selected_items.discard(vp)
+                else:
+                    self.selected_items.add(vp)
                 self._update_card_selection(vp)
+            # Update anchor to first video of this dir
+            self._last_anchor_path = video_paths_in_dir[0]
+
         else:
-            for vp in video_paths_in_dir:
-                self.selected_items.add(vp)
-                self._update_card_selection(vp)
+            all_selected = all(vp in self.selected_items for vp in video_paths_in_dir)
+
+            if all_selected:
+                # Directory is fully selected -- plain click deselects it (toggle off).
+                for vp in video_paths_in_dir:
+                    self.selected_items.discard(vp)
+                    self._update_card_selection(vp)
+                self._last_anchor_path = None
+            else:
+                # Plain click: clear everything else and select only this directory's videos.
+                old_selection = self.selected_items.copy()
+                self.selected_items = set(video_paths_in_dir)
+
+                for path in old_selection:
+                    if path not in self.selected_items:
+                        self._update_card_selection(path)
+                for vp in video_paths_in_dir:
+                    self._update_card_selection(vp)
+
+                # Anchor is the first video in this directory for future Shift+clicks.
+                self._last_anchor_path = video_paths_in_dir[0]
 
         self._update_selection_label()
 
@@ -1254,29 +1302,23 @@ class GridViewManager:
 
         current_index = video_paths.index(video_path)
 
-        if shift_held and self.selected_items:
-            last_selected = None
-            for path in reversed(video_paths):
-                if path in self.selected_items:
-                    last_selected = video_paths.index(path)
-                    break
-
-            if last_selected is not None:
-                start = min(last_selected, current_index)
-                end = max(last_selected, current_index)
-
-                for i in range(start, end + 1):
-                    path = video_paths[i]
-                    self.selected_items.add(path)
-                    self._update_card_selection(path)
+        if shift_held:
+            anchor = getattr(self, '_last_anchor_path', None)
+            anchor_index = video_paths.index(anchor) if anchor in video_paths else current_index
+            start = min(anchor_index, current_index)
+            end = max(anchor_index, current_index)
+            for i in range(start, end + 1):
+                path = video_paths[i]
+                self.selected_items.add(path)
+                self._update_card_selection(path)
 
         elif ctrl_held:
             if video_path in self.selected_items:
                 self.selected_items.remove(video_path)
             else:
                 self.selected_items.add(video_path)
-
             self._update_card_selection(video_path)
+            self._last_anchor_path = video_path
 
         else:
             old_selection = self.selected_items.copy()
@@ -1287,6 +1329,7 @@ class GridViewManager:
                     self._update_card_selection(path)
 
             self._update_card_selection(video_path)
+            self._last_anchor_path = video_path
 
         self._update_selection_label()
 
@@ -1878,6 +1921,7 @@ class GridViewManager:
     def _clear_selection(self):
         old_selection = self.selected_items.copy()
         self.selected_items.clear()
+        self._last_anchor_path = None
         for video_path in old_selection:
             self._update_card_selection(video_path)
         self._update_selection_label()
