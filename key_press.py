@@ -103,6 +103,12 @@ def listen_keys(controller):
     hotkey_refs.append(keyboard.add_hotkey('ctrl+-', _guarded(lambda: controller.zoom_video(-1))))
     hotkey_refs.append(keyboard.add_hotkey('ctrl+0',  _guarded(lambda: controller.zoom_video(0))))
 
+    hotkey_refs.append(keyboard.add_hotkey('ctrl+right', _guarded(lambda: controller.next_chapter())))
+    hotkey_refs.append(keyboard.add_hotkey('ctrl+left', _guarded(lambda: controller.prev_chapter())))
+
+    hotkey_refs.append(keyboard.add_hotkey('c', _guarded(lambda: controller.cycle_subtitle_track())))
+    hotkey_refs.append(keyboard.add_hotkey('ctrl+shift+c', _guarded(lambda: controller.disable_subtitles())))
+
 
 def cleanup_hotkeys():
     global hotkey_refs, _mouse_scroll_hook
