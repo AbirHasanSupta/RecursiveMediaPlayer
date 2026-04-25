@@ -677,6 +677,108 @@ class BaseVLCPlayerController:
                 if self.logger:
                     self.logger(f"Zoom error: {e}")
 
+    def next_chapter(self):
+        with self.lock:
+            try:
+                chapter_count = self.player.get_chapter_count()
+                if chapter_count <= 0:
+                    if self.logger:
+                        self.logger("No chapters available")
+                    return
+                current = self.player.get_chapter()
+                if current < chapter_count - 1:
+                    self.player.set_chapter(current + 1)
+                    if self.logger:
+                        self.logger(f"Chapter {current + 2} of {chapter_count}")
+                else:
+                    self.next_video()
+            except Exception as e:
+                if self.logger:
+                    self.logger(f"Chapter next error: {e}")
+
+    def prev_chapter(self):
+        with self.lock:
+            try:
+                chapter_count = self.player.get_chapter_count()
+                if chapter_count <= 0:
+                    if self.logger:
+                        self.logger("No chapters available")
+                    return
+                current = self.player.get_chapter()
+                if current > 0:
+                    self.player.set_chapter(current - 1)
+                    if self.logger:
+                        self.logger(f"Chapter {current} of {chapter_count}")
+                else:
+                    self.prev_video()
+            except Exception as e:
+                if self.logger:
+                    self.logger(f"Chapter prev error: {e}")
+
+    def get_chapter_info(self):
+        try:
+            chapter_count = self.player.get_chapter_count()
+            if chapter_count <= 0:
+                return None
+            current = self.player.get_chapter()
+            return {"current": current, "total": chapter_count}
+        except Exception:
+            return None
+
+    def cycle_subtitle_track(self):
+        with self.lock:
+            try:
+                track_count = self.player.video_get_spu_count()
+                if track_count <= 0:
+                    if self.logger:
+                        self.logger("No subtitle tracks available")
+                    return
+                current = self.player.video_get_spu()
+                tracks = self.player.video_get_spu_description()
+                track_ids = [t[0] for t in tracks] if tracks else []
+                if not track_ids:
+                    return
+                if current == -1 or current not in track_ids:
+                    self.player.video_set_spu(track_ids[0])
+                    track_name = tracks[0][1].decode() if isinstance(tracks[0][1], bytes) else tracks[0][1]
+                    if self.logger:
+                        self.logger(f"Subtitles: {track_name}")
+                else:
+                    idx = track_ids.index(current)
+                    next_idx = (idx + 1) % len(track_ids)
+                    next_id = track_ids[next_idx]
+                    self.player.video_set_spu(next_id)
+                    track_name = tracks[next_idx][1].decode() if isinstance(tracks[next_idx][1], bytes) else tracks[next_idx][1]
+                    if self.logger:
+                        self.logger(f"Subtitles: {track_name}")
+            except Exception as e:
+                if self.logger:
+                    self.logger(f"Subtitle error: {e}")
+
+    def disable_subtitles(self):
+        with self.lock:
+            try:
+                self.player.video_set_spu(-1)
+                if self.logger:
+                    self.logger("Subtitles disabled")
+            except Exception as e:
+                if self.logger:
+                    self.logger(f"Subtitle disable error: {e}")
+
+    def load_subtitle_file(self, path: str):
+        with self.lock:
+            try:
+                result = self.player.add_slave(vlc.MediaSlaveType.subtitle, path, True)
+                if result == 0:
+                    if self.logger:
+                        self.logger(f"Subtitle file loaded: {os.path.basename(path)}")
+                else:
+                    if self.logger:
+                        self.logger(f"Failed to load subtitle file: {os.path.basename(path)}")
+            except Exception as e:
+                if self.logger:
+                    self.logger(f"Subtitle load error: {e}")
+
 
 class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
     def __init__(self, videos, video_to_dir, directories, logger=None, volume=50, is_muted=False):
