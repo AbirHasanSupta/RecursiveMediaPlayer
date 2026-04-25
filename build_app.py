@@ -8,7 +8,7 @@ import sys
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 
-from key_press import listen_keys, cleanup_hotkeys
+from key_press import listen_keys, cleanup_hotkeys, reload_hotkeys
 from managers.favorites_manager import FavoritesManager
 from managers.filter_sort_manager import AdvancedFilterSortManager
 from managers.filter_sort_ui import FilterSortUI
@@ -197,6 +197,9 @@ def select_multiple_folders_and_play():
 
             self.settings_manager = SettingsManager(self.root, self, self.update_console)
             self.settings_manager.add_settings_changed_callback(self._on_settings_changed)
+            self.settings_manager.set_hotkey_reload_callback(
+                lambda hk: reload_hotkeys(self.controller, hk)
+            )
             app_settings = self.settings_manager.get_settings()
 
             self.video_preview_manager = VideoPreviewManager(self.root, self.update_console)
@@ -1398,7 +1401,7 @@ def select_multiple_folders_and_play():
             self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
             self.player_thread.start()
 
-            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
+            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller, self.settings_manager.get_settings().hotkeys if hasattr(self, "settings_manager") else None), daemon=True)
             self.keys_thread.start()
 
             def init_overlay_delayed():
@@ -1995,7 +1998,7 @@ def select_multiple_folders_and_play():
                             self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                             self.player_thread.start()
 
-                            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller),
+                            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller, self.settings_manager.get_settings().hotkeys if hasattr(self, "settings_manager") else None),
                                                                 daemon=True)
                             self.keys_thread.start()
                             self.root.config(cursor="")
@@ -2073,7 +2076,7 @@ def select_multiple_folders_and_play():
                             self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                             self.player_thread.start()
 
-                            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller),
+                            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller, self.settings_manager.get_settings().hotkeys if hasattr(self, "settings_manager") else None),
                                                                 daemon=True)
                             self.keys_thread.start()
                             self.root.config(cursor="")
@@ -2151,7 +2154,7 @@ def select_multiple_folders_and_play():
                             self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                             self.player_thread.start()
 
-                            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller),
+                            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller, self.settings_manager.get_settings().hotkeys if hasattr(self, "settings_manager") else None),
                                                                 daemon=True)
                             self.keys_thread.start()
                             self.root.config(cursor="")
@@ -2275,7 +2278,7 @@ def select_multiple_folders_and_play():
                     self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                     self.player_thread.start()
 
-                    self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
+                    self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller, self.settings_manager.get_settings().hotkeys if hasattr(self, "settings_manager") else None), daemon=True)
                     self.keys_thread.start()
                     self.root.config(cursor="")
 
@@ -3366,7 +3369,7 @@ def select_multiple_folders_and_play():
             self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
             self.player_thread.start()
 
-            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
+            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller, self.settings_manager.get_settings().hotkeys if hasattr(self, "settings_manager") else None), daemon=True)
             self.keys_thread.start()
 
             def init_overlay_delayed():
@@ -3503,7 +3506,7 @@ def select_multiple_folders_and_play():
                 self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                 self.player_thread.start()
 
-                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
+                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller, self.settings_manager.get_settings().hotkeys if hasattr(self, "settings_manager") else None), daemon=True)
                 self.keys_thread.start()
                 time.sleep(1)
                 self.controller.init_overlay()
@@ -3592,7 +3595,7 @@ def select_multiple_folders_and_play():
                 self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                 self.player_thread.start()
 
-                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
+                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller, self.settings_manager.get_settings().hotkeys if hasattr(self, "settings_manager") else None), daemon=True)
                 self.keys_thread.start()
                 time.sleep(1)
                 self.controller.init_overlay()
@@ -3666,7 +3669,7 @@ def select_multiple_folders_and_play():
                 self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                 self.player_thread.start()
 
-                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
+                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller, self.settings_manager.get_settings().hotkeys if hasattr(self, "settings_manager") else None), daemon=True)
                 self.keys_thread.start()
                 time.sleep(1)
                 self.controller.init_overlay()

@@ -21,6 +21,7 @@ A sophisticated video player application with AI-powered semantic search capabil
 - **Favorites System**: Bookmark and organize your favorite videos for quick access
 - **Video Queue**: Manual queue management for fine-tuned playback order
 - **Settings Management**: Persistent save/load for all user and application preferences
+- **Customizable Keyboard Shortcuts**: Reassign any hotkey from the Settings → Keyboard Shortcuts tab; changes apply instantly without restarting
 
 ### AI-Powered Search
 - **Semantic Video Search**: Find videos using natural language descriptions
@@ -30,10 +31,12 @@ A sophisticated video player application with AI-powered semantic search capabil
 - **Resource-Efficient Preprocessing**: Smart batching and memory management for large collections
 
 ### Playback Controls
-- **Keyboard Shortcuts**: Comprehensive hotkey support for all functions
+- **Keyboard Shortcuts**: Comprehensive, fully remappable hotkey support for all playback functions
 - **Variable Speed Playback**: 0.25x to 2.0x speed control with visual slider
 - **Screenshot Capture**: Save screenshots with automatic naming
 - **File Management**: Copy current video path to clipboard
+- **Chapter Navigation**: Jump between video chapters
+- **Subtitle Control**: Cycle through subtitle tracks or disable them entirely
 
 ## Installation
 
@@ -88,34 +91,89 @@ pip install -r requirements\ai_requirements.txt
 
 ### Keyboard Controls During Playback
 
-| Key           | Action                                           |
-|---------------|--------------------------------------------------|
-| `Space`       | Pause/Resume                                     |
-| `D`           | Next video                                       |
-| `A`           | Previous video                                   |
-| `E`           | Next directory                                   |
-| `Q`           | Previous directory                               |
-| `W`           | Volume up                                        |
-| `S`           | Volume down                                      |
-| `M`           | Toggle Mute                                      |
-| `I`           | Toggle Overlay                                   |
-| `Right Arrow` | Fast forward (200ms)                             |
-| `Left Arrow`  | Rewind (200ms)                                   |
-| `F`           | Toggle fullscreen                                |
-| `1`           | Switch to monitor 1                              |
-| `2`           | Switch to monitor 2                              |
-| `+/=`         | Increase playback speed                          |
-| `-`           | Decrease playback speed                          |
-| `0`           | Reset speed to 1.0x                              |
-| `R`           | Rotate video 90° clockwise (cycles 0→90→180→270) |
-| `Ctrl+=`      | Zoom in (+10%)                                   |
-| `Ctrl+-`      | Zoom out (-10%)                                  |
-| `Ctrl+0`      | Reset zoom to 100%                               |
-| `T`           | Take screenshot                                  |
-| `V`           | Toggle voice commands                            |
-| `Ctrl+C`      | Copy current video path                          |
-| `Esc`         | Stop playback + Exit dual player fullscreen      |
-| `Shift+F`     | Toggle dual player fullscreen                    |
+All shortcuts listed below are the **defaults**. Every binding can be changed in **Settings → Keyboard Shortcuts** — click any key badge to reassign it. If you assign a key that is already in use, the two actions automatically swap bindings.
+
+#### ▶ Playback
+
+| Key           | Action                          |
+|---------------|---------------------------------|
+| `Space`       | Pause / Resume                  |
+| `Esc`         | Stop playback                   |
+| `Right Arrow` | Fast-forward 200 ms             |
+| `Left Arrow`  | Rewind 200 ms                   |
+
+#### 📁 Navigation
+
+| Key | Action             |
+|-----|--------------------|
+| `D` | Next video         |
+| `A` | Previous video     |
+| `E` | Next directory     |
+| `Q` | Previous directory |
+
+#### 🔊 Audio
+
+| Key           | Action            |
+|---------------|-------------------|
+| `W`           | Volume up (+10)   |
+| `S`           | Volume down (-10) |
+| `M`           | Toggle mute       |
+| `Mouse Wheel` | Volume up / down  |
+
+#### ⚡ Speed
+
+| Key | Action                    |
+|-----|---------------------------|
+| `=` | Increase speed (+0.25×)   |
+| `-` | Decrease speed (−0.25×)   |
+| `0` | Reset speed to 1.0×       |
+
+#### 🖼 Display
+
+| Key        | Action                                        |
+|------------|-----------------------------------------------|
+| `F`        | Toggle fullscreen                             |
+| `1`        | Switch to monitor 1                           |
+| `2`        | Switch to monitor 2                           |
+| `I`        | Toggle info overlay                           |
+| `R`        | Rotate video 90° clockwise (cycles 0→90→180→270) |
+| `Ctrl+=`   | Zoom in (+10%)                                |
+| `Ctrl+-`   | Zoom out (−10%)                               |
+| `Ctrl+0`   | Reset zoom to 100%                            |
+
+#### 📖 Chapters
+
+| Key | Action          |
+|-----|-----------------|
+| `N` | Next chapter    |
+| `B` | Previous chapter |
+
+#### 💬 Subtitles
+
+| Key      | Action                |
+|----------|-----------------------|
+| `U`      | Cycle subtitle track  |
+| `Ctrl+U` | Disable subtitles     |
+
+#### 🛠 Tools
+
+| Key      | Action                     |
+|----------|----------------------------|
+| `T`      | Take screenshot            |
+| `Ctrl+C` | Copy current video path    |
+| `V`      | Toggle voice commands      |
+
+### Customising Keyboard Shortcuts
+
+1. Open **Settings** (gear icon or menu)
+2. Go to the **Keyboard Shortcuts** tab
+3. Click the key badge next to any action — a capture dialog appears
+4. Press the new key or combo (`Ctrl`, `Shift` modifiers supported)
+5. If the key is already assigned elsewhere, the two actions **swap automatically**
+6. Press **Esc** to cancel without changing anything
+7. Click **Save Settings** — new bindings take effect immediately in the player
+
+Use **Reset Shortcuts to Defaults** at the bottom of the tab to restore all bindings at once.
 
 ## AI Search System
 
@@ -140,7 +198,7 @@ python enhanced_model.py --mode preprocess --videos_dir "C:/Videos" --out_dir ".
 
 #### Preprocessing Output
 - `clip_index.faiss` - Visual similarity index
-- `text_index.faiss` - Text/caption similarity index  
+- `text_index.faiss` - Text/caption similarity index
 - `metadata.pkl` - Video metadata and captions
 - `tfidf_index.pkl` - Text search index
 
@@ -164,7 +222,7 @@ python enhanced_model.py --mode search --query "walking" --keep_alive
 - `--query`: Search text (natural language description)
 - `--top_k`: Number of results to return (default: 20)
 - `--clip_weight`: Visual similarity weight (default: 0.35)
-- `--text_weight`: Caption similarity weight (default: 0.35) 
+- `--text_weight`: Caption similarity weight (default: 0.35)
 - `--tfidf_weight`: Keyword matching weight (default: 0.3)
 - `--keep_alive`: Interactive mode for multiple searches
 
@@ -185,12 +243,17 @@ python enhanced_model.py --mode search --query "woman in white dress dancing ind
 ## Configuration
 
 ### Settings
-The application saves preferences automatically:
-- Selected directories
-- Exclusion lists  
+The application saves all preferences automatically, including:
+- Selected directories and exclusion lists
 - Theme preference
 - Playback position (if resume enabled)
 - UI layout preferences
+- **Custom keyboard shortcut bindings**
+- Dual player mode toggle
+- Watch history enabled/disabled
+- Video preview duration and enabled state
+- AI preprocessing preferences (workers, max frames, batch size, GPU acceleration, incremental mode)
+- Auto watch-history cleanup period
 
 ### Configuration Files
 
@@ -229,7 +292,7 @@ Recursive Video Player/
 │   ├── grid_view_manager.py       # Visual video browser
 │   ├── playlist_manager.py        # Playlist creation and management
 │   ├── resume_playback_manager.py # Playback session recovery
-│   ├── settings_manager.py        # Persistent application settings
+│   ├── settings_manager.py        # Persistent application settings and hotkey config
 │   ├── video_preview_manager.py   # Thumbnail and hover-preview logic
 │   ├── video_queue_manager.py     # Manual video queue
 │   ├── voice_command_manager.py   # Voice recognition and control
@@ -263,5 +326,4 @@ Recursive Video Player/
 
 **Memory errors during preprocessing**: Reduce `--workers` parameter or `--max_frames`
 
-**Hotkeys not working**: Ensure application window has focus
-
+**Hotkeys not working**: Ensure the application window has focus. If a shortcut conflicts with another app, reassign it in Settings → Keyboard Shortcuts

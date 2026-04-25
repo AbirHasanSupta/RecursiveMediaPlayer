@@ -42,15 +42,90 @@ def _guarded(fn):
                 fn()
             except Exception:
                 pass
-        else:
-            pass
     return wrapped
 
 
-def listen_keys(controller):
+# ---------------------------------------------------------------------------
+# Default hotkeys — used when no settings object is supplied.
+# Must stay in sync with DEFAULT_HOTKEYS in settings_manager.py.
+# ---------------------------------------------------------------------------
+_DEFAULT_HOTKEYS = {
+    "toggle_pause":      "space",
+    "stop_video":        "esc",
+    "fast_forward":      "right",
+    "rewind":            "left",
+    "next_video":        "d",
+    "prev_video":        "a",
+    "next_directory":    "e",
+    "prev_directory":    "q",
+    "volume_up":         "w",
+    "volume_down":       "s",
+    "toggle_mute":       "m",
+    "increase_speed":    "=",
+    "decrease_speed":    "-",
+    "reset_speed":       "0",
+    "toggle_fullscreen": "f",
+    "monitor_1":         "1",
+    "monitor_2":         "2",
+    "toggle_overlay":    "i",
+    "rotate_right":      "r",
+    "zoom_in":           "ctrl+=",
+    "zoom_out":          "ctrl+-",
+    "zoom_reset":        "ctrl+0",
+    "take_screenshot":   "t",
+    "copy_video_path":   "ctrl+c",
+    "toggle_voice":      "v",
+    "next_chapter":      "n",
+    "prev_chapter":      "b",
+    "cycle_subtitle":    "u",
+    "disable_subtitles": "ctrl+u",
+}
+
+# Mapping from action-id -> (controller_method_name, extra_positional_args)
+_ACTION_MAP = {
+    "toggle_pause":      ("toggle_pause",         ()),
+    "stop_video":        ("stop_video",            ()),
+    "fast_forward":      ("fast_forward",          ()),
+    "rewind":            ("rewind",                ()),
+    "next_video":        ("next_video",            ()),
+    "prev_video":        ("prev_video",            ()),
+    "next_directory":    ("next_directory",        ()),
+    "prev_directory":    ("prev_directory",        ()),
+    "volume_up":         ("volume_up",             ()),
+    "volume_down":       ("volume_down",           ()),
+    "toggle_mute":       ("toggle_mute",           ()),
+    "increase_speed":    ("increase_speed",        ()),
+    "decrease_speed":    ("decrease_speed",        ()),
+    "reset_speed":       ("reset_speed_hotkey",    ()),
+    "toggle_fullscreen": ("toggle_fullscreen",     ()),
+    "monitor_1":         ("switch_to_monitor",     (1,)),
+    "monitor_2":         ("switch_to_monitor",     (2,)),
+    "toggle_overlay":    ("toggle_overlay",        ()),
+    "rotate_right":      ("rotate_video",          ("right",)),
+    "zoom_in":           ("zoom_video",            (1,)),
+    "zoom_out":          ("zoom_video",            (-1,)),
+    "zoom_reset":        ("zoom_video",            (0,)),
+    "take_screenshot":   ("take_screenshot",       ()),
+    "copy_video_path":   ("copy_current_video",    ()),
+    "toggle_voice":      ("toggle_voice_commands", ()),
+    "next_chapter":      ("next_chapter",          ()),
+    "prev_chapter":      ("prev_chapter",          ()),
+    "cycle_subtitle":    ("cycle_subtitle_track",  ()),
+    "disable_subtitles": ("disable_subtitles",     ()),
+}
+
+
+def listen_keys(controller, hotkeys: dict = None):
+    """Register all hotkeys from *hotkeys* (falls back to _DEFAULT_HOTKEYS).
+
+    Call this function (or the convenience wrapper reload_hotkeys) whenever
+    the user saves new key bindings in Settings.
+    """
     global hotkey_refs, _mouse_scroll_hook
 
     cleanup_hotkeys()
+
+    hk = hotkeys if isinstance(hotkeys, dict) else _DEFAULT_HOTKEYS
 
     # ── mouse-wheel volume control ──────────────────────────────────────────
     def _on_mouse_scroll(event):
@@ -65,7 +140,7 @@ def listen_keys(controller):
         except Exception:
             pass
 
-    _mouse_scroll_hook = keyboard.on_press(lambda e: None)  # placeholder replaced below
+    # ── mouse-wheel hook (optional mouse package) ──────────────────────────
     try:
         import mouse as _mouse_lib
         _mouse_scroll_hook = _mouse_lib.hook(
@@ -73,41 +148,43 @@ def listen_keys(controller):
             if isinstance(e, _mouse_lib.WheelEvent) else None
         )
     except Exception:
-        pass  # 'mouse' package not available; wheel via overlay only
+        _mouse_scroll_hook = None  # 'mouse' package not available
 
-    hotkey_refs.append(keyboard.add_hotkey('esc', _guarded(lambda: controller.stop_video())))
-    hotkey_refs.append(keyboard.add_hotkey('d', _guarded(lambda: controller.next_video())))
-    hotkey_refs.append(keyboard.add_hotkey('a', _guarded(lambda: controller.prev_video())))
-    hotkey_refs.append(keyboard.add_hotkey('w', _guarded(lambda: controller.volume_up())))
-    hotkey_refs.append(keyboard.add_hotkey('s', _guarded(lambda: controller.volume_down())))
-    hotkey_refs.append(keyboard.add_hotkey('m', _guarded(lambda: controller.toggle_mute())))
-    hotkey_refs.append(keyboard.add_hotkey('space', _guarded(lambda: controller.toggle_pause())))
-    hotkey_refs.append(keyboard.add_hotkey('right', _guarded(lambda: controller.fast_forward())))
-    hotkey_refs.append(keyboard.add_hotkey('left', _guarded(lambda: controller.rewind())))
-    hotkey_refs.append(keyboard.add_hotkey('f', _guarded(lambda: controller.toggle_fullscreen())))
-    hotkey_refs.append(keyboard.add_hotkey('t', _guarded(lambda: controller.take_screenshot())))
-    hotkey_refs.append(keyboard.add_hotkey('1', _guarded(lambda: controller.switch_to_monitor(1))))
-    hotkey_refs.append(keyboard.add_hotkey('2', _guarded(lambda: controller.switch_to_monitor(2))))
-    hotkey_refs.append(keyboard.add_hotkey('=', _guarded(lambda: controller.increase_speed())))
-    hotkey_refs.append(keyboard.add_hotkey('-', _guarded(lambda: controller.decrease_speed())))
-    hotkey_refs.append(keyboard.add_hotkey('0', _guarded(lambda: controller.reset_speed_hotkey())))
-    hotkey_refs.append(keyboard.add_hotkey('ctrl+c', _guarded(lambda: controller.copy_current_video())))
-    hotkey_refs.append(keyboard.add_hotkey('i', _guarded(lambda: controller.toggle_overlay())))
-    hotkey_refs.append(keyboard.add_hotkey('e', _guarded(lambda: controller.next_directory())))
-    hotkey_refs.append(keyboard.add_hotkey('q', _guarded(lambda: controller.prev_directory())))
-    hotkey_refs.append(keyboard.add_hotkey('v', _guarded(lambda: controller.toggle_voice_commands() if hasattr(controller, 'toggle_voice_commands') else None)))
+    # ── register one hotkey per action ─────────────────────────────────────
+    for action_id, (method_name, extra_args) in _ACTION_MAP.items():
+        # Use the user's binding; only fall back to default when the value is
+        # explicitly None (not when it is an empty string, which means "unbound").
+        combo = hk.get(action_id) if hk.get(action_id) is not None else _DEFAULT_HOTKEYS.get(action_id)
+        if not combo:
+            continue  # action has no binding
 
-    hotkey_refs.append(keyboard.add_hotkey('r', _guarded(lambda: controller.rotate_video('right'))))
-    hotkey_refs.append(keyboard.add_hotkey('ctrl+=', _guarded(lambda: controller.zoom_video(1))))
-    hotkey_refs.append(keyboard.add_hotkey('ctrl+shift+equal', _guarded(lambda: controller.zoom_video(1))))
-    hotkey_refs.append(keyboard.add_hotkey('ctrl+-', _guarded(lambda: controller.zoom_video(-1))))
-    hotkey_refs.append(keyboard.add_hotkey('ctrl+0',  _guarded(lambda: controller.zoom_video(0))))
+        def _make_callback(mname, args):
+            def _cb():
+                method = getattr(controller, mname, None)
+                if method is None:
+                    return
+                try:
+                    method(*args)
+                except Exception:
+                    pass
+            return _guarded(_cb)
 
-    hotkey_refs.append(keyboard.add_hotkey('ctrl+right', _guarded(lambda: controller.next_chapter())))
-    hotkey_refs.append(keyboard.add_hotkey('ctrl+left', _guarded(lambda: controller.prev_chapter())))
+        try:
+            ref = keyboard.add_hotkey(combo, _make_callback(method_name, extra_args))
+            hotkey_refs.append(ref)
+        except Exception as e:
+            print(f"[key_press] Could not register hotkey '{combo}' for '{action_id}': {e}")
 
-    hotkey_refs.append(keyboard.add_hotkey('c', _guarded(lambda: controller.cycle_subtitle_track())))
-    hotkey_refs.append(keyboard.add_hotkey('ctrl+shift+c', _guarded(lambda: controller.disable_subtitles())))
+
+def reload_hotkeys(controller, hotkeys: dict = None):
+    """Convenience wrapper — call this after the user saves new key bindings.
+
+    Typical usage in your settings-changed callback::
+
+        def on_settings_changed(settings):
+            reload_hotkeys(controller, settings.hotkeys)
+    """
+    listen_keys(controller, hotkeys)
 
 
 def cleanup_hotkeys():
@@ -122,10 +199,9 @@ def cleanup_hotkeys():
             print(f"Error removing hotkey: {e}")
 
     hotkey_refs.clear()
-    try:
-        keyboard.unhook_all()
-    except:
-        pass
+    # NOTE: keyboard.unhook_all() is intentionally NOT called here because it
+    # would also remove hooks registered by other parts of the app (e.g. the
+    # mouse-scroll hook).  Individual refs are removed in the loop above.
 
     if _mouse_scroll_hook is not None:
         try:
@@ -134,5 +210,6 @@ def cleanup_hotkeys():
         except Exception:
             pass
     _mouse_scroll_hook = None
+
 
 get_resource_manager().register_cleanup_callback(cleanup_hotkeys)

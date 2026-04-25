@@ -28,6 +28,100 @@ def _get_app_dirs():
 
 
 
+# ---------------------------------------------------------------------------
+# Default hotkey bindings.  Keys are stable action identifiers; values are
+# the key/combo strings accepted by the `keyboard` library (e.g. 'space',
+# 'ctrl+c', 'right').  "mouse_wheel" is handled separately in key_press.py
+# and is included here only so the Settings UI can display/edit it.
+# ---------------------------------------------------------------------------
+DEFAULT_HOTKEYS: Dict[str, str] = {
+    # Playback
+    "toggle_pause":       "space",
+    "stop_video":         "esc",
+    "fast_forward":       "right",
+    "rewind":             "left",
+    # Navigation
+    "next_video":         "d",
+    "prev_video":         "a",
+    "next_directory":     "e",
+    "prev_directory":     "q",
+    # Audio
+    "volume_up":          "w",
+    "volume_down":        "s",
+    "toggle_mute":        "m",
+    # Speed
+    "increase_speed":     "=",
+    "decrease_speed":     "-",
+    "reset_speed":        "0",
+    # Display
+    "toggle_fullscreen":  "f",
+    "monitor_1":          "1",
+    "monitor_2":          "2",
+    "toggle_overlay":     "i",
+    "rotate_right":       "r",
+    "zoom_in":            "ctrl+=",
+    "zoom_out":           "ctrl+-",
+    "zoom_reset":         "ctrl+0",
+    # Tools
+    "take_screenshot":    "t",
+    "copy_video_path":    "ctrl+c",
+    "toggle_voice":       "v",
+    # Chapters
+    "next_chapter":       "n",
+    "prev_chapter":       "b",
+    # Subtitles
+    "cycle_subtitle":     "u",
+    "disable_subtitles":  "ctrl+u",
+}
+
+# Human-readable labels for the Settings UI
+HOTKEY_LABELS: Dict[str, str] = {
+    "toggle_pause":       "Pause / Resume",
+    "stop_video":         "Stop playback",
+    "fast_forward":       "Fast-forward 200 ms",
+    "rewind":             "Rewind 200 ms",
+    "next_video":         "Next video",
+    "prev_video":         "Previous video",
+    "next_directory":     "Next directory",
+    "prev_directory":     "Previous directory",
+    "volume_up":          "Volume up (+10)",
+    "volume_down":        "Volume down (-10)",
+    "toggle_mute":        "Toggle mute",
+    "increase_speed":     "Increase speed (+0.25×)",
+    "decrease_speed":     "Decrease speed (−0.25×)",
+    "reset_speed":        "Reset speed to 1.0×",
+    "toggle_fullscreen":  "Toggle fullscreen",
+    "monitor_1":          "Switch to monitor 1",
+    "monitor_2":          "Switch to monitor 2",
+    "toggle_overlay":     "Toggle info overlay",
+    "rotate_right":       "Rotate video 90° clockwise",
+    "zoom_in":            "Zoom in (+10%)",
+    "zoom_out":           "Zoom out (−10%)",
+    "zoom_reset":         "Reset zoom to 100%",
+    "take_screenshot":    "Take screenshot",
+    "copy_video_path":    "Copy current video path",
+    "toggle_voice":       "Toggle voice commands",
+    "next_chapter":       "Next chapter",
+    "prev_chapter":       "Previous chapter",
+    "cycle_subtitle":     "Cycle subtitle track",
+    "disable_subtitles":  "Disable subtitles",
+}
+
+# Group order for the Settings UI
+HOTKEY_GROUPS: list = [
+    ("▶  Playback",       ["toggle_pause", "stop_video", "fast_forward", "rewind"]),
+    ("📁  Navigation",    ["next_video", "prev_video", "next_directory", "prev_directory"]),
+    ("🔊  Audio",         ["volume_up", "volume_down", "toggle_mute"]),
+    ("⚡  Speed",          ["increase_speed", "decrease_speed", "reset_speed"]),
+    ("🖼  Display",        ["toggle_fullscreen", "monitor_1", "monitor_2",
+                            "toggle_overlay", "rotate_right",
+                            "zoom_in", "zoom_out", "zoom_reset"]),
+    ("🛠  Tools",          ["take_screenshot", "copy_video_path", "toggle_voice"]),
+    ("📖  Chapters",       ["next_chapter", "prev_chapter"]),
+    ("💬  Subtitles",      ["cycle_subtitle", "disable_subtitles"]),
+]
+
+
 class SettingsData:
     """Data class for application settings following Single Responsibility Principle"""
 
@@ -45,6 +139,8 @@ class SettingsData:
         self.use_video_preview = True
         self.enable_watch_history = True
         self.dual_window_enabled = False
+        # Mutable copy of default hotkeys — users can override individual bindings
+        self.hotkeys: Dict[str, str] = dict(DEFAULT_HOTKEYS)
 
     def to_dict(self) -> dict:
         return {
@@ -59,7 +155,8 @@ class SettingsData:
             'preview_duration': self.preview_duration,
             'use_video_preview': self.use_video_preview,
             'enable_watch_history': self.enable_watch_history,
-            'dual_window_enabled': self.dual_window_enabled
+            'dual_window_enabled': self.dual_window_enabled,
+            'hotkeys': dict(self.hotkeys),
         }
 
     @classmethod
@@ -77,6 +174,10 @@ class SettingsData:
         settings.use_video_preview = data.get('use_video_preview', settings.use_video_preview)
         settings.enable_watch_history = data.get('enable_watch_history', settings.enable_watch_history)
         settings.dual_window_enabled = data.get('dual_window_enabled', settings.dual_window_enabled)
+        # Merge saved hotkeys on top of defaults so new actions always have a binding
+        saved_hotkeys = data.get('hotkeys', {})
+        if isinstance(saved_hotkeys, dict):
+            settings.hotkeys.update(saved_hotkeys)
         return settings
 
 
@@ -233,6 +334,8 @@ class SettingsUI:
         self.clear_metadata_callback = None
         self.get_metadata_info_callback = None
         self.filter_sort_manager = None
+        # Maps action_id -> tk.Button so the shortcuts tab can update button labels
+        self._hotkey_btn_map: Dict[str, tk.Button] = {}
 
     def show_settings_window(self):
         """Show the settings window"""
@@ -747,50 +850,49 @@ class SettingsUI:
         return frame
 
     def _create_shortcuts_tab(self, parent):
-        """Create Keyboard Shortcuts reference tab"""
+        """Create editable Keyboard Shortcuts tab."""
         frame = ttk.Frame(parent)
 
         main_container = tk.Frame(frame, bg=self.theme_provider.bg_color)
         main_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-        # ── header ─────────────────────────────────────────────────────────
-        header_label = tk.Label(
+        # ── header ──────────────────────────────────────────────────────────
+        tk.Label(
             main_container,
-            text="All keyboard shortcuts are active whenever the player window is in focus.",
+            text="Click a key badge to reassign it.  Press the new key (or combo) when prompted.",
             font=self.theme_provider.small_font,
             bg=self.theme_provider.bg_color,
             fg="#666666",
             wraplength=620,
             justify=tk.LEFT
-        )
-        header_label.pack(anchor='w', pady=(0, 12))
+        ).pack(anchor='w', pady=(0, 4))
 
-        # ── scrollable canvas ───────────────────────────────────────────────
+        conflict_bar_frame = tk.Frame(main_container, bg=self.theme_provider.bg_color)
+        conflict_bar_frame.pack(fill=tk.X, pady=(0, 8))
+        self._conflict_label = tk.Label(
+            conflict_bar_frame,
+            text="",
+            font=self.theme_provider.small_font,
+            bg=self.theme_provider.bg_color,
+            fg="#cc3300",
+        )
+        self._conflict_label.pack(anchor='w')
+
+        # ── scrollable canvas ────────────────────────────────────────────────
         canvas_frame = tk.Frame(main_container, bg=self.theme_provider.bg_color)
         canvas_frame.pack(fill=tk.BOTH, expand=True)
 
-        canvas = tk.Canvas(
-            canvas_frame,
-            bg=self.theme_provider.bg_color,
-            highlightthickness=0
-        )
+        canvas = tk.Canvas(canvas_frame, bg=self.theme_provider.bg_color, highlightthickness=0)
         scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
         canvas.configure(yscrollcommand=scrollbar.set)
-
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         inner = tk.Frame(canvas, bg=self.theme_provider.bg_color)
         canvas_window = canvas.create_window((0, 0), window=inner, anchor='nw')
 
-        def _on_frame_configure(event):
-            canvas.configure(scrollregion=canvas.bbox("all"))
-
-        def _on_canvas_configure(event):
-            canvas.itemconfig(canvas_window, width=event.width)
-
-        inner.bind("<Configure>", _on_frame_configure)
-        canvas.bind("<Configure>", _on_canvas_configure)
+        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas_window, width=e.width))
 
         def _on_mousewheel(event):
             try:
@@ -800,139 +902,275 @@ class SettingsUI:
                 pass
 
         canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        self.settings_window.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>"))
 
-        def _unbind_mousewheel(event=None):
-            try:
-                canvas.unbind_all("<MouseWheel>")
-            except Exception:
-                pass
+        # ── state for key-capture ────────────────────────────────────────────
+        self._capturing_action: Optional[str] = None
+        self._capture_overlay: Optional[tk.Toplevel] = None
 
-        self.settings_window.bind("<Destroy>", _unbind_mousewheel)
+        # Working copy of hotkeys (not committed until Save is pressed)
+        self._hotkeys_draft: Dict[str, str] = dict(self.settings.hotkeys)
+        # Reset the button map for this window instance
+        self._hotkey_btn_map = {}
 
-        # ── shortcut data ───────────────────────────────────────────────────
-        SHORTCUT_GROUPS = [
-            ("▶  Playback", [
-                ("Space",           "Pause / Resume"),
-                ("Esc",             "Stop playback + Exit dual player fullscreen"),
-                ("Right Arrow",     "Fast-forward 200 ms"),
-                ("Left Arrow",      "Rewind 200 ms"),
-            ]),
-            ("📁  Navigation", [
-                ("D",               "Next video"),
-                ("A",               "Previous video"),
-                ("E",               "Next directory"),
-                ("Q",               "Previous directory"),
-            ]),
-            ("🔊  Audio", [
-                ("W",               "Volume up (+10)"),
-                ("S",               "Volume down (-10)"),
-                ("M",               "Toggle mute"),
-                ("Mouse Wheel",     "Volume up / down"),
-            ]),
-            ("⚡  Playback Speed", [
-                ("=  or  +",        "Increase speed (+0.25×)"),
-                ("-",               "Decrease speed (−0.25×)"),
-                ("0",               "Reset speed to 1.0×"),
-            ]),
-            ("🖼  Video & Display", [
-                ("F",               "Toggle fullscreen"),
-                ("1",               "Switch to monitor 1"),
-                ("2",               "Switch to monitor 2"),
-                ("I",               "Toggle info overlay"),
-                ("R",               "Rotate video 90° clockwise"),
-                ("Ctrl  +  =",      "Zoom in (+10%)"),
-                ("Ctrl  +  -",      "Zoom out (−10%)"),
-                ("Ctrl  +  0",      "Reset zoom to 100%"),
-                ("Shift  +  F",      "Toggle dual player fullscreen"),
-            ]),
-            ("🛠  Tools & Misc", [
-                ("T",               "Take screenshot"),
-                ("Ctrl  +  C",      "Copy current video path"),
-                ("V",               "Toggle voice commands"),
-            ]),
-        ]
+        # badge colours
+        badge_bg = getattr(self.theme_provider, 'badge_bg', '#e8e8e8')
+        badge_fg = getattr(self.theme_provider, 'badge_fg', '#333333')
+        active_bg = getattr(self.theme_provider, 'accent_color', '#0078d4')
 
-        # ── column widths ───────────────────────────────────────────────────
-        KEY_COL_W   = 22   # characters
-        ACTION_COL_W = 42
+        KEY_COL_W = 20
 
-        # ── helper to build one group ───────────────────────────────────────
-        def _add_group(parent_frame, title, rows):
+        def _start_capture(action_id: str, btn: tk.Button):
+            """Open a small overlay that waits for a single keypress."""
+            if self._capturing_action is not None:
+                return  # already capturing
+
+            self._capturing_action = action_id
+            self._conflict_label.config(text="")
+
+            # Dim the button to show it's "armed"
+            btn.config(bg=active_bg, fg='white', relief=tk.SUNKEN)
+
+            overlay = tk.Toplevel(self.settings_window)
+            overlay.title("Press new key…")
+            overlay.geometry("340x120")
+            overlay.configure(bg=self.theme_provider.bg_color)
+            overlay.transient(self.settings_window)
+            overlay.grab_set()
+            overlay.resizable(False, False)
+            self._capture_overlay = overlay
+
+            action_label = HOTKEY_LABELS.get(action_id, action_id)
+            tk.Label(
+                overlay,
+                text=f"Reassigning:  {action_label}",
+                font=self.theme_provider.normal_font,
+                bg=self.theme_provider.bg_color,
+                fg=self.theme_provider.text_color,
+                wraplength=300
+            ).pack(pady=(18, 6))
+
+            tk.Label(
+                overlay,
+                text="Press any key or combo  (Esc = cancel)",
+                font=self.theme_provider.small_font,
+                bg=self.theme_provider.bg_color,
+                fg="#888888"
+            ).pack()
+
+            def _finish_capture(event):
+                # ── Step 1: identify the main key, ignoring bare modifiers ──
+                keysym_raw = event.keysym.lower()
+
+                # Skip bare modifier keypresses entirely
+                if keysym_raw in ('control_l', 'control_r', 'shift_l', 'shift_r',
+                                  'alt_l', 'alt_r', 'super_l', 'super_r',
+                                  'caps_lock', 'num_lock', 'scroll_lock'):
+                    return
+
+                # Esc with NO other real key held → cancel (check raw keysym first,
+                # before we inspect state, to avoid the spurious-Alt problem on Windows)
+                if keysym_raw == 'escape':
+                    _cancel()
+                    return
+
+                # ── Step 2: detect held modifiers via keysym names, NOT event.state ──
+                # event.state is unreliable on Windows (spurious Alt bit after grab_set).
+                # Instead we ask Tk which modifier keys are physically pressed right now.
+                mods = []
+                try:
+                    # widget.tk.call returns a list of currently-pressed keys
+                    pressed = overlay.tk.call('::tk::PressedKeys') if False else []
+                except Exception:
+                    pressed = []
+
+                # Fallback: use event.state but mask out the known-spurious Alt bit (0x8)
+                # that Windows sets after grab_set/focus_force.  We still honour Ctrl (0x4)
+                # and Shift (0x1) from state because those don't suffer the same issue.
+                # Alt is only added if the keysym itself tells us it was held.
+                if event.state & 0x4:
+                    mods.append('ctrl')
+                if event.state & 0x1:
+                    mods.append('shift')
+                # Alt: only trust it when the previous event's keysym was alt_l/alt_r,
+                # i.e. when there is actual evidence in the keysym stream.
+                # The simplest safe approach: never infer Alt from state alone.
+                # Users who want Alt+X can press Alt first (it gets filtered above only
+                # for *bare* Alt presses), then X — at that point keysym_raw will be
+                # something like 'a' and state will have bit 0x20000 on Windows or 0x8
+                # on X11.  We honour the X11 bit only when keysym_raw is NOT 'escape'.
+                if (event.state & 0x20000) or (event.state & 0x8 and keysym_raw != 'escape'):
+                    # Double-check: if the previous keydown was actually an alt key,
+                    # include alt.  We use a simpler heuristic: only add 'alt' when
+                    # event.state has the bit AND the char produced is not a normal char
+                    # (alt on Windows produces odd chars via AltGr etc.).
+                    # Safe approach: skip adding 'alt' from state — users wanting
+                    # Alt combos are rare for a video player and it avoids all bugs.
+                    pass  # intentionally not adding alt from state bits
+
+                # Normalise keysym to the strings the `keyboard` library expects
+                _norm = {
+                    'return':    'enter',
+                    'prior':     'page_up',
+                    'next':      'page_down',
+                    'equal':     '=',
+                    'minus':     '-',
+                    'plus':      '+',
+                    'bracketleft':  '[',
+                    'bracketright': ']',
+                    'semicolon': ';',
+                    'apostrophe': "'",
+                    'comma':     ',',
+                    'period':    '.',
+                    'slash':     '/',
+                    'backslash': '\\',
+                    'grave':     '`',
+                    'space':     'space',
+                    'tab':       'tab',
+                    'delete':    'delete',
+                    'backspace': 'backspace',
+                    'insert':    'insert',
+                    'home':      'home',
+                    'end':       'end',
+                    'f1': 'f1', 'f2': 'f2', 'f3': 'f3', 'f4': 'f4',
+                    'f5': 'f5', 'f6': 'f6', 'f7': 'f7', 'f8': 'f8',
+                    'f9': 'f9', 'f10': 'f10', 'f11': 'f11', 'f12': 'f12',
+                    'up': 'up', 'down': 'down', 'left': 'left', 'right': 'right',
+                }
+                keysym = _norm.get(keysym_raw, keysym_raw)
+
+                combo = '+'.join(mods + [keysym]) if mods else keysym
+
+                # ── Step 3: detect collision and swap if needed ──────────────
+                conflict_action = None
+                for aid, k in self._hotkeys_draft.items():
+                    if k == combo and aid != action_id:
+                        conflict_action = aid
+                        break
+
+                old_combo = self._hotkeys_draft.get(action_id, '')
+
+                if conflict_action:
+                    # Swap: give the displaced action the key we are moving away from
+                    self._hotkeys_draft[conflict_action] = old_combo
+                    displaced_label = HOTKEY_LABELS.get(conflict_action, conflict_action)
+                    # Update the displaced action's button label immediately
+                    displaced_btn = self._hotkey_btn_map.get(conflict_action)
+                    if displaced_btn and displaced_btn.winfo_exists():
+                        displaced_btn.config(text=old_combo or '—',
+                                             bg=badge_bg, fg=badge_fg, relief=tk.GROOVE)
+                    try:
+                        self._conflict_label.config(
+                            text=f"↔  Swapped: '{displaced_label}' is now '{old_combo or '—'}'"
+                        )
+                    except Exception:
+                        pass
+
+                # ── Step 4: commit this action's new binding ──────────────────
+                self._hotkeys_draft[action_id] = combo
+                try:
+                    if btn.winfo_exists():
+                        btn.config(text=combo, bg=badge_bg, fg=badge_fg, relief=tk.GROOVE)
+                    if not conflict_action:
+                        self._conflict_label.config(text="")
+                except Exception:
+                    pass
+                _close_overlay()
+                self._capturing_action = None
+
+            def _cancel(revert=True):
+                if revert:
+                    btn.config(bg=badge_bg, fg=badge_fg, relief=tk.GROOVE)
+                _close_overlay()
+                self._capturing_action = None
+
+            def _close_overlay():
+                try:
+                    overlay.unbind_all('<KeyPress>')
+                    overlay.grab_release()
+                    overlay.destroy()
+                except Exception:
+                    pass
+                self._capture_overlay = None
+
+            overlay.bind('<KeyPress>', _finish_capture)
+            overlay.focus_force()
+
+        def _add_group(parent_frame, title, action_ids):
             section = tk.LabelFrame(
                 parent_frame,
                 text=title,
                 font=self.theme_provider.normal_font,
                 bg=self.theme_provider.bg_color,
                 fg=self.theme_provider.text_color,
-                padx=10,
-                pady=6
+                padx=10, pady=6
             )
             section.pack(fill=tk.X, pady=(0, 12))
 
-            # column headers
-            hdr_frame = tk.Frame(section, bg=self.theme_provider.bg_color)
-            hdr_frame.pack(fill=tk.X, pady=(0, 4))
+            hdr = tk.Frame(section, bg=self.theme_provider.bg_color)
+            hdr.pack(fill=tk.X, pady=(0, 4))
+            tk.Label(hdr, text="Key / Combo", font=self.theme_provider.small_font,
+                     bg=self.theme_provider.bg_color, fg="#999999",
+                     width=KEY_COL_W, anchor='w').pack(side=tk.LEFT)
+            tk.Label(hdr, text="Action", font=self.theme_provider.small_font,
+                     bg=self.theme_provider.bg_color, fg="#999999",
+                     anchor='w').pack(side=tk.LEFT)
 
-            tk.Label(
-                hdr_frame,
-                text="Key / Combo",
-                font=self.theme_provider.small_font,
-                bg=self.theme_provider.bg_color,
-                fg="#999999",
-                width=KEY_COL_W,
-                anchor='w'
-            ).pack(side=tk.LEFT)
+            tk.Frame(section, bg="#dddddd", height=1).pack(fill=tk.X, pady=(0, 6))
 
-            tk.Label(
-                hdr_frame,
-                text="Action",
-                font=self.theme_provider.small_font,
-                bg=self.theme_provider.bg_color,
-                fg="#999999",
-                anchor='w'
-            ).pack(side=tk.LEFT)
+            alt_row = getattr(self.theme_provider, 'alt_row_color', self.theme_provider.bg_color)
+            for i, action_id in enumerate(action_ids):
+                current_key = self._hotkeys_draft.get(action_id, '—')
+                action_label = HOTKEY_LABELS.get(action_id, action_id)
+                row_bg = alt_row if i % 2 else self.theme_provider.bg_color
 
-            # separator
-            sep = tk.Frame(section, bg="#dddddd", height=1)
-            sep.pack(fill=tk.X, pady=(0, 6))
+                row = tk.Frame(section, bg=row_bg)
+                row.pack(fill=tk.X, pady=1)
 
-            for i, (key, action) in enumerate(rows):
-                row_bg = self.theme_provider.bg_color
-                # subtle alternating shade
-                if hasattr(self.theme_provider, 'alt_row_color'):
-                    row_bg = self.theme_provider.alt_row_color if i % 2 else self.theme_provider.bg_color
-
-                row_frame = tk.Frame(section, bg=row_bg)
-                row_frame.pack(fill=tk.X, pady=1)
-
-                # key badge
-                key_lbl = tk.Label(
-                    row_frame,
-                    text=key,
+                btn = tk.Button(
+                    row,
+                    text=current_key,
                     font=self.theme_provider.normal_font,
-                    bg="#e8e8e8" if not hasattr(self.theme_provider, 'badge_bg') else self.theme_provider.badge_bg,
-                    fg="#333333" if not hasattr(self.theme_provider, 'badge_fg') else self.theme_provider.badge_fg,
-                    relief=tk.GROOVE,
-                    bd=1,
-                    padx=6,
-                    pady=2,
+                    bg=badge_bg, fg=badge_fg,
+                    relief=tk.GROOVE, bd=1,
+                    padx=6, pady=2,
                     width=KEY_COL_W,
-                    anchor='w'
+                    anchor='w',
+                    cursor='hand2',
                 )
-                key_lbl.pack(side=tk.LEFT, padx=(0, 10))
+                # Capture btn in closure
+                btn.config(command=lambda aid=action_id, b=btn: _start_capture(aid, b))
+                btn.pack(side=tk.LEFT, padx=(0, 10))
+                self._hotkey_btn_map[action_id] = btn
 
-                action_lbl = tk.Label(
-                    row_frame,
-                    text=action,
+                tk.Label(
+                    row,
+                    text=action_label,
                     font=self.theme_provider.normal_font,
                     bg=row_bg,
                     fg=self.theme_provider.text_color,
                     anchor='w'
-                )
-                action_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
+                ).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        for group_title, group_rows in SHORTCUT_GROUPS:
-            _add_group(inner, group_title, group_rows)
+        for group_title, action_ids in HOTKEY_GROUPS:
+            _add_group(inner, group_title, action_ids)
+
+        # ── Reset shortcuts button ───────────────────────────────────────────
+        reset_frame = tk.Frame(main_container, bg=self.theme_provider.bg_color)
+        reset_frame.pack(fill=tk.X, pady=(8, 0))
+
+        def _reset_shortcuts():
+            if messagebox.askyesno("Reset Shortcuts",
+                                   "Reset all keyboard shortcuts to their defaults?"):
+                self._hotkeys_draft = dict(DEFAULT_HOTKEYS)
+                self._conflict_label.config(text="")
+                for aid, btn in self._hotkey_btn_map.items():
+                    btn.config(text=self._hotkeys_draft.get(aid, '—'),
+                               bg=badge_bg, fg=badge_fg, relief=tk.GROOVE)
+
+        self.theme_provider.create_button(
+            reset_frame, "Reset Shortcuts to Defaults", _reset_shortcuts, "warning", "sm"
+        ).pack(side=tk.LEFT)
 
         return frame
 
@@ -1156,6 +1394,14 @@ class SettingsUI:
             self.dual_window_enabled_var.set(settings.dual_window_enabled)
         if hasattr(self, 'show_console_var'):
             self.show_console_var.set(getattr(settings, 'show_console', True))
+        # Refresh the shortcuts tab draft + button labels if the tab exists
+        if hasattr(self, '_hotkeys_draft'):
+            self._hotkeys_draft = dict(settings.hotkeys)
+            badge_bg = getattr(self.theme_provider, 'badge_bg', '#e8e8e8')
+            badge_fg = getattr(self.theme_provider, 'badge_fg', '#333333')
+            for aid, btn in self._hotkey_btn_map.items():
+                btn.config(text=self._hotkeys_draft.get(aid, '—'),
+                           bg=badge_bg, fg=badge_fg, relief=tk.GROOVE)
         self._update_index_info()
 
     def _apply_current_settings(self):
@@ -1178,6 +1424,9 @@ class SettingsUI:
                 new_val = self.show_console_var.get()
                 if new_val != getattr(self.theme_provider, 'show_console', True):
                     self.theme_provider.toggle_console()
+        # Commit the draft hotkeys edited in the shortcuts tab
+        if hasattr(self, '_hotkeys_draft'):
+            self.settings.hotkeys = dict(self._hotkeys_draft)
 
     def _save_settings(self):
         """Save current settings"""
@@ -1199,6 +1448,19 @@ class SettingsManager:
         self.ui = SettingsUI(parent, theme_provider, self.settings, console_callback, self._on_settings_changed)
 
         self._settings_changed_callbacks = []
+        # Optional callback that re-registers hotkeys in the player immediately.
+        # Set via set_hotkey_reload_callback(fn) where fn(hotkeys: dict) -> None.
+        self._hotkey_reload_callback: Optional[Callable] = None
+
+    def set_hotkey_reload_callback(self, callback: Callable):
+        """Register a function called with the new hotkeys dict every time the
+        user saves the Settings window.  Typically::
+
+            settings_manager.set_hotkey_reload_callback(
+                lambda hk: reload_hotkeys(controller, hk)
+            )
+        """
+        self._hotkey_reload_callback = callback
 
     def show_settings(self):
         """Show settings window"""
@@ -1223,6 +1485,11 @@ class SettingsManager:
         """Handle settings change from UI"""
         self.settings = new_settings
         self.storage.save_settings(self.settings)
+        if self._hotkey_reload_callback is not None:
+            try:
+                self._hotkey_reload_callback(self.settings.hotkeys)
+            except Exception as e:
+                print(f"[SettingsManager] Error reloading hotkeys: {e}")
         self._notify_settings_changed()
 
     def _notify_settings_changed(self):
