@@ -169,6 +169,7 @@ def select_multiple_folders_and_play():
             self.resource_manager.register_cleanup_callback(self._cleanup_scan_cache)
             self.resource_manager.register_cleanup_callback(self._cleanup_player_threads)
             self.apply_theme()
+            # Deferred: re-lock pill colors after tkinter's first render pass
             self.root.after(0, self._fix_pill_colors_initial)
             self.root.drop_target_register(DND_FILES)
             self.root.dnd_bind('<<Drop>>', self._on_drop_files)
@@ -3232,18 +3233,6 @@ def select_multiple_folders_and_play():
             ])
             make_toolbar_btn("Tools", menu=tools_menu)
 
-            _media_pill_accents = {
-                "🎵 Playlist":    ("#5B9BD5", "#1a5fa8", "#FFFFFF", "#144d8a"),  # blue
-                "⬛ Queue":       ("#2ecc71", "#1a8a4a", "#FFFFFF", "#156e3a"),  # green
-                "♥ Favourites":  ("#e67e22", "#b35a00", "#FFFFFF", "#8a4400"),  # orange
-                "🕐 History":     ("#9b59b6", "#6c2f8f", "#FFFFFF", "#521f6e"),  # purple
-            }
-            _media_pill_dark_accents = {
-                "🎵 Playlist":    ("#4A9EFF", "#1a5fa8", "#FFFFFF", "#144d8a"),
-                "⬛ Queue":       ("#2ecc71", "#1a8a4a", "#FFFFFF", "#156e3a"),
-                "♥ Favourites":  ("#FF9F43", "#b35a00", "#FFFFFF", "#8a4400"),
-                "🕐 History":     ("#C39BD3", "#6c2f8f", "#FFFFFF", "#521f6e"),
-            }
             _media_pill_commands = {
                 "🎵 Playlist":   self._manage_playlists,
                 "⬛ Queue":      self._show_queue_manager,
@@ -3253,12 +3242,8 @@ def select_multiple_folders_and_play():
 
             self._media_pill_btns = {}
 
-            def _pill_accents(lbl):
-                """Always returns the correct accent tuple for the current theme."""
-                return (_media_pill_dark_accents if self.dark_mode else _media_pill_accents)[lbl]
-
             def _make_media_pill(label):
-                a = _pill_accents(label)
+                a = self.pill_accents(label)  # palette lives in ThemeSelector
                 c = _tb_colors()
                 btn = tk.Label(
                     self.toolbar,
@@ -3277,16 +3262,16 @@ def select_multiple_folders_and_play():
                 self._media_pill_btns[label] = btn
 
                 def on_enter(e, b=btn, lbl=label):
-                    a = _pill_accents(lbl)
+                    a = self.pill_accents(lbl)
                     b.config(bg=a[1], fg=a[2], highlightbackground=a[1])
                 def on_leave(e, b=btn, lbl=label):
-                    a = _pill_accents(lbl); cc = _tb_colors()
+                    a = self.pill_accents(lbl); cc = _tb_colors()
                     b.config(bg=cc["bg"], fg=a[0], highlightbackground=a[0])
                 def on_press(e, b=btn, lbl=label):
-                    a = _pill_accents(lbl)
+                    a = self.pill_accents(lbl)
                     b.config(bg=a[3], fg=a[2], highlightbackground=a[3])
                 def on_release(e, b=btn, lbl=label, cmd=_media_pill_commands[label]):
-                    a = _pill_accents(lbl)
+                    a = self.pill_accents(lbl)
                     b.config(bg=a[1], fg=a[2], highlightbackground=a[1])
                     cmd()
 
@@ -3447,81 +3432,6 @@ def select_multiple_folders_and_play():
 
             self.create_button(dlg, "Set Timer", start, "primary", "md").pack(pady=15)
             dlg.bind("<Return>", lambda e: start())
-
-        def _fix_pill_colors_initial(self):
-            """Force-correct pill fg/border after tkinter's first render pass."""
-            if not hasattr(self, '_media_pill_btns') or not self._media_pill_btns:
-                return
-            if not hasattr(self, '_tb_colors'):
-                return
-            _light = {
-                "🎵 Playlist":   ("#5B9BD5", "#1a5fa8", "#FFFFFF", "#144d8a"),
-                "⬛ Queue":      ("#2ecc71", "#1a8a4a", "#FFFFFF", "#156e3a"),
-                "♥ Favourites": ("#e67e22", "#b35a00", "#FFFFFF", "#8a4400"),
-                "🕐 History":   ("#9b59b6", "#6c2f8f", "#FFFFFF", "#521f6e"),
-            }
-            _dark = {
-                "🎵 Playlist":   ("#4A9EFF", "#1a5fa8", "#FFFFFF", "#144d8a"),
-                "⬛ Queue":      ("#2ecc71", "#1a8a4a", "#FFFFFF", "#156e3a"),
-                "♥ Favourites": ("#FF9F43", "#b35a00", "#FFFFFF", "#8a4400"),
-                "🕐 History":   ("#C39BD3", "#6c2f8f", "#FFFFFF", "#521f6e"),
-            }
-            accents = _dark if self.dark_mode else _light
-            cc = self._tb_colors()
-            for lbl, btn in self._media_pill_btns.items():
-                if lbl in accents:
-                    normal_fg = accents[lbl][0]
-                    btn.config(bg=cc["bg"], fg=normal_fg,
-                               highlightbackground=normal_fg, highlightcolor=normal_fg)
-
-        def _toggle_theme_menu(self):
-            self.toggle_theme()
-            if hasattr(self, 'theme_toolbar_btn'):
-                cc = self._tb_colors()
-                self.theme_toolbar_btn.config(
-                    text="☀" if self.dark_mode else "🌙",
-                    bg=cc["bg"], fg=cc["fg"])
-
-            # Re-colour the media pill buttons for the new theme
-            if hasattr(self, '_media_pill_btns') and self._media_pill_btns:
-                _light = {
-                    "🎵 Playlist":   ("#5B9BD5", "#1a5fa8", "#FFFFFF", "#144d8a"),
-                    "⬛ Queue":      ("#2ecc71", "#1a8a4a", "#FFFFFF", "#156e3a"),
-                    "♥ Favourites": ("#e67e22", "#b35a00", "#FFFFFF", "#8a4400"),
-                    "🕐 History":   ("#9b59b6", "#6c2f8f", "#FFFFFF", "#521f6e"),
-                }
-                _dark = {
-                    "🎵 Playlist":   ("#4A9EFF", "#1a5fa8", "#FFFFFF", "#144d8a"),
-                    "⬛ Queue":      ("#2ecc71", "#1a8a4a", "#FFFFFF", "#156e3a"),
-                    "♥ Favourites": ("#FF9F43", "#b35a00", "#FFFFFF", "#8a4400"),
-                    "🕐 History":   ("#C39BD3", "#6c2f8f", "#FFFFFF", "#521f6e"),
-                }
-                accents = _dark if self.dark_mode else _light
-                cc = self._tb_colors()
-                for lbl, btn in self._media_pill_btns.items():
-                    normal_fg = accents[lbl][0]
-                    btn.config(bg=cc["bg"], fg=normal_fg,
-                               highlightbackground=normal_fg, highlightcolor=normal_fg)
-
-        def _toggle_loop_from_menu(self):
-            self.toggle_loop_mode()
-            if hasattr(self, 'loop_toolbar_btn'):
-                cc = self._tb_colors()
-                self.loop_toolbar_btn.config(
-                    text=self._get_loop_icon(),
-                    bg=cc["bg"], fg=cc["fg"])
-
-        def _set_loop_mode_menu(self, mode):
-            self.loop_mode = mode
-            if hasattr(self, 'loop_toolbar_btn'):
-                cc = self._tb_colors()
-                self.loop_toolbar_btn.config(text=self._get_loop_icon(), bg=cc["bg"], fg=cc["fg"])
-            if hasattr(self, '_loop_mode_var'):
-                self._loop_mode_var.set(mode)
-            if self.controller:
-                self.controller.set_loop_mode(self.loop_mode)
-            self.update_console(f"Loop mode: {mode}")
-            self.save_preferences()
 
         def _start_sleep_countdown(self):
             import time as _time

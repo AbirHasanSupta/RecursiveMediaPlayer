@@ -255,58 +255,18 @@ class ThemeSelector:
         for frame_attr in dir(self):
             if frame_attr.endswith('_frame') and hasattr(self, frame_attr):
                 frame = getattr(self, frame_attr)
-                # Skip the toolbar — it manages its own background color
+                # Skip the toolbar — _fix_toolbar_colors() handles it
                 if hasattr(self, 'toolbar') and frame is self.toolbar:
                     continue
                 if isinstance(frame, tk.Frame):
                     frame.configure(bg=self.bg_color)
 
-        # Also fix the toolbar's own bg (uses toolbar palette, not app bg)
-        if hasattr(self, 'toolbar') and hasattr(self, '_tb_colors'):
-            cc = self._tb_colors()
-            self.toolbar.configure(bg=cc["bg"])
-            # Re-color plain toolbar menu buttons
-            if hasattr(self, '_toolbar_btns'):
-                for btn in self._toolbar_btns.values():
-                    btn.config(bg=cc["bg"], fg=cc["fg"])
-            # Re-color play button
-            if hasattr(self, 'play_toolbar_btn'):
-                self.play_toolbar_btn.config(bg=cc["bg"], fg=cc["play_fg"])
-            # Re-color theme toggle button
-            if hasattr(self, 'theme_toolbar_btn'):
-                self.theme_toolbar_btn.config(bg=cc["bg"], fg=cc["fg"])
-            # Re-color media pill buttons with their accent colors
-            if hasattr(self, '_media_pill_btns') and self._media_pill_btns:
-                _light = {
-                    "🎵 Playlist":   ("#5B9BD5", "#1a5fa8", "#FFFFFF", "#144d8a"),
-                    "⬛ Queue":      ("#2ecc71", "#1a8a4a", "#FFFFFF", "#156e3a"),
-                    "♥ Favourites": ("#e67e22", "#b35a00", "#FFFFFF", "#8a4400"),
-                    "🕐 History":   ("#9b59b6", "#6c2f8f", "#FFFFFF", "#521f6e"),
-                }
-                _dark = {
-                    "🎵 Playlist":   ("#4A9EFF", "#1a5fa8", "#FFFFFF", "#144d8a"),
-                    "⬛ Queue":      ("#2ecc71", "#1a8a4a", "#FFFFFF", "#156e3a"),
-                    "♥ Favourites": ("#FF9F43", "#b35a00", "#FFFFFF", "#8a4400"),
-                    "🕐 History":   ("#C39BD3", "#6c2f8f", "#FFFFFF", "#521f6e"),
-                }
-                accents = _dark if self.dark_mode else _light
-                for lbl, btn in self._media_pill_btns.items():
-                    if lbl in accents:
-                        normal_fg = accents[lbl][0]
-                        btn.config(bg=cc["bg"], fg=normal_fg,
-                                   highlightbackground=normal_fg, highlightcolor=normal_fg)
-            # Re-color separator frames inside toolbar
-            for child in self.toolbar.winfo_children():
-                if isinstance(child, tk.Frame):
-                    child.configure(bg=cc["sep"])
-            # Fix sleep_countdown_label — it ends in _label so the loop below
-            # would overwrite it; set it correctly here instead
-            if hasattr(self, 'sleep_countdown_label'):
-                self.sleep_countdown_label.config(bg=cc["bg"], fg=cc["fg"])
+        # Re-apply all toolbar widget colors via the single source of truth
+        self._fix_toolbar_colors()
 
         for label_attr in dir(self):
             if label_attr.endswith('_label') and hasattr(self, label_attr):
-                # sleep_countdown_label lives on the toolbar — already handled above
+                # Toolbar labels are handled by _fix_toolbar_colors() — skip them
                 if label_attr == 'sleep_countdown_label':
                     continue
                 label = getattr(self, label_attr)
@@ -518,7 +478,8 @@ class ThemeSelector:
 
     def update_frames_recursive(self, widget):
         try:
-            if hasattr(self, 'toolbar') and widget is self.toolbar:
+            # Skip the toolbar and ALL its descendants — toolbar manages its own colors
+            if hasattr(self, 'toolbar') and (widget is self.toolbar or self._is_toolbar_descendant(widget)):
                 return
             if isinstance(widget, (tk.Frame, tk.Toplevel)):
                 widget.configure(bg=self.bg_color)
@@ -529,3 +490,110 @@ class ThemeSelector:
                 self.update_frames_recursive(child)
         except tk.TclError:
             pass
+
+    def _is_toolbar_descendant(self, widget):
+        """Return True if widget is inside self.toolbar."""
+        try:
+            w = widget.master
+            toolbar = self.toolbar
+            while w is not None:
+                if w is toolbar:
+                    return True
+                w = w.master
+        except Exception:
+            pass
+        return False
+
+    # ── Toolbar / pill colour palette ─────────────────────────────────────────
+    # (normal_fg, hover_bg, hover_fg, active_bg)
+    PILL_ACCENTS_LIGHT = {
+        "🎵 Playlist":   ("#5B9BD5", "#1a5fa8", "#FFFFFF", "#144d8a"),
+        "⬛ Queue":      ("#2ecc71", "#1a8a4a", "#FFFFFF", "#156e3a"),
+        "♥ Favourites": ("#e67e22", "#b35a00", "#FFFFFF", "#8a4400"),
+        "🕐 History":   ("#9b59b6", "#6c2f8f", "#FFFFFF", "#521f6e"),
+    }
+    PILL_ACCENTS_DARK = {
+        "🎵 Playlist":   ("#4A9EFF", "#1a5fa8", "#FFFFFF", "#144d8a"),
+        "⬛ Queue":      ("#2ecc71", "#1a8a4a", "#FFFFFF", "#156e3a"),
+        "♥ Favourites": ("#FF9F43", "#b35a00", "#FFFFFF", "#8a4400"),
+        "🕐 History":   ("#C39BD3", "#6c2f8f", "#FFFFFF", "#521f6e"),
+    }
+
+    def pill_accents(self, lbl):
+        """Return the correct accent tuple for lbl given the current theme."""
+        return (self.PILL_ACCENTS_DARK if self.dark_mode else self.PILL_ACCENTS_LIGHT)[lbl]
+
+    def _fix_toolbar_colors(self):
+        """Re-apply correct colors to every widget on the toolbar."""
+        if not hasattr(self, 'toolbar') or not hasattr(self, '_tb_colors'):
+            return
+        cc = self._tb_colors()
+        self.toolbar.configure(bg=cc["bg"])
+        if hasattr(self, '_toolbar_btns'):
+            for btn in self._toolbar_btns.values():
+                btn.config(bg=cc["bg"], fg=cc["fg"])
+        if hasattr(self, 'play_toolbar_btn'):
+            self.play_toolbar_btn.config(bg=cc["bg"], fg=cc["play_fg"])
+        if hasattr(self, 'theme_toolbar_btn'):
+            self.theme_toolbar_btn.config(bg=cc["bg"], fg=cc["fg"])
+        if hasattr(self, 'loop_toolbar_btn'):
+            self.loop_toolbar_btn.config(bg=cc["bg"], fg=cc["fg"])
+        if hasattr(self, 'sleep_countdown_label'):
+            self.sleep_countdown_label.config(bg=cc["bg"], fg=cc["fg"])
+        # Separator frames inside toolbar
+        for child in self.toolbar.winfo_children():
+            if isinstance(child, tk.Frame):
+                child.configure(bg=cc["sep"])
+        # Pill buttons
+        self._fix_pill_colors()
+
+    def _fix_pill_colors(self):
+        """Apply accent colors to all media pill buttons for the current theme."""
+        if not hasattr(self, '_media_pill_btns') or not self._media_pill_btns:
+            return
+        if not hasattr(self, '_tb_colors'):
+            return
+        cc = self._tb_colors()
+        for lbl, btn in self._media_pill_btns.items():
+            try:
+                normal_fg = self.pill_accents(lbl)[0]
+                btn.config(bg=cc["bg"], fg=normal_fg,
+                           highlightbackground=normal_fg, highlightcolor=normal_fg)
+            except KeyError:
+                pass
+
+    def _fix_pill_colors_initial(self):
+        """Deferred call after tkinter's first render to lock in pill accent colors."""
+        self._fix_toolbar_colors()
+
+    def _toggle_theme_menu(self):
+        """Toggle dark/light theme and refresh all toolbar widgets."""
+        self.toggle_theme()
+        if hasattr(self, 'theme_toolbar_btn') and hasattr(self, '_tb_colors'):
+            cc = self._tb_colors()
+            self.theme_toolbar_btn.config(
+                text="☀" if self.dark_mode else "🌙",
+                bg=cc["bg"], fg=cc["fg"])
+        self._fix_toolbar_colors()
+
+    def _toggle_loop_from_menu(self):
+        """Toggle loop mode and refresh the loop toolbar button."""
+        self.toggle_loop_mode()
+        if hasattr(self, 'loop_toolbar_btn') and hasattr(self, '_tb_colors'):
+            cc = self._tb_colors()
+            self.loop_toolbar_btn.config(
+                text=self._get_loop_icon(), bg=cc["bg"], fg=cc["fg"])
+
+    def _set_loop_mode_menu(self, mode):
+        """Set loop mode from menu and refresh toolbar button."""
+        self.loop_mode = mode
+        if hasattr(self, 'loop_toolbar_btn') and hasattr(self, '_tb_colors'):
+            cc = self._tb_colors()
+            self.loop_toolbar_btn.config(
+                text=self._get_loop_icon(), bg=cc["bg"], fg=cc["fg"])
+        if hasattr(self, '_loop_mode_var'):
+            self._loop_mode_var.set(mode)
+        if self.controller:
+            self.controller.set_loop_mode(self.loop_mode)
+        self.update_console(f"Loop mode: {mode}")
+        self.save_preferences()
