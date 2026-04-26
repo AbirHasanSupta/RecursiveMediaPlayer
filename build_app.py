@@ -29,7 +29,7 @@ from managers.dual_player_manager import DualPlayerManager
 import struct
 import socket
 import time
-
+from tkinterdnd2 import DND_FILES, TkinterDnD
 
 def select_multiple_folders_and_play():
     port_file = os.path.expanduser("~/.rmp_instance_port")
@@ -166,6 +166,8 @@ def select_multiple_folders_and_play():
             self.resource_manager.register_cleanup_callback(self._cleanup_scan_cache)
             self.resource_manager.register_cleanup_callback(self._cleanup_player_threads)
             self.apply_theme()
+            self.root.drop_target_register(DND_FILES)
+            self.root.dnd_bind('<<Drop>>', self._on_drop_files)
             command_line_dir = self._get_command_line_directory()
             if command_line_dir:
                 self.selected_dirs = []
@@ -434,6 +436,19 @@ def select_multiple_folders_and_play():
                 if os.path.isdir(arg_path):
                     return os.path.abspath(arg_path)
             return None
+
+        def _on_drop_files(self, event):
+            raw = event.data
+            # tkinterdnd2 wraps paths with spaces in braces
+            import re
+            paths = re.findall(r'\{([^}]+)\}|(\S+)', raw)
+            paths = [a or b for a, b in paths]
+            for path in paths:
+                path = path.strip()
+                if os.path.isdir(path):
+                    self._add_directory_from_ipc(path)
+                elif os.path.isfile(path) and is_video(path):
+                    self._play_grid_videos([path])
 
         def setup_theme(self):
             self.bg_color = "#f5f5f5"
@@ -4191,7 +4206,7 @@ def select_multiple_folders_and_play():
             except:
                 os._exit(0)
 
-    root = tk.Tk()
+    root = TkinterDnD.Tk()
     app = DirectorySelector(root)
     root.mainloop()
 
