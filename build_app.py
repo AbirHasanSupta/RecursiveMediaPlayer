@@ -3092,6 +3092,15 @@ def select_multiple_folders_and_play():
             )
             self.video_adjust_button.pack(side=tk.LEFT, padx=(0, 10))
 
+            self.aspect_ratio_button = self.create_button(
+                theme_frame,
+                text="Aspect",
+                command=self._show_aspect_ratio_dialog,
+                variant="secondary",
+                size="md"
+            )
+            self.aspect_ratio_button.pack(side=tk.LEFT, padx=(0, 10))
+
             self.theme_button = self.create_button(
                 theme_frame,
                 text="Dark Mode" if not self.dark_mode else "Light Mode",
@@ -3142,6 +3151,56 @@ def select_multiple_folders_and_play():
                 font=(self.normal_font.name, self.normal_font.actual()['size'], 'bold')
             )
             self.play_button.pack(side=tk.LEFT)
+
+        def _show_aspect_ratio_dialog(self):
+            dlg = tk.Toplevel(self.root)
+            dlg.title("Aspect Ratio")
+            dlg.geometry("260x320")
+            dlg.configure(bg=self.bg_color)
+            dlg.transient(self.root)
+            dlg.grab_set()
+            dlg.resizable(False, False)
+
+            tk.Label(dlg, text="Aspect Ratio",
+                     font=self.header_font, bg=self.bg_color,
+                     fg=self.text_color).pack(pady=(15, 10))
+
+            ratios = [
+                ("Auto (default)", None),
+                ("16:9", "16:9"),
+                ("4:3", "4:3"),
+                ("21:9", "21:9"),
+                ("1:1", "1:1"),
+                ("16:10", "16:10"),
+                ("2.35:1", "235:100"),
+                ("5:4", "5:4"),
+            ]
+
+            current = getattr(self.controller, '_aspect_ratio', None) if self.controller else None
+            selected_var = tk.StringVar(value=str(current))
+
+            for label, value in ratios:
+                is_current = (value == current)
+                rb = tk.Radiobutton(
+                    dlg,
+                    text=label,
+                    variable=selected_var,
+                    value=str(value),
+                    font=self.normal_font,
+                    bg=self.bg_color,
+                    fg=self.accent_color if is_current else self.text_color,
+                    selectcolor=self.bg_color,
+                    activebackground=self.bg_color,
+                    command=lambda v=value: self._apply_aspect_ratio(v)
+                )
+                rb.pack(anchor='w', padx=30, pady=3)
+
+            self.create_button(dlg, "Close", dlg.destroy, "secondary", "sm").pack(pady=12)
+
+        def _apply_aspect_ratio(self, ratio):
+            if self.controller:
+                self.controller.set_aspect_ratio(ratio)
+                self.update_console(f"Aspect ratio set to {ratio or 'Auto'}")
 
         def _show_video_adjust_dialog(self):
             dlg = tk.Toplevel(self.root)

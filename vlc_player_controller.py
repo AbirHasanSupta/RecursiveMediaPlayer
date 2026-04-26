@@ -92,6 +92,7 @@ class BaseVLCPlayerController:
 
         self._rotation_index = 0
         self._zoom_level = 1.0
+        self._aspect_ratio = None  # None = auto
 
         self.resource_manager = get_resource_manager()
         self._is_cleanup = False
@@ -100,6 +101,23 @@ class BaseVLCPlayerController:
 
     _ROTATION_STEPS = [0, 90, 180, 270]
     _TRANSFORM_MAP = {0: "identity", 90: "90", 180: "180", 270: "270"}
+
+    def set_aspect_ratio(self, ratio: str):
+        with self.lock:
+            try:
+                # ratio examples: "16:9", "4:3", "21:9", "1:1", None for auto
+                if ratio:
+                    self.player.video_set_aspect_ratio(ratio)
+                    self._aspect_ratio = ratio
+                else:
+                    self.player.video_set_aspect_ratio(None)
+                    self.player.video_set_scale(0)
+                    self._aspect_ratio = None
+                if self.logger:
+                    self.logger(f"Aspect ratio: {ratio or 'Auto'}")
+            except Exception as e:
+                if self.logger:
+                    self.logger(f"Aspect ratio error: {e}")
 
     def set_ab_point_a(self):
         with self.lock:
