@@ -3112,15 +3112,6 @@ def select_multiple_folders_and_play():
             )
             self.sleep_timer_button.pack(side=tk.LEFT, padx=(0, 10))
 
-            self.video_adjust_button = self.create_button(
-                theme_frame,
-                text="Video Adjust",
-                command=self._show_video_adjust_dialog,
-                variant="secondary",
-                size="md"
-            )
-            self.video_adjust_button.pack(side=tk.LEFT, padx=(0, 10))
-
             self.theme_button = self.create_button(
                 theme_frame,
                 text="Dark Mode" if not self.dark_mode else "Light Mode",
@@ -3171,77 +3162,6 @@ def select_multiple_folders_and_play():
                 font=(self.normal_font.name, self.normal_font.actual()['size'], 'bold')
             )
             self.play_button.pack(side=tk.LEFT)
-
-        def _show_video_adjust_dialog(self):
-            dlg = tk.Toplevel(self.root)
-            dlg.title("Video Adjustments")
-            dlg.geometry("400x280")
-            dlg.configure(bg=self.bg_color)
-            dlg.transient(self.root)
-            dlg.resizable(False, False)
-
-            sliders = [
-                ("Brightness", 0.0, 2.0, 1.0, "set_brightness"),
-                ("Contrast", 0.0, 2.0, 1.0, "set_contrast"),
-                ("Saturation", 0.0, 3.0, 1.0, "set_saturation"),
-                ("Gamma", 0.01, 10.0, 1.0, "set_gamma"),
-            ]
-
-            def make_slider(parent, label, mn, mx, default, method):
-                row = tk.Frame(parent, bg=self.bg_color)
-                row.pack(fill=tk.X, padx=20, pady=6)
-
-                tk.Label(row, text=f"{label}:", width=12, anchor='w',
-                         font=self.normal_font, bg=self.bg_color,
-                         fg=self.text_color).pack(side=tk.LEFT)
-
-                val_label = tk.Label(row, text=f"{default:.2f}", width=5,
-                                     font=self.small_font, bg=self.bg_color,
-                                     fg=self.text_color)
-                val_label.pack(side=tk.RIGHT)
-
-                var = tk.DoubleVar(value=default)
-
-                # pre-load current value from controller if playing
-                if self.controller:
-                    attr = f"_{method.replace('set_', '')}"
-                    current = getattr(self.controller, attr, default)
-                    var.set(current)
-                    val_label.config(text=f"{current:.2f}")
-
-                def on_change(v, m=method, lbl=val_label, vr=var):
-                    val = round(float(v), 2)
-                    lbl.config(text=f"{val:.2f}")
-                    if self.controller:
-                        try:
-                            getattr(self.controller, m)(val)
-                        except Exception:
-                            pass
-
-                tk.Scale(row, from_=mn, to=mx, resolution=0.01,
-                         orient=tk.HORIZONTAL, variable=var,
-                         command=on_change, length=200,
-                         bg=self.bg_color, fg=self.text_color,
-                         highlightthickness=0, troughcolor="#cccccc",
-                         showvalue=False).pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-            tk.Label(dlg, text="Video Adjustments",
-                     font=self.header_font, bg=self.bg_color,
-                     fg=self.text_color).pack(pady=(15, 10))
-
-            for args in sliders:
-                make_slider(dlg, *args)
-
-            def reset():
-                if self.controller:
-                    self.controller.reset_video_adjustments()
-                dlg.destroy()
-                self._show_video_adjust_dialog()
-
-            btn_row = tk.Frame(dlg, bg=self.bg_color)
-            btn_row.pack(pady=12)
-            self.create_button(btn_row, "Reset", reset, "warning", "sm").pack(side=tk.LEFT, padx=5)
-            self.create_button(btn_row, "Close", dlg.destroy, "secondary", "sm").pack(side=tk.LEFT, padx=5)
 
         def _show_sleep_timer_dialog(self):
             # if timer already running, cancel it

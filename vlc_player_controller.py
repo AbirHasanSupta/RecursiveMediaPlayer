@@ -79,12 +79,6 @@ class BaseVLCPlayerController:
         self.stop_callback = None
         self.position_overlay = None
 
-        self._brightness = 1.0
-        self._contrast = 1.0
-        self._saturation = 1.0
-        self._gamma = 1.0
-        self._hue = 0
-
         self._ab_point_a = None
         self._ab_point_b = None
         self._ab_loop_active = False
