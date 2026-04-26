@@ -90,6 +90,8 @@ def select_multiple_folders_and_play():
             self.current_max_depth = 20
             self.loop_mode = "loop_on"
             self._sleep_timer_job = None
+            self._sleep_countdown_job = None
+            self._sleep_timer_end = None
 
             preferences = self.config.load_preferences()
             self.dark_mode = preferences['dark_mode']
@@ -439,17 +441,44 @@ def select_multiple_folders_and_play():
             return None
 
         def _on_drop_files(self, event):
-            raw = event.data
-            # tkinterdnd2 wraps paths with spaces in braces
             import re
-            paths = re.findall(r'\{([^}]+)\}|(\S+)', raw)
-            paths = [a or b for a, b in paths]
+            raw = event.data.strip()
+            # handles: {path with spaces} path_without_spaces {another path}
+            paths = []
+            i = 0
+            while i < len(raw):
+                if raw[i] == '{':
+                    end = raw.find('}', i)
+                    if end == -1:
+                        break
+                    paths.append(raw[i + 1:end])
+                    i = end + 1
+                elif raw[i] == ' ':
+                    i += 1
+                else:
+                    end = raw.find(' ', i)
+                    if end == -1:
+                        paths.append(raw[i:])
+                        break
+                    paths.append(raw[i:end])
+                    i = end + 1
+
+            added = 0
+            played = []
             for path in paths:
                 path = path.strip()
+                if not path:
+                    continue
                 if os.path.isdir(path):
                     self._add_directory_from_ipc(path)
+                    added += 1
                 elif os.path.isfile(path) and is_video(path):
-                    self._play_grid_videos([path])
+                    played.append(path)
+
+            if played:
+                self._play_grid_videos(played)
+            if added:
+                self.update_console(f"Dropped {added} director{'ies' if added > 1 else 'y'}")
 
         def setup_theme(self):
             self.bg_color = "#f5f5f5"
@@ -3274,9 +3303,14 @@ def select_multiple_folders_and_play():
             self.create_button(btn_row, "Close", dlg.destroy, "secondary", "sm").pack(side=tk.LEFT, padx=5)
 
         def _show_sleep_timer_dialog(self):
-            if hasattr(self, '_sleep_timer_job') and self._sleep_timer_job:
+            # if timer already running, cancel it
+            if getattr(self, '_sleep_timer_job', None):
                 self.root.after_cancel(self._sleep_timer_job)
                 self._sleep_timer_job = None
+                if hasattr(self, '_sleep_countdown_job') and self._sleep_countdown_job:
+                    self.root.after_cancel(self._sleep_countdown_job)
+                    self._sleep_countdown_job = None
+                self._sleep_timer_end = None
                 self.sleep_timer_button.config(text="Sleep Timer")
                 self.update_console("Sleep timer cancelled")
                 return
@@ -3294,24 +3328,49 @@ def select_multiple_folders_and_play():
                      fg=self.text_color).pack(pady=(20, 8))
 
             minutes_var = tk.IntVar(value=30)
-            spin = tk.Spinbox(dlg, from_=1, to=300, textvariable=minutes_var,
+            spin = tk.Spinbox(dlg, from_=1, to=300,
+                              textvariable=minutes_var,
                               font=self.normal_font, width=8,
                               bg=self.bg_color, fg=self.text_color)
             spin.pack()
 
             def start():
+                import time as _time
                 minutes = minutes_var.get()
                 ms = minutes * 60 * 1000
+                self._sleep_timer_end = _time.time() + (minutes * 60)
                 self._sleep_timer_job = self.root.after(ms, self._sleep_timer_fired)
-                self.sleep_timer_button.config(text=f"Sleep: {minutes}m ✕")
+                self._start_sleep_countdown()
                 self.update_console(f"Sleep timer set for {minutes} minutes")
                 dlg.destroy()
 
             self.create_button(dlg, "Set Timer", start, "primary", "md").pack(pady=15)
             dlg.bind("<Return>", lambda e: start())
 
+        def _start_sleep_countdown(self):
+            import time as _time
+
+            def tick():
+                if not getattr(self, '_sleep_timer_end', None):
+                    return
+                remaining = int(self._sleep_timer_end - _time.time())
+                if remaining <= 0:
+                    return
+                mins = remaining // 60
+                secs = remaining % 60
+                self.sleep_timer_button.config(
+                    text=f"Sleep {mins}:{secs:02d} ✕")
+                self._sleep_countdown_job = self.root.after(1000, tick)
+
+            self._sleep_countdown_job = None
+            tick()
+
         def _sleep_timer_fired(self):
             self._sleep_timer_job = None
+            self._sleep_timer_end = None
+            if hasattr(self, '_sleep_countdown_job') and self._sleep_countdown_job:
+                self.root.after_cancel(self._sleep_countdown_job)
+                self._sleep_countdown_job = None
             self.sleep_timer_button.config(text="Sleep Timer")
             self.update_console("Sleep timer: stopping playback")
             if self.controller:
