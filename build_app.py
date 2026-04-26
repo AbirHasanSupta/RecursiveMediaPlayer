@@ -3197,10 +3197,12 @@ def select_multiple_folders_and_play():
             # ── Playback ──────────────────────────────────────────────────────────
             self._loop_mode_var = tk.StringVar(value=self.loop_mode)
             c = _tb_colors()
+            _sel_color = "#4A9EFF" if self.dark_mode else "#2d89ef"
             loop_sub = tk.Menu(self.root, tearoff=0,
                                bg=c["bg"], fg=c["fg"],
                                activebackground=c["hover_bg"],
                                activeforeground=c["hover_fg"],
+                               selectcolor=_sel_color,
                                relief="flat", bd=1,
                                font=("Segoe UI", 9))
             for mode, lbl in [("loop_on", "Loop On"), ("loop_off", "Loop Off"), ("shuffle", "Shuffle")]:
