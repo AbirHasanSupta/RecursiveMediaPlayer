@@ -3146,9 +3146,9 @@ def select_multiple_folders_and_play():
                     cc = _tb_colors()
                     b.config(bg=cc["active_bg"], fg=cc["active_fg"])
 
-                def on_release(e, b=btn, m=menu, cmd=command, p=play):
+                def on_release(e, b=btn, m=menu, cmd=command):
                     cc = _tb_colors()
-                    b.config(bg=cc["bg"], fg=cc["play_fg"] if p else cc["fg"])
+                    b.config(bg=cc["hover_bg"], fg=cc["hover_fg"])
                     if m:
                         try:
                             m.tk_popup(b.winfo_rootx(), b.winfo_rooty() + b.winfo_height())
@@ -3167,8 +3167,6 @@ def select_multiple_folders_and_play():
             file_menu = make_dropdown_menu([
                 ("Add Directory",           self.add_directory),
                 ("Add Google Drive Link",   self.add_drive_link),
-                None,
-                ("Remove Selected Directory", self.remove_directory),
                 None,
                 ("Exit",                    self.cancel),
             ])
@@ -3228,31 +3226,16 @@ def select_multiple_folders_and_play():
             make_toolbar_btn("Tools", menu=tools_menu)
 
             # ── right-side action buttons ─────────────────────────────────────────
-            # loop toggle
-            self.loop_toolbar_btn = tk.Label(
+            # sleep countdown label
+            self.sleep_countdown_label = tk.Label(
                 self.toolbar,
-                text=self._get_loop_icon(),
+                text="",
                 bg=_tb_colors()["bg"],
                 fg=_tb_colors()["fg"],
-                font=("Segoe UI", 9, "bold"),
-                padx=10, pady=4,
-                cursor="hand2"
+                font=("Segoe UI", 9),
+                padx=8, pady=4,
             )
-            self.loop_toolbar_btn.pack(side=tk.RIGHT, padx=(0, 2))
-
-            def _loop_enter(e):
-                cc = _tb_colors(); self.loop_toolbar_btn.config(bg=cc["hover_bg"], fg=cc["hover_fg"])
-            def _loop_leave(e):
-                cc = _tb_colors(); self.loop_toolbar_btn.config(bg=cc["bg"], fg=cc["fg"])
-            def _loop_press(e):
-                cc = _tb_colors(); self.loop_toolbar_btn.config(bg=cc["active_bg"], fg=cc["active_fg"])
-            def _loop_release(e):
-                cc = _tb_colors(); self.loop_toolbar_btn.config(bg=cc["bg"], fg=cc["fg"])
-                self._toggle_loop_from_menu()
-            self.loop_toolbar_btn.bind("<Enter>",          _loop_enter)
-            self.loop_toolbar_btn.bind("<Leave>",          _loop_leave)
-            self.loop_toolbar_btn.bind("<ButtonPress-1>",  _loop_press)
-            self.loop_toolbar_btn.bind("<ButtonRelease-1>",_loop_release)
+            self.sleep_countdown_label.pack(side=tk.RIGHT, padx=(0, 2))
 
             # theme toggle
             self.theme_toolbar_btn = tk.Label(
@@ -3273,7 +3256,7 @@ def select_multiple_folders_and_play():
             def _theme_press(e):
                 cc = _tb_colors(); self.theme_toolbar_btn.config(bg=cc["active_bg"], fg=cc["active_fg"])
             def _theme_release(e):
-                cc = _tb_colors(); self.theme_toolbar_btn.config(bg=cc["bg"], fg=cc["fg"])
+                cc = _tb_colors(); self.theme_toolbar_btn.config(bg=cc["hover_bg"], fg=cc["hover_fg"])
                 self._toggle_theme_menu()
             self.theme_toolbar_btn.bind("<Enter>",          _theme_enter)
             self.theme_toolbar_btn.bind("<Leave>",          _theme_leave)
@@ -3299,7 +3282,7 @@ def select_multiple_folders_and_play():
             def _play_press(e):
                 cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc["active_bg"], fg="#FFFFFF")
             def _play_release(e):
-                cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc["bg"], fg=cc["play_fg"])
+                cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc["hover_bg"], fg="#FFFFFF")
                 self.play_videos()
             self.play_toolbar_btn.bind("<Enter>",          _play_enter)
             self.play_toolbar_btn.bind("<Leave>",          _play_leave)
@@ -3319,7 +3302,8 @@ def select_multiple_folders_and_play():
                     self.root.after_cancel(self._sleep_countdown_job)
                     self._sleep_countdown_job = None
                 self._sleep_timer_end = None
-                pass  # sleep_timer_button removed
+                if hasattr(self, 'sleep_countdown_label'):
+                    self.sleep_countdown_label.config(text="")
                 self.update_console("Sleep timer cancelled")
                 return
 
@@ -3394,7 +3378,8 @@ def select_multiple_folders_and_play():
                     return
                 mins = remaining // 60
                 secs = remaining % 60
-                pass  # sleep_timer_button removed
+                if hasattr(self, 'sleep_countdown_label'):
+                    self.sleep_countdown_label.config(text=f"⏾ {mins}:{secs:02d}")
                 self._sleep_countdown_job = self.root.after(1000, tick)
 
             self._sleep_countdown_job = None
@@ -3406,7 +3391,8 @@ def select_multiple_folders_and_play():
             if hasattr(self, '_sleep_countdown_job') and self._sleep_countdown_job:
                 self.root.after_cancel(self._sleep_countdown_job)
                 self._sleep_countdown_job = None
-            pass  # sleep_timer_button removed
+            if hasattr(self, 'sleep_countdown_label'):
+                self.sleep_countdown_label.config(text="")
             self.update_console("Sleep timer: stopping playback")
             if self.controller:
                 try:
