@@ -26,8 +26,6 @@ from managers.video_preview_manager import VideoPreviewManager
 from managers.video_queue_manager import VideoQueueManager
 from managers.google_drive_manager import GoogleDriveManager
 from managers.dual_player_manager import DualPlayerManager
-import win32clipboard as wcb
-import win32con
 import struct
 import socket
 import time
@@ -49,12 +47,16 @@ def select_multiple_folders_and_play():
                     sock.close()
 
                     if result == 0:
-                        import win32gui
-                        hwnd = win32gui.FindWindow(None, "Recursive Video Player")
-                        if hwnd:
-                            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                            win32gui.SetForegroundWindow(hwnd)
-                            time.sleep(0.5)
+                        try:
+                            import win32gui
+                            import win32con
+                            hwnd = win32gui.FindWindow(None, "Recursive Video Player")
+                            if hwnd:
+                                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                                win32gui.SetForegroundWindow(hwnd)
+                                time.sleep(0.5)
+                        except:
+                            pass
 
                         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                         sock.connect(("127.0.0.1", port))
@@ -108,7 +110,10 @@ def select_multiple_folders_and_play():
 
             root.title("Recursive Video Player")
             root.geometry("1600x900")
-            root.state('zoomed')
+            try:
+                root.state('zoomed')
+            except:
+                pass
             root.protocol("WM_DELETE_WINDOW", self.cancel)
             root.configure(bg=self.bg_color)
 
@@ -1369,7 +1374,11 @@ def select_multiple_folders_and_play():
                 return
 
             if self.controller:
-                self.controller.stop()
+                try:
+                    self.controller.stop()
+                except Exception:
+                    pass
+                self.controller = None
                 cleanup_hotkeys()
 
             all_video_to_dir = {v: os.path.dirname(v) for v in videos}
@@ -1396,7 +1405,7 @@ def select_multiple_folders_and_play():
 
             if self.player_thread and self.player_thread.is_alive():
                 self.controller.running = False
-                self.player_thread.join(timeout=1.0)
+                self.player_thread.join(timeout=3.0)
 
             self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
             self.player_thread.start()
@@ -1404,9 +1413,10 @@ def select_multiple_folders_and_play():
             self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller, self.settings_manager.get_settings().hotkeys if hasattr(self, "settings_manager") else None), daemon=True)
             self.keys_thread.start()
 
-            def init_overlay_delayed():
+            def init_overlay_delayed(ctrl=self.controller):
                 time.sleep(1)
-                self.controller.init_overlay()
+                if self.controller is ctrl and ctrl.running:
+                    ctrl.init_overlay()
 
             ManagedThread(target=init_overlay_delayed, name="InitOverlay").start()
 
@@ -1443,6 +1453,8 @@ def select_multiple_folders_and_play():
                 data = file_struct + files_encoded
 
                 try:
+                    import win32clipboard as wcb
+                    import win32con
                     wcb.OpenClipboard()
                     wcb.EmptyClipboard()
                     wcb.SetClipboardData(win32con.CF_HDROP, data)
@@ -1918,7 +1930,11 @@ def select_multiple_folders_and_play():
                 return
 
             if self.controller:
-                self.controller.stop()
+                try:
+                    self.controller.stop()
+                except Exception:
+                    pass
+                self.controller = None
                 cleanup_hotkeys()
 
             self.root.config(cursor="wait")
@@ -1993,7 +2009,7 @@ def select_multiple_folders_and_play():
 
                             if self.player_thread and self.player_thread.is_alive():
                                 self.controller.running = False
-                                self.player_thread.join(timeout=1.0)
+                                self.player_thread.join(timeout=3.0)
 
                             self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                             self.player_thread.start()
@@ -2071,7 +2087,7 @@ def select_multiple_folders_and_play():
 
                             if self.player_thread and self.player_thread.is_alive():
                                 self.controller.running = False
-                                self.player_thread.join(timeout=1.0)
+                                self.player_thread.join(timeout=3.0)
 
                             self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                             self.player_thread.start()
@@ -2149,7 +2165,7 @@ def select_multiple_folders_and_play():
 
                             if self.player_thread and self.player_thread.is_alive():
                                 self.controller.running = False
-                                self.player_thread.join(timeout=1.0)
+                                self.player_thread.join(timeout=3.0)
 
                             self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                             self.player_thread.start()
@@ -2273,7 +2289,7 @@ def select_multiple_folders_and_play():
 
                     if self.player_thread and self.player_thread.is_alive():
                         self.controller.running = False
-                        self.player_thread.join(timeout=1.0)
+                        self.player_thread.join(timeout=3.0)
 
                     self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                     self.player_thread.start()
@@ -2282,11 +2298,12 @@ def select_multiple_folders_and_play():
                     self.keys_thread.start()
                     self.root.config(cursor="")
 
-                    def init_overlay_delayed():
+                    def init_overlay_delayed(ctrl=self.controller):
                         time.sleep(1)
-                        self.controller.init_overlay()
+                        if self.controller is ctrl and ctrl.running:
+                            ctrl.init_overlay()
 
-                    threading.Thread(target=init_overlay_delayed, daemon=True).start()
+                    ManagedThread(target=init_overlay_delayed, name="InitOverlay").start()
 
                 self.root.after(0, _start_player)
 
@@ -3342,7 +3359,11 @@ def select_multiple_folders_and_play():
                 return
 
             if self.controller:
-                self.controller.stop()
+                try:
+                    self.controller.stop()
+                except Exception:
+                    pass
+                self.controller = None
                 cleanup_hotkeys()
 
             all_video_to_dir = {v: os.path.dirname(v) for v in videos}
@@ -3364,7 +3385,7 @@ def select_multiple_folders_and_play():
 
             if self.player_thread and self.player_thread.is_alive():
                 self.controller.running = False
-                self.player_thread.join(timeout=1.0)
+                self.player_thread.join(timeout=3.0)
 
             self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
             self.player_thread.start()
@@ -3372,11 +3393,12 @@ def select_multiple_folders_and_play():
             self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller, self.settings_manager.get_settings().hotkeys if hasattr(self, "settings_manager") else None), daemon=True)
             self.keys_thread.start()
 
-            def init_overlay_delayed():
+            def init_overlay_delayed(ctrl=self.controller):
                 time.sleep(1)
-                self.controller.init_overlay()
+                if self.controller is ctrl and ctrl.running:
+                    ctrl.init_overlay()
 
-            threading.Thread(target=init_overlay_delayed, daemon=True).start()
+            ManagedThread(target=init_overlay_delayed, name="InitOverlay").start()
 
         def _add_to_playlist(self):
             selected_dir = self.get_current_selected_directory()
@@ -3448,7 +3470,11 @@ def select_multiple_folders_and_play():
                 return
 
             if self.controller:
-                self.controller.stop()
+                try:
+                    self.controller.stop()
+                except Exception:
+                    pass
+                self.controller = None
                 cleanup_hotkeys()
 
             self.update_console("=" * 100)
@@ -3501,7 +3527,7 @@ def select_multiple_folders_and_play():
 
                 if self.player_thread and self.player_thread.is_alive():
                     self.controller.running = False
-                    self.player_thread.join(timeout=1.0)
+                    self.player_thread.join(timeout=3.0)
 
                 self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                 self.player_thread.start()
@@ -3538,7 +3564,11 @@ def select_multiple_folders_and_play():
                 return
 
             if self.controller:
-                self.controller.stop()
+                try:
+                    self.controller.stop()
+                except Exception:
+                    pass
+                self.controller = None
                 cleanup_hotkeys()
 
             all_video_to_dir = {}
@@ -3590,7 +3620,7 @@ def select_multiple_folders_and_play():
 
                 if self.player_thread and self.player_thread.is_alive():
                     self.controller.running = False
-                    self.player_thread.join(timeout=1.0)
+                    self.player_thread.join(timeout=3.0)
 
                 self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                 self.player_thread.start()
@@ -3611,7 +3641,11 @@ def select_multiple_folders_and_play():
                 return
 
             if self.controller:
-                self.controller.stop()
+                try:
+                    self.controller.stop()
+                except Exception:
+                    pass
+                self.controller = None
                 cleanup_hotkeys()
 
             self.update_console("=" * 100)
@@ -3664,7 +3698,7 @@ def select_multiple_folders_and_play():
 
                 if self.player_thread and self.player_thread.is_alive():
                     self.controller.running = False
-                    self.player_thread.join(timeout=1.0)
+                    self.player_thread.join(timeout=3.0)
 
                 self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                 self.player_thread.start()
@@ -3832,6 +3866,8 @@ def select_multiple_folders_and_play():
 
             def paste_clipboard():
                 try:
+                    import win32clipboard as wcb
+                    import win32con
                     wcb.OpenClipboard()
                     data = wcb.GetClipboardData(win32con.CF_UNICODETEXT)
                     wcb.CloseClipboard()
@@ -3910,6 +3946,8 @@ def select_multiple_folders_and_play():
             cancel_btn.pack(side=tk.RIGHT)
 
             try:
+                import win32clipboard as wcb
+                import win32con
                 wcb.OpenClipboard()
                 data = wcb.GetClipboardData(win32con.CF_UNICODETEXT)
                 wcb.CloseClipboard()

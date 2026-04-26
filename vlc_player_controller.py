@@ -7,8 +7,6 @@ from screeninfo import get_monitors
 from datetime import datetime
 from pathlib import Path
 from key_press import cleanup_hotkeys
-import win32clipboard as wcb
-import win32con
 import struct
 
 from managers.resource_manager import get_resource_manager
@@ -137,6 +135,11 @@ class BaseVLCPlayerController:
 
         try:
             em = self.player.event_manager()
+            em.event_detach(vlc.EventType.MediaPlayerEndReached)
+        except Exception:
+            pass
+        try:
+            em = self.player.event_manager()
             em.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_vlc_stopped)
         except Exception:
             pass
@@ -202,6 +205,12 @@ class BaseVLCPlayerController:
 
         if self.player:
             try:
+                media = self.player.get_media()
+                if media:
+                    media.release()
+            except Exception:
+                pass
+            try:
                 self.player.stop()
                 time.sleep(0.2)
             except Exception:
@@ -211,13 +220,6 @@ class BaseVLCPlayerController:
             except Exception:
                 pass
             self.player = None
-
-        try:
-            media = self.player.get_media() if self.player else None
-            if media:
-                media.release()
-        except Exception:
-            pass
 
         try:
             if self.instance:
@@ -445,6 +447,9 @@ class BaseVLCPlayerController:
                     f'--transform-type={transform_type}',
                 ]
 
+            old_player = self.player
+            old_instance = self.instance
+
             self.instance = vlc.Instance(*instance_args)
             self.player = self.instance.media_player_new()
             try:
@@ -454,6 +459,16 @@ class BaseVLCPlayerController:
             except Exception:
                 pass
             self.current_monitor = monitor_number
+
+            try:
+                old_player.stop()
+                old_player.release()
+            except Exception:
+                pass
+            try:
+                old_instance.release()
+            except Exception:
+                pass
 
             if current_media:
                 self.player.set_media(current_media)
@@ -509,10 +524,15 @@ class BaseVLCPlayerController:
                 files = (current_video + "\0").encode("utf-16le") + b"\0\0"
                 data = file_struct + files
 
-                wcb.OpenClipboard()
-                wcb.EmptyClipboard()
-                wcb.SetClipboardData(win32con.CF_HDROP, data)
-                wcb.CloseClipboard()
+                try:
+                    import win32clipboard as wcb
+                    import win32con
+                    wcb.OpenClipboard()
+                    wcb.EmptyClipboard()
+                    wcb.SetClipboardData(win32con.CF_HDROP, data)
+                    wcb.CloseClipboard()
+                except:
+                    pass
 
                 if self.logger:
                     self.logger(f"Copied to clipboard: {current_video}")
@@ -648,8 +668,9 @@ class BaseVLCPlayerController:
             except Exception:
                 pass
 
-            self.instance = new_instance
-            self.player = new_player
+            with self.lock:
+                self.instance = new_instance
+                self.player = new_player
             self.resource_manager.register_vlc_instance(self.instance)
         except Exception as e:
             if self.logger:
