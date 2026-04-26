@@ -1101,6 +1101,7 @@ class SettingsUI:
                 self._capture_overlay = None
 
             overlay.bind('<KeyPress>', _finish_capture)
+            overlay.protocol("WM_DELETE_WINDOW", _cancel)
             overlay.focus_force()
 
         def _add_group(parent_frame, title, action_ids):
