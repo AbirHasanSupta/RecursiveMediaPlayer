@@ -3250,8 +3250,45 @@ def select_multiple_folders_and_play():
                 fg=_tb_colors()["fg"],
                 font=("Segoe UI", 9),
                 padx=8, pady=4,
+                cursor="hand2"
             )
             self.sleep_countdown_label.pack(side=tk.RIGHT, padx=(0, 2))
+
+            def _sleep_label_click(e):
+                if not getattr(self, '_sleep_timer_end', None):
+                    return
+                try:
+                    if getattr(self, '_sleep_timer_paused', False):
+                        # resume: restart the after job and countdown
+                        import time as _time
+                        remaining_ms = int(self._sleep_timer_remaining * 1000)
+                        self._sleep_timer_end = _time.time() + self._sleep_timer_remaining
+                        self._sleep_timer_job = self.root.after(remaining_ms, self._sleep_timer_fired)
+                        self._sleep_timer_paused = False
+                        self._start_sleep_countdown()
+                        if self.controller:
+                            self.controller.player.pause()
+                    else:
+                        # pause: cancel the after job, store remaining
+                        import time as _time
+                        if self._sleep_timer_job:
+                            self.root.after_cancel(self._sleep_timer_job)
+                            self._sleep_timer_job = None
+                        if hasattr(self, '_sleep_countdown_job') and self._sleep_countdown_job:
+                            self.root.after_cancel(self._sleep_countdown_job)
+                            self._sleep_countdown_job = None
+                        self._sleep_timer_remaining = max(0, self._sleep_timer_end - _time.time())
+                        self._sleep_timer_paused = True
+                        if hasattr(self, 'sleep_countdown_label'):
+                            mins = int(self._sleep_timer_remaining) // 60
+                            secs = int(self._sleep_timer_remaining) % 60
+                            self.sleep_countdown_label.config(text=f"⏸ {mins}:{secs:02d}")
+                        if self.controller:
+                            self.controller.player.pause()
+                except Exception:
+                    pass
+
+            self.sleep_countdown_label.bind("<ButtonRelease-1>", _sleep_label_click)
 
             # theme toggle
             self.theme_toolbar_btn = tk.Label(
@@ -3318,6 +3355,7 @@ def select_multiple_folders_and_play():
                     self.root.after_cancel(self._sleep_countdown_job)
                     self._sleep_countdown_job = None
                 self._sleep_timer_end = None
+                self._sleep_timer_paused = False
                 if hasattr(self, 'sleep_countdown_label'):
                     self.sleep_countdown_label.config(text="")
                 self.update_console("Sleep timer cancelled")
@@ -3389,6 +3427,8 @@ def select_multiple_folders_and_play():
             def tick():
                 if not getattr(self, '_sleep_timer_end', None):
                     return
+                if getattr(self, '_sleep_timer_paused', False):
+                    return
                 remaining = int(self._sleep_timer_end - _time.time())
                 if remaining <= 0:
                     return
@@ -3404,6 +3444,7 @@ def select_multiple_folders_and_play():
         def _sleep_timer_fired(self):
             self._sleep_timer_job = None
             self._sleep_timer_end = None
+            self._sleep_timer_paused = False
             if hasattr(self, '_sleep_countdown_job') and self._sleep_countdown_job:
                 self.root.after_cancel(self._sleep_countdown_job)
                 self._sleep_countdown_job = None
