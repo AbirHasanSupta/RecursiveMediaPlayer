@@ -3182,8 +3182,6 @@ def select_multiple_folders_and_play():
                 ("Add Directory",           self.add_directory),
                 ("Add Google Drive Link",   self.add_drive_link),
                 None,
-                ("Remove Selected Directory", self.remove_directory),
-                None,
                 ("Exit",                    self.cancel),
             ])
             make_toolbar_btn("File", menu=file_menu)

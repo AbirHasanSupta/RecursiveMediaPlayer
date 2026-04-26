@@ -226,6 +226,11 @@ class ThemeSelector:
             self.entry_bg = "#313335"
             self.entry_fg = "#A9B7C6"
             self.entry_border = "#323232"
+            self.muted_fg = "#6B7A8A"
+            self.badge_bg = "#3C3F41"
+            self.badge_fg = "#A9B7C6"
+            self.alt_row_color = "#313335"
+            self.divider_color = "#3A3B3E"
         else:
             self.bg_color = "#f5f5f5"
             self.accent_color = "#3498db"
@@ -240,6 +245,11 @@ class ThemeSelector:
             self.entry_fg = "#333333"
             self.entry_border = "#e0e0e0"
             self.header_color = "#333333"
+            self.muted_fg = "#666666"
+            self.badge_bg = "#e8e8e8"
+            self.badge_fg = "#333333"
+            self.alt_row_color = "#ebebeb"
+            self.divider_color = "#dddddd"
 
         if hasattr(self, 'theme_button'):
             self.theme_button.config(text="Light Mode" if self.dark_mode else "Dark Mode")

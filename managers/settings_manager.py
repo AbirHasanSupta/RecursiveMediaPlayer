@@ -411,22 +411,15 @@ class SettingsUI:
             path_frame,
             textvariable=self.ai_index_path_var,
             font=self.theme_provider.normal_font,
-            bg="white",
-            fg=self.theme_provider.text_color,
+            bg=self.theme_provider.entry_bg,
+            fg=self.theme_provider.entry_fg,
             relief=tk.FLAT,
             bd=1,
             highlightthickness=1,
-            highlightbackground="#e0e0e0"
+            insertbackground=self.theme_provider.entry_fg,
+            highlightbackground=self.theme_provider.entry_border
         )
         path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-
-        if hasattr(self.theme_provider, 'entry_bg'):
-            path_entry.configure(
-                bg=self.theme_provider.entry_bg,
-                fg=self.theme_provider.entry_fg,
-                insertbackground=self.theme_provider.entry_fg,
-                highlightbackground=self.theme_provider.entry_border
-            )
 
         browse_btn = self.theme_provider.create_button(
             path_frame, "Browse", self._browse_index_path, "secondary", "sm"
@@ -438,7 +431,7 @@ class SettingsUI:
             text="",
             font=self.theme_provider.small_font,
             bg=self.theme_provider.bg_color,
-            fg="#666666"
+            fg=self.theme_provider.muted_fg
         )
         self.index_info_label.pack(anchor='w')
 
@@ -474,23 +467,22 @@ class SettingsUI:
             textvariable=self.workers_var,
             font=self.theme_provider.normal_font,
             width=10,
-            bg="white"
+            bg=self.theme_provider.entry_bg
         )
         workers_spin.pack(side=tk.LEFT, padx=(0, 5))
 
-        if hasattr(self.theme_provider, 'entry_bg'):
-            workers_spin.configure(
-                bg=self.theme_provider.entry_bg,
-                fg=self.theme_provider.entry_fg,
-                buttonbackground=self.theme_provider.bg_color
-            )
+        workers_spin.configure(
+            bg=self.theme_provider.entry_bg,
+            fg=self.theme_provider.entry_fg,
+            buttonbackground=self.theme_provider.bg_color
+        )
 
         tk.Label(
             workers_frame,
             text="(1-8, recommend 2-4)",
             font=self.theme_provider.small_font,
             bg=self.theme_provider.bg_color,
-            fg="#666666"
+            fg=self.theme_provider.muted_fg
         ).pack(side=tk.LEFT)
 
         frames_frame = tk.Frame(prep_section, bg=self.theme_provider.bg_color)
@@ -514,23 +506,22 @@ class SettingsUI:
             textvariable=self.max_frames_var,
             font=self.theme_provider.normal_font,
             width=10,
-            bg="white"
+            bg=self.theme_provider.entry_bg
         )
         frames_spin.pack(side=tk.LEFT, padx=(0, 5))
 
-        if hasattr(self.theme_provider, 'entry_bg'):
-            frames_spin.configure(
-                bg=self.theme_provider.entry_bg,
-                fg=self.theme_provider.entry_fg,
-                buttonbackground=self.theme_provider.bg_color
-            )
+        frames_spin.configure(
+            bg=self.theme_provider.entry_bg,
+            fg=self.theme_provider.entry_fg,
+            buttonbackground=self.theme_provider.bg_color
+        )
 
         tk.Label(
             frames_frame,
             text="(20-200, higher = more accurate)",
             font=self.theme_provider.small_font,
             bg=self.theme_provider.bg_color,
-            fg="#666666"
+            fg=self.theme_provider.muted_fg
         ).pack(side=tk.LEFT)
 
         self.incremental_var = tk.BooleanVar(value=self.settings.incremental_preprocessing)
@@ -657,23 +648,22 @@ class SettingsUI:
             textvariable=self.preview_duration_var,
             font=self.theme_provider.normal_font,
             width=10,
-            bg="white"
+            bg=self.theme_provider.entry_bg
         )
         duration_spin.pack(side=tk.LEFT, padx=(0, 2))
 
-        if hasattr(self.theme_provider, 'entry_bg'):
-            duration_spin.configure(
-                bg=self.theme_provider.entry_bg,
-                fg=self.theme_provider.entry_fg,
-                buttonbackground=self.theme_provider.bg_color
-            )
+        duration_spin.configure(
+            bg=self.theme_provider.entry_bg,
+            fg=self.theme_provider.entry_fg,
+            buttonbackground=self.theme_provider.bg_color
+        )
 
         tk.Label(
             duration_frame,
             text="(1-10 seconds)",
             font=self.theme_provider.small_font,
             bg=self.theme_provider.bg_color,
-            fg="#666666"
+            fg=self.theme_provider.muted_fg
         ).pack(side=tk.LEFT)
 
         self.use_video_preview_var = tk.BooleanVar(value=self.settings.use_video_preview)
@@ -713,7 +703,7 @@ class SettingsUI:
                  "with its own 3 players — ideal for a second monitor.",
             font=self.theme_provider.small_font,
             bg=self.theme_provider.bg_color,
-            fg="#666666",
+            fg=self.theme_provider.muted_fg,
             justify=tk.LEFT
         ).pack(anchor='w', pady=(4, 2))
 
@@ -731,7 +721,7 @@ class SettingsUI:
             text="",
             font=self.theme_provider.small_font,
             bg=self.theme_provider.bg_color,
-            fg="#666666"
+            fg=self.theme_provider.muted_fg
         )
         self.thumbnail_info_label.pack(anchor='w', pady=(5, 0))
 
@@ -751,7 +741,7 @@ class SettingsUI:
             text="Video metadata cache stores information like resolution, duration, and play statistics.",
             font=self.theme_provider.small_font,
             bg=self.theme_provider.bg_color,
-            fg="#666666",
+            fg=self.theme_provider.muted_fg,
             wraplength=600,
             justify=tk.LEFT
         )
@@ -771,7 +761,7 @@ class SettingsUI:
             text="",
             font=self.theme_provider.small_font,
             bg=self.theme_provider.bg_color,
-            fg="#666666"
+            fg=self.theme_provider.muted_fg
         )
         self.metadata_info_label.pack(anchor='w', pady=(5, 0))
 
@@ -809,23 +799,22 @@ class SettingsUI:
             textvariable=self.cleanup_days_var,
             font=self.theme_provider.normal_font,
             width=10,
-            bg="white"
+            bg=self.theme_provider.entry_bg
         )
         cleanup_spin.pack(side=tk.LEFT, padx=(0, 5))
 
-        if hasattr(self.theme_provider, 'entry_bg'):
-            cleanup_spin.configure(
-                bg=self.theme_provider.entry_bg,
-                fg=self.theme_provider.entry_fg,
-                buttonbackground=self.theme_provider.bg_color
-            )
+        cleanup_spin.configure(
+            bg=self.theme_provider.entry_bg,
+            fg=self.theme_provider.entry_fg,
+            buttonbackground=self.theme_provider.bg_color
+        )
 
         tk.Label(
             cleanup_frame,
             text="(applies to watch history & resume data)",
             font=self.theme_provider.small_font,
             bg=self.theme_provider.bg_color,
-            fg="#666666"
+            fg=self.theme_provider.muted_fg
         ).pack(side=tk.LEFT)
 
         manual_cleanup_section = tk.LabelFrame(
@@ -869,7 +858,7 @@ class SettingsUI:
             text="Click a key badge to reassign it.  Press the new key (or combo) when prompted.",
             font=self.theme_provider.small_font,
             bg=self.theme_provider.bg_color,
-            fg="#666666",
+            fg=self.theme_provider.muted_fg,
             wraplength=620,
             justify=tk.LEFT
         ).pack(anchor='w', pady=(0, 4))
@@ -962,7 +951,7 @@ class SettingsUI:
                 text="Press any key or combo  (Esc = cancel)",
                 font=self.theme_provider.small_font,
                 bg=self.theme_provider.bg_color,
-                fg="#888888"
+                fg=self.theme_provider.muted_fg
             ).pack()
 
             def _finish_capture(event):
@@ -1118,13 +1107,13 @@ class SettingsUI:
             hdr = tk.Frame(section, bg=self.theme_provider.bg_color)
             hdr.pack(fill=tk.X, pady=(0, 4))
             tk.Label(hdr, text="Key / Combo", font=self.theme_provider.small_font,
-                     bg=self.theme_provider.bg_color, fg="#999999",
+                     bg=self.theme_provider.bg_color, fg=self.theme_provider.muted_fg,
                      width=KEY_COL_W, anchor='w').pack(side=tk.LEFT)
             tk.Label(hdr, text="Action", font=self.theme_provider.small_font,
-                     bg=self.theme_provider.bg_color, fg="#999999",
+                     bg=self.theme_provider.bg_color, fg=self.theme_provider.muted_fg,
                      anchor='w').pack(side=tk.LEFT)
 
-            tk.Frame(section, bg="#dddddd", height=1).pack(fill=tk.X, pady=(0, 6))
+            tk.Frame(section, bg=self.theme_provider.divider_color, height=1).pack(fill=tk.X, pady=(0, 6))
 
             alt_row = getattr(self.theme_provider, 'alt_row_color', self.theme_provider.bg_color)
             for i, action_id in enumerate(action_ids):
