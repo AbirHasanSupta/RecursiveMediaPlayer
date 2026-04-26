@@ -89,6 +89,7 @@ def select_multiple_folders_and_play():
             self.collapsed_paths = set()
             self.current_max_depth = 20
             self.loop_mode = "loop_on"
+            self._sleep_timer_job = None
 
             preferences = self.config.load_preferences()
             self.dark_mode = preferences['dark_mode']
@@ -3073,6 +3074,15 @@ def select_multiple_folders_and_play():
             )
             self.filter_sort_button.pack(side=tk.LEFT, padx=(0, 10))
 
+            self.sleep_timer_button = self.create_button(
+                theme_frame,
+                text="Sleep Timer",
+                command=self._show_sleep_timer_dialog,
+                variant="secondary",
+                size="md"
+            )
+            self.sleep_timer_button.pack(side=tk.LEFT, padx=(0, 10))
+
             self.theme_button = self.create_button(
                 theme_frame,
                 text="Dark Mode" if not self.dark_mode else "Light Mode",
@@ -3123,6 +3133,56 @@ def select_multiple_folders_and_play():
                 font=(self.normal_font.name, self.normal_font.actual()['size'], 'bold')
             )
             self.play_button.pack(side=tk.LEFT)
+
+        def _show_sleep_timer_dialog(self):
+            if hasattr(self, '_sleep_timer_job') and self._sleep_timer_job:
+                self.root.after_cancel(self._sleep_timer_job)
+                self._sleep_timer_job = None
+                self.sleep_timer_button.config(text="Sleep Timer")
+                self.update_console("Sleep timer cancelled")
+                return
+
+            dlg = tk.Toplevel(self.root)
+            dlg.title("Sleep Timer")
+            dlg.geometry("300x160")
+            dlg.configure(bg=self.bg_color)
+            dlg.transient(self.root)
+            dlg.grab_set()
+            dlg.resizable(False, False)
+
+            tk.Label(dlg, text="Stop playback after (minutes):",
+                     font=self.normal_font, bg=self.bg_color,
+                     fg=self.text_color).pack(pady=(20, 8))
+
+            minutes_var = tk.IntVar(value=30)
+            spin = tk.Spinbox(dlg, from_=1, to=300, textvariable=minutes_var,
+                              font=self.normal_font, width=8,
+                              bg=self.bg_color, fg=self.text_color)
+            spin.pack()
+
+            def start():
+                minutes = minutes_var.get()
+                ms = minutes * 60 * 1000
+                self._sleep_timer_job = self.root.after(ms, self._sleep_timer_fired)
+                self.sleep_timer_button.config(text=f"Sleep: {minutes}m ✕")
+                self.update_console(f"Sleep timer set for {minutes} minutes")
+                dlg.destroy()
+
+            self.create_button(dlg, "Set Timer", start, "primary", "md").pack(pady=15)
+            dlg.bind("<Return>", lambda e: start())
+
+        def _sleep_timer_fired(self):
+            self._sleep_timer_job = None
+            self.sleep_timer_button.config(text="Sleep Timer")
+            self.update_console("Sleep timer: stopping playback")
+            if self.controller:
+                try:
+                    self.controller.stop()
+                except Exception:
+                    pass
+                self.controller = None
+                from key_press import cleanup_hotkeys
+                cleanup_hotkeys()
 
         def setup_status_section(self):
             # Video count is now shown inline in the exclusion section header
