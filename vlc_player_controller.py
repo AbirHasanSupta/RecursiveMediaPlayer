@@ -79,6 +79,12 @@ class BaseVLCPlayerController:
         self.stop_callback = None
         self.position_overlay = None
 
+        self._brightness = 1.0
+        self._contrast = 1.0
+        self._saturation = 1.0
+        self._gamma = 1.0
+        self._hue = 0
+
         self._rotation_index = 0
         self._zoom_level = 1.0
 
@@ -799,6 +805,54 @@ class BaseVLCPlayerController:
             except Exception as e:
                 if self.logger:
                     self.logger(f"Subtitle load error: {e}")
+
+    def _enable_adjust(self):
+        try:
+            self.player.video_set_adjust_int(vlc.VideoAdjustOption.Enable, 1)
+        except Exception:
+            pass
+
+    def set_brightness(self, value: float):
+        self._brightness = round(max(0.0, min(2.0, value)), 2)
+        self._enable_adjust()
+        try:
+            self.player.video_set_adjust_float(vlc.VideoAdjustOption.Brightness, self._brightness)
+        except Exception:
+            pass
+
+    def set_contrast(self, value: float):
+        self._contrast = round(max(0.0, min(2.0, value)), 2)
+        self._enable_adjust()
+        try:
+            self.player.video_set_adjust_float(vlc.VideoAdjustOption.Contrast, self._contrast)
+        except Exception:
+            pass
+
+    def set_saturation(self, value: float):
+        self._saturation = round(max(0.0, min(3.0, value)), 2)
+        self._enable_adjust()
+        try:
+            self.player.video_set_adjust_float(vlc.VideoAdjustOption.Saturation, self._saturation)
+        except Exception:
+            pass
+
+    def set_gamma(self, value: float):
+        self._gamma = round(max(0.01, min(10.0, value)), 2)
+        self._enable_adjust()
+        try:
+            self.player.video_set_adjust_float(vlc.VideoAdjustOption.Gamma, self._gamma)
+        except Exception:
+            pass
+
+    def reset_video_adjustments(self):
+        self._brightness = 1.0
+        self._contrast = 1.0
+        self._saturation = 1.0
+        self._gamma = 1.0
+        try:
+            self.player.video_set_adjust_int(vlc.VideoAdjustOption.Enable, 0)
+        except Exception:
+            pass
 
 
 class VLCPlayerControllerForMultipleDirectory(BaseVLCPlayerController):
