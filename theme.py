@@ -255,11 +255,60 @@ class ThemeSelector:
         for frame_attr in dir(self):
             if frame_attr.endswith('_frame') and hasattr(self, frame_attr):
                 frame = getattr(self, frame_attr)
+                # Skip the toolbar — it manages its own background color
+                if hasattr(self, 'toolbar') and frame is self.toolbar:
+                    continue
                 if isinstance(frame, tk.Frame):
                     frame.configure(bg=self.bg_color)
 
+        # Also fix the toolbar's own bg (uses toolbar palette, not app bg)
+        if hasattr(self, 'toolbar') and hasattr(self, '_tb_colors'):
+            cc = self._tb_colors()
+            self.toolbar.configure(bg=cc["bg"])
+            # Re-color plain toolbar menu buttons
+            if hasattr(self, '_toolbar_btns'):
+                for btn in self._toolbar_btns.values():
+                    btn.config(bg=cc["bg"], fg=cc["fg"])
+            # Re-color play button
+            if hasattr(self, 'play_toolbar_btn'):
+                self.play_toolbar_btn.config(bg=cc["bg"], fg=cc["play_fg"])
+            # Re-color theme toggle button
+            if hasattr(self, 'theme_toolbar_btn'):
+                self.theme_toolbar_btn.config(bg=cc["bg"], fg=cc["fg"])
+            # Re-color media pill buttons with their accent colors
+            if hasattr(self, '_media_pill_btns') and self._media_pill_btns:
+                _light = {
+                    "🎵 Playlist":   ("#5B9BD5", "#1a5fa8", "#FFFFFF", "#144d8a"),
+                    "⬛ Queue":      ("#2ecc71", "#1a8a4a", "#FFFFFF", "#156e3a"),
+                    "♥ Favourites": ("#e67e22", "#b35a00", "#FFFFFF", "#8a4400"),
+                    "🕐 History":   ("#9b59b6", "#6c2f8f", "#FFFFFF", "#521f6e"),
+                }
+                _dark = {
+                    "🎵 Playlist":   ("#4A9EFF", "#1a5fa8", "#FFFFFF", "#144d8a"),
+                    "⬛ Queue":      ("#2ecc71", "#1a8a4a", "#FFFFFF", "#156e3a"),
+                    "♥ Favourites": ("#FF9F43", "#b35a00", "#FFFFFF", "#8a4400"),
+                    "🕐 History":   ("#C39BD3", "#6c2f8f", "#FFFFFF", "#521f6e"),
+                }
+                accents = _dark if self.dark_mode else _light
+                for lbl, btn in self._media_pill_btns.items():
+                    if lbl in accents:
+                        normal_fg = accents[lbl][0]
+                        btn.config(bg=cc["bg"], fg=normal_fg,
+                                   highlightbackground=normal_fg, highlightcolor=normal_fg)
+            # Re-color separator frames inside toolbar
+            for child in self.toolbar.winfo_children():
+                if isinstance(child, tk.Frame):
+                    child.configure(bg=cc["sep"])
+            # Fix sleep_countdown_label — it ends in _label so the loop below
+            # would overwrite it; set it correctly here instead
+            if hasattr(self, 'sleep_countdown_label'):
+                self.sleep_countdown_label.config(bg=cc["bg"], fg=cc["fg"])
+
         for label_attr in dir(self):
             if label_attr.endswith('_label') and hasattr(self, label_attr):
+                # sleep_countdown_label lives on the toolbar — already handled above
+                if label_attr == 'sleep_countdown_label':
+                    continue
                 label = getattr(self, label_attr)
                 if isinstance(label, tk.Label):
                     if 'header' in label_attr or label.cget('font') == str(self.header_font):
