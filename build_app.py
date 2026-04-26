@@ -3082,15 +3082,16 @@ def select_multiple_folders_and_play():
                     }
                 else:
                     return {
-                        "bg":        "#D0D4DA",
+                        "bg":        "#ECECEC",
                         "fg":        "#2B2B2B",
-                        "hover_bg":  "#BCC8DC",
+                        "hover_bg":  "#DCDCDC",
                         "hover_fg":  "#000000",
-                        "active_bg": "#A8B8D0",
+                        "active_bg": "#CCCCCC",
                         "active_fg": "#000000",
                         "play_fg":   "#c0392b",
                         "play_hover":"#992d22",
-                        "sep":       "#B8BEC8",
+                        "play_hover_bg": "#c0392b",
+                        "sep":       "#E0E0E0",
                     }
 
             self._tb_colors = _tb_colors
@@ -3167,6 +3168,8 @@ def select_multiple_folders_and_play():
             file_menu = make_dropdown_menu([
                 ("Add Directory",           self.add_directory),
                 ("Add Google Drive Link",   self.add_drive_link),
+                None,
+                ("Remove Selected Directory", self.remove_directory),
                 None,
                 ("Exit",                    self.cancel),
             ])
@@ -3276,11 +3279,11 @@ def select_multiple_folders_and_play():
             self.play_toolbar_btn.pack(side=tk.RIGHT, padx=(0, 6))
 
             def _play_enter(e):
-                cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc["hover_bg"], fg="#FFFFFF")
+                cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc.get("play_hover_bg", cc["hover_bg"]), fg="#FFFFFF")
             def _play_leave(e):
                 cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc["bg"], fg=cc["play_fg"])
             def _play_press(e):
-                cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc["active_bg"], fg="#FFFFFF")
+                cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc.get("play_hover_bg", cc["active_bg"]), fg="#FFFFFF")
             def _play_release(e):
                 cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc["hover_bg"], fg="#FFFFFF")
                 self.play_videos()
