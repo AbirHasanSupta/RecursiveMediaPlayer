@@ -603,7 +603,7 @@ def select_multiple_folders_and_play():
 
             self.clear_console_button = self.create_button(
                 console_header_frame,
-                text="Clear Console",
+                text="Clear",
                 command=self.clear_console,
                 variant="dark",
                 size="sm"
@@ -623,7 +623,7 @@ def select_multiple_folders_and_play():
 
             self.console_text = tk.Text(
                 console_frame,
-                height=8,
+                height=10,
                 wrap=tk.WORD,
                 yscrollcommand=self.console_scrollbar.set,
                 font=self.mono_font,
@@ -2838,7 +2838,18 @@ def select_multiple_folders_and_play():
             if self.show_only_excluded:
                 self.selected_dir_label.config(text=f"Excluded items in: {os.path.basename(directory)}")
             else:
-                self.selected_dir_label.config(text=f"All items in: {os.path.basename(directory)}")
+                _cache = self.scan_cache.get(directory)
+                if _cache:
+                    _videos, _, _ = _cache
+                    _excluded_subdirs = self.excluded_subdirs.get(directory, [])
+                    _excluded_videos = self.excluded_videos.get(directory, [])
+                    if _excluded_subdirs or _excluded_videos:
+                        _count = sum(1 for v in _videos if not self.is_video_excluded(directory, v))
+                    else:
+                        _count = len(_videos)
+                    self.selected_dir_label.config(text=f"All items in: {os.path.basename(directory)} ({_count} videos)")
+                else:
+                    self.selected_dir_label.config(text=f"All items in: {os.path.basename(directory)}")
             self.exclusion_listbox.delete(0, tk.END)
             self.exclusion_listbox.insert(tk.END, "Loading...")
             self.current_subdirs_mapping = {}
