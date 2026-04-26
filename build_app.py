@@ -1379,7 +1379,7 @@ def select_multiple_folders_and_play():
                 except Exception:
                     pass
                 self.controller = None
-                cleanup_hotkeys()
+                # cleanup_hotkeys()
 
             all_video_to_dir = {v: os.path.dirname(v) for v in videos}
             all_directories = sorted(list(set(all_video_to_dir.values())))
@@ -1935,7 +1935,7 @@ def select_multiple_folders_and_play():
                 except Exception:
                     pass
                 self.controller = None
-                cleanup_hotkeys()
+                # cleanup_hotkeys()
 
             self.root.config(cursor="wait")
             self.root.update()
@@ -3364,7 +3364,7 @@ def select_multiple_folders_and_play():
                 except Exception:
                     pass
                 self.controller = None
-                cleanup_hotkeys()
+                # cleanup_hotkeys()
 
             all_video_to_dir = {v: os.path.dirname(v) for v in videos}
             all_directories = sorted(list(set(all_video_to_dir.values())))
@@ -3475,7 +3475,7 @@ def select_multiple_folders_and_play():
                 except Exception:
                     pass
                 self.controller = None
-                cleanup_hotkeys()
+                # cleanup_hotkeys()
 
             self.update_console("=" * 100)
             self.update_console("STARTING PLAYLIST PLAYBACK")
@@ -3569,7 +3569,7 @@ def select_multiple_folders_and_play():
                 except Exception:
                     pass
                 self.controller = None
-                cleanup_hotkeys()
+                # cleanup_hotkeys()
 
             all_video_to_dir = {}
             all_directories = []
@@ -3646,7 +3646,7 @@ def select_multiple_folders_and_play():
                 except Exception:
                     pass
                 self.controller = None
-                cleanup_hotkeys()
+                # cleanup_hotkeys()
 
             self.update_console("=" * 100)
             self.update_console("STARTING HISTORY VIDEO PLAYBACK")
@@ -4153,7 +4153,7 @@ def select_multiple_folders_and_play():
                     self.save_preferences()
 
                 self.controller.stop()
-            cleanup_hotkeys()
+            # cleanup_hotkeys()
             try:
                 if hasattr(self, 'executor'):
                     self.executor.shutdown(wait=False, cancel_futures=True)
