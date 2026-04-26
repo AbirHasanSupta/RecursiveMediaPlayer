@@ -72,6 +72,9 @@ DEFAULT_HOTKEYS: Dict[str, str] = {
     # Subtitles
     "cycle_subtitle":     "u",
     "disable_subtitles":  "ctrl+u",
+    "ab_set_a": "[",
+    "ab_set_b": "]",
+    "ab_clear": "\\",
 }
 
 # Human-readable labels for the Settings UI
@@ -105,6 +108,9 @@ HOTKEY_LABELS: Dict[str, str] = {
     "prev_chapter":       "Previous chapter",
     "cycle_subtitle":     "Cycle subtitle track",
     "disable_subtitles":  "Disable subtitles",
+    "ab_set_a": "A-B Loop: Set point A",
+    "ab_set_b": "A-B Loop: Set point B",
+    "ab_clear": "A-B Loop: Clear",
 }
 
 # Group order for the Settings UI
@@ -119,6 +125,7 @@ HOTKEY_GROUPS: list = [
     ("🛠  Tools",          ["take_screenshot", "copy_video_path", "toggle_voice"]),
     ("📖  Chapters",       ["next_chapter", "prev_chapter"]),
     ("💬  Subtitles",      ["cycle_subtitle", "disable_subtitles"]),
+    ("🔁  A-B Loop", ["ab_set_a", "ab_set_b", "ab_clear"]),
 ]
 
 

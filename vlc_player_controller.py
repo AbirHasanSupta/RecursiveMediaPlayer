@@ -85,6 +85,11 @@ class BaseVLCPlayerController:
         self._gamma = 1.0
         self._hue = 0
 
+        self._ab_point_a = None
+        self._ab_point_b = None
+        self._ab_loop_active = False
+        self._ab_monitor_thread = None
+
         self._rotation_index = 0
         self._zoom_level = 1.0
 
@@ -95,6 +100,66 @@ class BaseVLCPlayerController:
 
     _ROTATION_STEPS = [0, 90, 180, 270]
     _TRANSFORM_MAP = {0: "identity", 90: "90", 180: "180", 270: "270"}
+
+    def set_ab_point_a(self):
+        with self.lock:
+            try:
+                self._ab_point_a = self.player.get_time()
+                self._ab_point_b = None
+                self._ab_loop_active = False
+                if self.logger:
+                    self.logger(f"A-B Loop: Point A set at {self._ab_point_a / 1000:.1f}s")
+            except Exception as e:
+                if self.logger:
+                    self.logger(f"A-B Loop error: {e}")
+
+    def set_ab_point_b(self):
+        with self.lock:
+            try:
+                if self._ab_point_a is None:
+                    if self.logger:
+                        self.logger("A-B Loop: Set point A first")
+                    return
+                b = self.player.get_time()
+                if b <= self._ab_point_a:
+                    if self.logger:
+                        self.logger("A-B Loop: Point B must be after point A")
+                    return
+                self._ab_point_b = b
+                self._ab_loop_active = True
+                if self.logger:
+                    self.logger(f"A-B Loop: Point B set at {self._ab_point_b / 1000:.1f}s — looping")
+                self._start_ab_monitor()
+            except Exception as e:
+                if self.logger:
+                    self.logger(f"A-B Loop error: {e}")
+
+    def clear_ab_loop(self):
+        with self.lock:
+            self._ab_point_a = None
+            self._ab_point_b = None
+            self._ab_loop_active = False
+            if self.logger:
+                self.logger("A-B Loop cleared")
+
+    def _start_ab_monitor(self):
+        if self._ab_monitor_thread and self._ab_monitor_thread.is_alive():
+            return
+
+        def _monitor():
+            while self.running and self._ab_loop_active:
+                try:
+                    current = self.player.get_time()
+                    if (self._ab_point_b is not None and
+                            current >= self._ab_point_b):
+                        self.player.set_time(self._ab_point_a)
+                except Exception:
+                    pass
+                time.sleep(0.1)
+
+        self._ab_monitor_thread = threading.Thread(
+            target=_monitor, name="ABLoopMonitor", daemon=True)
+        self._ab_monitor_thread.start()
 
 
     def set_initial_playback_rate(self, rate):

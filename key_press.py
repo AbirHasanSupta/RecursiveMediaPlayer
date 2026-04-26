@@ -79,6 +79,9 @@ _DEFAULT_HOTKEYS = {
     "prev_chapter":      "b",
     "cycle_subtitle":    "u",
     "disable_subtitles": "ctrl+u",
+    "ab_set_a":   "[",
+    "ab_set_b":   "]",
+    "ab_clear":   "\\",
 }
 
 # Mapping from action-id -> (controller_method_name, extra_positional_args)
@@ -112,6 +115,9 @@ _ACTION_MAP = {
     "prev_chapter":      ("prev_chapter",          ()),
     "cycle_subtitle":    ("cycle_subtitle_track",  ()),
     "disable_subtitles": ("disable_subtitles",     ()),
+    "ab_set_a": ("set_ab_point_a", ()),
+    "ab_set_b": ("set_ab_point_b", ()),
+    "ab_clear": ("clear_ab_loop",  ()),
 }
 
 
