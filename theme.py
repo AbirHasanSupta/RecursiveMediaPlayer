@@ -164,6 +164,48 @@ class ThemeSelector:
         }
         self.config.save(prefs)
 
+    def _apply_menubar_colors(self):
+        """Repaint the custom toolbar frame and all its dropdown menus."""
+        if not hasattr(self, 'toolbar'):
+            return
+        if not hasattr(self, '_tb_colors'):
+            return
+
+        cc = self._tb_colors()
+
+        # toolbar background
+        self.toolbar.config(bg=cc["bg"])
+
+        # all Label-based menu buttons (left side)
+        for child in self.toolbar.winfo_children():
+            if isinstance(child, tk.Label):
+                # decide text colour: play button stays play_fg unless hovered
+                is_play = hasattr(self, 'play_toolbar_btn') and child is self.play_toolbar_btn
+                child.config(bg=cc["bg"], fg=cc["play_fg"] if is_play else cc["fg"])
+
+        # rebuild dropdown-menu colors inline (they are tk.Menu objects stored on root)
+        def restyle_menu(m):
+            try:
+                m.configure(
+                    bg=cc["bg"], fg=cc["fg"],
+                    activebackground=cc["hover_bg"],
+                    activeforeground=cc["hover_fg"])
+                end = m.index("end")
+                if end is not None:
+                    for i in range(end + 1):
+                        try:
+                            sub = m.nametowidget(m.entrycget(i, "menu"))
+                            restyle_menu(sub)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        # walk all Menu widgets that are children of root
+        for widget in self.root.winfo_children():
+            if isinstance(widget, tk.Menu):
+                restyle_menu(widget)
+
     def toggle_theme(self):
         self.dark_mode = not self.dark_mode
         self.save_preferences()
@@ -266,6 +308,8 @@ class ThemeSelector:
 
         self.update_container_borders()
 
+        self._apply_menubar_colors()
+
         style = ttk.Style()
         style.configure("TFrame", background=self.bg_color)
         style.configure("TLabel", background=self.bg_color, foreground=self.text_color)
@@ -321,7 +365,8 @@ class ThemeSelector:
         next_index = (current_index + 1) % len(modes)
         self.loop_mode = modes[next_index]
 
-        self.loop_toggle_button.config(text=self._get_loop_icon())
+        if hasattr(self, 'loop_toggle_button'):
+            self.loop_toggle_button.config(text=self._get_loop_icon())
 
         if self.controller:
             self.controller.set_loop_mode(self.loop_mode)
@@ -424,6 +469,8 @@ class ThemeSelector:
 
     def update_frames_recursive(self, widget):
         try:
+            if hasattr(self, 'toolbar') and widget is self.toolbar:
+                return
             if isinstance(widget, (tk.Frame, tk.Toplevel)):
                 widget.configure(bg=self.bg_color)
             elif isinstance(widget, tk.Label):
@@ -433,4 +480,3 @@ class ThemeSelector:
                 self.update_frames_recursive(child)
         except tk.TclError:
             pass
-

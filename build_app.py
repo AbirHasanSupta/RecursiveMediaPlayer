@@ -758,41 +758,41 @@ def select_multiple_folders_and_play():
             self.dir_listbox.bind('<ButtonRelease-1>', self._on_drop)
             self.scrollbar.config(command=self.dir_listbox.yview)
 
-            media_section = tk.Frame(self.dir_section, bg=self.bg_color)
-            media_section.pack(fill=tk.X, pady=(10, 0))
-
-            media_label = tk.Label(
-                media_section,
-                text="Media:",
-                font=self.small_font,
-                bg=self.bg_color,
-                fg="#666666"
-            )
-            media_label.pack(side=tk.LEFT, padx=(0, 8))
-
-            self.manage_playlist_button = self.create_button(
-                media_section, "Manage Playlists",
-                self._manage_playlists, "playlist", "sm"
-            )
-            self.manage_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.queue_manager_button = self.create_button(
-                media_section, "Manage Queue",
-                self._show_queue_manager, "primary", "sm"
-            )
-            self.queue_manager_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.favorites_button = self.create_button(
-                media_section, "Favorites",
-                self._show_favorites_manager, "warning", "sm"
-            )
-            self.favorites_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.watch_history_button = self.create_button(
-                media_section, "Watch History",
-                self._show_watch_history, "history", "sm"
-            )
-            self.watch_history_button.pack(side=tk.LEFT)
+            # media_section = tk.Frame(self.dir_section, bg=self.bg_color)
+            # media_section.pack(fill=tk.X, pady=(10, 0))
+            #
+            # media_label = tk.Label(
+            #     media_section,
+            #     text="Media:",
+            #     font=self.small_font,
+            #     bg=self.bg_color,
+            #     fg="#666666"
+            # )
+            # media_label.pack(side=tk.LEFT, padx=(0, 8))
+            #
+            # self.manage_playlist_button = self.create_button(
+            #     media_section, "Manage Playlists",
+            #     self._manage_playlists, "playlist", "sm"
+            # )
+            # self.manage_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
+            #
+            # self.queue_manager_button = self.create_button(
+            #     media_section, "Manage Queue",
+            #     self._show_queue_manager, "primary", "sm"
+            # )
+            # self.queue_manager_button.pack(side=tk.LEFT, padx=(0, 5))
+            #
+            # self.favorites_button = self.create_button(
+            #     media_section, "Favorites",
+            #     self._show_favorites_manager, "warning", "sm"
+            # )
+            # self.favorites_button.pack(side=tk.LEFT, padx=(0, 5))
+            #
+            # self.watch_history_button = self.create_button(
+            #     media_section, "Watch History",
+            #     self._show_watch_history, "history", "sm"
+            # )
+            # self.watch_history_button.pack(side=tk.LEFT)
 
         def on_directory_focus_out(self, event):
             selection = self.dir_listbox.curselection()
@@ -3066,102 +3066,249 @@ def select_multiple_folders_and_play():
             ManagedThread(target=build_and_post, name="LoadSubdirs").start()
 
         def setup_action_buttons(self):
-            self.button_frame = tk.Frame(self.main_frame, bg=self.bg_color)
-            self.button_frame.pack(fill=tk.X, pady=(0, 15))
+            # ── Custom toolbar frame packed above main_frame ──────────────────────
+            def _tb_colors():
+                if self.dark_mode:
+                    return {
+                        "bg":        "#1E1F22",
+                        "fg":        "#A9B7C6",
+                        "hover_bg":  "#2D5A8E",
+                        "hover_fg":  "#FFFFFF",
+                        "active_bg": "#1A4070",
+                        "active_fg": "#FFFFFF",
+                        "play_fg":   "#FF6B6B",
+                        "play_hover":"#C0392B",
+                        "sep":       "#3A3B3E",
+                    }
+                else:
+                    return {
+                        "bg":        "#D0D4DA",
+                        "fg":        "#2B2B2B",
+                        "hover_bg":  "#BCC8DC",
+                        "hover_fg":  "#000000",
+                        "active_bg": "#A8B8D0",
+                        "active_fg": "#000000",
+                        "play_fg":   "#c0392b",
+                        "play_hover":"#992d22",
+                        "sep":       "#B8BEC8",
+                    }
 
-            dir_buttons_frame = tk.Frame(self.button_frame, bg=self.bg_color)
-            dir_buttons_frame.pack(side=tk.LEFT)
+            self._tb_colors = _tb_colors
 
-            self.add_button = self.create_button(
-                dir_buttons_frame,
-                text='+ ADD',
-                command=self.add_directory,
-                variant="primary",
-                size="md"
-            )
-            self.add_button.pack(side=tk.LEFT, padx=(0, 5))
+            self.toolbar = tk.Frame(self.root, bg=_tb_colors()["bg"], height=28)
+            self.toolbar.pack(side=tk.TOP, fill=tk.X, before=self.main_frame)
+            self.toolbar.pack_propagate(False)
 
-            self.add_drive_button = self.create_button(
-                dir_buttons_frame,
-                text="Add Drive Link",
-                command=self.add_drive_link,
-                variant="primary",
-                size="md"
-            )
-            self.add_drive_button.pack(side=tk.LEFT, padx=(0, 5))
+            self._toolbar_btns = {}   # label -> tk.Label widget
 
+            def make_dropdown_menu(entries):
+                """entries: list of (label, command) or None for separator."""
+                c = _tb_colors()
+                menu = tk.Menu(self.root, tearoff=0,
+                               bg=c["bg"], fg=c["fg"],
+                               activebackground=c["hover_bg"],
+                               activeforeground=c["hover_fg"],
+                               relief="flat", bd=1,
+                               font=("Segoe UI", 9))
+                for entry in entries:
+                    if entry is None:
+                        menu.add_separator()
+                    else:
+                        lbl, cmd = entry
+                        menu.add_command(label=lbl, command=cmd)
+                return menu
 
-            theme_frame = tk.Frame(self.button_frame, bg=self.bg_color)
-            theme_frame.pack(side=tk.LEFT, expand=True)
+            def make_toolbar_btn(text, command=None, menu=None, is_action=False, play=False):
+                c = _tb_colors()
+                fg = c["play_fg"] if play else c["fg"]
+                font_weight = "bold" if play else "normal"
+                btn = tk.Label(
+                    self.toolbar,
+                    text=text,
+                    bg=c["bg"],
+                    fg=fg,
+                    font=("Segoe UI", 9, font_weight),
+                    padx=10, pady=4,
+                    cursor="hand2"
+                )
+                btn.pack(side=tk.LEFT)
+                self._toolbar_btns[text] = btn
 
-            self.filter_sort_button = self.create_button(
-                theme_frame,
-                text="Filter/Sort",
-                command=self._show_filter_dialog,
-                variant="primary",
-                size="md"
-            )
-            self.filter_sort_button.pack(side=tk.LEFT, padx=(0, 10))
+                def on_enter(e, b=btn):
+                    cc = _tb_colors()
+                    b.config(bg=cc["hover_bg"], fg=cc["hover_fg"])
 
-            self.sleep_timer_button = self.create_button(
-                theme_frame,
-                text="Sleep Timer",
-                command=self._show_sleep_timer_dialog,
-                variant="secondary",
-                size="md"
-            )
-            self.sleep_timer_button.pack(side=tk.LEFT, padx=(0, 10))
+                def on_leave(e, b=btn, p=play):
+                    cc = _tb_colors()
+                    b.config(bg=cc["bg"], fg=cc["play_fg"] if p else cc["fg"])
 
-            self.theme_button = self.create_button(
-                theme_frame,
-                text="Dark Mode" if not self.dark_mode else "Light Mode",
-                command=self.toggle_theme,
-                variant="theme",
-                size="md"
-            )
-            self.theme_button.pack(side=tk.LEFT, padx=(0, 10))
+                def on_press(e, b=btn):
+                    cc = _tb_colors()
+                    b.config(bg=cc["active_bg"], fg=cc["active_fg"])
 
-            self.settings_button = self.create_button(
-                theme_frame,
-                text="Settings",
-                command=self._show_settings,
-                variant="settings",
-                size="md"
-            )
-            self.settings_button.pack(side=tk.LEFT, padx=(0, 10))
+                def on_release(e, b=btn, m=menu, cmd=command, p=play):
+                    cc = _tb_colors()
+                    b.config(bg=cc["bg"], fg=cc["play_fg"] if p else cc["fg"])
+                    if m:
+                        try:
+                            m.tk_popup(b.winfo_rootx(), b.winfo_rooty() + b.winfo_height())
+                        finally:
+                            m.grab_release()
+                    elif cmd:
+                        cmd()
 
+                btn.bind("<Enter>",          on_enter)
+                btn.bind("<Leave>",          on_leave)
+                btn.bind("<ButtonPress-1>",  on_press)
+                btn.bind("<ButtonRelease-1>",on_release)
+                return btn
 
-            action_buttons_frame = tk.Frame(self.button_frame, bg=self.bg_color)
-            action_buttons_frame.pack(side=tk.RIGHT)
+            # ── File ──────────────────────────────────────────────────────────────
+            file_menu = make_dropdown_menu([
+                ("Add Directory",           self.add_directory),
+                ("Add Google Drive Link",   self.add_drive_link),
+                None,
+                ("Remove Selected Directory", self.remove_directory),
+                None,
+                ("Exit",                    self.cancel),
+            ])
+            make_toolbar_btn("File", menu=file_menu)
 
-            self.cancel_button = self.create_button(
-                action_buttons_frame,
-                text="Close",
-                command=self.cancel,
-                variant="secondary",
-                size="md"
-            )
-            self.cancel_button.pack(side=tk.LEFT, padx=(0, 5))
+            # ── View ──────────────────────────────────────────────────────────────
+            view_menu = make_dropdown_menu([
+                ("Show/Hide Console",       self.toggle_console),
+                None,
+                ("Filter / Sort",           self._show_filter_dialog),
+            ])
+            make_toolbar_btn("View", menu=view_menu)
 
-            self.loop_toggle_button = self.create_button(
-                action_buttons_frame,
+            # ── Playback ──────────────────────────────────────────────────────────
+            self._loop_mode_var = tk.StringVar(value=self.loop_mode)
+            c = _tb_colors()
+            loop_sub = tk.Menu(self.root, tearoff=0,
+                               bg=c["bg"], fg=c["fg"],
+                               activebackground=c["hover_bg"],
+                               activeforeground=c["hover_fg"],
+                               relief="flat", bd=1,
+                               font=("Segoe UI", 9))
+            for mode, lbl in [("loop_on", "Loop On"), ("loop_off", "Loop Off"), ("shuffle", "Shuffle")]:
+                loop_sub.add_radiobutton(
+                    label=lbl,
+                    variable=self._loop_mode_var,
+                    value=mode,
+                    command=lambda m=mode: self._set_loop_mode_menu(m))
+            self._loop_sub_menu = loop_sub
+
+            playback_menu = tk.Menu(self.root, tearoff=0,
+                                    bg=c["bg"], fg=c["fg"],
+                                    activebackground=c["hover_bg"],
+                                    activeforeground=c["hover_fg"],
+                                    relief="flat", bd=1,
+                                    font=("Segoe UI", 9))
+            playback_menu.add_cascade(label="Loop Mode", menu=loop_sub)
+            playback_menu.add_separator()
+            playback_menu.add_command(label="Sleep Timer", command=self._show_sleep_timer_dialog)
+            make_toolbar_btn("Playback", menu=playback_menu)
+
+            # ── Media ─────────────────────────────────────────────────────────────
+            media_menu = make_dropdown_menu([
+                ("Manage Playlists",        self._manage_playlists),
+                ("Manage Queue",            self._show_queue_manager),
+                ("Favorites",               self._show_favorites_manager),
+                ("Watch History",           self._show_watch_history),
+            ])
+            make_toolbar_btn("Media", menu=media_menu)
+
+            # ── Tools ─────────────────────────────────────────────────────────────
+            tools_menu = make_dropdown_menu([
+                ("Settings",                self._show_settings),
+                None,
+                ("Filter / Sort",           self._show_filter_dialog),
+            ])
+            make_toolbar_btn("Tools", menu=tools_menu)
+
+            # ── right-side action buttons ─────────────────────────────────────────
+            # loop toggle
+            self.loop_toolbar_btn = tk.Label(
+                self.toolbar,
                 text=self._get_loop_icon(),
-                command=self.toggle_loop_mode,
-                variant="danger",
-                size="lg",
-                font=(self.normal_font.name, self.normal_font.actual()['size'], 'bold')
+                bg=_tb_colors()["bg"],
+                fg=_tb_colors()["fg"],
+                font=("Segoe UI", 9, "bold"),
+                padx=10, pady=4,
+                cursor="hand2"
             )
-            self.loop_toggle_button.pack(side=tk.LEFT, padx=(0, 5))
+            self.loop_toolbar_btn.pack(side=tk.RIGHT, padx=(0, 2))
 
-            self.play_button = self.create_button(
-                action_buttons_frame,
-                text="▶ Play Videos",
-                command=self.play_videos,
-                variant="danger",
-                size="lg",
-                font=(self.normal_font.name, self.normal_font.actual()['size'], 'bold')
+            def _loop_enter(e):
+                cc = _tb_colors(); self.loop_toolbar_btn.config(bg=cc["hover_bg"], fg=cc["hover_fg"])
+            def _loop_leave(e):
+                cc = _tb_colors(); self.loop_toolbar_btn.config(bg=cc["bg"], fg=cc["fg"])
+            def _loop_press(e):
+                cc = _tb_colors(); self.loop_toolbar_btn.config(bg=cc["active_bg"], fg=cc["active_fg"])
+            def _loop_release(e):
+                cc = _tb_colors(); self.loop_toolbar_btn.config(bg=cc["bg"], fg=cc["fg"])
+                self._toggle_loop_from_menu()
+            self.loop_toolbar_btn.bind("<Enter>",          _loop_enter)
+            self.loop_toolbar_btn.bind("<Leave>",          _loop_leave)
+            self.loop_toolbar_btn.bind("<ButtonPress-1>",  _loop_press)
+            self.loop_toolbar_btn.bind("<ButtonRelease-1>",_loop_release)
+
+            # theme toggle
+            self.theme_toolbar_btn = tk.Label(
+                self.toolbar,
+                text="🌙" if not self.dark_mode else "☀",
+                bg=_tb_colors()["bg"],
+                fg=_tb_colors()["fg"],
+                font=("Segoe UI", 10),
+                padx=8, pady=4,
+                cursor="hand2"
             )
-            self.play_button.pack(side=tk.LEFT)
+            self.theme_toolbar_btn.pack(side=tk.RIGHT, padx=(0, 2))
+
+            def _theme_enter(e):
+                cc = _tb_colors(); self.theme_toolbar_btn.config(bg=cc["hover_bg"], fg=cc["hover_fg"])
+            def _theme_leave(e):
+                cc = _tb_colors(); self.theme_toolbar_btn.config(bg=cc["bg"], fg=cc["fg"])
+            def _theme_press(e):
+                cc = _tb_colors(); self.theme_toolbar_btn.config(bg=cc["active_bg"], fg=cc["active_fg"])
+            def _theme_release(e):
+                cc = _tb_colors(); self.theme_toolbar_btn.config(bg=cc["bg"], fg=cc["fg"])
+                self._toggle_theme_menu()
+            self.theme_toolbar_btn.bind("<Enter>",          _theme_enter)
+            self.theme_toolbar_btn.bind("<Leave>",          _theme_leave)
+            self.theme_toolbar_btn.bind("<ButtonPress-1>",  _theme_press)
+            self.theme_toolbar_btn.bind("<ButtonRelease-1>",_theme_release)
+
+            # play button
+            self.play_toolbar_btn = tk.Label(
+                self.toolbar,
+                text="▶  Play Videos",
+                bg=_tb_colors()["bg"],
+                fg=_tb_colors()["play_fg"],
+                font=("Segoe UI", 9, "bold"),
+                padx=12, pady=4,
+                cursor="hand2"
+            )
+            self.play_toolbar_btn.pack(side=tk.RIGHT, padx=(0, 6))
+
+            def _play_enter(e):
+                cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc["hover_bg"], fg="#FFFFFF")
+            def _play_leave(e):
+                cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc["bg"], fg=cc["play_fg"])
+            def _play_press(e):
+                cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc["active_bg"], fg="#FFFFFF")
+            def _play_release(e):
+                cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc["bg"], fg=cc["play_fg"])
+                self.play_videos()
+            self.play_toolbar_btn.bind("<Enter>",          _play_enter)
+            self.play_toolbar_btn.bind("<Leave>",          _play_leave)
+            self.play_toolbar_btn.bind("<ButtonPress-1>",  _play_press)
+            self.play_toolbar_btn.bind("<ButtonRelease-1>",_play_release)
+
+            # placeholder so toggle_console's before= ref works
+            self.button_frame = tk.Frame(self.main_frame, bg=self.bg_color)
+            self.button_frame.pack(fill=tk.X)
 
         def _show_sleep_timer_dialog(self):
             # if timer already running, cancel it
@@ -3172,7 +3319,7 @@ def select_multiple_folders_and_play():
                     self.root.after_cancel(self._sleep_countdown_job)
                     self._sleep_countdown_job = None
                 self._sleep_timer_end = None
-                self.sleep_timer_button.config(text="Sleep Timer")
+                pass  # sleep_timer_button removed
                 self.update_console("Sleep timer cancelled")
                 return
 
@@ -3208,6 +3355,34 @@ def select_multiple_folders_and_play():
             self.create_button(dlg, "Set Timer", start, "primary", "md").pack(pady=15)
             dlg.bind("<Return>", lambda e: start())
 
+        def _toggle_theme_menu(self):
+            self.toggle_theme()
+            if hasattr(self, 'theme_toolbar_btn'):
+                cc = self._tb_colors()
+                self.theme_toolbar_btn.config(
+                    text="☀" if self.dark_mode else "🌙",
+                    bg=cc["bg"], fg=cc["fg"])
+
+        def _toggle_loop_from_menu(self):
+            self.toggle_loop_mode()
+            if hasattr(self, 'loop_toolbar_btn'):
+                cc = self._tb_colors()
+                self.loop_toolbar_btn.config(
+                    text=self._get_loop_icon(),
+                    bg=cc["bg"], fg=cc["fg"])
+
+        def _set_loop_mode_menu(self, mode):
+            self.loop_mode = mode
+            if hasattr(self, 'loop_toolbar_btn'):
+                cc = self._tb_colors()
+                self.loop_toolbar_btn.config(text=self._get_loop_icon(), bg=cc["bg"], fg=cc["fg"])
+            if hasattr(self, '_loop_mode_var'):
+                self._loop_mode_var.set(mode)
+            if self.controller:
+                self.controller.set_loop_mode(self.loop_mode)
+            self.update_console(f"Loop mode: {mode}")
+            self.save_preferences()
+
         def _start_sleep_countdown(self):
             import time as _time
 
@@ -3219,8 +3394,7 @@ def select_multiple_folders_and_play():
                     return
                 mins = remaining // 60
                 secs = remaining % 60
-                self.sleep_timer_button.config(
-                    text=f"Sleep {mins}:{secs:02d} ✕")
+                pass  # sleep_timer_button removed
                 self._sleep_countdown_job = self.root.after(1000, tick)
 
             self._sleep_countdown_job = None
@@ -3232,7 +3406,7 @@ def select_multiple_folders_and_play():
             if hasattr(self, '_sleep_countdown_job') and self._sleep_countdown_job:
                 self.root.after_cancel(self._sleep_countdown_job)
                 self._sleep_countdown_job = None
-            self.sleep_timer_button.config(text="Sleep Timer")
+            pass  # sleep_timer_button removed
             self.update_console("Sleep timer: stopping playback")
             if self.controller:
                 try:
