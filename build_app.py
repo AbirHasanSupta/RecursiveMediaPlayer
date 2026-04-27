@@ -3353,14 +3353,12 @@ def select_multiple_folders_and_play():
             if hasattr(self, 'sleep_countdown_label'):
                 self.sleep_countdown_label.config(text="")
             self.update_console("Sleep timer: stopping playback")
-            if self.controller:
+            if self._active_player is not None:
                 try:
-                    self.controller.stop()
+                    self._active_player._close()
                 except Exception:
                     pass
-                self.controller = None
-                from key_press import cleanup_hotkeys
-                cleanup_hotkeys()
+                self._active_player = None
 
         def setup_status_section(self):
             # Video count is now shown inline in the exclusion section header
