@@ -1,8 +1,3 @@
-try:
-    from version import __version__, __commit__, __build__
-except ImportError:
-    __version__ = __commit__ = __build__ = "dev"
-
 import threading
 import tkinter as tk
 from datetime import datetime
