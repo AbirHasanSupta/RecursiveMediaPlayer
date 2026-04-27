@@ -3230,12 +3230,7 @@ def select_multiple_folders_and_play():
             playback_menu.add_command(label="Sleep Timer", command=self._show_sleep_timer_dialog)
             make_toolbar_btn("Playback", menu=playback_menu)
 
-            tools_menu = make_dropdown_menu([
-                ("Settings",                self._show_settings),
-                None,
-                ("Filter / Sort",           self._show_filter_dialog),
-            ])
-            make_toolbar_btn("Tools", menu=tools_menu)
+            make_toolbar_btn("Settings", command=self._show_settings)
 
             _media_pill_commands = {
                 "🎵 Playlist":   self._manage_playlists,
