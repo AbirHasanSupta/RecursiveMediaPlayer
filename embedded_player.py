@@ -146,6 +146,16 @@ class EmbeddedPlayer:
         self._borderless     = False
         self._pre_bl_geo     = "1280x720"
 
+        # A-B loop
+        self._ab_point_a     = None
+        self._ab_point_b     = None
+        self._ab_loop_active = False
+        self._ab_monitor_job = None   # Tk after() job id
+
+        # Sleep timer
+        self._sleep_timer_job = None   # Tk after() job id
+        self._sleep_remaining = 0      # seconds remaining
+
         # VLC
         self._instance = vlc.Instance("--no-video-title-show", "--quiet")
         self._player   = self._instance.media_player_new()
@@ -214,50 +224,14 @@ class EmbeddedPlayer:
         F_ICO = tkfont.Font(family="Segoe UI", size=12)
         F_ACC = tkfont.Font(family="Segoe UI", size=8, weight="bold")
         F_XS  = tkfont.Font(family="Segoe UI", size=7)
+        F_AB  = tkfont.Font(family="Segoe UI", size=8, weight="bold")
 
-        # ── info row ──────────────────────────────────────────────────
-        info = tk.Frame(bar, bg=_CTRL_BG)
-        info.pack(fill=tk.X, padx=12, pady=(3, 2))
-
-        self._lbl_title = tk.Label(info, text="", anchor="w",
-                                   font=F_SM, bg=_CTRL_BG, fg=_TXT)
-        self._lbl_title.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        self._lbl_idx = tk.Label(info, text="", font=F_SM,
-                                 bg=_CTRL_BG, fg=_TXT_DIM)
-        self._lbl_idx.pack(side=tk.LEFT, padx=(6, 10))
-
-        self._lbl_dir = tk.Label(info, text="", font=F_SM,
-                                 bg=_CTRL_BG, fg=_TXT_DIM)
-        self._lbl_dir.pack(side=tk.LEFT, padx=(0, 12))
-
-        self._lbl_time = tk.Label(info, text="0:00 / 0:00",
-                                  font=F_SM, bg=_CTRL_BG, fg=_TXT_MED)
-        self._lbl_time.pack(side=tk.RIGHT)
-
-        # ── seek bar ──────────────────────────────────────────────────
-        seek_row = tk.Frame(bar, bg=_CTRL_BG)
-        seek_row.pack(fill=tk.X, padx=12, pady=(2, 3))
-
-        self._seek = tk.Canvas(seek_row, height=20, bg=_CTRL_BG,
-                               highlightthickness=0, cursor="hand2")
-        self._seek.pack(fill=tk.X, expand=True)
-        self._seek.bind("<Button-1>",        self._seek_click)
-        self._seek.bind("<B1-Motion>",       self._seek_drag)
-        self._seek.bind("<ButtonRelease-1>", self._seek_release)
-        self._seek.bind("<Configure>",       lambda e: self._draw_seek())
-        self._seek.bind("<Enter>",  lambda e: (self._set_seek_hover(True),  self._cancel_hide()))
-        self._seek.bind("<Leave>",  lambda e: (self._set_seek_hover(False), self._schedule_hide()))
-
-        # ── button row ────────────────────────────────────────────────
-        btn_row = tk.Frame(bar, bg=_CTRL_BG2)
-        btn_row.pack(fill=tk.X)
-
-        def _btn(parent, text, cmd, font=None, fg=_TXT, padx=9):
+        # ── helper: styled button ──────────────────────────────────────
+        def _btn(parent, text, cmd, font=None, fg=_TXT, padx=8, pady=4):
             b = tk.Button(parent, text=text, command=cmd,
                           font=font or F_MD,
                           bg=_BTN, fg=fg, bd=0,
-                          padx=padx, pady=5,
+                          padx=padx, pady=pady,
                           relief=tk.FLAT, cursor="hand2",
                           activebackground=_BTN_ACT,
                           activeforeground=_TXT)
@@ -267,44 +241,143 @@ class EmbeddedPlayer:
             b.bind("<Leave>", lambda e: self._schedule_hide(), add="+")
             return b
 
-        # Left — transport
-        lg = tk.Frame(btn_row, bg=_CTRL_BG2)
-        lg.pack(side=tk.LEFT, padx=(8, 0), pady=1)
+        # ═══════════════════════════════════════════════════════════════
+        # ROW 1 — info strip: title · status badges · time
+        # ═══════════════════════════════════════════════════════════════
+        info = tk.Frame(bar, bg=_CTRL_BG)
+        info.pack(fill=tk.X, padx=12, pady=(4, 1))
 
-        _btn(lg, "⏮", self._prev, font=F_ICO).pack(side=tk.LEFT, padx=1)
+        self._lbl_title = tk.Label(info, text="", anchor="w",
+                                   font=F_SM, bg=_CTRL_BG, fg=_TXT)
+        self._lbl_title.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # right-side status badges (packed right-to-left)
+        self._lbl_time = tk.Label(info, text="0:00 / 0:00",
+                                  font=F_SM, bg=_CTRL_BG, fg=_TXT_MED)
+        self._lbl_time.pack(side=tk.RIGHT, padx=(8, 0))
+
+        self._lbl_idx = tk.Label(info, text="",
+                                 font=F_SM, bg=_CTRL_BG, fg=_TXT_DIM)
+        self._lbl_idx.pack(side=tk.RIGHT, padx=(0, 4))
+
+        # chapter badge — only visible when chapters exist
+        self._lbl_chapter = tk.Label(info, text="",
+                                     font=F_XS, bg="#1e2a1e", fg="#66cc66",
+                                     padx=4, pady=1, relief=tk.FLAT)
+        self._lbl_chapter.pack(side=tk.RIGHT, padx=(0, 4))
+
+        # A-B loop badge — only visible when A or A+B are set
+        self._lbl_ab = tk.Label(info, text="",
+                                font=F_AB, bg="#0d1f2d", fg="#00BFFF",
+                                padx=4, pady=1, relief=tk.FLAT)
+        self._lbl_ab.pack(side=tk.RIGHT, padx=(0, 4))
+
+        # sleep timer countdown badge
+        self._lbl_sleep = tk.Label(info, text="",
+                                   font=F_XS, bg="#2a1e0d", fg="#FFA500",
+                                   padx=4, pady=1, relief=tk.FLAT)
+        self._lbl_sleep.pack(side=tk.RIGHT, padx=(0, 4))
+
+        # directory name (dim, right of title)
+        self._lbl_dir = tk.Label(info, text="",
+                                 font=F_XS, bg=_CTRL_BG, fg=_TXT_DIM)
+        self._lbl_dir.pack(side=tk.RIGHT, padx=(0, 6))
+
+        # ═══════════════════════════════════════════════════════════════
+        # ROW 2 — seek bar
+        # ═══════════════════════════════════════════════════════════════
+        seek_row = tk.Frame(bar, bg=_CTRL_BG)
+        seek_row.pack(fill=tk.X, padx=12, pady=(2, 2))
+
+        self._seek = tk.Canvas(seek_row, height=18, bg=_CTRL_BG,
+                               highlightthickness=0, cursor="hand2")
+        self._seek.pack(fill=tk.X, expand=True)
+        self._seek.bind("<Button-1>",        self._seek_click)
+        self._seek.bind("<B1-Motion>",       self._seek_drag)
+        self._seek.bind("<ButtonRelease-1>", self._seek_release)
+        self._seek.bind("<Configure>",       lambda e: self._draw_seek())
+        self._seek.bind("<Enter>",  lambda e: (self._set_seek_hover(True),  self._cancel_hide()))
+        self._seek.bind("<Leave>",  lambda e: (self._set_seek_hover(False), self._schedule_hide()))
+
+        # ═══════════════════════════════════════════════════════════════
+        # ROW 3 — control buttons
+        # Three zones: LEFT (transport + nav), CENTRE (loop), RIGHT (vol/speed/tools)
+        # ═══════════════════════════════════════════════════════════════
+        btn_row = tk.Frame(bar, bg=_CTRL_BG2)
+        btn_row.pack(fill=tk.X)
+
+        # ── LEFT: core transport ──────────────────────────────────────
+        lg = tk.Frame(btn_row, bg=_CTRL_BG2)
+        lg.pack(side=tk.LEFT, padx=(8, 0), pady=2)
+
+        _btn(lg, "⏮", self._prev,         font=F_ICO).pack(side=tk.LEFT, padx=1)
         self._btn_play = _btn(lg, "⏸", self._toggle_pause, font=F_ICO)
         self._btn_play.pack(side=tk.LEFT, padx=1)
-        _btn(lg, "⏭", self._next, font=F_ICO).pack(side=tk.LEFT, padx=1)
-        _btn(lg, "■",  self._stop, font=F_MD).pack(side=tk.LEFT, padx=(1, 10))
+        _btn(lg, "⏭", self._next,         font=F_ICO).pack(side=tk.LEFT, padx=1)
+        _btn(lg, "■",  self._stop,         font=F_MD).pack(side=tk.LEFT, padx=(1, 8))
 
-        _btn(lg, "◀ Dir", self._prev_dir, font=F_SM).pack(side=tk.LEFT, padx=1)
-        _btn(lg, "Dir ▶", self._next_dir, font=F_SM).pack(side=tk.LEFT, padx=(1, 10))
+        # thin divider
+        tk.Frame(lg, width=1, bg="#333333").pack(side=tk.LEFT, fill=tk.Y, pady=3)
 
-        _btn(lg, "⟳ Rotate", self._rotate_right, font=F_SM).pack(side=tk.LEFT, padx=1)
-        _btn(lg, "🔍+", self._zoom_in, font=F_SM).pack(side=tk.LEFT, padx=1)
-        _btn(lg, "🔍−", self._zoom_out, font=F_SM).pack(side=tk.LEFT, padx=1)
-        _btn(lg, "🔍1", lambda: self._zoom(0), font=F_SM).pack(side=tk.LEFT, padx=1)
-        _btn(lg, "📸", self._screenshot, font=F_MD).pack(side=tk.LEFT, padx=1)
+        # Directory skip — text-only, compact
+        _btn(lg, "◀ Dir", self._prev_dir, font=F_SM, padx=6).pack(side=tk.LEFT, padx=(6, 1))
+        _btn(lg, "Dir ▶", self._next_dir, font=F_SM, padx=6).pack(side=tk.LEFT, padx=(1, 8))
 
-        # Centre — loop mode
+        tk.Frame(lg, width=1, bg="#333333").pack(side=tk.LEFT, fill=tk.Y, pady=3)
+
+        # Zoom menu (includes rotate)
+        _btn(lg, "🔍", self._show_zoom_menu, font=F_MD, padx=6).pack(side=tk.LEFT, padx=(6, 8))
+
+        tk.Frame(lg, width=1, bg="#333333").pack(side=tk.LEFT, fill=tk.Y, pady=3)
+
+        # Chapter buttons — compact symbols only, tooltip via logger
+        _btn(lg, "❮Ch", self._prev_chapter, font=F_SM, padx=5).pack(side=tk.LEFT, padx=(6, 1))
+        _btn(lg, "Ch❯", self._next_chapter, font=F_SM, padx=5).pack(side=tk.LEFT, padx=(1, 8))
+
+        tk.Frame(lg, width=1, bg="#333333").pack(side=tk.LEFT, fill=tk.Y, pady=3)
+
+        # A-B loop — three compact tagged buttons
+        self._btn_ab_a = _btn(lg, "A", self._set_ab_a, font=F_ACC,
+                              fg="#00BFFF", padx=6)
+        self._btn_ab_a.pack(side=tk.LEFT, padx=(6, 1))
+
+        self._btn_ab_b = _btn(lg, "B", self._set_ab_b, font=F_ACC,
+                              fg="#00BFFF", padx=6)
+        self._btn_ab_b.pack(side=tk.LEFT, padx=1)
+
+        self._btn_ab_clr = _btn(lg, "✕", self._clear_ab, font=F_XS,
+                                fg=_TXT_DIM, padx=5)
+        self._btn_ab_clr.pack(side=tk.LEFT, padx=(1, 6))
+
+        # ── CENTRE: loop mode ─────────────────────────────────────────
         mg = tk.Frame(btn_row, bg=_CTRL_BG2)
-        mg.pack(side=tk.LEFT, padx=12, pady=1)
+        mg.pack(side=tk.LEFT, expand=True, pady=2)   # expand to push left/right apart
 
         self._btn_loop = _btn(mg, "↺  Loop", self._cycle_loop,
-                              font=F_ACC, fg=_ACCENT)
-        self._btn_loop.pack(side=tk.LEFT)
+                              font=F_ACC, fg=_ACCENT, padx=10)
+        self._btn_loop.pack()
 
-        # Right — volume · speed · fullscreen
+        # ── RIGHT: volume · speed · sleep · fullscreen · overflow ─────
         rg = tk.Frame(btn_row, bg=_CTRL_BG2)
-        rg.pack(side=tk.RIGHT, padx=(0, 8), pady=1)
+        rg.pack(side=tk.RIGHT, padx=(0, 8), pady=2)
 
-        _btn(rg, "⛶", self._toggle_borderless, font=F_ICO).pack(side=tk.RIGHT, padx=(6, 0))
+        # Fullscreen (rightmost, most-used secondary action)
+        _btn(rg, "⛶", self._toggle_borderless, font=F_ICO, padx=7).pack(side=tk.RIGHT, padx=(4, 0))
 
-        _btn(rg, "⋮", self._show_context_menu_from_btn, font=F_ICO).pack(side=tk.RIGHT, padx=(2, 0))
+        # Overflow menu (context / playlist / add-to)
+        _btn(rg, "⋮", self._show_context_menu_from_btn, font=F_ICO, padx=6).pack(side=tk.RIGHT, padx=1)
 
+        # Sleep timer — badge-style: shows icon only; countdown appears in info strip
+        self._btn_sleep = _btn(rg, "⏻", self._show_sleep_menu,
+                               font=F_MD, fg="#FFA500", padx=6)
+        self._btn_sleep.pack(side=tk.RIGHT, padx=(1, 4))
+
+        tk.Frame(rg, width=1, bg="#333333").pack(side=tk.RIGHT, fill=tk.Y, pady=3, padx=4)
+
+        # Speed label (interactive)
         self._lbl_speed = tk.Label(rg, text="1.00×", cursor="hand2",
                                    font=F_ACC, bg=_CTRL_BG2, fg=_ACCENT)
-        self._lbl_speed.pack(side=tk.RIGHT, padx=(0, 4))
+        self._lbl_speed.pack(side=tk.RIGHT, padx=(0, 2))
         self._lbl_speed.bind("<Button-1>",        lambda e: self._speed_up())
         self._lbl_speed.bind("<Button-3>",        lambda e: self._speed_down())
         self._lbl_speed.bind("<Double-Button-1>", lambda e: self._speed_reset())
@@ -312,9 +385,9 @@ class EmbeddedPlayer:
         self._lbl_speed.bind("<Enter>", lambda e: self._cancel_hide())
         self._lbl_speed.bind("<Leave>", lambda e: self._schedule_hide())
 
-        tk.Label(rg, text="spd", font=F_XS, bg=_CTRL_BG2, fg=_TXT_DIM).pack(side=tk.RIGHT)
-        tk.Frame(rg, width=12, bg=_CTRL_BG2).pack(side=tk.RIGHT)
+        tk.Frame(rg, width=1, bg="#333333").pack(side=tk.RIGHT, fill=tk.Y, pady=3, padx=4)
 
+        # Volume
         self._lbl_vol = tk.Label(rg, text=f"{self.volume}%", width=4,
                                  font=F_SM, bg=_CTRL_BG2, fg=_TXT_MED)
         self._lbl_vol.pack(side=tk.RIGHT)
@@ -330,9 +403,11 @@ class EmbeddedPlayer:
         self._lbl_mute.bind("<Enter>", lambda e: self._cancel_hide())
         self._lbl_mute.bind("<Leave>", lambda e: self._schedule_hide())
 
-        # keep bar alive while hovering any part of it
-        for w in [bar, info, seek_row, btn_row, lg, mg, rg,
-                  self._lbl_title, self._lbl_dir, self._lbl_idx, self._lbl_time]:
+        # ── keep bar alive while mouse is over any widget ─────────────
+        _all = [bar, info, seek_row, btn_row, lg, mg, rg,
+                self._lbl_title, self._lbl_dir, self._lbl_idx, self._lbl_time,
+                self._lbl_ab, self._lbl_sleep, self._lbl_chapter]
+        for w in _all:
             w.bind("<Enter>", lambda e: self._cancel_hide(), add="+")
             w.bind("<Leave>", lambda e: self._schedule_hide(), add="+")
 
@@ -402,6 +477,19 @@ class EmbeddedPlayer:
         w.bind("<Z>",             lambda e: self._zoom(-0.1))
         w.bind("<x>",             lambda e: self._zoom(0))
         w.bind("<X>",             lambda e: self._zoom(0))
+        # Chapter navigation — [ prev, ] next
+        w.bind("<bracketleft>",   lambda e: self._prev_chapter())
+        w.bind("<bracketright>",  lambda e: self._next_chapter())
+        # Subtitles — v toggles on/off
+        w.bind("<v>",             lambda e: self._toggle_subtitle())
+        w.bind("<V>",             lambda e: self._toggle_subtitle())
+        # A-B loop — i = set A, k = set B, j = clear
+        w.bind("<i>",             lambda e: self._set_ab_a())
+        w.bind("<I>",             lambda e: self._set_ab_a())
+        w.bind("<k>",             lambda e: self._set_ab_b())
+        w.bind("<K>",             lambda e: self._set_ab_b())
+        w.bind("<j>",             lambda e: self._clear_ab())
+        w.bind("<J>",             lambda e: self._clear_ab())
 
     # ═══════════════════════════════════════════════════════════════════
     # CORE EMBED — dual_player_manager pattern exactly
@@ -436,6 +524,7 @@ class EmbeddedPlayer:
         self.index = idx
         path = self.videos[idx]
 
+        self._clear_ab()
         self._embed()
         media = self._instance.media_new(path)
         self._player.set_media(media)
@@ -489,6 +578,13 @@ class EmbeddedPlayer:
 
     def _advance(self):
         if not self._running:
+            return
+        # If sleep-at-end-of-video was requested, close the player now.
+        if self._sleep_remaining == -1:
+            self._sleep_remaining = 0
+            if self.logger:
+                self.logger("Sleep timer: closing after video ended")
+            self._win.after(0, self._close)
             return
         if self.loop_mode == "shuffle":
             self._played_indices.add(self.index)
@@ -727,6 +823,23 @@ class EmbeddedPlayer:
     def _zoom_out(self):
         self._zoom(-0.1)
 
+    def _show_zoom_menu(self):
+        menu = tk.Menu(self._win, tearoff=0, bg=_BTN, fg=_TXT,
+                       activebackground=_BTN_HVR, activeforeground=_TXT,
+                       bd=0, relief=tk.FLAT)
+        menu.add_command(label="🔍+  Zoom In",    command=self._zoom_in)
+        menu.add_command(label="🔍−  Zoom Out",   command=self._zoom_out)
+        menu.add_command(label="🔍1  Reset Zoom", command=lambda: self._zoom(0))
+        menu.add_separator()
+        menu.add_command(label="⟲  Rotate Left",  command=self._rotate_left)
+        menu.add_command(label="⟳  Rotate Right", command=self._rotate_right)
+        try:
+            x = self._win.winfo_pointerx()
+            y = self._win.winfo_pointery()
+            menu.tk_popup(x, y)
+        finally:
+            menu.grab_release()
+
     def _zoom(self, delta: float):
         if delta == 0:
             self._player.video_set_scale(0.0)
@@ -753,6 +866,273 @@ class EmbeddedPlayer:
         except Exception as e:
             if self.logger:
                 self.logger(f"Screenshot error: {e}")
+
+    # ═══════════════════════════════════════════════════════════════════
+    # CHAPTER NAVIGATION  (mirrors vlc_player_controller.py)
+    # ═══════════════════════════════════════════════════════════════════
+
+    def _next_chapter(self):
+        try:
+            ch_count = self._player.get_chapter_count()
+            if ch_count and ch_count > 0:
+                cur = self._player.get_chapter()
+                if cur < ch_count - 1:
+                    self._player.set_chapter(cur + 1)
+                    if self.logger:
+                        self.logger(f"Chapter {cur + 2} of {ch_count}")
+                else:
+                    self._next()          # last chapter → advance to next video
+            else:
+                if self.logger:
+                    self.logger("No chapters in this file")
+        except Exception as e:
+            if self.logger:
+                self.logger(f"Chapter next error: {e}")
+
+    def _prev_chapter(self):
+        try:
+            ch_count = self._player.get_chapter_count()
+            if ch_count and ch_count > 0:
+                cur = self._player.get_chapter()
+                if cur > 0:
+                    self._player.set_chapter(cur - 1)
+                    if self.logger:
+                        self.logger(f"Chapter {cur} of {ch_count}")
+                else:
+                    self._prev()          # first chapter → go to previous video
+            else:
+                if self.logger:
+                    self.logger("No chapters in this file")
+        except Exception as e:
+            if self.logger:
+                self.logger(f"Chapter prev error: {e}")
+
+    # ═══════════════════════════════════════════════════════════════════
+    # SUBTITLES  (mirrors vlc_player_controller.py)
+    # ═══════════════════════════════════════════════════════════════════
+
+    def _toggle_subtitle(self):
+        """If subtitles are currently off, enable the first (or next) track.
+        If a track is already active, disable subtitles."""
+        try:
+            current = self._player.video_get_spu()
+            if current == -1:
+                self._cycle_subtitle()   # off → turn on (first/next track)
+            else:
+                self._disable_subtitle() # on  → turn off
+        except Exception as e:
+            if self.logger:
+                self.logger(f"Subtitle toggle error: {e}")
+
+    def _cycle_subtitle(self):
+        try:
+            track_count = self._player.video_get_spu_count()
+            if not track_count or track_count <= 0:
+                if self.logger:
+                    self.logger("No subtitle tracks available")
+                return
+            current = self._player.video_get_spu()
+            tracks  = self._player.video_get_spu_description()
+            track_ids = [t[0] for t in tracks] if tracks else []
+            if not track_ids:
+                return
+            if current == -1 or current not in track_ids:
+                self._player.video_set_spu(track_ids[0])
+                name = tracks[0][1]
+                name = name.decode() if isinstance(name, bytes) else name
+            else:
+                idx      = track_ids.index(current)
+                next_idx = (idx + 1) % len(track_ids)
+                self._player.video_set_spu(track_ids[next_idx])
+                name = tracks[next_idx][1]
+                name = name.decode() if isinstance(name, bytes) else name
+            if self.logger:
+                self.logger(f"Subtitles: {name}")
+        except Exception as e:
+            if self.logger:
+                self.logger(f"Subtitle error: {e}")
+
+    def _disable_subtitle(self):
+        try:
+            self._player.video_set_spu(-1)
+            if self.logger:
+                self.logger("Subtitles disabled")
+        except Exception as e:
+            if self.logger:
+                self.logger(f"Subtitle disable error: {e}")
+
+    def load_subtitle_file(self, path: str):
+        """External API: load an external subtitle file."""
+        try:
+            result = self._player.add_slave(vlc.MediaSlaveType.subtitle, path, True)
+            if self.logger:
+                status = "loaded" if result == 0 else "failed"
+                self.logger(f"Subtitle file {status}: {os.path.basename(path)}")
+        except Exception as e:
+            if self.logger:
+                self.logger(f"Subtitle load error: {e}")
+
+    # ═══════════════════════════════════════════════════════════════════
+    # A-B LOOP  (mirrors vlc_player_controller.py, Tk-based monitor)
+    # ═══════════════════════════════════════════════════════════════════
+
+    def _set_ab_a(self):
+        self._ab_point_a    = self._player.get_time()
+        self._ab_point_b    = None
+        self._ab_loop_active = False
+        self._cancel_ab_monitor()
+        if self.logger:
+            self.logger(f"A-B: A set at {_fmt(self._ab_point_a)}")
+
+    def _set_ab_b(self):
+        if self._ab_point_a is None:
+            if self.logger:
+                self.logger("A-B: set point A first")
+            return
+        b = self._player.get_time()
+        if b <= self._ab_point_a:
+            if self.logger:
+                self.logger("A-B: point B must be after A")
+            return
+        self._ab_point_b    = b
+        self._ab_loop_active = True
+        if self.logger:
+            self.logger(f"A-B: B set at {_fmt(self._ab_point_b)} — looping")
+        self._start_ab_monitor()
+
+    def _clear_ab(self):
+        self._ab_point_a    = None
+        self._ab_point_b    = None
+        self._ab_loop_active = False
+        self._cancel_ab_monitor()
+        try:
+            self._lbl_ab.config(text="")
+            self._btn_ab_a.config(bg=_BTN)
+            self._btn_ab_b.config(bg=_BTN)
+            self._btn_ab_clr.config(fg=_TXT_DIM)
+        except Exception:
+            pass
+        if self.logger:
+            self.logger("A-B loop cleared")
+
+    def _start_ab_monitor(self):
+        self._cancel_ab_monitor()
+        self._ab_monitor_tick()
+
+    def _ab_monitor_tick(self):
+        if not self._running or not self._ab_loop_active:
+            return
+        try:
+            if (self._ab_point_b is not None and
+                    self._player.get_time() >= self._ab_point_b):
+                self._player.set_time(self._ab_point_a)
+        except Exception:
+            pass
+        try:
+            self._ab_monitor_job = self._win.after(100, self._ab_monitor_tick)
+        except Exception:
+            pass
+
+    def _cancel_ab_monitor(self):
+        if self._ab_monitor_job:
+            try:
+                self._win.after_cancel(self._ab_monitor_job)
+            except Exception:
+                pass
+            self._ab_monitor_job = None
+
+    # ═══════════════════════════════════════════════════════════════════
+    # SLEEP TIMER
+    # ═══════════════════════════════════════════════════════════════════
+
+    def _show_sleep_menu(self):
+        """Pop a small menu to choose a sleep duration."""
+        menu = tk.Menu(self._win, tearoff=0, bg=_BTN, fg=_TXT,
+                       activebackground=_BTN_HVR, activeforeground=_TXT,
+                       bd=0, relief=tk.FLAT)
+        options = [
+            ("1 minute",   1 * 60),
+            ("5 minutes",  5 * 60),
+            ("10 minutes", 10 * 60),
+            ("15 minutes", 15 * 60),
+            ("30 minutes", 30 * 60),
+            ("45 minutes", 45 * 60),
+            ("60 minutes", 60 * 60),
+            ("End of video", -1),
+        ]
+        for label, secs in options:
+            menu.add_command(
+                label=label,
+                command=lambda s=secs: self._start_sleep_timer(s))
+        if self._sleep_timer_job is not None:
+            menu.add_separator()
+            menu.add_command(label="✕  Cancel timer", command=self._cancel_sleep_timer)
+        try:
+            x = self._win.winfo_pointerx()
+            y = self._win.winfo_pointery()
+            menu.tk_popup(x, y)
+        finally:
+            menu.grab_release()
+
+    def _start_sleep_timer(self, seconds: int):
+        self._cancel_sleep_timer()
+        if seconds == -1:
+            # sleep at end of current video — handled by _on_media_ended override
+            self._sleep_remaining = -1
+            try:
+                self._lbl_sleep.config(text="⏻ end")
+            except Exception:
+                pass
+            if self.logger:
+                self.logger("Sleep timer: will pause after current video")
+        else:
+            self._sleep_remaining = seconds
+            self._sleep_tick()
+            if self.logger:
+                self.logger(f"Sleep timer: {seconds // 60} min")
+
+    def _sleep_tick(self):
+        if not self._running or self._sleep_remaining <= 0:
+            return
+        self._sleep_remaining -= 1
+        m, s = divmod(self._sleep_remaining, 60)
+        try:
+            self._lbl_sleep.config(text=f"⏻ {m}:{s:02d}")
+        except Exception:
+            pass
+        if self._sleep_remaining == 0:
+            self._do_sleep_pause()
+        else:
+            try:
+                self._sleep_timer_job = self._win.after(1000, self._sleep_tick)
+            except Exception:
+                pass
+
+    def _do_sleep_pause(self):
+        self._sleep_remaining = 0
+        self._sleep_timer_job = None
+        try:
+            self._lbl_sleep.config(text="")
+        except Exception:
+            pass
+        if self.logger:
+            self.logger("Sleep timer: closing player")
+        self._close()
+
+    def _cancel_sleep_timer(self):
+        if self._sleep_timer_job:
+            try:
+                self._win.after_cancel(self._sleep_timer_job)
+            except Exception:
+                pass
+            self._sleep_timer_job = None
+        self._sleep_remaining = 0
+        try:
+            self._lbl_sleep.config(text="")
+        except Exception:
+            pass
+        if self.logger:
+            self.logger("Sleep timer cancelled")
 
     def _show_context_menu_from_btn(self):
         try:
@@ -784,6 +1164,10 @@ class EmbeddedPlayer:
         if self.on_add_to_favourites:
             menu.add_command(label="★  Add to Favourites",
                              command=lambda: self.on_add_to_favourites([path]))
+        menu.add_separator()
+        menu.add_command(label="📸  Screenshot",      command=self._screenshot)
+        menu.add_separator()
+        menu.add_command(label="💬  Subtitle",        command=self._toggle_subtitle)
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -951,6 +1335,26 @@ class EmbeddedPlayer:
             dur = max(1, self._player.get_length() or 1)
             px  = int((cur / dur) * w)
             sc.create_rectangle(0, cy - 2, px, cy + 2, fill=_ACCENT, outline="")
+            # A-B loop region
+            try:
+                pt_a = self._ab_point_a
+                pt_b = self._ab_point_b
+                if pt_a is not None:
+                    ax = int((pt_a / dur) * w)
+                    if pt_b is not None:
+                        bx = int((pt_b / dur) * w)
+                        sc.create_rectangle(ax, cy - 2, bx, cy + 2,
+                                            fill="#00BFFF", outline="", stipple="gray50")
+                    sc.create_line(ax, 0, ax, h, fill="#00BFFF", width=2)
+                    sc.create_text(ax + 2, 2, text="A", anchor="nw",
+                                   font=("Segoe UI", 7, "bold"), fill="#00BFFF")
+                if pt_b is not None:
+                    bx = int((pt_b / dur) * w)
+                    sc.create_line(bx, 0, bx, h, fill="#00BFFF", width=2)
+                    sc.create_text(bx - 2, 2, text="B", anchor="ne",
+                                   font=("Segoe UI", 7, "bold"), fill="#00BFFF")
+            except Exception:
+                pass
             r = 7 if self._seek_hover else 5
             sc.create_oval(px - r, cy - r, px + r, cy + r,
                            fill="white", outline="")
@@ -1032,6 +1436,35 @@ class EmbeddedPlayer:
         except Exception:
             pass
         self._draw_seek()
+        # Chapter info badge
+        try:
+            ch_count = self._player.get_chapter_count()
+            if ch_count and ch_count > 0:
+                ch_cur = self._player.get_chapter()
+                self._lbl_chapter.config(text=f"Ch {ch_cur + 1}/{ch_count}")
+            else:
+                self._lbl_chapter.config(text="")
+        except Exception:
+            self._lbl_chapter.config(text="")
+        # A-B loop badge + button highlight states
+        try:
+            if self._ab_loop_active and self._ab_point_a is not None and self._ab_point_b is not None:
+                self._lbl_ab.config(text=f"⟳ {_fmt(self._ab_point_a)}–{_fmt(self._ab_point_b)}")
+                self._btn_ab_a.config(bg="#003d5c", fg="#00BFFF")
+                self._btn_ab_b.config(bg="#003d5c", fg="#00BFFF")
+                self._btn_ab_clr.config(fg=_TXT)
+            elif self._ab_point_a is not None:
+                self._lbl_ab.config(text=f"A {_fmt(self._ab_point_a)}…")
+                self._btn_ab_a.config(bg="#003d5c", fg="#00BFFF")
+                self._btn_ab_b.config(bg=_BTN, fg="#00BFFF")
+                self._btn_ab_clr.config(fg=_TXT_DIM)
+            else:
+                self._lbl_ab.config(text="")
+                self._btn_ab_a.config(bg=_BTN, fg="#00BFFF")
+                self._btn_ab_b.config(bg=_BTN, fg="#00BFFF")
+                self._btn_ab_clr.config(fg=_TXT_DIM)
+        except Exception:
+            pass
 
     # ═══════════════════════════════════════════════════════════════════
     # CLOSE
@@ -1050,7 +1483,8 @@ class EmbeddedPlayer:
 
         self._running = False
         # cancel pending jobs
-        for attr in ("_hide_job", "_poll_job", "_update_job"):
+        for attr in ("_hide_job", "_poll_job", "_update_job",
+                     "_ab_monitor_job", "_sleep_timer_job"):
             job = getattr(self, attr, None)
             if job:
                 try:
