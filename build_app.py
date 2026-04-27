@@ -1,3 +1,8 @@
+try:
+    from version import __version__, __commit__, __build__
+except ImportError:
+    __version__ = __commit__ = __build__ = "dev"
+
 import threading
 import tkinter as tk
 from datetime import datetime
@@ -8,7 +13,7 @@ import sys
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 
-from key_press import listen_keys, cleanup_hotkeys
+from key_press import listen_keys, cleanup_hotkeys, reload_hotkeys
 from managers.favorites_manager import FavoritesManager
 from managers.filter_sort_manager import AdvancedFilterSortManager
 from managers.filter_sort_ui import FilterSortUI
@@ -26,8 +31,6 @@ from managers.video_preview_manager import VideoPreviewManager
 from managers.video_queue_manager import VideoQueueManager
 from managers.google_drive_manager import GoogleDriveManager
 from managers.dual_player_manager import DualPlayerManager
-import win32clipboard as wcb
-import win32con
 import struct
 import socket
 import time
@@ -49,12 +52,16 @@ def select_multiple_folders_and_play():
                     sock.close()
 
                     if result == 0:
-                        import win32gui
-                        hwnd = win32gui.FindWindow(None, "Recursive Video Player")
-                        if hwnd:
-                            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                            win32gui.SetForegroundWindow(hwnd)
-                            time.sleep(0.5)
+                        try:
+                            import win32gui
+                            import win32con
+                            hwnd = win32gui.FindWindow(None, "Recursive Video Player")
+                            if hwnd:
+                                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                                win32gui.SetForegroundWindow(hwnd)
+                                time.sleep(0.5)
+                        except:
+                            pass
 
                         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                         sock.connect(("127.0.0.1", port))
@@ -87,6 +94,9 @@ def select_multiple_folders_and_play():
             self.collapsed_paths = set()
             self.current_max_depth = 20
             self.loop_mode = "loop_on"
+            self._sleep_timer_job = None
+            self._sleep_countdown_job = None
+            self._sleep_timer_end = None
             self._active_player = None
 
             preferences = self.config.load_preferences()
@@ -109,7 +119,10 @@ def select_multiple_folders_and_play():
 
             root.title("Recursive Video Player")
             root.geometry("1600x900")
-            root.state('zoomed')
+            try:
+                root.state('zoomed')
+            except:
+                pass
             root.protocol("WM_DELETE_WINDOW", self.cancel)
             root.configure(bg=self.bg_color)
 
@@ -162,6 +175,8 @@ def select_multiple_folders_and_play():
             self.resource_manager.register_cleanup_callback(self._cleanup_scan_cache)
             self.resource_manager.register_cleanup_callback(self._cleanup_player_threads)
             self.apply_theme()
+            # Deferred: re-lock pill colors after tkinter's first render pass
+            self.root.after(0, self._fix_pill_colors_initial)
             self.root.drop_target_register(DND_FILES)
             self.root.dnd_bind('<<Drop>>', self._on_drop_files)
             command_line_dir = self._get_command_line_directory()
@@ -200,6 +215,9 @@ def select_multiple_folders_and_play():
 
             self.settings_manager = SettingsManager(self.root, self, self.update_console)
             self.settings_manager.add_settings_changed_callback(self._on_settings_changed)
+            self.settings_manager.set_hotkey_reload_callback(
+                lambda hk: reload_hotkeys(self.controller, hk)
+            )
             app_settings = self.settings_manager.get_settings()
 
             self.video_preview_manager = VideoPreviewManager(self.root, self.update_console)
@@ -431,17 +449,44 @@ def select_multiple_folders_and_play():
             return None
 
         def _on_drop_files(self, event):
-            raw = event.data
-            # tkinterdnd2 wraps paths with spaces in braces
             import re
-            paths = re.findall(r'\{([^}]+)\}|(\S+)', raw)
-            paths = [a or b for a, b in paths]
+            raw = event.data.strip()
+            # handles: {path with spaces} path_without_spaces {another path}
+            paths = []
+            i = 0
+            while i < len(raw):
+                if raw[i] == '{':
+                    end = raw.find('}', i)
+                    if end == -1:
+                        break
+                    paths.append(raw[i + 1:end])
+                    i = end + 1
+                elif raw[i] == ' ':
+                    i += 1
+                else:
+                    end = raw.find(' ', i)
+                    if end == -1:
+                        paths.append(raw[i:])
+                        break
+                    paths.append(raw[i:end])
+                    i = end + 1
+
+            added = 0
+            played = []
             for path in paths:
                 path = path.strip()
+                if not path:
+                    continue
                 if os.path.isdir(path):
                     self._add_directory_from_ipc(path)
+                    added += 1
                 elif os.path.isfile(path) and is_video(path):
-                    self._play_grid_videos([path])
+                    played.append(path)
+
+            if played:
+                self._play_grid_videos(played)
+            if added:
+                self.update_console(f"Dropped {added} director{'ies' if added > 1 else 'y'}")
 
         def setup_theme(self):
             self.bg_color = "#f5f5f5"
@@ -566,7 +611,7 @@ def select_multiple_folders_and_play():
 
             self.clear_console_button = self.create_button(
                 console_header_frame,
-                text="Clear Console",
+                text="Clear",
                 command=self.clear_console,
                 variant="dark",
                 size="sm"
@@ -586,7 +631,7 @@ def select_multiple_folders_and_play():
 
             self.console_text = tk.Text(
                 console_frame,
-                height=8,
+                height=10,
                 wrap=tk.WORD,
                 yscrollcommand=self.console_scrollbar.set,
                 font=self.mono_font,
@@ -605,6 +650,7 @@ def select_multiple_folders_and_play():
             self.console_scrollbar.config(command=self.console_text.yview)
 
             self.update_console("Video Player Console Ready")
+            self.update_console(f"version:{__version__}  commit:{__commit__}  built:{__build__}")
             self.update_console("Select directories and click 'Play Videos' to start")
 
         def update_console(self, message):
@@ -721,41 +767,41 @@ def select_multiple_folders_and_play():
             self.dir_listbox.bind('<ButtonRelease-1>', self._on_drop)
             self.scrollbar.config(command=self.dir_listbox.yview)
 
-            media_section = tk.Frame(self.dir_section, bg=self.bg_color)
-            media_section.pack(fill=tk.X, pady=(10, 0))
-
-            media_label = tk.Label(
-                media_section,
-                text="Media:",
-                font=self.small_font,
-                bg=self.bg_color,
-                fg="#666666"
-            )
-            media_label.pack(side=tk.LEFT, padx=(0, 8))
-
-            self.manage_playlist_button = self.create_button(
-                media_section, "Manage Playlists",
-                self._manage_playlists, "playlist", "sm"
-            )
-            self.manage_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.queue_manager_button = self.create_button(
-                media_section, "Manage Queue",
-                self._show_queue_manager, "primary", "sm"
-            )
-            self.queue_manager_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.favorites_button = self.create_button(
-                media_section, "Favorites",
-                self._show_favorites_manager, "warning", "sm"
-            )
-            self.favorites_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.watch_history_button = self.create_button(
-                media_section, "Watch History",
-                self._show_watch_history, "history", "sm"
-            )
-            self.watch_history_button.pack(side=tk.LEFT)
+            # media_section = tk.Frame(self.dir_section, bg=self.bg_color)
+            # media_section.pack(fill=tk.X, pady=(10, 0))
+            #
+            # media_label = tk.Label(
+            #     media_section,
+            #     text="Media:",
+            #     font=self.small_font,
+            #     bg=self.bg_color,
+            #     fg="#666666"
+            # )
+            # media_label.pack(side=tk.LEFT, padx=(0, 8))
+            #
+            # self.manage_playlist_button = self.create_button(
+            #     media_section, "Manage Playlists",
+            #     self._manage_playlists, "playlist", "sm"
+            # )
+            # self.manage_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
+            #
+            # self.queue_manager_button = self.create_button(
+            #     media_section, "Manage Queue",
+            #     self._show_queue_manager, "primary", "sm"
+            # )
+            # self.queue_manager_button.pack(side=tk.LEFT, padx=(0, 5))
+            #
+            # self.favorites_button = self.create_button(
+            #     media_section, "Favorites",
+            #     self._show_favorites_manager, "warning", "sm"
+            # )
+            # self.favorites_button.pack(side=tk.LEFT, padx=(0, 5))
+            #
+            # self.watch_history_button = self.create_button(
+            #     media_section, "Watch History",
+            #     self._show_watch_history, "history", "sm"
+            # )
+            # self.watch_history_button.pack(side=tk.LEFT)
 
         def on_directory_focus_out(self, event):
             selection = self.dir_listbox.curselection()
@@ -2686,7 +2732,18 @@ def select_multiple_folders_and_play():
             if self.show_only_excluded:
                 self.selected_dir_label.config(text=f"Excluded items in: {os.path.basename(directory)}")
             else:
-                self.selected_dir_label.config(text=f"All items in: {os.path.basename(directory)}")
+                _cache = self.scan_cache.get(directory)
+                if _cache:
+                    _videos, _, _ = _cache
+                    _excluded_subdirs = self.excluded_subdirs.get(directory, [])
+                    _excluded_videos = self.excluded_videos.get(directory, [])
+                    if _excluded_subdirs or _excluded_videos:
+                        _count = sum(1 for v in _videos if not self.is_video_excluded(directory, v))
+                    else:
+                        _count = len(_videos)
+                    self.selected_dir_label.config(text=f"All items in: {os.path.basename(directory)} ({_count} videos)")
+                else:
+                    self.selected_dir_label.config(text=f"All items in: {os.path.basename(directory)}")
             self.exclusion_listbox.delete(0, tk.END)
             self.exclusion_listbox.insert(tk.END, "Loading...")
             self.current_subdirs_mapping = {}
@@ -2914,93 +2971,396 @@ def select_multiple_folders_and_play():
             ManagedThread(target=build_and_post, name="LoadSubdirs").start()
 
         def setup_action_buttons(self):
+            # ── Custom toolbar frame packed above main_frame ──────────────────────
+            def _tb_colors():
+                if self.dark_mode:
+                    return {
+                        "bg":        "#1E1F22",
+                        "fg":        "#A9B7C6",
+                        "hover_bg":  "#2D5A8E",
+                        "hover_fg":  "#FFFFFF",
+                        "active_bg": "#1A4070",
+                        "active_fg": "#FFFFFF",
+                        "play_fg":   "#FF6B6B",
+                        "play_hover":"#C0392B",
+                        "sep":       "#3A3B3E",
+                    }
+                else:
+                    return {
+                        "bg":        "#ECECEC",
+                        "fg":        "#2B2B2B",
+                        "hover_bg":  "#DCDCDC",
+                        "hover_fg":  "#000000",
+                        "active_bg": "#CCCCCC",
+                        "active_fg": "#000000",
+                        "play_fg":   "#c0392b",
+                        "play_hover":"#992d22",
+                        "play_hover_bg": "#c0392b",
+                        "sep":       "#E0E0E0",
+                    }
+
+            self._tb_colors = _tb_colors
+
+            self.toolbar = tk.Frame(self.root, bg=_tb_colors()["bg"], height=28)
+            self.toolbar.pack(side=tk.TOP, fill=tk.X, before=self.main_frame)
+            self.toolbar.pack_propagate(False)
+
+            self._toolbar_btns = {}   # label -> tk.Label widget
+
+            def make_dropdown_menu(entries):
+                """entries: list of (label, command) or None for separator."""
+                c = _tb_colors()
+                menu = tk.Menu(self.root, tearoff=0,
+                               bg=c["bg"], fg=c["fg"],
+                               activebackground=c["hover_bg"],
+                               activeforeground=c["hover_fg"],
+                               relief="flat", bd=1,
+                               font=("Segoe UI", 9))
+                for entry in entries:
+                    if entry is None:
+                        menu.add_separator()
+                    else:
+                        lbl, cmd = entry
+                        menu.add_command(label=lbl, command=cmd)
+                return menu
+
+            def make_toolbar_btn(text, command=None, menu=None, is_action=False, play=False):
+                c = _tb_colors()
+                fg = c["play_fg"] if play else c["fg"]
+                font_weight = "bold" if play else "normal"
+                btn = tk.Label(
+                    self.toolbar,
+                    text=text,
+                    bg=c["bg"],
+                    fg=fg,
+                    font=("Segoe UI", 9, font_weight),
+                    padx=10, pady=4,
+                    cursor="hand2"
+                )
+                btn.pack(side=tk.LEFT)
+                self._toolbar_btns[text] = btn
+
+                def on_enter(e, b=btn):
+                    cc = _tb_colors()
+                    b.config(bg=cc["hover_bg"], fg=cc["hover_fg"])
+
+                def on_leave(e, b=btn, p=play):
+                    cc = _tb_colors()
+                    b.config(bg=cc["bg"], fg=cc["play_fg"] if p else cc["fg"])
+
+                def on_press(e, b=btn):
+                    cc = _tb_colors()
+                    b.config(bg=cc["active_bg"], fg=cc["active_fg"])
+
+                def on_release(e, b=btn, m=menu, cmd=command):
+                    cc = _tb_colors()
+                    b.config(bg=cc["hover_bg"], fg=cc["hover_fg"])
+                    if m:
+                        try:
+                            m.tk_popup(b.winfo_rootx(), b.winfo_rooty() + b.winfo_height())
+                        finally:
+                            m.grab_release()
+                    elif cmd:
+                        cmd()
+
+                btn.bind("<Enter>",          on_enter)
+                btn.bind("<Leave>",          on_leave)
+                btn.bind("<ButtonPress-1>",  on_press)
+                btn.bind("<ButtonRelease-1>",on_release)
+                return btn
+
+            # ── File ──────────────────────────────────────────────────────────────
+            file_menu = make_dropdown_menu([
+                ("Add Directory",           self.add_directory),
+                ("Add Google Drive Link",   self.add_drive_link),
+                None,
+                ("Exit",                    self.cancel),
+            ])
+            make_toolbar_btn("File", menu=file_menu)
+
+            # ── View ──────────────────────────────────────────────────────────────
+            view_menu = make_dropdown_menu([
+                ("Show/Hide Console",       self.toggle_console),
+                None,
+                ("Filter / Sort",           self._show_filter_dialog),
+            ])
+            make_toolbar_btn("View", menu=view_menu)
+
+            # ── Playback ──────────────────────────────────────────────────────────
+            self._loop_mode_var = tk.StringVar(value=self.loop_mode)
+            c = _tb_colors()
+            _sel_color = "#4A9EFF" if self.dark_mode else "#2d89ef"
+            loop_sub = tk.Menu(self.root, tearoff=0,
+                               bg=c["bg"], fg=c["fg"],
+                               activebackground=c["hover_bg"],
+                               activeforeground=c["hover_fg"],
+                               selectcolor=_sel_color,
+                               relief="flat", bd=1,
+                               font=("Segoe UI", 9))
+            for mode, lbl in [("loop_on", "Loop On"), ("loop_off", "Loop Off"), ("shuffle", "Shuffle")]:
+                loop_sub.add_radiobutton(
+                    label=lbl,
+                    variable=self._loop_mode_var,
+                    value=mode,
+                    command=lambda m=mode: self._set_loop_mode_menu(m))
+            self._loop_sub_menu = loop_sub
+
+            playback_menu = tk.Menu(self.root, tearoff=0,
+                                    bg=c["bg"], fg=c["fg"],
+                                    activebackground=c["hover_bg"],
+                                    activeforeground=c["hover_fg"],
+                                    relief="flat", bd=1,
+                                    font=("Segoe UI", 9))
+            playback_menu.add_cascade(label="Loop Mode", menu=loop_sub)
+            playback_menu.add_separator()
+            playback_menu.add_command(label="Sleep Timer", command=self._show_sleep_timer_dialog)
+            make_toolbar_btn("Playback", menu=playback_menu)
+
+            tools_menu = make_dropdown_menu([
+                ("Settings",                self._show_settings),
+                None,
+                ("Filter / Sort",           self._show_filter_dialog),
+            ])
+            make_toolbar_btn("Tools", menu=tools_menu)
+
+            _media_pill_commands = {
+                "🎵 Playlist":   self._manage_playlists,
+                "⬛ Queue":      self._show_queue_manager,
+                "♥ Favourites": self._show_favorites_manager,
+                "🕐 History":   self._show_watch_history,
+            }
+
+            self._media_pill_btns = {}
+
+            def _make_media_pill(label):
+                a = self.pill_accents(label)  # palette lives in ThemeSelector
+                c = _tb_colors()
+                btn = tk.Label(
+                    self.toolbar,
+                    text=label,
+                    bg=c["bg"],
+                    fg=a[0],
+                    font=("Segoe UI", 9, "bold"),
+                    padx=9, pady=3,
+                    cursor="hand2",
+                    relief="flat",
+                    highlightthickness=1,
+                    highlightbackground=a[0],
+                    highlightcolor=a[0],
+                )
+                btn.pack(side=tk.LEFT, padx=(0, 3), pady=2)
+                self._media_pill_btns[label] = btn
+
+                def on_enter(e, b=btn, lbl=label):
+                    a = self.pill_accents(lbl)
+                    b.config(bg=a[1], fg=a[2], highlightbackground=a[1])
+                def on_leave(e, b=btn, lbl=label):
+                    a = self.pill_accents(lbl); cc = _tb_colors()
+                    b.config(bg=cc["bg"], fg=a[0], highlightbackground=a[0])
+                def on_press(e, b=btn, lbl=label):
+                    a = self.pill_accents(lbl)
+                    b.config(bg=a[3], fg=a[2], highlightbackground=a[3])
+                def on_release(e, b=btn, lbl=label, cmd=_media_pill_commands[label]):
+                    a = self.pill_accents(lbl)
+                    b.config(bg=a[1], fg=a[2], highlightbackground=a[1])
+                    cmd()
+
+                btn.bind("<Enter>",           on_enter)
+                btn.bind("<Leave>",           on_leave)
+                btn.bind("<ButtonPress-1>",   on_press)
+                btn.bind("<ButtonRelease-1>", on_release)
+
+            for _pill_label in ["🎵 Playlist", "⬛ Queue", "♥ Favourites", "🕐 History"]:
+                _make_media_pill(_pill_label)
+
+            self.sleep_countdown_label = tk.Label(
+                self.toolbar,
+                text="",
+                bg=_tb_colors()["bg"],
+                fg=_tb_colors()["fg"],
+                font=("Segoe UI", 9),
+                padx=8, pady=4,
+                cursor="hand2"
+            )
+            self.sleep_countdown_label.pack(side=tk.RIGHT, padx=(0, 2))
+
+            def _sleep_label_click(e):
+                if not getattr(self, '_sleep_timer_end', None):
+                    return
+                try:
+                    if getattr(self, '_sleep_timer_paused', False):
+                        # resume: restart the after job and countdown
+                        import time as _time
+                        remaining_ms = int(self._sleep_timer_remaining * 1000)
+                        self._sleep_timer_end = _time.time() + self._sleep_timer_remaining
+                        self._sleep_timer_job = self.root.after(remaining_ms, self._sleep_timer_fired)
+                        self._sleep_timer_paused = False
+                        self._start_sleep_countdown()
+                        if self.controller:
+                            self.controller.player.pause()
+                    else:
+                        # pause: cancel the after job, store remaining
+                        import time as _time
+                        if self._sleep_timer_job:
+                            self.root.after_cancel(self._sleep_timer_job)
+                            self._sleep_timer_job = None
+                        if hasattr(self, '_sleep_countdown_job') and self._sleep_countdown_job:
+                            self.root.after_cancel(self._sleep_countdown_job)
+                            self._sleep_countdown_job = None
+                        self._sleep_timer_remaining = max(0, self._sleep_timer_end - _time.time())
+                        self._sleep_timer_paused = True
+                        if hasattr(self, 'sleep_countdown_label'):
+                            mins = int(self._sleep_timer_remaining) // 60
+                            secs = int(self._sleep_timer_remaining) % 60
+                            self.sleep_countdown_label.config(text=f"⏸ {mins}:{secs:02d}")
+                        if self.controller:
+                            self.controller.player.pause()
+                except Exception:
+                    pass
+
+            self.sleep_countdown_label.bind("<ButtonRelease-1>", _sleep_label_click)
+
+            # theme toggle
+            self.theme_toolbar_btn = tk.Label(
+                self.toolbar,
+                text="🌙" if not self.dark_mode else "☀",
+                bg=_tb_colors()["bg"],
+                fg=_tb_colors()["fg"],
+                font=("Segoe UI", 10),
+                padx=8, pady=4,
+                cursor="hand2"
+            )
+            self.theme_toolbar_btn.pack(side=tk.RIGHT, padx=(0, 2))
+
+            def _theme_enter(e):
+                cc = _tb_colors(); self.theme_toolbar_btn.config(bg=cc["hover_bg"], fg=cc["hover_fg"])
+            def _theme_leave(e):
+                cc = _tb_colors(); self.theme_toolbar_btn.config(bg=cc["bg"], fg=cc["fg"])
+            def _theme_press(e):
+                cc = _tb_colors(); self.theme_toolbar_btn.config(bg=cc["active_bg"], fg=cc["active_fg"])
+            def _theme_release(e):
+                cc = _tb_colors(); self.theme_toolbar_btn.config(bg=cc["hover_bg"], fg=cc["hover_fg"])
+                self._toggle_theme_menu()
+            self.theme_toolbar_btn.bind("<Enter>",          _theme_enter)
+            self.theme_toolbar_btn.bind("<Leave>",          _theme_leave)
+            self.theme_toolbar_btn.bind("<ButtonPress-1>",  _theme_press)
+            self.theme_toolbar_btn.bind("<ButtonRelease-1>",_theme_release)
+
+            # play button
+            self.play_toolbar_btn = tk.Label(
+                self.toolbar,
+                text="▶  Play Videos",
+                bg=_tb_colors()["bg"],
+                fg=_tb_colors()["play_fg"],
+                font=("Segoe UI", 9, "bold"),
+                padx=12, pady=4,
+                cursor="hand2"
+            )
+            self.play_toolbar_btn.pack(side=tk.RIGHT, padx=(0, 6))
+
+            def _play_enter(e):
+                cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc.get("play_hover_bg", cc["hover_bg"]), fg="#FFFFFF")
+            def _play_leave(e):
+                cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc["bg"], fg=cc["play_fg"])
+            def _play_press(e):
+                cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc.get("play_hover_bg", cc["active_bg"]), fg="#FFFFFF")
+            def _play_release(e):
+                cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc["hover_bg"], fg="#FFFFFF")
+                self.play_videos()
+            self.play_toolbar_btn.bind("<Enter>",          _play_enter)
+            self.play_toolbar_btn.bind("<Leave>",          _play_leave)
+            self.play_toolbar_btn.bind("<ButtonPress-1>",  _play_press)
+            self.play_toolbar_btn.bind("<ButtonRelease-1>",_play_release)
+
+            # placeholder so toggle_console's before= ref works
             self.button_frame = tk.Frame(self.main_frame, bg=self.bg_color)
-            self.button_frame.pack(fill=tk.X, pady=(0, 15))
+            self.button_frame.pack(fill=tk.X)
 
-            dir_buttons_frame = tk.Frame(self.button_frame, bg=self.bg_color)
-            dir_buttons_frame.pack(side=tk.LEFT)
+        def _show_sleep_timer_dialog(self):
+            # if timer already running, cancel it
+            if getattr(self, '_sleep_timer_job', None):
+                self.root.after_cancel(self._sleep_timer_job)
+                self._sleep_timer_job = None
+                if hasattr(self, '_sleep_countdown_job') and self._sleep_countdown_job:
+                    self.root.after_cancel(self._sleep_countdown_job)
+                    self._sleep_countdown_job = None
+                self._sleep_timer_end = None
+                self._sleep_timer_paused = False
+                if hasattr(self, 'sleep_countdown_label'):
+                    self.sleep_countdown_label.config(text="")
+                self.update_console("Sleep timer cancelled")
+                return
 
-            self.add_button = self.create_button(
-                dir_buttons_frame,
-                text='+ ADD',
-                command=self.add_directory,
-                variant="primary",
-                size="md"
-            )
-            self.add_button.pack(side=tk.LEFT, padx=(0, 5))
+            dlg = tk.Toplevel(self.root)
+            dlg.title("Sleep Timer")
+            dlg.geometry("300x160")
+            dlg.configure(bg=self.bg_color)
+            dlg.transient(self.root)
+            dlg.grab_set()
+            dlg.resizable(False, False)
 
-            self.add_drive_button = self.create_button(
-                dir_buttons_frame,
-                text="Add Drive Link",
-                command=self.add_drive_link,
-                variant="primary",
-                size="md"
-            )
-            self.add_drive_button.pack(side=tk.LEFT, padx=(0, 5))
+            tk.Label(dlg, text="Stop playback after (minutes):",
+                     font=self.normal_font, bg=self.bg_color,
+                     fg=self.text_color).pack(pady=(20, 8))
 
+            minutes_var = tk.IntVar(value=30)
+            spin = tk.Spinbox(dlg, from_=1, to=300,
+                              textvariable=minutes_var,
+                              font=self.normal_font, width=8,
+                              bg=self.bg_color, fg=self.text_color)
+            spin.pack()
 
-            theme_frame = tk.Frame(self.button_frame, bg=self.bg_color)
-            theme_frame.pack(side=tk.LEFT, expand=True)
+            def start():
+                import time as _time
+                minutes = minutes_var.get()
+                ms = minutes * 60 * 1000
+                self._sleep_timer_end = _time.time() + (minutes * 60)
+                self._sleep_timer_job = self.root.after(ms, self._sleep_timer_fired)
+                self._start_sleep_countdown()
+                self.update_console(f"Sleep timer set for {minutes} minutes")
+                dlg.destroy()
 
-            self.filter_sort_button = self.create_button(
-                theme_frame,
-                text="Filter/Sort",
-                command=self._show_filter_dialog,
-                variant="primary",
-                size="md"
-            )
-            self.filter_sort_button.pack(side=tk.LEFT, padx=(0, 10))
+            self.create_button(dlg, "Set Timer", start, "primary", "md").pack(pady=15)
+            dlg.bind("<Return>", lambda e: start())
 
-            self.theme_button = self.create_button(
-                theme_frame,
-                text="Dark Mode" if not self.dark_mode else "Light Mode",
-                command=self.toggle_theme,
-                variant="theme",
-                size="md"
-            )
-            self.theme_button.pack(side=tk.LEFT, padx=(0, 10))
+        def _start_sleep_countdown(self):
+            import time as _time
 
-            self.settings_button = self.create_button(
-                theme_frame,
-                text="Settings",
-                command=self._show_settings,
-                variant="settings",
-                size="md"
-            )
-            self.settings_button.pack(side=tk.LEFT, padx=(0, 10))
+            def tick():
+                if not getattr(self, '_sleep_timer_end', None):
+                    return
+                if getattr(self, '_sleep_timer_paused', False):
+                    return
+                remaining = int(self._sleep_timer_end - _time.time())
+                if remaining <= 0:
+                    return
+                mins = remaining // 60
+                secs = remaining % 60
+                if hasattr(self, 'sleep_countdown_label'):
+                    self.sleep_countdown_label.config(text=f"⏾ {mins}:{secs:02d}")
+                self._sleep_countdown_job = self.root.after(1000, tick)
 
+            self._sleep_countdown_job = None
+            tick()
 
-            action_buttons_frame = tk.Frame(self.button_frame, bg=self.bg_color)
-            action_buttons_frame.pack(side=tk.RIGHT)
-
-            self.cancel_button = self.create_button(
-                action_buttons_frame,
-                text="Close",
-                command=self.cancel,
-                variant="secondary",
-                size="md"
-            )
-            self.cancel_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.loop_toggle_button = self.create_button(
-                action_buttons_frame,
-                text=self._get_loop_icon(),
-                command=self.toggle_loop_mode,
-                variant="danger",
-                size="lg",
-                font=(self.normal_font.name, self.normal_font.actual()['size'], 'bold')
-            )
-            self.loop_toggle_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.play_button = self.create_button(
-                action_buttons_frame,
-                text="▶ Play Videos",
-                command=self.play_videos,
-                variant="danger",
-                size="lg",
-                font=(self.normal_font.name, self.normal_font.actual()['size'], 'bold')
-            )
-            self.play_button.pack(side=tk.LEFT)
+        def _sleep_timer_fired(self):
+            self._sleep_timer_job = None
+            self._sleep_timer_end = None
+            self._sleep_timer_paused = False
+            if hasattr(self, '_sleep_countdown_job') and self._sleep_countdown_job:
+                self.root.after_cancel(self._sleep_countdown_job)
+                self._sleep_countdown_job = None
+            if hasattr(self, 'sleep_countdown_label'):
+                self.sleep_countdown_label.config(text="")
+            self.update_console("Sleep timer: stopping playback")
+            if self.controller:
+                try:
+                    self.controller.stop()
+                except Exception:
+                    pass
+                self.controller = None
+                from key_press import cleanup_hotkeys
+                cleanup_hotkeys()
 
         def setup_status_section(self):
             # Video count is now shown inline in the exclusion section header
@@ -3724,6 +4084,8 @@ def select_multiple_folders_and_play():
 
             def paste_clipboard():
                 try:
+                    import win32clipboard as wcb
+                    import win32con
                     wcb.OpenClipboard()
                     data = wcb.GetClipboardData(win32con.CF_UNICODETEXT)
                     wcb.CloseClipboard()
@@ -3802,6 +4164,8 @@ def select_multiple_folders_and_play():
             cancel_btn.pack(side=tk.RIGHT)
 
             try:
+                import win32clipboard as wcb
+                import win32con
                 wcb.OpenClipboard()
                 data = wcb.GetClipboardData(win32con.CF_UNICODETEXT)
                 wcb.CloseClipboard()
@@ -4020,7 +4384,7 @@ def select_multiple_folders_and_play():
                     self.save_preferences()
 
                 self.controller.stop()
-            cleanup_hotkeys()
+            # cleanup_hotkeys()
             try:
                 if hasattr(self, 'executor'):
                     self.executor.shutdown(wait=False, cancel_futures=True)

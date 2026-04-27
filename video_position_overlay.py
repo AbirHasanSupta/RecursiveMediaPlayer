@@ -108,6 +108,7 @@ class VideoPositionOverlay:
         self._spd_label       = None
         self._title_label     = None
         self._time_label      = None
+        self._ab_label        = None
 
         # public compat shim (old code checks is_visible)
         self.is_visible = False
@@ -223,6 +224,12 @@ class VideoPositionOverlay:
             bg=PANEL_BG, fg=TEXT_BRIGHT)
         self._title_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+        self._ab_label = tk.Label(
+            title_row, text="",
+            font=Font(family="Segoe UI", size=8, weight="bold"),
+            bg=PANEL_BG, fg="#00BFFF")
+        self._ab_label.pack(side=tk.RIGHT, padx=(6, 0))
+
         self._time_label = tk.Label(
             title_row, text="0:00 / 0:00",
             font=Font(family="Segoe UI", size=8),
@@ -297,7 +304,7 @@ class VideoPositionOverlay:
 
         # keep overlay shown while mouse is over it
         for w in [root, title_row, seek_row, ctrl,
-                  self._title_label, self._time_label,
+                  self._title_label, self._time_label, self._ab_label,
                   self._seek_canvas, self._play_btn, self._rotate_btn, self._fullscreen_btn,
                   self._vol_label, self._vol_value, self._spd_label]:
             w.bind("<Enter>", lambda e: self._cancel_hide(), add="+")
@@ -462,6 +469,25 @@ class VideoPositionOverlay:
             px = int((cur / dur) * w)
             # progress
             c.create_rectangle(0, cy - 2, px, cy + 2, fill=ACCENT, outline="")
+            # A-B loop region + markers
+            try:
+                pt_a = getattr(self.controller, '_ab_point_a', None)
+                pt_b = getattr(self.controller, '_ab_point_b', None)
+                if pt_a is not None:
+                    ax = int((pt_a / dur) * w)
+                    if pt_b is not None:
+                        bx = int((pt_b / dur) * w)
+                        c.create_rectangle(ax, cy - 2, bx, cy + 2, fill="#00BFFF", outline="", stipple="gray50")
+                    c.create_line(ax, 0, ax, h, fill="#00BFFF", width=2)
+                    c.create_text(ax + 2, 2, text="A", anchor="nw",
+                                  font=("Segoe UI", 7, "bold"), fill="#00BFFF")
+                if pt_b is not None:
+                    bx = int((pt_b / dur) * w)
+                    c.create_line(bx, 0, bx, h, fill="#00BFFF", width=2)
+                    c.create_text(bx - 2, 2, text="B", anchor="ne",
+                                  font=("Segoe UI", 7, "bold"), fill="#00BFFF")
+            except Exception:
+                pass
             # handle
             r = 6 if self._is_hovering_bar else 4
             c.create_oval(px - r, cy - r, px + r, cy + r, fill="white", outline="")
@@ -551,6 +577,20 @@ class VideoPositionOverlay:
             try:
                 spd = c.player.get_rate()
                 self._spd_label.config(text=f"{spd:.2f}×")
+            except Exception:
+                pass
+
+            # A-B loop indicator
+            try:
+                pt_a = getattr(c, '_ab_point_a', None)
+                pt_b = getattr(c, '_ab_point_b', None)
+                active = getattr(c, '_ab_loop_active', False)
+                if active and pt_a is not None and pt_b is not None:
+                    self._ab_label.config(text=f"⟳ A {_fmt_time(pt_a)}–{_fmt_time(pt_b)}")
+                elif pt_a is not None:
+                    self._ab_label.config(text=f"A {_fmt_time(pt_a)}…")
+                else:
+                    self._ab_label.config(text="")
             except Exception:
                 pass
 
