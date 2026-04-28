@@ -1068,7 +1068,6 @@ class EmbeddedPlayer:
         menu.add_command(label="⟳⟲  Reset Rotate/Flip",
                          command=lambda: (setattr(self, '_rotation_index', 0),
                                           setattr(self, '_flip_h', False),
-                                          setattr(self, '_flip_v', False),
                                           self._apply_transforms()))
         try:
             x = self._win.winfo_pointerx()
