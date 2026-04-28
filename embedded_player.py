@@ -144,6 +144,7 @@ class EmbeddedPlayer:
         self._rotation_index = 0          # index into _ROTATION_STEPS: 0/1/2/3
         self._borderless     = False
         self._pre_bl_geo     = "1280x720"
+        self._chapters_visible = True     # initially assume chapters exist (packed in UI)
 
         # A-B loop
         self._ab_point_a     = None
@@ -218,6 +219,8 @@ class EmbeddedPlayer:
 
         self._start_poll()
         self._schedule_refresh()
+        # Force initial chapter visibility check after UI is fully built
+        self._win.after(100, lambda: self._refresh_display())
 
     def _build_bar(self):
         bar = self._bar
@@ -340,10 +343,15 @@ class EmbeddedPlayer:
         tk.Frame(lg, width=1, bg="#333333").pack(side=tk.LEFT, fill=tk.Y, pady=3)
 
         # Chapter buttons — compact symbols only, tooltip via logger
-        _btn(lg, "❮Ch", self._prev_chapter, font=F_SM, padx=5).pack(side=tk.LEFT, padx=(6, 1))
-        _btn(lg, "Ch❯", self._next_chapter, font=F_SM, padx=5).pack(side=tk.LEFT, padx=(1, 8))
+        self._btn_prev_chapter = _btn(lg, "❮Ch", self._prev_chapter, font=F_SM, padx=5)
+        self._btn_prev_chapter.pack(side=tk.LEFT, padx=(6, 1))
+        self._btn_next_chapter = _btn(lg, "Ch❯", self._next_chapter, font=F_SM, padx=5)
+        self._btn_next_chapter.pack(side=tk.LEFT, padx=(1, 8))
 
-        tk.Frame(lg, width=1, bg="#333333").pack(side=tk.LEFT, fill=tk.Y, pady=3)
+        # This divider sits between chapter buttons and A-B loop buttons.
+        # We keep a reference so we can re-pack chapter buttons correctly.
+        self._divider_before_ab = tk.Frame(lg, width=1, bg="#333333")
+        self._divider_before_ab.pack(side=tk.LEFT, fill=tk.Y, pady=3)
 
         # A-B loop — three compact tagged buttons
         self._btn_ab_a = _btn(lg, "A", self._set_ab_a, font=F_ACC,
@@ -1373,8 +1381,20 @@ class EmbeddedPlayer:
                              command=lambda: self.on_add_to_favourites([path]))
         menu.add_separator()
         menu.add_command(label="📸  Screenshot",      command=self._screenshot)
-        menu.add_separator()
-        menu.add_command(label="💬  Subtitle",        command=self._toggle_subtitle)
+        try:
+            has_subtitles = False
+            spu_count = self._player.video_get_spu_count()
+            if spu_count and spu_count > 0:
+                tracks = self._player.video_get_spu_description()
+                if tracks and len(tracks) > 0:
+                    has_subtitles = True
+        except Exception:
+            has_subtitles = False
+
+        if has_subtitles:
+            menu.add_separator()
+            menu.add_command(label="💬  Subtitle", command=self._toggle_subtitle)
+
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -1637,8 +1657,20 @@ class EmbeddedPlayer:
             if ch_count and ch_count > 0:
                 ch_cur = self._player.get_chapter()
                 self._lbl_chapter.config(text=f"Ch {ch_cur + 1}/{ch_count}")
+                if not self._chapters_visible:
+                    # Show chapter navigation buttons
+                    self._btn_prev_chapter.pack(side=tk.LEFT, padx=(6, 1),
+                                                before=self._divider_before_ab)
+                    self._btn_next_chapter.pack(side=tk.LEFT, padx=(1, 8),
+                                                before=self._divider_before_ab)
+                    self._chapters_visible = True
             else:
                 self._lbl_chapter.config(text="")
+                if self._chapters_visible:
+                    # Hide chapter navigation buttons
+                    self._btn_prev_chapter.pack_forget()
+                    self._btn_next_chapter.pack_forget()
+                    self._chapters_visible = False
         except Exception:
             self._lbl_chapter.config(text="")
         # A-B loop badge + button highlight states
