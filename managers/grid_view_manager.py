@@ -57,6 +57,7 @@ class GridViewManager:
         self.now_playing_path = None
         self._now_playing_badge = None
         self._last_anchor_path = None
+        self._search_timer = None
 
         # callbacks
         self.play_callback = None
@@ -295,7 +296,7 @@ class GridViewManager:
                  bg=toolbar_bg, fg=t['text_sub']).pack(side=tk.LEFT, padx=(12, 6), pady=10)
 
         self.search_var = tk.StringVar()
-        self.search_var.trace('w', lambda *_: self._filter_directories())
+        self.search_var.trace('w', lambda *_: self._on_search_changed())
 
         search_frame = tk.Frame(inner_tb, bg=t['surface'],
                                 highlightthickness=1, highlightbackground=t['border'])
@@ -392,6 +393,9 @@ class GridViewManager:
                     pass
             self._photo_cache.clear()
             self.now_playing_path = None
+            if self._search_timer:
+                self.root.after_cancel(self._search_timer)
+                self._search_timer = None
             # ── ADD THIS LINE ────────────────────────────────────────────
             try:
                 self.grid_window.destroy()
@@ -1391,6 +1395,11 @@ class GridViewManager:
     # ─────────────────────────────────────────────────────────────────────────
     # Filter (original)
     # ─────────────────────────────────────────────────────────────────────────
+    def _on_search_changed(self):
+        """Debounce the search filter to avoid rapid rebuilds."""
+        if self._search_timer:
+            self.root.after_cancel(self._search_timer)
+        self._search_timer = self.root.after(400, self._filter_directories)
 
     def _filter_directories(self):
         self._page = 0
