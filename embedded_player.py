@@ -167,6 +167,7 @@ class EmbeddedPlayer:
         self._poll_job      = None
         self._update_job    = None
         self._drag_seek     = False
+        self._holding = False
         self._seek_hover    = False
         self._last_mouse    = (-1, -1)
         self._last_move_t   = 0.0
@@ -803,14 +804,18 @@ class EmbeddedPlayer:
 
         def _on_press(e):
             state["fired"] = False
+            self._holding = True
+            self._cancel_hide()
             state["hold_job"] = btn.after(hold_delay_ms, _start_hold)
 
         def _on_release(e):
+            self._holding = False
             if state["hold_job"] is not None:
                 btn.after_cancel(state["hold_job"])
                 state["hold_job"] = None
             if not state["fired"]:
                 on_click()
+            self._schedule_hide()
 
         btn.config(command=None)
         btn.bind("<ButtonPress-1>",   _on_press,   add=True)
@@ -1491,7 +1496,7 @@ class EmbeddedPlayer:
                         self._show_bar()
                     else:
                         idle = time.monotonic() - self._last_move_t
-                        if idle >= self.INACTIVITY_S and self._ctrl_visible and not self._hide_job:
+                        if idle >= self.INACTIVITY_S and self._ctrl_visible and not self._hide_job and not self._holding:
                             self._schedule_hide(100)
                 else:
                     if self._ctrl_visible and not self._hide_job:
