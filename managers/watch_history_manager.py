@@ -343,6 +343,7 @@ class WatchHistoryUI:
         self.current_entries: List[WatchHistoryEntry] = []
         self.filter_var = None
         self.video_preview_manager = None
+        self.theme_provider.register_manager_ui(self)
 
     def show_history_manager(self):
         if self.history_window and self.history_window.winfo_exists():
@@ -351,170 +352,179 @@ class WatchHistoryUI:
 
         self.history_window = tk.Toplevel(self.parent)
         self.history_window.title("Watch History")
-        self.history_window.geometry("900x600")
+        self.history_window.geometry("960x640")
+        self.history_window.minsize(720, 500)
         self.history_window.configure(bg=self.theme_provider.bg_color)
+
+        self.history_window.update_idletasks()
+        px = self.parent.winfo_rootx() + (self.parent.winfo_width() - 960) // 2
+        py = self.parent.winfo_rooty() + (self.parent.winfo_height() - 640) // 2
+        self.history_window.geometry(f"960x640+{max(0, px)}+{max(0, py)}")
 
         self._setup_history_ui()
         self._refresh_history_list()
 
     def _setup_history_ui(self):
-        main_frame = tk.Frame(self.history_window, bg=self.theme_provider.bg_color)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        tp = self.theme_provider
+        ACCENT = "#C39BD3" if tp.dark_mode else "#9b59b6"
+        PANEL = tp.listbox_bg
 
-        header_frame = tk.Frame(main_frame, bg=self.theme_provider.bg_color)
-        header_frame.pack(fill=tk.X, pady=(0, 20))
-
-        title_label = tk.Label(
-            header_frame,
-            text="Watch History",
-            font=self.theme_provider.header_font,
-            bg=self.theme_provider.bg_color,
-            fg=self.theme_provider.text_color
-        )
-        title_label.pack(side=tk.LEFT)
-
-        self.stats_label = tk.Label(
-            header_frame,
-            text="",
-            font=self.theme_provider.small_font,
-            bg=self.theme_provider.bg_color,
-            fg="#666666"
-        )
+        # ── Header band ───────────────────────────────────────────────────────
+        band = tk.Frame(self.history_window, bg=ACCENT)
+        band.pack(fill=tk.X)
+        hrow = tk.Frame(band, bg=ACCENT)
+        hrow.pack(fill=tk.X, padx=20, pady=14)
+        tk.Label(hrow, text="🕐  Watch History",
+                 font=tp.header_font, bg=ACCENT, fg="white").pack(side=tk.LEFT)
+        self.stats_label = tk.Label(hrow, text="",
+                                    font=tp.small_font, bg=ACCENT, fg="white")
         self.stats_label.pack(side=tk.RIGHT)
 
-        filter_frame = tk.Frame(main_frame, bg=self.theme_provider.bg_color)
-        filter_frame.pack(fill=tk.X, pady=(0, 15))
+        # ── Filter pill bar ───────────────────────────────────────────────────
+        filter_row = tk.Frame(self.history_window, bg=tp.bg_color)
+        filter_row.pack(fill=tk.X, padx=20, pady=(14, 0))
 
-        filter_label = tk.Label(
-            filter_frame,
-            text="Filter:",
-            font=self.theme_provider.normal_font,
-            bg=self.theme_provider.bg_color,
-            fg=self.theme_provider.text_color
-        )
-        filter_label.pack(side=tk.LEFT, padx=(0, 10))
+        tk.Label(filter_row, text="Show:", font=tp.small_font,
+                 bg=tp.bg_color, fg=tp.muted_fg).pack(side=tk.LEFT, padx=(0, 10))
 
         self.filter_var = tk.StringVar(value="all")
+        self._filter_pills = []
 
-        filter_options = [
-            ("All History", "all"),
-            ("Today", "today"),
-            ("Last 7 days", "week"),
-            ("Last 30 days", "month")
-        ]
+        for label_text, val in [("All time", "all"), ("Today", "today"),
+                                ("7 days", "week"), ("30 days", "month")]:
+            pill = tk.Label(filter_row, text=f"  {label_text}  ",
+                            font=tp.small_font, bg=tp.badge_bg, fg=tp.badge_fg,
+                            padx=4, pady=4, cursor="hand2", relief=tk.FLAT)
 
-        for text, value in filter_options:
-            radio = ttk.Radiobutton(
-                filter_frame,
-                text=text,
-                variable=self.filter_var,
-                value=value,
-                command=self._apply_filter,
-                style="TRadiobutton"
-            )
-            radio.pack(side=tk.LEFT, padx=(0, 15))
+            def _click(v=val):
+                self.filter_var.set(v)
+                for p, pv in self._filter_pills:
+                    p.config(bg=ACCENT if pv == v else tp.badge_bg,
+                             fg="white" if pv == v else tp.badge_fg)
+                self._apply_filter()
+                self._update_stats_label()
 
-        list_frame = tk.Frame(
-            main_frame,
-            bg=self.theme_provider.bg_color,
-            highlightbackground=self.theme_provider.frame_border,
-            highlightthickness=1
-        )
-        list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+            def _enter(e, w=pill, v=val):
+                if self.filter_var.get() != v:
+                    w.config(bg=ACCENT, fg="white")
 
-        columns = ('video', 'directory', 'watched_at', 'duration', 'completion')
+            def _leave(e, w=pill, v=val):
+                if self.filter_var.get() != v:
+                    w.config(bg=tp.badge_bg, fg=tp.badge_fg)
 
+            pill.bind("<Button-1>", lambda e, fn=_click: fn())
+            pill.bind("<Enter>", _enter)
+            pill.bind("<Leave>", _leave)
+            pill.pack(side=tk.LEFT, padx=(0, 4))
+            self._filter_pills.append((pill, val))
+
+        # activate default pill after window is ready
+        self.history_window.after(50, lambda: [
+            p.config(bg=ACCENT if pv == "all" else tp.badge_bg,
+                     fg="white" if pv == "all" else tp.badge_fg)
+            for p, pv in self._filter_pills
+        ])
+
+        # ── Card ──────────────────────────────────────────────────────────────
+        body = tk.Frame(self.history_window, bg=tp.bg_color)
+        body.pack(fill=tk.BOTH, expand=True, padx=20, pady=12)
+
+        card = tk.Frame(body, bg=PANEL,
+                        highlightbackground=tp.frame_border, highlightthickness=1)
+        card.pack(fill=tk.BOTH, expand=True)
+
+        # Treeview style
         style = ttk.Style()
-        style.configure("Custom.Treeview",
-                        background=self.theme_provider.bg_color,
-                        fieldbackground=self.theme_provider.bg_color,
-                        foreground=self.theme_provider.text_color)
+        style.configure("Hist.Treeview",
+                        background=PANEL, fieldbackground=PANEL,
+                        foreground=tp.listbox_fg, rowheight=28,
+                        borderwidth=0, relief="flat")
+        style.configure("Hist.Treeview.Heading",
+                        background=tp.badge_bg, foreground=tp.text_color,
+                        font=(tp.small_font.actual()["family"], 9, "bold"),
+                        relief="flat", borderwidth=0, padding=(6, 6))
+        style.map("Hist.Treeview",
+                  background=[("selected", tp.listbox_select_bg)],
+                  foreground=[("selected", "white")])
+        style.map("Hist.Treeview.Heading",
+                  background=[("active", ACCENT)],
+                  foreground=[("active", "white")])
 
-        self.history_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=15, style="Custom.Treeview")
+        columns = ("video", "directory", "watched_at", "duration", "completion")
+        self.history_tree = ttk.Treeview(card, columns=columns,
+                                         show="headings", style="Hist.Treeview")
 
-        self.history_tree.heading('video', text='Video Name')
-        self.history_tree.heading('directory', text='Directory')
-        self.history_tree.heading('watched_at', text='Watched At')
-        self.history_tree.heading('duration', text='Duration')
-        self.history_tree.heading('completion', text='Completion')
+        for col, heading, width, anchor in [
+            ("video", "Video", 260, "w"),
+            ("directory", "Directory", 190, "w"),
+            ("watched_at", "Watched At", 160, "w"),
+            ("duration", "Duration", 90, "center"),
+            ("completion", "Completion", 90, "center"),
+        ]:
+            self.history_tree.heading(col, text=heading, anchor=anchor)
+            self.history_tree.column(col, width=width, minwidth=70, anchor=anchor)
 
-        self.history_tree.column('video', width=200, minwidth=150)
-        self.history_tree.column('directory', width=200, minwidth=150)
-        self.history_tree.column('watched_at', width=150, minwidth=120)
-        self.history_tree.column('duration', width=100, minwidth=80)
-        self.history_tree.column('completion', width=100, minwidth=80)
+        vsb = ttk.Scrollbar(card, orient=tk.VERTICAL, command=self.history_tree.yview)
+        hsb = ttk.Scrollbar(card, orient=tk.HORIZONTAL, command=self.history_tree.xview)
+        self.history_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
-        v_scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.history_tree.yview)
-        h_scrollbar = ttk.Scrollbar(list_frame, orient=tk.HORIZONTAL, command=self.history_tree.xview)
+        self.history_tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        card.grid_rowconfigure(0, weight=1)
+        card.grid_columnconfigure(0, weight=1)
 
-        self.history_tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+        self.history_tree.bind("<Double-Button-1>", self._on_history_double_click)
+        self.history_tree.bind("<Button-3>", self._on_history_right_click)
+        self.history_tree.bind("<Button-1>", self._on_history_left_click)
 
-        self.history_tree.grid(row=0, column=0, sticky='nsew')
-        v_scrollbar.grid(row=0, column=1, sticky='ns')
-        h_scrollbar.grid(row=1, column=0, sticky='ew')
+        # ── Action bar ────────────────────────────────────────────────────────
+        # LEFT:  Clear All History (warning)
+        # RIGHT: ↺ Refresh (secondary)  ·  Close (secondary)
+        action = tk.Frame(self.history_window, bg=tp.bg_color)
+        action.pack(fill=tk.X, padx=20, pady=14)
 
-        self.history_tree.bind('<Double-Button-1>', self._on_history_double_click)
-        self.history_tree.bind('<Button-3>', self._on_history_right_click)
-        self.history_tree.bind('<Button-1>', self._on_history_left_click)
+        left = tk.Frame(action, bg=tp.bg_color)
+        left.pack(side=tk.LEFT)
+        right = tk.Frame(action, bg=tp.bg_color)
+        right.pack(side=tk.RIGHT)
 
-        list_frame.grid_rowconfigure(0, weight=1)
-        list_frame.grid_columnconfigure(0, weight=1)
+        tp.create_button(left, "Clear All History", self._clear_all_history,
+                         "warning", "md").pack(side=tk.LEFT)
 
-        button_frame = tk.Frame(main_frame, bg=self.theme_provider.bg_color)
-        button_frame.pack(fill=tk.X)
+        tp.create_button(right, "↺  Refresh", self._refresh_history_list,
+                         "secondary", "md").pack(side=tk.LEFT, padx=(0, 8))
+        tp.create_button(right, "Close", self.history_window.destroy,
+                         "secondary", "md").pack(side=tk.LEFT)
 
-        left_buttons = tk.Frame(button_frame, bg=self.theme_provider.bg_color)
-        left_buttons.pack(side=tk.LEFT)
-
-        # self.remove_selected_btn = self.theme_provider.create_button(
-        #     left_buttons, "Remove Selected", self._remove_selected, "danger", "md"
-        # )
-        # self.remove_selected_btn.pack(side=tk.LEFT, padx=(0, 5))
-        # self.play_selected_btn = self.theme_provider.create_button(
-        #     left_buttons, "Play Selected", self._play_selected_video, "success", "md"
-        # )
-        # self.play_selected_btn.pack(side=tk.LEFT, padx=(0, 5))
-
-        self.clear_all_btn = self.theme_provider.create_button(
-            left_buttons, "Clear All History", self._clear_all_history, "warning", "md"
-        )
-        self.clear_all_btn.pack(side=tk.LEFT)
-
-        right_buttons = tk.Frame(button_frame, bg=self.theme_provider.bg_color)
-        right_buttons.pack(side=tk.RIGHT)
-
-
-        self.close_btn = self.theme_provider.create_button(
-            right_buttons, "Close", self.history_window.destroy, "secondary", "md"
-        )
-        self.close_btn.pack(side=tk.RIGHT, padx=(5, 0))
-
-        self.refresh_btn = self.theme_provider.create_button(
-            right_buttons, "Refresh", self._refresh_history_list, "secondary", "md"
-        )
-        self.refresh_btn.pack(side=tk.RIGHT)
+    def _update_stats_label(self):
+        total = len(self.history_service.get_all_history())
+        unique = self.history_service.get_unique_videos_count()
+        shown = len(self.current_entries) if hasattr(self, "current_entries") else total
+        text = f"{total} entries  •  {unique} unique"
+        if shown != total:
+            text += f"  •  showing {shown}"
+        self.stats_label.config(text=text)
 
     def _refresh_history_list(self):
-        """Refresh the history list display"""
-
         def refresh():
-            # Clear existing items
             for item in self.history_tree.get_children():
                 self.history_tree.delete(item)
 
-            # Apply current filter
             self._apply_filter()
 
-            # Update stats
-            total_entries = len(self.history_service.get_all_history())
-            unique_videos = self.history_service.get_unique_videos_count()
-            filtered_count = len(self.current_entries)
+            for i, entry in enumerate(self.current_entries):
+                pct = f"{entry.completion_percentage:.0f}%" \
+                    if entry.completion_percentage > 0 else "—"
+                self.history_tree.insert("", tk.END, values=(
+                    entry.video_name,
+                    os.path.basename(entry.directory_path),
+                    entry.get_watch_date_formatted(),
+                    entry.get_duration_formatted(),
+                    pct,
+                ), tags=(entry.id,))
 
-            stats_text = f"Total: {total_entries} entries | Unique videos: {unique_videos}"
-            if filtered_count != total_entries:
-                stats_text += f" | Showing: {filtered_count}"
-
-            self.stats_label.config(text=stats_text)
+            self._update_stats_label()
 
         if threading.current_thread() is threading.main_thread():
             refresh()

@@ -332,6 +332,7 @@ class QueueUI:
         self.drag_data = None
         self.video_preview_manager = None
         self.grid_view_manager = None
+        self.theme_provider.register_manager_ui(self)
 
     def show_queue_manager(self):
         if self.queue_window and self.queue_window.winfo_exists():
@@ -341,62 +342,65 @@ class QueueUI:
 
         self.queue_window = tk.Toplevel(self.parent)
         self.queue_window.title("Playback Queue")
-        self.queue_window.geometry("800x600")
+        self.queue_window.geometry("820x620")
+        self.queue_window.minsize(640, 480)
         self.queue_window.configure(bg=self.theme_provider.bg_color)
+
+        self.queue_window.update_idletasks()
+        px = self.parent.winfo_rootx() + (self.parent.winfo_width() - 820) // 2
+        py = self.parent.winfo_rooty() + (self.parent.winfo_height() - 620) // 2
+        self.queue_window.geometry(f"820x620+{max(0, px)}+{max(0, py)}")
 
         self._setup_queue_ui()
         self._refresh_queue()
 
     def _setup_queue_ui(self):
-        main_frame = tk.Frame(self.queue_window, bg=self.theme_provider.bg_color)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        tp = self.theme_provider
+        ACCENT = "#2ecc71"
+        PANEL = tp.listbox_bg
 
-        header_frame = tk.Frame(main_frame, bg=self.theme_provider.bg_color)
-        header_frame.pack(fill=tk.X, pady=(0, 20))
-
-        title_label = tk.Label(
-            header_frame,
-            text="🎬 Playback Queue",
-            font=self.theme_provider.header_font,
-            bg=self.theme_provider.bg_color,
-            fg=self.theme_provider.text_color
-        )
-        title_label.pack(side=tk.LEFT)
-
-        self.queue_info_label = tk.Label(
-            header_frame,
-            text="",
-            font=self.theme_provider.small_font,
-            bg=self.theme_provider.bg_color,
-            fg="#666666"
-        )
+        # ── Header band ───────────────────────────────────────────────────────
+        band = tk.Frame(self.queue_window, bg=ACCENT)
+        band.pack(fill=tk.X)
+        hrow = tk.Frame(band, bg=ACCENT)
+        hrow.pack(fill=tk.X, padx=20, pady=14)
+        tk.Label(hrow, text="⬛  Playback Queue",
+                 font=tp.header_font, bg=ACCENT, fg="white").pack(side=tk.LEFT)
+        self.queue_info_label = tk.Label(hrow, text="",
+                                         font=tp.small_font, bg=ACCENT, fg="white")
         self.queue_info_label.pack(side=tk.RIGHT)
 
-        list_frame = tk.Frame(
-            main_frame,
-            bg=self.theme_provider.bg_color,
-            highlightbackground=self.theme_provider.frame_border,
-            highlightthickness=1
-        )
-        list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+        # ── Card ──────────────────────────────────────────────────────────────
+        body = tk.Frame(self.queue_window, bg=tp.bg_color)
+        body.pack(fill=tk.BOTH, expand=True, padx=20, pady=12)
 
-        scrollbar = tk.Scrollbar(list_frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        card = tk.Frame(body, bg=PANEL,
+                        highlightbackground=tp.frame_border, highlightthickness=1)
+        card.pack(fill=tk.BOTH, expand=True)
+
+        col_hdr = tk.Frame(card, bg=tp.badge_bg)
+        col_hdr.pack(fill=tk.X)
+        tk.Label(col_hdr, text="  #    VIDEO", font=tp.small_font,
+                 bg=tp.badge_bg, fg=tp.muted_fg, pady=6, anchor="w"
+                 ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
+        tk.Label(col_hdr, text="▶ = now playing   ✓ = played  ",
+                 font=tp.small_font, bg=tp.badge_bg, fg=tp.muted_fg, pady=6
+                 ).pack(side=tk.RIGHT)
+        tk.Frame(card, bg=tp.frame_border, height=1).pack(fill=tk.X)
+
+        lb_row = tk.Frame(card, bg=PANEL)
+        lb_row.pack(fill=tk.BOTH, expand=True)
+
+        sb = tk.Scrollbar(lb_row, width=10, relief=tk.FLAT, bd=0)
+        sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
 
         self.queue_listbox = tk.Listbox(
-            list_frame,
-            selectmode=tk.MULTIPLE,
-            yscrollcommand=scrollbar.set,
-            font=self.theme_provider.normal_font,
-            bg=self.theme_provider.listbox_bg,
-            fg=self.theme_provider.listbox_fg,
-            selectbackground=self.theme_provider.accent_color,
-            selectforeground="white",
-            relief=tk.FLAT,
-            bd=0
-        )
-        self.queue_listbox.pack(fill=tk.BOTH, expand=True)
-        scrollbar.config(command=self.queue_listbox.yview)
+            lb_row, selectmode=tk.MULTIPLE, yscrollcommand=sb.set,
+            font=tp.normal_font, bg=PANEL, fg=tp.listbox_fg,
+            selectbackground=ACCENT, selectforeground="white",
+            activestyle="none", relief=tk.FLAT, bd=0, highlightthickness=0)
+        self.queue_listbox.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        sb.config(command=self.queue_listbox.yview)
 
         self.queue_listbox.bind("<Double-Button-1>", self._on_double_click)
         self.queue_listbox.bind("<Button-1>", self._on_drag_start)
@@ -404,81 +408,61 @@ class QueueUI:
         self.queue_listbox.bind("<B1-Motion>", self._on_drag_motion)
         self.queue_listbox.bind("<ButtonRelease-1>", self._on_drag_release)
 
-        button_frame = tk.Frame(main_frame, bg=self.theme_provider.bg_color)
-        button_frame.pack(fill=tk.X)
+        # ── Action bar ────────────────────────────────────────────────────────
+        # LEFT:  ↑ Move Up  ·  ↓ Move Down  ·  ✓ Clear Played  ·  Clear All
+        # RIGHT: ▶ Play Queue  ·  Close
+        action = tk.Frame(self.queue_window, bg=tp.bg_color)
+        action.pack(fill=tk.X, padx=20, pady=14)
 
-        left_buttons = tk.Frame(button_frame, bg=self.theme_provider.bg_color)
-        left_buttons.pack(side=tk.LEFT)
+        left = tk.Frame(action, bg=tp.bg_color)
+        left.pack(side=tk.LEFT)
+        right = tk.Frame(action, bg=tp.bg_color)
+        right.pack(side=tk.RIGHT)
 
-        self.move_up_btn = self.theme_provider.create_button(
-            left_buttons, "↑ Move Up", self._move_up, "secondary", "sm"
-        )
-        self.move_up_btn.pack(side=tk.LEFT, padx=(0, 5))
+        tp.create_button(left, "↑  Move Up", self._move_up, "secondary", "md").pack(side=tk.LEFT, padx=(0, 8))
+        tp.create_button(left, "↓  Move Down", self._move_down, "secondary", "md").pack(side=tk.LEFT, padx=(0, 8))
+        tp.create_button(left, "✓  Clear Played", self._clear_played, "secondary", "md").pack(side=tk.LEFT, padx=(0, 8))
+        tp.create_button(left, "Clear All", self._clear_queue, "warning", "md").pack(side=tk.LEFT)
 
-        self.move_down_btn = self.theme_provider.create_button(
-            left_buttons, "↓ Move Down", self._move_down, "secondary", "sm"
-        )
-        self.move_down_btn.pack(side=tk.LEFT, padx=(0, 5))
-
-        # self.remove_btn = self.theme_provider.create_button(
-        #     left_buttons, "Remove", self._remove_selected, "danger", "sm"
-        # )
-        # self.remove_btn.pack(side=tk.LEFT, padx=(0, 5))
-
-        self.clear_played_btn = self.theme_provider.create_button(
-            left_buttons, "Clear Played", self._clear_played, "warning", "sm"
-        )
-        self.clear_played_btn.pack(side=tk.LEFT)
-
-        right_buttons = tk.Frame(button_frame, bg=self.theme_provider.bg_color)
-        right_buttons.pack(side=tk.RIGHT)
-
-        self.close_btn = self.theme_provider.create_button(
-            right_buttons, "Close", self.queue_window.destroy, "secondary", "md"
-        )
-        self.close_btn.pack(side=tk.RIGHT, padx=(5, 0))
-
-        self.clear_btn = self.theme_provider.create_button(
-            right_buttons, "Clear All", self._clear_queue, "warning", "md"
-        )
-        self.clear_btn.pack(side=tk.RIGHT, padx=(5, 0))
-
-        self.play_btn = self.theme_provider.create_button(
-            right_buttons, "▶ Play Queue", self._play_queue, "success", "md"
-        )
-        self.play_btn.pack(side=tk.RIGHT)
-
+        tp.create_button(right, "▶  Play Queue", self._play_queue, "success", "md").pack(side=tk.LEFT, padx=(0, 8))
+        tp.create_button(right, "Close", self.queue_window.destroy, "secondary", "md").pack(side=tk.LEFT)
 
     def _refresh_queue(self):
         def refresh():
-            self.queue_listbox.delete(0, tk.END)
+            tp = self.theme_provider
+            ACCENT = "#2ecc71"
 
+            self.queue_listbox.delete(0, tk.END)
             queue = self.queue_service.get_queue()
             current_index = self.queue_service.get_current_index()
 
             if not queue:
-                self.queue_listbox.insert(tk.END, "Queue is empty")
-                self.queue_info_label.config(text="No videos in queue")
+                self.queue_listbox.configure(fg=tp.muted_fg)
+                self.queue_listbox.insert(tk.END, "")
+                self.queue_listbox.insert(tk.END, "   Queue is empty.")
+                self.queue_listbox.insert(tk.END, "   Right-click a video to add it to the queue.")
+                self.queue_info_label.config(text="0 videos")
                 return
 
+            self.queue_listbox.configure(fg=tp.listbox_fg)
             video_mapping = {}
             for i, entry in enumerate(queue):
-                prefix = "▶ " if i == current_index else "  "
-                status = " ✓" if entry.played else ""
-                display = f"{prefix}{entry.video_name}{status}"
+                if i == current_index:
+                    marker, row_fg = "▶", ACCENT
+                elif entry.played:
+                    marker, row_fg = "✓", tp.muted_fg
+                else:
+                    marker, row_fg = "  ", tp.listbox_fg
 
-                self.queue_listbox.insert(tk.END, display)
+                self.queue_listbox.insert(tk.END, f"   {marker}  {i + 1}.   {entry.video_name}")
+                self.queue_listbox.itemconfig(i, fg=row_fg)
                 video_mapping[i] = entry.video_path
 
-                if i == current_index:
-                    self.queue_listbox.itemconfig(i, fg=self.theme_provider.accent_color)
-
-            unplayed = len([e for e in queue if not e.played])
+            unplayed = sum(1 for e in queue if not e.played)
             self.queue_info_label.config(
-                text=f"{len(queue)} videos • {unplayed} unplayed • Playing #{current_index + 1}"
-            )
+                text=f"{len(queue)} videos  •  {unplayed} unplayed  •  #{current_index + 1} playing")
 
-            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+            if hasattr(self, "video_preview_manager") and self.video_preview_manager:
                 self.video_preview_manager.attach_to_listbox(self.queue_listbox, video_mapping)
 
         if threading.current_thread() is threading.main_thread():

@@ -169,6 +169,7 @@ class PlaylistUI:
         self.video_mapping = {}
 
         self.dragging_index = None
+        self.theme_provider.register_manager_ui(self)
 
     def show_playlist_manager(self):
         if self.playlist_window and self.playlist_window.winfo_exists():
@@ -176,165 +177,158 @@ class PlaylistUI:
             return
 
         self.playlist_window = tk.Toplevel(self.parent)
-        self.playlist_window.title("Playlist Manager")
-        self.playlist_window.geometry("1000x600")
+        self.playlist_window.title("Playlists")
+        self.playlist_window.geometry("1020x640")
+        self.playlist_window.minsize(760, 500)
         self.playlist_window.configure(bg=self.theme_provider.bg_color)
+
+        self.playlist_window.update_idletasks()
+        px = self.parent.winfo_rootx() + (self.parent.winfo_width() - 1020) // 2
+        py = self.parent.winfo_rooty() + (self.parent.winfo_height() - 640) // 2
+        self.playlist_window.geometry(f"1020x640+{max(0, px)}+{max(0, py)}")
 
         self._setup_playlist_manager_ui()
         self._refresh_playlist_list()
 
     def _setup_playlist_manager_ui(self):
-        main_frame = tk.Frame(self.playlist_window, bg=self.theme_provider.bg_color)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        tp = self.theme_provider
+        ACCENT = "#4A9EFF" if tp.dark_mode else "#2d89ef"
+        PANEL = tp.listbox_bg
+        SIDE_BG = tp.badge_bg
 
-        header_frame = tk.Frame(main_frame, bg=self.theme_provider.bg_color)
-        header_frame.pack(fill=tk.X, pady=(0, 20))
+        # ── Header band ───────────────────────────────────────────────────────
+        band = tk.Frame(self.playlist_window, bg=ACCENT)
+        band.pack(fill=tk.X)
+        hrow = tk.Frame(band, bg=ACCENT)
+        hrow.pack(fill=tk.X, padx=20, pady=14)
+        tk.Label(hrow, text="🎵  Playlist Manager",
+                 font=tp.header_font, bg=ACCENT, fg="white").pack(side=tk.LEFT)
 
-        title_label = tk.Label(
-            header_frame,
-            text="Playlist Manager",
-            font=self.theme_provider.header_font,
-            bg=self.theme_provider.bg_color,
-            fg=self.theme_provider.text_color
-        )
-        title_label.pack(side=tk.LEFT)
+        # ── Two-column body ───────────────────────────────────────────────────
+        cols = tk.Frame(self.playlist_window, bg=tp.bg_color)
+        cols.pack(fill=tk.BOTH, expand=True, padx=20, pady=14)
 
-        content_frame = tk.Frame(main_frame, bg=self.theme_provider.bg_color)
-        content_frame.pack(fill=tk.BOTH, expand=True)
+        # ── LEFT sidebar card ─────────────────────────────────────────────────
+        left_card = tk.Frame(cols, bg=SIDE_BG, width=310,
+                             highlightbackground=tp.frame_border, highlightthickness=1)
+        left_card.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 10))
+        left_card.pack_propagate(False)
 
-        left_panel = tk.Frame(content_frame, bg=self.theme_provider.bg_color)
-        left_panel.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 10))
-        left_panel.pack_configure(expand=False)
-        left_panel.configure(width=400)
-        left_panel.pack_propagate(False)
+        tk.Label(left_card, text="  PLAYLISTS", font=tp.small_font,
+                 bg=SIDE_BG, fg=tp.muted_fg, pady=8, anchor="w"
+                 ).pack(fill=tk.X, padx=(4, 0))
+        tk.Frame(left_card, bg=tp.frame_border, height=1).pack(fill=tk.X)
 
-        playlist_label = tk.Label(
-            left_panel,
-            text="Playlists",
-            font=self.theme_provider.normal_font,
-            bg=self.theme_provider.bg_color,
-            fg=self.theme_provider.text_color
-        )
-        playlist_label.pack(anchor='w', pady=(0, 10))
+        pl_body = tk.Frame(left_card, bg=PANEL)
+        pl_body.pack(fill=tk.BOTH, expand=True)
 
-        playlist_container = tk.Frame(
-            left_panel,
-            bg=self.theme_provider.bg_color,
-            highlightbackground=self.theme_provider.frame_border,
-            highlightthickness=1
-        )
-        playlist_container.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-
-        playlist_scrollbar = tk.Scrollbar(playlist_container)
-        playlist_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        pl_sb = tk.Scrollbar(pl_body, width=10, relief=tk.FLAT, bd=0)
+        pl_sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
 
         self.playlist_listbox = tk.Listbox(
-            playlist_container,
-            yscrollcommand=playlist_scrollbar.set,
-            font=self.theme_provider.normal_font,
-            bg=self.theme_provider.listbox_bg,
-            fg=self.theme_provider.listbox_fg,
-            selectbackground=self.theme_provider.accent_color,
-            selectforeground="white",
-            relief=tk.FLAT,
-            bd=0
-        )
-        self.playlist_listbox.pack(fill=tk.BOTH, expand=True)
-        self.playlist_listbox.bind('<<ListboxSelect>>', self._on_playlist_select)
-        playlist_scrollbar.config(command=self.playlist_listbox.yview)
+            pl_body, yscrollcommand=pl_sb.set, font=tp.normal_font,
+            bg=PANEL, fg=tp.listbox_fg, selectbackground=ACCENT,
+            selectforeground="white", activestyle="none",
+            relief=tk.FLAT, bd=0, highlightthickness=0)
+        self.playlist_listbox.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        self.playlist_listbox.bind("<<ListboxSelect>>", self._on_playlist_select)
+        pl_sb.config(command=self.playlist_listbox.yview)
 
-        playlist_btn_frame = tk.Frame(left_panel, bg=self.theme_provider.bg_color)
-        playlist_btn_frame.pack(fill=tk.X)
+        # Sidebar action strip
+        # LEFT: Delete (danger)   RIGHT: + New (primary)  ·  ▶ Play (success)
+        tk.Frame(left_card, bg=tp.frame_border, height=1).pack(fill=tk.X)
+        pl_act = tk.Frame(left_card, bg=SIDE_BG)
+        pl_act.pack(fill=tk.X, padx=8, pady=8)
 
-        self.new_playlist_btn = self.theme_provider.create_button(
-            playlist_btn_frame, "New Playlist", self._create_new_playlist, "primary", "sm"
-        )
-        self.new_playlist_btn.pack(side=tk.LEFT, padx=(0, 5))
+        pl_left = tk.Frame(pl_act, bg=SIDE_BG)
+        pl_left.pack(side=tk.LEFT)
+        pl_right = tk.Frame(pl_act, bg=SIDE_BG)
+        pl_right.pack(side=tk.RIGHT)
 
-        self.delete_playlist_btn = self.theme_provider.create_button(
-            playlist_btn_frame, "Delete", self._delete_playlist, "danger", "sm"
-        )
-        self.delete_playlist_btn.pack(side=tk.LEFT, padx=(0, 5))
+        self.delete_playlist_btn = tp.create_button(
+            pl_left, "Delete", self._delete_playlist, "danger", "md")
+        self.delete_playlist_btn.pack(side=tk.LEFT)
 
-        self.play_playlist_btn = self.theme_provider.create_button(
-            playlist_btn_frame, "Play Playlist", self._play_playlist, "success", "sm"
-        )
-        self.play_playlist_btn.pack(side=tk.RIGHT)
+        self.new_playlist_btn = tp.create_button(
+            pl_right, "+ New", self._create_new_playlist, "primary", "md")
+        self.new_playlist_btn.pack(side=tk.LEFT, padx=(0, 8))
 
-        right_panel = tk.Frame(content_frame, bg=self.theme_provider.bg_color)
-        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(10, 0))
+        self.play_playlist_btn = tp.create_button(
+            pl_right, "▶  Play", self._play_playlist, "success", "md")
+        self.play_playlist_btn.pack(side=tk.LEFT)
 
-        info_frame = tk.Frame(right_panel, bg=self.theme_provider.bg_color)
-        info_frame.pack(fill=tk.X, pady=(0, 10))
+        # ── RIGHT content card ────────────────────────────────────────────────
+        right_area = tk.Frame(cols, bg=tp.bg_color)
+        right_area.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        # info row above card: playlist name left, Edit Info right
+        info_row = tk.Frame(right_area, bg=tp.bg_color)
+        info_row.pack(fill=tk.X, pady=(0, 8))
 
         self.playlist_info_label = tk.Label(
-            info_frame,
-            text="Select a playlist to view videos",
-            font=self.theme_provider.small_font,
-            bg=self.theme_provider.bg_color,
-            fg="#666666"
-        )
-        self.playlist_info_label.pack(anchor='w')
+            info_row, text="Select a playlist →",
+            font=tp.small_font, bg=tp.bg_color, fg=tp.muted_fg)
+        self.playlist_info_label.pack(side=tk.LEFT, anchor="w")
 
-        button_row = tk.Frame(info_frame, bg=self.theme_provider.bg_color)
-        button_row.pack(side=tk.RIGHT)
+        info_btns = tk.Frame(info_row, bg=tp.bg_color)
+        info_btns.pack(side=tk.RIGHT)
 
-        self.grid_view_btn = self.theme_provider.create_button(
-            button_row, "Grid View", self._open_grid_view, "primary", "sm"
-        )
-        self.grid_view_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.grid_view_btn.pack_forget()
-
-        self.edit_info_btn = self.theme_provider.create_button(
-            button_row, "Edit Info", self._edit_playlist_info, "secondary", "sm"
-        )
-        self.edit_info_btn.pack(side=tk.LEFT)
+        self.edit_info_btn = tp.create_button(
+            info_btns, "✎  Edit Info", self._edit_playlist_info, "secondary", "md")
+        self.edit_info_btn.pack(side=tk.LEFT, padx=(0, 8))
         self.edit_info_btn.pack_forget()
 
-        video_container = tk.Frame(
-            right_panel,
-            bg=self.theme_provider.bg_color,
-            highlightbackground=self.theme_provider.frame_border,
-            highlightthickness=1
-        )
-        video_container.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        self.grid_view_btn = tp.create_button(
+            info_btns, "⊞  Grid View", self._open_grid_view, "secondary", "md")
+        self.grid_view_btn.pack(side=tk.LEFT)
+        self.grid_view_btn.pack_forget()
 
-        video_scrollbar = tk.Scrollbar(video_container)
-        video_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        # video list card
+        right_card = tk.Frame(right_area, bg=PANEL,
+                              highlightbackground=tp.frame_border, highlightthickness=1)
+        right_card.pack(fill=tk.BOTH, expand=True)
+
+        vid_hdr = tk.Frame(right_card, bg=tp.badge_bg)
+        vid_hdr.pack(fill=tk.X)
+        tk.Label(vid_hdr, text="  VIDEOS  —  drag to reorder  •  double-click to play",
+                 font=tp.small_font, bg=tp.badge_bg, fg=tp.muted_fg,
+                 pady=6, anchor="w"
+                 ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
+        tk.Frame(right_card, bg=tp.frame_border, height=1).pack(fill=tk.X)
+
+        vid_body = tk.Frame(right_card, bg=PANEL)
+        vid_body.pack(fill=tk.BOTH, expand=True)
+
+        vid_sb = tk.Scrollbar(vid_body, width=10, relief=tk.FLAT, bd=0)
+        vid_sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
 
         self.video_listbox = tk.Listbox(
-            video_container,
-            yscrollcommand=video_scrollbar.set,
-            font=self.theme_provider.normal_font,
-            bg=self.theme_provider.listbox_bg,
-            fg=self.theme_provider.listbox_fg,
-            selectbackground=self.theme_provider.accent_color,
-            selectforeground="white",
-            selectmode=tk.MULTIPLE,
-            relief=tk.FLAT,
-            bd=0
-        )
-        self.video_listbox.pack(fill=tk.BOTH, expand=True)
-        self.video_listbox.bind('<Double-Button-1>', self._on_video_double_click)
-        self._right_click_binding = self.video_listbox.bind_all('<Button-3>', self._on_video_right_click_wrapper)
-        self.video_listbox.bind('<Button-1>', self._on_mouse_down)
-        self.video_listbox.bind('<B1-Motion>', self._on_mouse_drag)
-        self.video_listbox.bind('<ButtonRelease-1>', self._on_mouse_release)
-        self.video_listbox.bind('<Motion>', self._on_mouse_motion)
-        self.video_listbox.bind('<Leave>', self._on_mouse_leave)
-        video_scrollbar.config(command=self.video_listbox.yview)
+            vid_body, yscrollcommand=vid_sb.set, font=tp.normal_font,
+            bg=PANEL, fg=tp.listbox_fg, selectbackground=ACCENT,
+            selectforeground="white", selectmode=tk.MULTIPLE,
+            activestyle="none", relief=tk.FLAT, bd=0, highlightthickness=0)
+        self.video_listbox.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        self.video_listbox.bind("<Double-Button-1>", self._on_video_double_click)
+        self._right_click_binding = self.video_listbox.bind_all(
+            "<Button-3>", self._on_video_right_click_wrapper)
+        self.video_listbox.bind("<Button-1>", self._on_mouse_down)
+        self.video_listbox.bind("<B1-Motion>", self._on_mouse_drag)
+        self.video_listbox.bind("<ButtonRelease-1>", self._on_mouse_release)
+        self.video_listbox.bind("<Motion>", self._on_mouse_motion)
+        self.video_listbox.bind("<Leave>", self._on_mouse_leave)
+        vid_sb.config(command=self.video_listbox.yview)
 
-        video_btn_frame = tk.Frame(right_panel, bg=self.theme_provider.bg_color)
-        video_btn_frame.pack(fill=tk.X)
+        # ── Bottom action bar ─────────────────────────────────────────────────
+        # LEFT:  (empty — playlist-level actions are in sidebar)
+        # RIGHT: Close
+        action = tk.Frame(self.playlist_window, bg=tp.bg_color)
+        action.pack(fill=tk.X, padx=20, pady=(0, 14))
 
-        close_btn = self.theme_provider.create_button(
-            video_btn_frame,
-            text="Close",
-            command=self.playlist_window.destroy,
-            variant="secondary",
-            size="sm"
-        )
-        close_btn.pack(side=tk.RIGHT)
+        right_btns = tk.Frame(action, bg=tp.bg_color)
+        right_btns.pack(side=tk.RIGHT)
+
+        tp.create_button(right_btns, "Close",
+                         self.playlist_window.destroy, "secondary", "md").pack(side=tk.LEFT)
 
         self.playlist_window.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -838,86 +832,59 @@ class PlaylistInfoDialog:
         self._setup_dialog(name, description)
 
     def _setup_dialog(self, name: str, description: str):
-        main_frame = tk.Frame(self.dialog, bg=self.theme_provider.bg_color, padx=20, pady=20)
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        tp = self.theme_provider
+        ACCENT = "#4A9EFF" if tp.dark_mode else "#2d89ef"
 
-        name_label = tk.Label(
-            main_frame,
-            text="Playlist Name:",
-            font=self.theme_provider.normal_font,
-            bg=self.theme_provider.bg_color,
-            fg=self.theme_provider.text_color
-        )
-        name_label.pack(anchor='w', pady=(0, 5))
+        self.dialog.geometry("420x280")
 
-        self.name_entry = tk.Entry(
-            main_frame,
-            font=self.theme_provider.normal_font,
-            bg="white",
-            fg=self.theme_provider.text_color,
-            relief=tk.FLAT,
-            bd=1,
-            highlightthickness=1,
-            highlightbackground="#e0e0e0"
-        )
-        self.name_entry.pack(fill=tk.X, pady=(0, 15))
+        # header band
+        band = tk.Frame(self.dialog, bg=ACCENT)
+        band.pack(fill=tk.X)
+        tk.Label(band, text="  Playlist Info", font=tp.header_font,
+                 bg=ACCENT, fg="white", pady=12).pack(side=tk.LEFT, padx=16)
+
+        # body
+        body = tk.Frame(self.dialog, bg=tp.bg_color, padx=20, pady=16)
+        body.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(body, text="Name", font=tp.small_font,
+                 bg=tp.bg_color, fg=tp.muted_fg).pack(anchor="w", pady=(0, 4))
+        self.name_entry = tk.Entry(body, font=tp.normal_font,
+                                   bg=tp.entry_bg, fg=tp.entry_fg,
+                                   insertbackground=tp.entry_fg,
+                                   relief=tk.FLAT, bd=0,
+                                   highlightthickness=1,
+                                   highlightbackground=tp.entry_border)
+        self.name_entry.pack(fill=tk.X, pady=(0, 12), ipady=6)
         self.name_entry.insert(0, name)
 
-        if hasattr(self.theme_provider, 'entry_bg'):
-            self.name_entry.configure(
-                bg=self.theme_provider.entry_bg,
-                fg=self.theme_provider.entry_fg,
-                insertbackground=self.theme_provider.entry_fg,
-                highlightbackground=self.theme_provider.entry_border
-            )
-
-        desc_label = tk.Label(
-            main_frame,
-            text="Description (optional):",
-            font=self.theme_provider.normal_font,
-            bg=self.theme_provider.bg_color,
-            fg=self.theme_provider.text_color
-        )
-        desc_label.pack(anchor='w', pady=(0, 5))
-
-        self.description_entry = tk.Text(
-            main_frame,
-            font=self.theme_provider.normal_font,
-            bg="white",
-            fg=self.theme_provider.text_color,
-            relief=tk.FLAT,
-            bd=1,
-            highlightthickness=1,
-            highlightbackground="#e0e0e0",
-            height=4
-        )
-        self.description_entry.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+        tk.Label(body, text="Description  (optional)", font=tp.small_font,
+                 bg=tp.bg_color, fg=tp.muted_fg).pack(anchor="w", pady=(0, 4))
+        self.description_entry = tk.Text(body, font=tp.normal_font,
+                                         bg=tp.entry_bg, fg=tp.entry_fg,
+                                         insertbackground=tp.entry_fg,
+                                         relief=tk.FLAT, bd=0,
+                                         highlightthickness=1,
+                                         highlightbackground=tp.entry_border,
+                                         height=3)
+        self.description_entry.pack(fill=tk.BOTH, expand=True, pady=(0, 14))
         self.description_entry.insert("1.0", description)
 
-        if hasattr(self.theme_provider, 'entry_bg'):
-            self.description_entry.configure(
-                bg=self.theme_provider.entry_bg,
-                fg=self.theme_provider.entry_fg,
-                insertbackground=self.theme_provider.entry_fg,
-                highlightbackground=self.theme_provider.entry_border
-            )
+        tk.Frame(body, bg=tp.divider_color, height=1).pack(fill=tk.X, pady=(0, 12))
 
-        btn_frame = tk.Frame(main_frame, bg=self.theme_provider.bg_color)
-        btn_frame.pack(fill=tk.X)
+        # LEFT: (empty)   RIGHT: Cancel  ·  Save
+        btn_row = tk.Frame(body, bg=tp.bg_color)
+        btn_row.pack(fill=tk.X)
 
-        cancel_btn = self.theme_provider.create_button(
-            btn_frame, "Cancel", self._cancel, "secondary", "md"
-        )
-        cancel_btn.pack(side=tk.RIGHT, padx=(5, 0))
+        right = tk.Frame(btn_row, bg=tp.bg_color)
+        right.pack(side=tk.RIGHT)
 
-        ok_btn = self.theme_provider.create_button(
-            btn_frame, "OK", self._ok, "primary", "md"
-        )
-        ok_btn.pack(side=tk.RIGHT)
+        tp.create_button(right, "Cancel", self._cancel, "secondary", "md").pack(side=tk.LEFT, padx=(0, 8))
+        tp.create_button(right, "Save", self._ok, "primary", "md").pack(side=tk.LEFT)
 
         self.name_entry.focus_set()
-        self.dialog.bind('<Return>', lambda e: self._ok())
-        self.dialog.bind('<Escape>', lambda e: self._cancel())
+        self.dialog.bind("<Return>", lambda e: self._ok())
+        self.dialog.bind("<Escape>", lambda e: self._cancel())
 
     def _ok(self):
         name = self.name_entry.get().strip()
@@ -994,99 +961,93 @@ class PlaylistManager:
         else:
             self._show_add_to_playlist_dialog(videos_to_add, playlists)
 
-    def _show_add_to_playlist_dialog(self, videos: List[str], playlists: List[PlaylistData]):
-        """Show dialog to select playlist or create new one"""
+    def _show_add_to_playlist_dialog(self, videos: list, playlists: list):
+        tp = self.ui.theme_provider
+        ACCENT = "#4A9EFF" if tp.dark_mode else "#2d89ef"
+        PANEL = tp.listbox_bg
+
         dialog = tk.Toplevel(self.ui.parent)
         dialog.title("Add to Playlist")
-        dialog.geometry("400x300")
-        dialog.configure(bg=self.ui.theme_provider.bg_color)
+        dialog.geometry("420x360")
+        dialog.minsize(360, 300)
+        dialog.configure(bg=tp.bg_color)
         dialog.transient(self.ui.parent)
         dialog.grab_set()
 
-        # Center dialog
-        dialog.geometry("+%d+%d" % (
-            self.ui.parent.winfo_rootx() + 50,
-            self.ui.parent.winfo_rooty() + 50
-        ))
+        dialog.update_idletasks()
+        px = self.ui.parent.winfo_rootx() + (self.ui.parent.winfo_width() - 420) // 2
+        py = self.ui.parent.winfo_rooty() + (self.ui.parent.winfo_height() - 360) // 2
+        dialog.geometry(f"420x360+{max(0, px)}+{max(0, py)}")
 
-        main_frame = tk.Frame(dialog, bg=self.ui.theme_provider.bg_color, padx=20, pady=20)
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        # header band
+        band = tk.Frame(dialog, bg=ACCENT)
+        band.pack(fill=tk.X)
+        tk.Label(band,
+                 text=f"  Add {len(videos)} video{'s' if len(videos) != 1 else ''} to…",
+                 font=tp.header_font, bg=ACCENT, fg="white",
+                 pady=12).pack(side=tk.LEFT, padx=16)
 
-        title_label = tk.Label(
-            main_frame,
-            text=f"Add {len(videos)} videos to playlist:",
-            font=self.ui.theme_provider.normal_font,
-            bg=self.ui.theme_provider.bg_color,
-            fg=self.ui.theme_provider.text_color
-        )
-        title_label.pack(anchor='w', pady=(0, 10))
+        # body
+        body = tk.Frame(dialog, bg=tp.bg_color, padx=20, pady=14)
+        body.pack(fill=tk.BOTH, expand=True)
 
-        # Playlist selection
-        listbox_frame = tk.Frame(
-            main_frame,
-            bg=self.ui.theme_provider.bg_color,
-            highlightbackground=self.ui.theme_provider.frame_border,
-            highlightthickness=1
-        )
-        listbox_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+        tk.Label(body, text="Select a playlist:", font=tp.small_font,
+                 bg=tp.bg_color, fg=tp.muted_fg).pack(anchor="w", pady=(0, 8))
 
-        scrollbar = tk.Scrollbar(listbox_frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        # list card
+        card = tk.Frame(body, bg=PANEL,
+                        highlightbackground=tp.frame_border, highlightthickness=1)
+        card.pack(fill=tk.BOTH, expand=True, pady=(0, 14))
+
+        sb = tk.Scrollbar(card, width=10, relief=tk.FLAT, bd=0)
+        sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
 
         playlist_listbox = tk.Listbox(
-            listbox_frame,
-            yscrollcommand=scrollbar.set,
-            font=self.ui.theme_provider.normal_font,
-            bg=self.ui.theme_provider.listbox_bg,
-            fg=self.ui.theme_provider.listbox_fg,
-            selectbackground=self.ui.theme_provider.accent_color,
-            relief=tk.FLAT,
-            bd=0
-        )
-        playlist_listbox.pack(fill=tk.BOTH, expand=True)
-        scrollbar.config(command=playlist_listbox.yview)
+            card, yscrollcommand=sb.set, font=tp.normal_font,
+            bg=PANEL, fg=tp.listbox_fg, selectbackground=ACCENT,
+            selectforeground="white", activestyle="none",
+            relief=tk.FLAT, bd=0, highlightthickness=0)
+        playlist_listbox.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        sb.config(command=playlist_listbox.yview)
 
-        for playlist in playlists:
-            playlist_listbox.insert(tk.END, f"{playlist.name} ({len(playlist.videos)} videos)")
+        for pl in playlists:
+            playlist_listbox.insert(tk.END, f"   {pl.name}  ({len(pl.videos)} videos)")
 
-        # Buttons
-        btn_frame = tk.Frame(main_frame, bg=self.ui.theme_provider.bg_color)
-        btn_frame.pack(fill=tk.X)
+        tk.Frame(body, bg=tp.divider_color, height=1).pack(fill=tk.X, pady=(0, 10))
+
+        # LEFT: + New Playlist (primary)
+        # RIGHT: Add to Selected (success)  ·  Cancel (secondary)
+        btn_row = tk.Frame(body, bg=tp.bg_color)
+        btn_row.pack(fill=tk.X)
+
+        left = tk.Frame(btn_row, bg=tp.bg_color)
+        left.pack(side=tk.LEFT)
+        right = tk.Frame(btn_row, bg=tp.bg_color)
+        right.pack(side=tk.RIGHT)
 
         def create_new():
             dialog.destroy()
-            info_dialog = PlaylistInfoDialog(self.ui.parent, self.ui.theme_provider)
+            info_dialog = PlaylistInfoDialog(self.ui.parent, tp)
             result = info_dialog.show()
-
             if result:
-                name, description = result
-                self.service.create_playlist(name, description, videos)
+                name, desc = result
+                self.service.create_playlist(name, desc, videos)
                 self._log(f"Playlist '{name}' created with {len(videos)} videos")
+
         def add_to_existing():
-            selection = playlist_listbox.curselection()
-            if not selection:
+            sel = playlist_listbox.curselection()
+            if not sel:
                 messagebox.showwarning("Warning", "Please select a playlist", parent=dialog)
                 return
-
-            selected_playlist = playlists[selection[0]]
-            self.service.add_videos_to_playlist(selected_playlist.id, videos)
-            self._log(f"Added {len(videos)} videos to '{selected_playlist.name}'")
+            chosen = playlists[sel[0]]
+            self.service.add_videos_to_playlist(chosen.id, videos)
+            self._log(f"Added {len(videos)} videos to '{chosen.name}'")
             dialog.destroy()
 
-        new_btn = self.ui.theme_provider.create_button(
-            btn_frame, "Create New", create_new, "primary", "md"
-        )
-        new_btn.pack(side=tk.LEFT)
+        tp.create_button(left, "+ New Playlist", create_new, "primary", "md").pack(side=tk.LEFT)
 
-        cancel_btn = self.ui.theme_provider.create_button(
-            btn_frame, "Cancel", dialog.destroy, "secondary", "md"
-        )
-        cancel_btn.pack(side=tk.RIGHT, padx=(5, 0))
-
-        add_btn = self.ui.theme_provider.create_button(
-            btn_frame, "Add to Selected", add_to_existing, "success", "md"
-        )
-        add_btn.pack(side=tk.RIGHT, padx=(5, 0))
+        tp.create_button(right, "Add to Selected", add_to_existing, "success", "md").pack(side=tk.LEFT, padx=(0, 8))
+        tp.create_button(right, "Cancel", dialog.destroy, "secondary", "md").pack(side=tk.LEFT)
 
         self.ui.parent.wait_window(dialog)
 
