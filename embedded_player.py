@@ -97,7 +97,7 @@ class EmbeddedPlayer:
 
     CTRL_H       = 100           # px — height of the slide-up control bar
     INACTIVITY_S = 2.0           # seconds before auto-hiding the bar
-    SEEK_PX      = 10_000        # ms per arrow-key seek
+    SEEK_PX      = 200           # ms per arrow-key seek (matches vlc_player_controller)
     VOL_STEP     = 5             # % per scroll / key press
     SPEED_STEPS  = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
@@ -310,11 +310,17 @@ class EmbeddedPlayer:
         lg = tk.Frame(btn_row, bg=_CTRL_BG2)
         lg.pack(side=tk.LEFT, padx=(8, 0), pady=2)
 
-        _btn(lg, "⏮", self._prev,         font=F_ICO).pack(side=tk.LEFT, padx=1)
+        # ⏮ / ⏭ — single click = prev/next video; hold = rewind/fast-forward
+        btn_prev = _btn(lg, "⏮", None, font=F_ICO)
+        btn_prev.pack(side=tk.LEFT, padx=1)
         self._btn_play = _btn(lg, "⏸", self._toggle_pause, font=F_ICO)
         self._btn_play.pack(side=tk.LEFT, padx=1)
-        _btn(lg, "⏭", self._next,         font=F_ICO).pack(side=tk.LEFT, padx=1)
-        _btn(lg, "■",  self._stop,         font=F_MD).pack(side=tk.LEFT, padx=(1, 8))
+        btn_next = _btn(lg, "⏭", None, font=F_ICO)
+        btn_next.pack(side=tk.LEFT, padx=1)
+        _btn(lg, "■",  self._stop, font=F_MD).pack(side=tk.LEFT, padx=(1, 8))
+
+        self._setup_hold_button(btn_prev, on_click=self._prev, on_hold=self._rewind)
+        self._setup_hold_button(btn_next, on_click=self._next, on_hold=self._fast_forward)
 
         # thin divider
         tk.Frame(lg, width=1, bg="#333333").pack(side=tk.LEFT, fill=tk.Y, pady=3)
@@ -455,8 +461,8 @@ class EmbeddedPlayer:
     _ACTION_MAP: Dict[str, tuple] = {
         "toggle_pause":      ("_toggle_pause",      ()),
         # stop_video handled by static <Escape> bind — excluded from _rebind_keys
-        "fast_forward":      ("_seek_rel",          (10_000,)),
-        "rewind":            ("_seek_rel",          (-10_000,)),
+        "fast_forward":      ("_fast_forward",     ()),
+        "rewind":            ("_rewind",           ()),
         "next_video":        ("_next",              ()),
         "prev_video":        ("_prev",              ()),
         "next_directory":    ("_next_dir",          ()),
@@ -799,6 +805,67 @@ class EmbeddedPlayer:
             if self.video_to_dir.get(v) == prv_dir:
                 self._play_index(i)
                 return
+
+    def _setup_hold_button(self, btn: tk.Button,
+                           on_click: Callable,
+                           on_hold:  Callable,
+                           hold_delay_ms: int = 500,
+                           repeat_ms:     int = 100):
+        """
+        Wire a button so that:
+          • a short press  (<hold_delay_ms) fires on_click  (prev / next video)
+          • holding down   (≥hold_delay_ms) fires on_hold repeatedly every
+            repeat_ms ms   (rewind / fast-forward)
+
+        The distinction is made entirely on the client side using Tk after() jobs,
+        so no threading is needed.
+        """
+        state = {"hold_job": None, "fired": False}
+
+        def _start_hold():
+            state["fired"] = True
+            on_hold()
+            state["hold_job"] = btn.after(repeat_ms, _start_hold)
+
+        def _on_press(e):
+            state["fired"] = False
+            state["hold_job"] = btn.after(hold_delay_ms, _start_hold)
+
+        def _on_release(e):
+            if state["hold_job"] is not None:
+                btn.after_cancel(state["hold_job"])
+                state["hold_job"] = None
+            if not state["fired"]:
+                on_click()
+
+        btn.config(command=None)
+        btn.bind("<ButtonPress-1>",   _on_press,   add=True)
+        btn.bind("<ButtonRelease-1>", _on_release, add=True)
+
+    def _fast_forward(self):
+        """Seek +200 ms — mirrors vlc_player_controller.fast_forward."""
+        try:
+            current_time = self._player.get_time()
+            new_time = current_time + 200
+            length = self._player.get_length()
+            if 0 < length < new_time:
+                new_time = length - 20
+            self._player.set_time(new_time)
+            if self.logger:
+                self.logger(f"Fast forward to {new_time / 1000:.1f}s")
+        except Exception:
+            pass
+
+    def _rewind(self):
+        """Seek -200 ms — mirrors vlc_player_controller.rewind."""
+        try:
+            current_time = self._player.get_time()
+            new_time = max(0, current_time - 200)
+            self._player.set_time(new_time)
+            if self.logger:
+                self.logger(f"Rewind to {new_time / 1000:.1f}s")
+        except Exception:
+            pass
 
     def _seek_rel(self, delta_ms: int):
         t   = self._player.get_time() or 0
