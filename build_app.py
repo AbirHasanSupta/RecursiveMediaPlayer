@@ -1151,6 +1151,8 @@ def select_multiple_folders_and_play():
             player.on_add_to_playlist = lambda vids: self.playlist_manager.add_videos_to_playlist([], vids)
             player.on_add_to_queue = lambda vids: self.queue_manager.add_to_queue(vids, added_from="player")
             player.on_add_to_favourites = lambda vids: self.favorites_manager.add_to_favorites(vids, self.get_current_selected_directory() or os.path.dirname(vids[0]))
+            player.set_hotkeys(self.settings_manager.get_settings().hotkeys)
+
             player.play()
             self._active_player = player
 
@@ -1493,6 +1495,8 @@ def select_multiple_folders_and_play():
             player.on_add_to_favourites = lambda vids: self.favorites_manager.add_to_favorites(vids,
                                                                                                self.get_current_selected_directory() or os.path.dirname(
                                                                                                    vids[0]))
+            player.set_hotkeys(self.settings_manager.get_settings().hotkeys)
+
             player.play()
             self._active_player = player
 
@@ -2116,6 +2120,8 @@ def select_multiple_folders_and_play():
             player.on_add_to_favourites = lambda vids: self.favorites_manager.add_to_favorites(vids,
                                                                                                self.get_current_selected_directory() or os.path.dirname(
                                                                                                    vids[0]))
+            player.set_hotkeys(self.settings_manager.get_settings().hotkeys)
+
             player.play()
             self._active_player = player
 
@@ -2210,6 +2216,8 @@ def select_multiple_folders_and_play():
             player.on_add_to_favourites = lambda vids: self.favorites_manager.add_to_favorites(vids,
                                                                                                self.get_current_selected_directory() or os.path.dirname(
                                                                                                    vids[0]))
+            player.set_hotkeys(self.settings_manager.get_settings().hotkeys)
+
             player.play()
             self._active_player = player
 
@@ -3650,6 +3658,8 @@ def select_multiple_folders_and_play():
             player.on_add_to_favourites = lambda vids: self.favorites_manager.add_to_favorites(vids,
                                                                                                self.get_current_selected_directory() or os.path.dirname(
                                                                                                    vids[0]))
+            player.set_hotkeys(self.settings_manager.get_settings().hotkeys)
+
             player.play()
             self._active_player = player
 
@@ -3776,6 +3786,8 @@ def select_multiple_folders_and_play():
             player.on_add_to_favourites = lambda vids: self.favorites_manager.add_to_favorites(vids,
                                                                                                self.get_current_selected_directory() or os.path.dirname(
                                                                                                    vids[0]))
+            player.set_hotkeys(self.settings_manager.get_settings().hotkeys)
+
             player.play()
             self._active_player = player
 
@@ -3853,6 +3865,8 @@ def select_multiple_folders_and_play():
             player.on_add_to_favourites = lambda vids: self.favorites_manager.add_to_favorites(vids,
                                                                                                self.get_current_selected_directory() or os.path.dirname(
                                                                                                    vids[0]))
+            player.set_hotkeys(self.settings_manager.get_settings().hotkeys)
+
             player.play()
             self._active_player = player
 
@@ -3918,6 +3932,8 @@ def select_multiple_folders_and_play():
             player.on_add_to_favourites = lambda vids: self.favorites_manager.add_to_favorites(vids,
                                                                                                self.get_current_selected_directory() or os.path.dirname(
                                                                                                    vids[0]))
+            player.set_hotkeys(self.settings_manager.get_settings().hotkeys)
+
             player.play()
             self._active_player = player
 
@@ -4326,6 +4342,13 @@ def select_multiple_folders_and_play():
 
             if hasattr(self, 'resume_manager'):
                 self.resume_manager._auto_cleanup_days = new_settings.auto_cleanup_days
+
+            # Live-reload hotkeys in any open EmbeddedPlayer window
+            if getattr(self, '_active_player', None) is not None:
+                try:
+                    self._active_player.set_hotkeys(new_settings.hotkeys)
+                except Exception as e:
+                    self.update_console(f"Hotkey reload error: {e}")
 
             if hasattr(self, 'dual_player_manager'):
                 # Player count per window is always 3; no need to call set_player_count.

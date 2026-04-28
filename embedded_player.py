@@ -412,84 +412,245 @@ class EmbeddedPlayer:
             w.bind("<Leave>", lambda e: self._schedule_hide(), add="+")
 
     # ═══════════════════════════════════════════════════════════════════
-    # KEY BINDINGS  — all shortcuts from the original key_press.py
+    # KEY BINDINGS — hotkey-driven, live-reloadable
     # ═══════════════════════════════════════════════════════════════════
 
+    # Default hotkeys — kept in sync with DEFAULT_HOTKEYS in settings_manager.py
+    _DEFAULT_HOTKEYS: Dict[str, str] = {
+        "toggle_pause":      "space",
+        "stop_video":        "esc",
+        "fast_forward":      "right",
+        "rewind":            "left",
+        "next_video":        "d",
+        "prev_video":        "a",
+        "next_directory":    "e",
+        "prev_directory":    "q",
+        "volume_up":         "w",
+        "volume_down":       "s",
+        "toggle_mute":       "m",
+        "increase_speed":    "=",
+        "decrease_speed":    "-",
+        "reset_speed":       "0",
+        "toggle_fullscreen": "f",
+        "monitor_1":         "1",
+        "monitor_2":         "2",
+        "toggle_overlay":    "i",
+        "rotate_right":      "r",
+        "zoom_in":           "ctrl+=",
+        "zoom_out":          "ctrl+-",
+        "zoom_reset":        "ctrl+0",
+        "take_screenshot":   "t",
+        "copy_video_path":   "ctrl+c",
+        "toggle_voice":      "v",
+        "next_chapter":      "n",
+        "prev_chapter":      "b",
+        "cycle_subtitle":    "u",
+        "disable_subtitles": "ctrl+u",
+        "ab_set_a":          "[",
+        "ab_set_b":          "]",
+        "ab_clear":          "\\",
+    }
+
+    # Maps action_id -> (method_name, extra_args)
+    _ACTION_MAP: Dict[str, tuple] = {
+        "toggle_pause":      ("_toggle_pause",      ()),
+        # stop_video handled by static <Escape> bind — excluded from _rebind_keys
+        "fast_forward":      ("_seek_rel",          (10_000,)),
+        "rewind":            ("_seek_rel",          (-10_000,)),
+        "next_video":        ("_next",              ()),
+        "prev_video":        ("_prev",              ()),
+        "next_directory":    ("_next_dir",          ()),
+        "prev_directory":    ("_prev_dir",          ()),
+        "volume_up":         ("_vol_change",        (5,)),
+        "volume_down":       ("_vol_change",        (-5,)),
+        "toggle_mute":       ("_toggle_mute",       ()),
+        "increase_speed":    ("_speed_up",          ()),
+        "decrease_speed":    ("_speed_down",        ()),
+        "reset_speed":       ("_speed_reset",       ()),
+        "toggle_fullscreen": ("_toggle_borderless", ()),
+        "monitor_1":         ("_switch_monitor",    (1,)),
+        "monitor_2":         ("_switch_monitor",    (2,)),
+        "toggle_overlay":    ("_toggle_overlay",    ()),
+        "rotate_right":      ("_rotate_right",      ()),
+        "zoom_in":           ("_zoom_in",           ()),
+        "zoom_out":          ("_zoom_out",          ()),
+        "zoom_reset":        ("_zoom",              (0,)),
+        "take_screenshot":   ("_screenshot",        ()),
+        "copy_video_path":   ("_copy_video_path",   ()),
+        "toggle_voice":      ("_toggle_voice",      ()),
+        "next_chapter":      ("_next_chapter",      ()),
+        "prev_chapter":      ("_prev_chapter",      ()),
+        "cycle_subtitle":    ("_cycle_subtitle",    ()),
+        "disable_subtitles": ("_disable_subtitle",  ()),
+        "ab_set_a":          ("_set_ab_a",          ()),
+        "ab_set_b":          ("_set_ab_b",          ()),
+        "ab_clear":          ("_clear_ab",          ()),
+    }
+
+    def set_hotkeys(self, hotkeys: dict):
+        """Live-reload key bindings from a new hotkeys dict (called on settings save)."""
+        self._hotkeys = dict(hotkeys) if hotkeys else dict(self._DEFAULT_HOTKEYS)
+        self._rebind_keys()
+
     def _bind_keys(self):
+        """Initial key setup — called once from _build_ui."""
+        self._hotkeys = dict(self._DEFAULT_HOTKEYS)
+        self._registered_cbids: list = []   # [(seq, cbid), …] for safe per-cbid unbind
+
+        # Register hotkey-driven bindings
+        self._rebind_keys()
+
+        # ── Static convenience binds (not in hotkey map, always active) ──────
+        # All use add=True so they stack beside _rebind_keys bindings without
+        # overwriting them.
         w = self._win
-        # Pause / resume
-        w.bind("<space>",         lambda e: self._toggle_pause())
-        w.bind("<p>",             lambda e: self._toggle_pause())
-        w.bind("<P>",             lambda e: self._toggle_pause())
-        # Seek
-        w.bind("<Left>",          lambda e: self._seek_rel(-self.SEEK_PX))
-        w.bind("<Right>",         lambda e: self._seek_rel(+self.SEEK_PX))
-        w.bind("<Shift-Left>",    lambda e: self._seek_rel(-60_000))
-        w.bind("<Shift-Right>",   lambda e: self._seek_rel(+60_000))
-        w.bind("<Control-Left>",  lambda e: self._seek_rel(-5_000))
-        w.bind("<Control-Right>", lambda e: self._seek_rel(+5_000))
-        # Video navigation — d=next, a=prev  (matches key_press.py)
-        w.bind("<d>",             lambda e: self._next())
-        w.bind("<D>",             lambda e: self._next())
-        w.bind("<a>",             lambda e: self._prev())
-        w.bind("<A>",             lambda e: self._prev())
-        w.bind("<Prior>",         lambda e: self._next())   # Page Up
-        w.bind("<Next>",          lambda e: self._prev())   # Page Down
-        # Directory navigation — e=next dir, q=prev dir  (matches key_press.py)
-        w.bind("<e>",             lambda e: self._next_dir())
-        w.bind("<E>",             lambda e: self._next_dir())
-        w.bind("<q>",             lambda e: self._prev_dir())
-        w.bind("<Q>",             lambda e: self._prev_dir())
-        # Volume — w=up, s=down  (matches key_press.py)
-        w.bind("<Up>",            lambda e: self._vol_change(+self.VOL_STEP))
-        w.bind("<Down>",          lambda e: self._vol_change(-self.VOL_STEP))
-        w.bind("<w>",             lambda e: self._vol_change(+self.VOL_STEP))
-        w.bind("<W>",             lambda e: self._vol_change(+self.VOL_STEP))
-        w.bind("<s>",             lambda e: self._vol_change(-self.VOL_STEP))
-        w.bind("<S>",             lambda e: self._vol_change(-self.VOL_STEP))
-        w.bind("<m>",             lambda e: self._toggle_mute())
-        w.bind("<M>",             lambda e: self._toggle_mute())
-        # Screenshot — t  (matches key_press.py)
-        w.bind("<t>",             lambda e: self._screenshot())
-        w.bind("<T>",             lambda e: self._screenshot())
-        # Speed — = / -  (matches key_press.py)
-        w.bind("<equal>",         lambda e: self._speed_up())
-        w.bind("<plus>",          lambda e: self._speed_up())
-        w.bind("<minus>",         lambda e: self._speed_down())
-        w.bind("<underscore>",    lambda e: self._speed_down())
-        w.bind("<0>",             lambda e: self._speed_reset())
-        w.bind("<KP_0>",          lambda e: self._speed_reset())
-        # Fullscreen / borderless — f  (matches key_press.py)
-        w.bind("<f>",             lambda e: self._toggle_borderless())
-        w.bind("<F>",             lambda e: self._toggle_borderless())
-        w.bind("<Return>",        lambda e: self._toggle_borderless())
+        w.bind("<Shift-Left>",    lambda e: self._seek_rel(-60_000),        add=True)
+        w.bind("<Shift-Right>",   lambda e: self._seek_rel(+60_000),        add=True)
+        w.bind("<Control-Left>",  lambda e: self._seek_rel(-5_000),         add=True)
+        w.bind("<Control-Right>", lambda e: self._seek_rel(+5_000),         add=True)
+        w.bind("<Prior>",         lambda e: self._next(),                   add=True)
+        w.bind("<Next>",          lambda e: self._prev(),                   add=True)
+        w.bind("<Return>",        lambda e: self._toggle_borderless(),      add=True)
+        w.bind("<KP_0>",          lambda e: self._speed_reset(),            add=True)
+        w.bind("<plus>",          lambda e: self._speed_up(),               add=True)
+        w.bind("<underscore>",    lambda e: self._speed_down(),             add=True)
+        # Loop / zoom / rotate extras that are not in the hotkey table
+        w.bind("<o>",             lambda e: self._cycle_loop(),             add=True)
+        w.bind("<O>",             lambda e: self._cycle_loop(),             add=True)
+        w.bind("<l>",             lambda e: self._rotate_left(),            add=True)
+        w.bind("<L>",             lambda e: self._rotate_left(),            add=True)
+        w.bind("<z>",             lambda e: self._zoom(+0.1),               add=True)
+        w.bind("<Z>",             lambda e: self._zoom(-0.1),               add=True)
+        w.bind("<x>",             lambda e: self._zoom(0),                  add=True)
+        w.bind("<X>",             lambda e: self._zoom(0),                  add=True)
+        w.bind("<Up>",            lambda e: self._vol_change(+self.VOL_STEP), add=True)
+        w.bind("<Down>",          lambda e: self._vol_change(-self.VOL_STEP), add=True)
+        # Escape always calls _escape (exit borderless or close) — NOT overrideable
+        # via hotkeys so it is registered once here without add=True, taking priority.
         w.bind("<Escape>",        lambda e: self._escape())
-        # Rotate — r  (matches key_press.py)
-        w.bind("<r>",             lambda e: self._rotate_right())
-        w.bind("<R>",             lambda e: self._rotate_right())
-        w.bind("<l>",             lambda e: self._rotate_left())
-        w.bind("<L>",             lambda e: self._rotate_left())
-        # Loop
-        w.bind("<o>",             lambda e: self._cycle_loop())
-        w.bind("<O>",             lambda e: self._cycle_loop())
-        # Zoom
-        w.bind("<z>",             lambda e: self._zoom(+0.1))
-        w.bind("<Z>",             lambda e: self._zoom(-0.1))
-        w.bind("<x>",             lambda e: self._zoom(0))
-        w.bind("<X>",             lambda e: self._zoom(0))
-        # Chapter navigation — [ prev, ] next
-        w.bind("<bracketleft>",   lambda e: self._prev_chapter())
-        w.bind("<bracketright>",  lambda e: self._next_chapter())
-        # Subtitles — v toggles on/off
-        w.bind("<v>",             lambda e: self._toggle_subtitle())
-        w.bind("<V>",             lambda e: self._toggle_subtitle())
-        # A-B loop — i = set A, k = set B, j = clear
-        w.bind("<i>",             lambda e: self._set_ab_a())
-        w.bind("<I>",             lambda e: self._set_ab_a())
-        w.bind("<k>",             lambda e: self._set_ab_b())
-        w.bind("<K>",             lambda e: self._set_ab_b())
-        w.bind("<j>",             lambda e: self._clear_ab())
-        w.bind("<J>",             lambda e: self._clear_ab())
+
+    def _rebind_keys(self):
+        """Remove previously registered hotkey cbids and re-register from self._hotkeys."""
+        w = self._win
+
+        # Safely unbind only the specific callbacks we registered before
+        for seq, cbid in getattr(self, '_registered_cbids', []):
+            try:
+                w.unbind(seq, cbid)
+            except Exception:
+                pass
+        self._registered_cbids = []
+
+        hk = self._hotkeys
+
+        # Keys that must not be overridden via hotkey map (handled by static binds)
+        _EXCLUDED = {"stop_video"}
+
+        def _to_tk_seq(combo: str) -> Optional[str]:
+            """Convert a keyboard-library combo string to a Tk bind sequence."""
+            if not combo:
+                return None
+            parts = combo.lower().split('+')
+            key   = parts[-1]
+            mods  = parts[:-1]
+            _key_map = {
+                'space': 'space', 'esc': 'Escape', 'escape': 'Escape',
+                'enter': 'Return', 'return': 'Return',
+                'left': 'Left', 'right': 'Right', 'up': 'Up', 'down': 'Down',
+                'page_up': 'Prior', 'page_down': 'Next',
+                'delete': 'Delete', 'backspace': 'BackSpace',
+                'insert': 'Insert', 'home': 'Home', 'end': 'End',
+                'tab': 'Tab',
+                '=': 'equal', '-': 'minus', '+': 'plus',
+                '[': 'bracketleft', ']': 'bracketright',
+                '\\': 'backslash', ';': 'semicolon', "'": 'apostrophe',
+                ',': 'comma', '.': 'period', '/': 'slash', '`': 'grave',
+                '0': '0', '1': '1', '2': '2',
+                **{f'f{i}': f'F{i}' for i in range(1, 13)},
+            }
+            tk_key  = _key_map.get(key, key)
+            mod_map = {'ctrl': 'Control', 'shift': 'Shift', 'alt': 'Alt'}
+            tk_mods = [mod_map.get(m, m.capitalize()) for m in mods]
+            inner   = '-'.join(tk_mods + [tk_key]) if tk_mods else tk_key
+            return f'<{inner}>'
+
+        def _make_cb(method, args):
+            def _cb(e, _m=method, _a=args):
+                try:
+                    _m(*_a)
+                except Exception:
+                    pass
+            return _cb
+
+        for action_id, (method_name, extra_args) in self._ACTION_MAP.items():
+            if action_id in _EXCLUDED:
+                continue
+            combo = hk.get(action_id) or self._DEFAULT_HOTKEYS.get(action_id)
+            if not combo:
+                continue
+            seq = _to_tk_seq(combo)
+            if not seq:
+                continue
+            method = getattr(self, method_name, None)
+            if method is None:
+                continue
+            try:
+                cbid = w.bind(seq, _make_cb(method, extra_args), add=True)
+                self._registered_cbids.append((seq, cbid))
+                # Also bind the uppercase variant for bare single-letter keys
+                if len(seq) == 3 and seq[1].isalpha() and seq[1].islower():
+                    upper_seq = f'<{seq[1].upper()}>'
+                    cbid2 = w.bind(upper_seq, _make_cb(method, extra_args), add=True)
+                    self._registered_cbids.append((upper_seq, cbid2))
+            except Exception:
+                pass
+
+    # ── Extra action methods referenced by _ACTION_MAP ────────────────────────
+
+    def _switch_monitor(self, monitor_number: int):
+        """Move the player window to the requested monitor (1-based)."""
+        x, y, mw, mh = self._get_monitor_geometry(monitor_number)
+        self._win.geometry(f"{mw}x{mh}+{x}+{y}")
+        self._embed()
+        if self.logger:
+            self.logger(f"Switched to monitor {monitor_number}")
+
+    def _toggle_overlay(self):
+        """Toggle the control bar via keyboard shortcut."""
+        if self._ctrl_visible:
+            self._force_hide_bar()
+        else:
+            self._show_bar()
+
+    def _copy_video_path(self):
+        """Copy the current video path to clipboard."""
+        try:
+            import struct
+            path = self.videos[self.index]
+            # Try Windows CF_HDROP first (copies as a file, not just text)
+            try:
+                import win32clipboard as wcb
+                import win32con
+                file_struct = struct.pack("Iiiii", 20, 0, 0, 0, 1)
+                files = (path + "\0").encode("utf-16le") + b"\0\0"
+                data  = file_struct + files
+                wcb.OpenClipboard()
+                wcb.EmptyClipboard()
+                wcb.SetClipboardData(win32con.CF_HDROP, data)
+                wcb.CloseClipboard()
+            except Exception:
+                self._win.clipboard_clear()
+                self._win.clipboard_append(path)
+            if self.logger:
+                self.logger(f"Copied: {path}")
+        except Exception as e:
+            if self.logger:
+                self.logger(f"Copy error: {e}")
+
+    def _toggle_voice(self):
+        """Stub — voice commands not available in the embedded player."""
+        if self.logger:
+            self.logger("Voice commands not available in embedded player")
 
     # ═══════════════════════════════════════════════════════════════════
     # CORE EMBED — dual_player_manager pattern exactly
@@ -1482,6 +1643,17 @@ class EmbeddedPlayer:
                 pass
 
         self._running = False
+        # Stop A-B loop monitor
+        self._ab_loop_active = False
+
+        # Unbind hotkey cbids we registered so nothing fires after destroy
+        for seq, cbid in getattr(self, '_registered_cbids', []):
+            try:
+                self._win.unbind(seq, cbid)
+            except Exception:
+                pass
+        self._registered_cbids = []
+
         # cancel pending jobs
         for attr in ("_hide_job", "_poll_job", "_update_job",
                      "_ab_monitor_job", "_sleep_timer_job"):
