@@ -142,7 +142,6 @@ class EmbeddedPlayer:
         self._played_indices = set()
         self._speed_idx      = self.SPEED_STEPS.index(1.0)
         self._rotation_index = 0          # index into _ROTATION_STEPS: 0/1/2/3
-        self._current_monitor = 1
         self._borderless     = False
         self._pre_bl_geo     = "1280x720"
 
@@ -199,6 +198,9 @@ class EmbeddedPlayer:
         # ── floating control bar ──────────────────────────────────────
         self._bar = tk.Frame(self._win, bg=_CTRL_BG, highlightthickness=0)
         self._build_bar()
+        # Keep bar out of the pack/grid layout so it never influences window geometry.
+        # It is shown exclusively via place() when needed.
+        self._bar.place_forget()
 
         # ── canvas bindings ───────────────────────────────────────────
         self._canvas.bind("<Motion>",          lambda e: self._show_bar())
@@ -438,16 +440,12 @@ class EmbeddedPlayer:
         "decrease_speed":    "-",
         "reset_speed":       "0",
         "toggle_fullscreen": "f",
-        "monitor_1":         "1",
-        "monitor_2":         "2",
-        "toggle_overlay":    "i",
         "rotate_right":      "r",
         "zoom_in":           "ctrl+=",
         "zoom_out":          "ctrl+-",
         "zoom_reset":        "ctrl+0",
         "take_screenshot":   "t",
         "copy_video_path":   "ctrl+c",
-        "toggle_voice":      "v",
         "next_chapter":      "n",
         "prev_chapter":      "b",
         "cycle_subtitle":    "u",
@@ -474,16 +472,12 @@ class EmbeddedPlayer:
         "decrease_speed":    ("_speed_down",        ()),
         "reset_speed":       ("_speed_reset",       ()),
         "toggle_fullscreen": ("_toggle_borderless", ()),
-        "monitor_1":         ("_switch_monitor",    (1,)),
-        "monitor_2":         ("_switch_monitor",    (2,)),
-        "toggle_overlay":    ("_toggle_overlay",    ()),
         "rotate_right":      ("_rotate_right",      ()),
         "zoom_in":           ("_zoom_in",           ()),
         "zoom_out":          ("_zoom_out",          ()),
         "zoom_reset":        ("_zoom",              (0,)),
         "take_screenshot":   ("_screenshot",        ()),
         "copy_video_path":   ("_copy_video_path",   ()),
-        "toggle_voice":      ("_toggle_voice",      ()),
         "next_chapter":      ("_next_chapter",      ()),
         "prev_chapter":      ("_prev_chapter",      ()),
         "cycle_subtitle":    ("_cycle_subtitle",    ()),
@@ -613,21 +607,6 @@ class EmbeddedPlayer:
 
     # ── Extra action methods referenced by _ACTION_MAP ────────────────────────
 
-    def _switch_monitor(self, monitor_number: int):
-        """Move the player window to the requested monitor (1-based)."""
-        x, y, mw, mh = self._get_monitor_geometry(monitor_number)
-        self._win.geometry(f"{mw}x{mh}+{x}+{y}")
-        self._embed()
-        if self.logger:
-            self.logger(f"Switched to monitor {monitor_number}")
-
-    def _toggle_overlay(self):
-        """Toggle the control bar via keyboard shortcut."""
-        if self._ctrl_visible:
-            self._force_hide_bar()
-        else:
-            self._show_bar()
-
     def _copy_video_path(self):
         """Copy the current video path to clipboard."""
         try:
@@ -652,11 +631,6 @@ class EmbeddedPlayer:
         except Exception as e:
             if self.logger:
                 self.logger(f"Copy error: {e}")
-
-    def _toggle_voice(self):
-        """Stub — voice commands not available in the embedded player."""
-        if self.logger:
-            self.logger("Voice commands not available in embedded player")
 
     # ═══════════════════════════════════════════════════════════════════
     # CORE EMBED — dual_player_manager pattern exactly
@@ -1404,18 +1378,6 @@ class EmbeddedPlayer:
     # ═══════════════════════════════════════════════════════════════════
     # FULLSCREEN / BORDERLESS
     # ═══════════════════════════════════════════════════════════════════
-
-    def _get_monitor_geometry(self, monitor_number: int):
-        try:
-            if _get_monitors:
-                monitors = _get_monitors()
-                idx = monitor_number - 1
-                if idx < len(monitors):
-                    m = monitors[idx]
-                    return m.x, m.y, m.width, m.height
-        except Exception:
-            pass
-        return 0, 0, self._win.winfo_screenwidth(), self._win.winfo_screenheight()
 
     def _toggle_borderless(self):
         self._borderless = not self._borderless
