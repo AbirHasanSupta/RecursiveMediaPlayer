@@ -142,6 +142,7 @@ class EmbeddedPlayer:
         self._played_indices = set()
         self._speed_idx      = self.SPEED_STEPS.index(1.0)
         self._rotation_index = 0          # index into _ROTATION_STEPS: 0/1/2/3
+        self._flip_h         = False      # horizontal flip toggled
         self._borderless     = False
         self._pre_bl_geo     = "1280x720"
         self._chapters_visible = True     # initially assume chapters exist (packed in UI)
@@ -450,6 +451,7 @@ class EmbeddedPlayer:
         "reset_speed":       "0",
         "toggle_fullscreen": "f",
         "rotate_right":      "r",
+        "flip_h":             "h",
         "zoom_in":           "ctrl+=",
         "zoom_out":          "ctrl+-",
         "zoom_reset":        "ctrl+0",
@@ -482,6 +484,7 @@ class EmbeddedPlayer:
         "reset_speed":       ("_speed_reset",       ()),
         "toggle_fullscreen": ("_toggle_borderless", ()),
         "rotate_right":      ("_rotate_right",      ()),
+        "flip_h":            ("_toggle_flip_h",      ()),
         "zoom_in":           ("_zoom_in",           ()),
         "zoom_out":          ("_zoom_out",          ()),
         "zoom_reset":        ("_zoom",              (0,)),
@@ -526,8 +529,6 @@ class EmbeddedPlayer:
         # Loop / zoom / rotate extras that are not in the hotkey table
         w.bind("<o>",             lambda e: self._cycle_loop(),             add=True)
         w.bind("<O>",             lambda e: self._cycle_loop(),             add=True)
-        w.bind("<l>",             lambda e: self._rotate_left(),            add=True)
-        w.bind("<L>",             lambda e: self._rotate_left(),            add=True)
         w.bind("<z>",             lambda e: self._zoom(+0.1),               add=True)
         w.bind("<Z>",             lambda e: self._zoom(-0.1),               add=True)
         w.bind("<x>",             lambda e: self._zoom(0),                  add=True)
@@ -953,31 +954,46 @@ class EmbeddedPlayer:
 
     def _rotate_right(self):
         self._rotation_index = (self._rotation_index + 1) % 4
-        self._apply_rotation()
+        self._apply_transforms(rotation_only=True)
 
-    def _rotate_left(self):
-        self._rotation_index = (self._rotation_index - 1) % 4
-        self._apply_rotation()
+    def _toggle_flip_h(self):
+        self._flip_h = not self._flip_h
+        self._apply_transforms()
 
-    def _apply_rotation(self):
+    def _apply_transforms(self, rotation_only=False):
         if not self._player or not self.videos:
             return
         try:
-            angle          = self._ROTATION_STEPS[self._rotation_index]
-            transform_type = self._TRANSFORM_MAP[angle]
-
+            angle = self._ROTATION_STEPS[self._rotation_index]
             position_ms = self._player.get_time() or 0
             was_playing = self._player.is_playing()
-            path        = self.videos[self.index]
-
+            path = self.videos[self.index]
             base_args = ['--quiet', '--no-video-title-show']
             if os.name == 'nt':
                 base_args += ['--aout=directsound']
             else:
                 base_args += ['--aout=pulse']
-            if transform_type != "identity":
-                base_args += ['--video-filter=transform',
-                              f'--transform-type={transform_type}']
+            if rotation_only:
+                transform_type = self._TRANSFORM_MAP[angle]
+                if transform_type != "identity":
+                    base_args += ['--video-filter=transform',
+                                  f'--transform-type={transform_type}']
+            else:
+                transform_type = None
+                if self._flip_h:
+                    transform_type = "hflip"
+                filters = []
+                filter_opts = []
+                if angle != 0:
+                    filters.append("rotate")
+                    filter_opts.append(f"--rotate-angle={angle}")
+                if transform_type:
+                    filters.append("transform")
+                    filter_opts.append(f"--transform-type={transform_type}")
+
+                if filters:
+                    base_args.append(f"--video-filter={','.join(filters)}")
+                    base_args.extend(filter_opts)
 
             try:
                 self._player.stop()
@@ -1042,12 +1058,18 @@ class EmbeddedPlayer:
         menu = tk.Menu(self._win, tearoff=0, bg=_BTN, fg=_TXT,
                        activebackground=_BTN_HVR, activeforeground=_TXT,
                        bd=0, relief=tk.FLAT)
-        menu.add_command(label="🔍+  Zoom In",    command=self._zoom_in)
-        menu.add_command(label="🔍−  Zoom Out",   command=self._zoom_out)
+        menu.add_command(label="🔍+  Zoom In", command=self._zoom_in)
+        menu.add_command(label="🔍−  Zoom Out", command=self._zoom_out)
         menu.add_command(label="🔍1  Reset Zoom", command=lambda: self._zoom(0))
         menu.add_separator()
-        menu.add_command(label="⟲  Rotate Left",  command=self._rotate_left)
-        menu.add_command(label="⟳  Rotate Right", command=self._rotate_right)
+        menu.add_command(label="⟳  Rotate", command=self._rotate_right)
+        menu.add_separator()
+        menu.add_command(label="↔  Flip Horizontal", command=self._toggle_flip_h)
+        menu.add_command(label="⟳⟲  Reset Rotate/Flip",
+                         command=lambda: (setattr(self, '_rotation_index', 0),
+                                          setattr(self, '_flip_h', False),
+                                          setattr(self, '_flip_v', False),
+                                          self._apply_transforms()))
         try:
             x = self._win.winfo_pointerx()
             y = self._win.winfo_pointery()
