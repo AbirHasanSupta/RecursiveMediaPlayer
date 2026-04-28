@@ -1520,14 +1520,42 @@ class GridViewManager:
     # ─────────────────────────────────────────────────────────────────────────
 
     def _on_card_press(self, event, vp, card_widget):
-        if bool(event.state & 0x4) or bool(event.state & 0x1):
+        ctrl_held = bool(event.state & 0x4)
+        shift_held = bool(event.state & 0x1)
+        if ctrl_held or shift_held:
             return
-        self._drag_source = {'type': 'video', 'video_path': vp, 'widget': card_widget}
-        self._drag_type = 'video'
-        label = os.path.basename(vp)
-        if len(label) > 30:
-            label = label[:27] + "…"
-        self._create_drag_ghost(f"▶ {label}", event.x_root, event.y_root)
+
+        # Only videos in the same folder as the card being dragged can be moved together
+        same_dir = os.path.dirname(vp)
+        selected_in_dir = [
+            sp for sp in self.selected_items
+            if os.path.dirname(sp) == same_dir and sp not in self.excluded_items
+        ]
+
+        if len(selected_in_dir) > 1 and vp in selected_in_dir:
+            # Multi‑drag
+            self._drag_type = 'video_multiple'
+            count = len(selected_in_dir)
+            label = f"▶  {count} video{'s' if count > 1 else ''}"
+            self._drag_source = {
+                'type': 'video_multiple',
+                'paths': selected_in_dir,
+                'widget': card_widget
+            }
+        else:
+            # Single drag (original behaviour)
+            self._drag_type = 'video'
+            label = os.path.basename(vp)
+            if len(label) > 30:
+                label = label[:27] + "…"
+            label = f"▶  {label}"
+            self._drag_source = {
+                'type': 'video',
+                'video_path': vp,
+                'widget': card_widget
+            }
+
+        self._create_drag_ghost(label, event.x_root, event.y_root)
         try:
             self.drag_mode_label.config(text="Dragging video…")
         except Exception:
@@ -1555,19 +1583,84 @@ class GridViewManager:
         if self._drag_over_widget:
             self._highlight_drop_target(self._drag_over_widget, active=False)
             self._drag_over_widget = None
-        if self._drag_type != 'video':
+
+        if self._drag_type not in ('video', 'video_multiple'):
             self._cancel_drag()
             return
-        tgt = self._find_card_at_root_coords(event.x_root, event.y_root)
-        if tgt and tgt != src_vp:
-            if os.path.dirname(src_vp) == os.path.dirname(tgt):
-                self._move_video_before(src_vp, tgt)
-                self.root.after(0, self._relayout_grid)
-        self._drag_source = self._drag_type = None
+
+        drag_source = self._drag_source
+        self._drag_source = None
+        self._drag_type = None
         try:
             self.drag_mode_label.config(text="")
         except Exception:
             pass
+
+        target_vp = self._find_card_at_root_coords(event.x_root, event.y_root)
+        if not target_vp:
+            return
+
+        if drag_source['type'] == 'video_multiple':
+            # Ensure target is not one of the dragged videos and is in the same folder
+            if target_vp in drag_source['paths']:
+                return
+            dragged_dir = os.path.dirname(drag_source['paths'][0])
+            target_dir = os.path.dirname(target_vp)
+            if dragged_dir != target_dir:
+                return  # can only reorder within one folder
+
+            self._move_multiple_videos_before(drag_source['paths'], target_vp)
+            self.root.after(0, self._relayout_grid)
+
+        else:  # single video
+            if target_vp == drag_source['video_path']:
+                return
+            src_dir = os.path.dirname(drag_source['video_path'])
+            tgt_dir = os.path.dirname(target_vp)
+            if src_dir == tgt_dir:
+                self._move_video_before(drag_source['video_path'], target_vp)
+                self.root.after(0, self._relayout_grid)
+
+    def _move_multiple_videos_before(self, paths, target):
+        """
+        Move all video items listed in `paths` to just before `target`.
+        `paths` is a list of full video paths, all belonging to the same folder.
+        The relative order of the moved items is preserved.
+        """
+        # Collect current indices of the videos to move
+        indexed = []
+        for p in paths:
+            idx = next((i for i, it in enumerate(self.items)
+                        if it['type'] == 'video' and it['path'] == p), None)
+            if idx is not None:
+                indexed.append((idx, self.items[idx]))
+        if not indexed:
+            return
+
+        # Sort by original position (so we remove them without messing up later indices)
+        indexed.sort(key=lambda x: x[0])
+
+        # Remove the items in reverse order (to keep earlier indices valid)
+        moved_items = []
+        for idx, item in reversed(indexed):
+            moved_items.append(item)
+            del self.items[idx]
+        moved_items.reverse()   # restore original order
+
+        # Find insertion point after removal
+        target_idx = next((i for i, it in enumerate(self.items)
+                           if it['type'] == 'video' and it['path'] == target), None)
+        if target_idx is None:
+            self.items.extend(moved_items)
+        else:
+            for item in moved_items:
+                self.items.insert(target_idx, item)
+                target_idx += 1
+
+        # Invalidate caches
+        self._pages_cache = None
+        if not self.search_var.get():
+            self.all_items = self.items.copy()
 
     def _find_card_at_root_coords(self, x, y):
         for vp, card in self.card_widgets.items():
