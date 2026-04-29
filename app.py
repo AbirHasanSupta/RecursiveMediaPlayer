@@ -1,21 +1,26 @@
-import sys
+try:
+    from version import __version__, __commit__, __build__
+except ImportError:
+    __version__ = __commit__ = __build__ = "dev"
+
 import threading
 import time
 import tkinter as tk
 from datetime import datetime
-from tkinter import filedialog, messagebox, ttk, simpledialog
+from tkinter import filedialog, messagebox, ttk
 from tkinter.font import Font
 import os
+import sys
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 
-from key_press import listen_keys, cleanup_hotkeys
+from key_press import listen_keys, cleanup_hotkeys, reload_hotkeys
 from managers.favorites_manager import FavoritesManager
 from managers.filter_sort_manager import AdvancedFilterSortManager
 from managers.filter_sort_ui import FilterSortUI
 from managers.grid_view_manager import GridViewManager
-from managers.resource_manager import ThreadSafeDict, get_resource_manager, ManagedExecutor, ManagedThread, \
-    MemoryMonitor
+from managers.resource_manager import ThreadSafeDict, get_resource_manager, ManagedExecutor, MemoryMonitor, \
+    ManagedThread
 from theme import ThemeSelector
 from utils import gather_videos_with_directories, is_video, gather_videos
 from vlc_player_controller import VLCPlayerControllerForMultipleDirectory
@@ -27,10 +32,10 @@ from managers.video_preview_manager import VideoPreviewManager
 from managers.video_queue_manager import VideoQueueManager
 from managers.google_drive_manager import GoogleDriveManager
 from managers.dual_player_manager import DualPlayerManager
-import win32clipboard as wcb
-import win32con
 import struct
 import socket
+import time
+from tkinterdnd2 import DND_FILES, TkinterDnD
 try:
     from managers.voice_command_manager import VoiceCommandManager, SPEECH_RECOGNITION_AVAILABLE
 except ImportError:
@@ -54,12 +59,16 @@ def select_multiple_folders_and_play():
                     sock.close()
 
                     if result == 0:
-                        import win32gui
-                        hwnd = win32gui.FindWindow(None, "Recursive Video Player")
-                        if hwnd:
-                            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                            win32gui.SetForegroundWindow(hwnd)
-                            time.sleep(0.5)
+                        try:
+                            import win32gui
+                            import win32con
+                            hwnd = win32gui.FindWindow(None, "Recursive Video Player")
+                            if hwnd:
+                                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                                win32gui.SetForegroundWindow(hwnd)
+                                time.sleep(0.5)
+                        except:
+                            pass
 
                         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                         sock.connect(("127.0.0.1", port))
@@ -94,7 +103,11 @@ def select_multiple_folders_and_play():
             self.search_query = ""
             self.expanded_paths = set()
             self.collapsed_paths = set()
+            self.current_max_depth = 20
             self.loop_mode = "loop_on"
+            self._sleep_timer_job = None
+            self._sleep_countdown_job = None
+            self._sleep_timer_end = None
 
             preferences = self.config.load_preferences()
             self.dark_mode = preferences['dark_mode']
@@ -108,7 +121,9 @@ def select_multiple_folders_and_play():
             self.excluded_subdirs = preferences.get('excluded_subdirs', {})
             self.excluded_videos = preferences.get('excluded_videos', {})
             self.volume = preferences.get('volume', 50)
+            self.is_muted = preferences.get('is_muted', False)
             self.loop_mode = preferences.get('loop_mode', 'loop_on')
+            self.show_console = preferences.get('show_console', True)
             self.voice_manager = None
             self.voice_enabled = False
             self.voice_available = False
@@ -127,11 +142,13 @@ def select_multiple_folders_and_play():
             self.setup_theme()
             root.title("Recursive Video Player")
             root.geometry("1600x900")
-            root.state('zoomed')
+            try:
+                root.state('zoomed')
+            except:
+                pass
             root.protocol("WM_DELETE_WINDOW", self.cancel)
             root.configure(bg=self.bg_color)
 
-            # Initialize Google Drive helper
             try:
                 self.drive_manager = GoogleDriveManager()
             except Exception as e:
@@ -181,14 +198,19 @@ def select_multiple_folders_and_play():
             self.resource_manager.register_cleanup_callback(self._cleanup_scan_cache)
             self.resource_manager.register_cleanup_callback(self._cleanup_player_threads)
             self.apply_theme()
-
+            # Deferred: re-lock pill colors after tkinter's first render pass
+            self.root.after(0, self._fix_pill_colors_initial)
+            self.root.drop_target_register(DND_FILES)
+            self.root.dnd_bind('<<Drop>>', self._on_drop_files)
             command_line_dir = self._get_command_line_directory()
             if command_line_dir:
                 self.selected_dirs = []
                 if self.save_directories:
                     self.selected_dirs = preferences.get('selected_dirs', [])
+
                 if command_line_dir not in self.selected_dirs:
                     self.selected_dirs.append(command_line_dir)
+
                 for directory in self.selected_dirs:
                     display_name = directory
                     if len(directory) > 60:
@@ -214,10 +236,11 @@ def select_multiple_folders_and_play():
             else:
                 self.selected_dirs = []
 
-            self.update_ui_for_mode()
-
             self.settings_manager = SettingsManager(self.root, self, self.update_console)
             self.settings_manager.add_settings_changed_callback(self._on_settings_changed)
+            self.settings_manager.set_hotkey_reload_callback(
+                lambda hk: reload_hotkeys(self.controller, hk)
+            )
             app_settings = self.settings_manager.get_settings()
 
             self.video_preview_manager = VideoPreviewManager(self.root, self.update_console)
@@ -229,11 +252,13 @@ def select_multiple_folders_and_play():
 
             self.playlist_manager = PlaylistManager(self.root, self)
             self.playlist_manager.set_play_callback(self._play_playlist_videos)
+            self.playlist_manager.set_log_callback(self.update_console)
             self.playlist_manager.set_video_preview_manager(self.video_preview_manager)
             self.playlist_manager.set_grid_view_manager(self.grid_view_manager)
             self.playlist_manager.ui.video_preview_manager = self.video_preview_manager
 
             self.watch_history_manager = WatchHistoryManager(self.root, self)
+            self.watch_history_manager.set_settings_manager(self.settings_manager)
             self.watch_history_manager.set_play_callback(self._play_history_videos)
             self.watch_history_manager.set_video_preview_manager(self.video_preview_manager)
 
@@ -249,12 +274,14 @@ def select_multiple_folders_and_play():
             self.favorites_manager.set_play_callback(self._play_favorites_videos)
             self.favorites_manager.set_video_preview_manager(self.video_preview_manager)
             self.favorites_manager.set_grid_view_manager(self.grid_view_manager)
+            self.favorites_manager.set_on_removed_callback(self._refresh_tree_after_fav_change)
 
             self.dual_player_manager = DualPlayerManager(
                 self.root,
                 self,
                 self.update_console,
-                watch_history_callback=self.watch_history_manager.track_video_playback
+                watch_history_callback=self.watch_history_manager.track_video_playback,
+                player_count=3
             )
 
             self.filter_sort_manager = AdvancedFilterSortManager(
@@ -269,6 +296,49 @@ def select_multiple_folders_and_play():
             )
             self.filter_sort_ui.app_instance = self
 
+            self.grid_view_manager.set_add_to_playlist_callback(
+                lambda videos: self.playlist_manager.add_videos_to_playlist([], videos)
+            )
+            self.grid_view_manager.set_add_to_favourites_callback(
+                lambda videos: self.favorites_manager.add_to_favorites(videos, self.get_current_selected_directory())
+            )
+            self.grid_view_manager.set_remove_from_favourites_callback(
+                lambda videos: self.favorites_manager.remove_from_favorites(videos,
+                                                                            self.get_current_selected_directory())
+            )
+            self.grid_view_manager.set_is_favourite_callback(
+                lambda video_path: self.favorites_manager.is_favorite(video_path, self.get_current_selected_directory())
+            )
+            self.grid_view_manager.set_add_to_queue_callback(
+                lambda videos: self.queue_manager.add_to_queue(videos, added_from="grid_view")
+            )
+            self.grid_view_manager.set_play_in_dual_player1_callback(
+                lambda videos: self.dual_player_manager.load_videos_into_slot(1, 1, videos)
+            )
+            self.grid_view_manager.set_play_in_dual_player2_callback(
+                lambda videos: self.dual_player_manager.load_videos_into_slot(1, 2, videos)
+            )
+            self.grid_view_manager.set_play_in_dual_player3_callback(
+                lambda videos: self.dual_player_manager.load_videos_into_slot(1, 3, videos)
+            )
+
+            # Player count per window is always 3 (dynamic/fixed).
+            # Win 2 availability is controlled via dual_window_enabled setting.
+            self.grid_view_manager.set_get_player_count_callback(lambda: 3)
+
+            if self.settings_manager.get_settings().dual_window_enabled:
+                self.grid_view_manager.set_play_in_dual_player_win2_1_callback(
+                    lambda videos: self.dual_player_manager.load_videos_into_slot(2, 1, videos)
+                )
+                self.grid_view_manager.set_play_in_dual_player_win2_2_callback(
+                    lambda videos: self.dual_player_manager.load_videos_into_slot(2, 2, videos)
+                )
+                self.grid_view_manager.set_play_in_dual_player_win2_3_callback(
+                    lambda videos: self.dual_player_manager.load_videos_into_slot(2, 3, videos)
+                )
+
+            self.grid_view_manager.set_open_file_location_callback(self._context_open_location)
+            self.grid_view_manager.set_show_properties_callback(self._context_show_properties)
             self.ai_index_path = app_settings.ai_index_path
 
             self.settings_manager.ui.cleanup_resume_callback = lambda: self.resume_manager.service.cleanup_old_positions(
@@ -280,8 +350,6 @@ def select_multiple_folders_and_play():
             self.settings_manager.ui.clear_metadata_callback = lambda: self._clear_metadata_cache()
             self.settings_manager.ui.get_metadata_info_callback = lambda: self._get_metadata_cache_info()
             self.settings_manager.ui.filter_sort_manager = self.filter_sort_manager
-
-            self.settings_manager.ui.dual_player_manager = self.dual_player_manager
             self._setup_periodic_cleanup()
             self.resource_manager.register_cleanup_callback(self._cleanup_managers)
 
@@ -365,6 +433,12 @@ def select_multiple_folders_and_play():
                 self.update_console(f"Error clearing metadata cache: {e}")
                 return 0
 
+        def _refresh_tree_after_fav_change(self):
+            selected_dir = self.get_current_selected_directory()
+            if selected_dir:
+                scroll_pos = self.exclusion_listbox.yview()
+                self.load_subdirectories(selected_dir, max_depth=self.current_max_depth, restore_scroll=scroll_pos)
+
         def _get_metadata_cache_info(self):
             try:
                 return self.filter_sort_manager.metadata_cache.get_cache_info()
@@ -377,12 +451,67 @@ def select_multiple_folders_and_play():
                     'cache_file': ''
                 }
 
+        def _add_directory_from_ipc(self, directory):
+            if directory not in self.selected_dirs:
+                self.selected_dirs.append(directory)
+                display_name = directory
+                if len(directory) > 60:
+                    display_name = os.path.basename(directory)
+                    parent = os.path.dirname(directory)
+                    if parent:
+                        display_name = f"{os.path.basename(parent)}/{display_name}"
+                    display_name = f".../{display_name}"
+                self.dir_listbox.insert(tk.END, display_name)
+                self._submit_scan(directory)
+                self.update_video_count()
+                self.save_preferences()
+
         def _get_command_line_directory(self):
             if len(sys.argv) > 1:
                 arg_path = sys.argv[1]
                 if os.path.isdir(arg_path):
                     return os.path.abspath(arg_path)
             return None
+
+        def _on_drop_files(self, event):
+            import re
+            raw = event.data.strip()
+            # handles: {path with spaces} path_without_spaces {another path}
+            paths = []
+            i = 0
+            while i < len(raw):
+                if raw[i] == '{':
+                    end = raw.find('}', i)
+                    if end == -1:
+                        break
+                    paths.append(raw[i + 1:end])
+                    i = end + 1
+                elif raw[i] == ' ':
+                    i += 1
+                else:
+                    end = raw.find(' ', i)
+                    if end == -1:
+                        paths.append(raw[i:])
+                        break
+                    paths.append(raw[i:end])
+                    i = end + 1
+
+            added = 0
+            played = []
+            for path in paths:
+                path = path.strip()
+                if not path:
+                    continue
+                if os.path.isdir(path):
+                    self._add_directory_from_ipc(path)
+                    added += 1
+                elif os.path.isfile(path) and is_video(path):
+                    played.append(path)
+
+            if played:
+                self._play_grid_videos(played)
+            if added:
+                self.update_console(f"Dropped {added} director{'ies' if added > 1 else 'y'}")
 
         def setup_theme(self):
             self.bg_color = "#f5f5f5"
@@ -416,7 +545,7 @@ def select_multiple_folders_and_play():
             self.button_variants = {
                 "primary": {"bg": "#2d89ef", "fg": "white", "active": "#1e70cf"},
                 "success": {"bg": "#27ae60", "fg": "white", "active": "#229954"},
-                "danger":  {"bg": "#e74c3c", "fg": "white", "active": "#c0392b"},
+                "danger": {"bg": "#e74c3c", "fg": "white", "active": "#c0392b"},
                 "warning": {"bg": "#f39c12", "fg": "white", "active": "#e67e22"},
                 "secondary": {"bg": "#95a5a6", "fg": "white", "active": "#7f8c8d"},
                 "dark": {"bg": "#34495e", "fg": "white", "active": "#2c3e50"}
@@ -491,12 +620,26 @@ def select_multiple_folders_and_play():
             self.content_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
 
         def setup_console_section(self):
-            console_section = tk.Frame(self.main_frame, bg=self.bg_color)
-            console_section.pack(fill=tk.X, pady=(0, 15))
+            self.console_section = tk.Frame(self.main_frame, bg=self.bg_color)
+            if self.show_console:
+                self.console_section.pack(fill=tk.X, pady=(0, 15))
+            console_section = self.console_section
 
-            console_header = tk.Label(console_section, text="Player Console",
+            console_header_frame = tk.Frame(console_section, bg=self.bg_color)
+            console_header_frame.pack(fill=tk.X, pady=(0, 10))
+
+            console_header = tk.Label(console_header_frame, text="Player Console",
                                       font=self.header_font, bg=self.bg_color, fg=self.text_color)
-            console_header.pack(anchor='w', pady=(0, 10))
+            console_header.pack(side=tk.LEFT, anchor='w')
+
+            self.clear_console_button = self.create_button(
+                console_header_frame,
+                text="Clear",
+                command=self.clear_console,
+                variant="dark",
+                size="sm"
+            )
+            self.clear_console_button.pack(side=tk.LEFT, padx=(10, 0), anchor='w')
 
             console_container = tk.Frame(console_section, bg=self.bg_color,
                                          highlightbackground="#cccccc",
@@ -511,7 +654,7 @@ def select_multiple_folders_and_play():
 
             self.console_text = tk.Text(
                 console_frame,
-                height=8,
+                height=10,
                 wrap=tk.WORD,
                 yscrollcommand=self.console_scrollbar.set,
                 font=self.mono_font,
@@ -529,70 +672,9 @@ def select_multiple_folders_and_play():
             self.console_text.pack(fill=tk.BOTH, expand=True)
             self.console_scrollbar.config(command=self.console_text.yview)
 
-            console_button_frame = tk.Frame(console_section, bg=self.bg_color)
-            console_button_frame.pack(fill=tk.X)
-
-            self.clear_console_button = self.create_button(
-                console_button_frame,
-                text="Clear Console",
-                command=self.clear_console,
-                variant="dark",
-                size="sm"
-            )
-            self.clear_console_button.pack(side=tk.LEFT, padx=(0, 10))
-
-            speed_label = tk.Label(console_button_frame, text="Playback Speed:",
-                                   font=self.small_font, bg=self.bg_color, fg="#666666")
-            speed_label.pack(side=tk.LEFT, padx=(0, 8))
-
-            slider_frame = tk.Frame(console_button_frame, bg=self.bg_color, height=30)
-            slider_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
-            slider_frame.pack_propagate(False)
-
-            self.speed_var = tk.DoubleVar(value=1.0)
-            self.speed_canvas = tk.Canvas(
-                slider_frame,
-                height=6,
-                bg=self.bg_color,
-                highlightthickness=0,
-                relief=tk.FLAT
-            )
-            self.speed_canvas.pack(fill=tk.X, pady=12)
-
-            self.slider_width = 200
-            self.slider_min = 0.25
-            self.slider_max = 2.0
-            self.slider_current = 1.0
-            self.dragging = False
-
-            self.speed_canvas.bind("<Button-1>", self.on_slider_click)
-            self.speed_canvas.bind("<B1-Motion>", self.on_slider_drag)
-            self.speed_canvas.bind("<ButtonRelease-1>", self.on_slider_release)
-            self.speed_canvas.bind("<Configure>", self.on_slider_configure)
-
-            self.speed_display = tk.Label(
-                console_button_frame,
-                text="1.0×",
-                font=Font(family=self.small_font.actual().get("family", "Segoe UI"),
-                          size=self.small_font.actual().get("size", 9), weight="bold"),
-                bg=self.bg_color,
-                fg=self.accent_color,
-                width=5
-            )
-            self.speed_display.pack(side=tk.LEFT, padx=(0, 8))
-
-            self.reset_speed_button = self.create_button(
-                console_button_frame,
-                text="1×",
-                command=self.reset_speed,
-                variant="secondary",
-                size="sm"
-            )
-            self.reset_speed_button.pack(side=tk.LEFT)
-
-            self.root.after(100, self.draw_slider)
-
             self.update_console("Video Player Console Ready")
+            self.update_console(f"version{__version__}  commit:{__commit__}  built:{__build__}")
+            self.update_console("Select directories and click 'Play Videos' to start")
 
         def update_console(self, message):
             def _update():
@@ -609,6 +691,14 @@ def select_multiple_folders_and_play():
             self.console_text.config(state=tk.NORMAL)
             self.console_text.delete(1.0, tk.END)
             self.console_text.config(state=tk.DISABLED)
+
+        def toggle_console(self):
+            self.show_console = not self.show_console
+            if self.show_console:
+                self.console_section.pack(fill=tk.X, pady=(0, 15), before=self.button_frame)
+            else:
+                self.console_section.pack_forget()
+            self.save_preferences()
 
         def _submit_scan(self, directory):
             cache_result = self.scan_cache.get(directory)
@@ -673,11 +763,9 @@ def select_multiple_folders_and_play():
             self.scrollbar = tk.Scrollbar(list_container)
             self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-
-
             self.dir_listbox = tk.Listbox(
                 list_container,
-                selectmode=tk.MULTIPLE,
+                selectmode=tk.EXTENDED,
                 yscrollcommand=self.scrollbar.set,
                 font=self.normal_font,
                 bg="white",
@@ -694,393 +782,13 @@ def select_multiple_folders_and_play():
             self.dir_listbox.bind('<<ListboxSelect>>', self.on_directory_select)
             self.dir_listbox.bind('<FocusOut>', self.on_directory_focus_out)
             self.dir_listbox.bind('<FocusIn>', self.on_directory_focus_in)
-            self.dir_listbox.bind('<Control-a>', self._select_all_main_dirs)
             self.dir_listbox.bind('<Button-1>', self._on_main_dir_left_click)
+            self.dir_listbox.bind('<Button-3>', self._show_main_dir_context_menu)
+            self.dir_listbox.bind('<Control-a>', self._select_all_main_dirs)
+            self.dir_listbox.bind('<Control-A>', self._select_all_main_dirs)
             self.dir_listbox.bind('<B1-Motion>', self._on_drag)
             self.dir_listbox.bind('<ButtonRelease-1>', self._on_drop)
-            self.dir_listbox.bind('<Button-3>', self._show_main_dir_context_menu)
             self.scrollbar.config(command=self.dir_listbox.yview)
-
-            media_section = tk.Frame(self.dir_section, bg=self.bg_color)
-            media_section.pack(fill=tk.X, pady=(10, 0))
-
-            media_label = tk.Label(
-                media_section,
-                text="Media:",
-                font=self.small_font,
-                bg=self.bg_color,
-                fg="#666666"
-            )
-            media_label.pack(side=tk.LEFT, padx=(0, 8))
-
-            # self.add_to_playlist_button = self.create_button(
-            #     media_section, "Add to Playlist",
-            #     self._add_to_playlist, "playlist", "sm"
-            # )
-            # self.add_to_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.manage_playlist_button = self.create_button(
-                media_section, "Manage Playlists",
-                self._manage_playlists, "playlist", "sm"
-            )
-            self.manage_playlist_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.queue_manager_button = self.create_button(
-                media_section, "Manage Queue",
-                self._show_queue_manager, "primary", "sm"
-            )
-            self.queue_manager_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.favorites_button = self.create_button(
-                media_section, "Favorites",
-                self._show_favorites_manager, "warning", "sm"
-            )
-            self.favorites_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.watch_history_button = self.create_button(
-                media_section, "Watch History",
-                self._show_watch_history, "history", "sm"
-            )
-            self.watch_history_button.pack(side=tk.LEFT)
-
-            # self.grid_view_button = self.create_button(
-            #     media_section, "Grid View",
-            #     self._show_grid_view, "primary", "sm"
-            # )
-            # self.grid_view_button.pack(side=tk.LEFT, padx=(5, 0))
-
-        def _show_grid_view(self):
-            selected_dir = self.get_current_selected_directory()
-            if not selected_dir:
-                messagebox.showwarning("Warning", "Please select a directory first")
-                return
-
-            exclusion_selection = self.exclusion_listbox.curselection()
-
-            if exclusion_selection:
-                self.update_console("Loading grid view for selected items...")
-
-                def collect_selected_videos():
-                    selected_videos = []
-                    selected_folders = []
-
-                    for index in exclusion_selection:
-                        item_path = self.current_subdirs_mapping.get(index)
-                        if not item_path:
-                            continue
-
-                        if os.path.isfile(item_path) and is_video(item_path):
-                            if not self.is_video_excluded(selected_dir, item_path):
-                                selected_videos.append(item_path)
-                        elif os.path.isdir(item_path):
-                            selected_folders.append(item_path)
-
-                    for folder in selected_folders:
-                        try:
-                            for root, dirs, files in os.walk(folder):
-                                for f in files:
-                                    full_path = os.path.join(root, f)
-                                    if is_video(full_path):
-                                        if not self.is_video_excluded(selected_dir, full_path):
-                                            selected_videos.append(full_path)
-                        except Exception as e:
-                            self.update_console(f"Error reading folder {folder}: {e}")
-
-                    seen = set()
-                    final_videos = []
-                    for v in selected_videos:
-                        v_norm = os.path.normpath(v)
-                        if v_norm not in seen:
-                            seen.add(v_norm)
-                            final_videos.append(v_norm)
-
-                    if final_videos:
-                        self.root.after(0, lambda: self._open_grid_view(final_videos))
-                    else:
-                        self.root.after(0, lambda: messagebox.showwarning("Warning", "No videos found in selection"))
-
-                threading.Thread(target=collect_selected_videos, daemon=True).start()
-            else:
-                self.update_console("Loading grid view for entire directory...")
-
-                def collect_all_videos():
-                    cache = self.scan_cache.get(selected_dir)
-                    if cache:
-                        videos, _, _ = cache
-                        filtered = [v for v in videos if not self.is_video_excluded(selected_dir, v)]
-                        self.root.after(0, lambda: self._open_grid_view(filtered))
-                    else:
-                        self.root.after(0, lambda: messagebox.showwarning("Warning", "No videos found"))
-
-                threading.Thread(target=collect_all_videos, daemon=True).start()
-
-        def _play_grid_videos(self, videos):
-            if not videos:
-                return
-
-            if self.controller:
-                self.controller.stop()
-                cleanup_hotkeys()
-
-            all_video_to_dir = {v: os.path.dirname(v) for v in videos}
-            all_directories = sorted(list(set(all_video_to_dir.values())))
-
-            self.update_console(f"Playing {len(videos)} videos from grid selection")
-
-            self.controller = VLCPlayerControllerForMultipleDirectory(
-                videos, all_video_to_dir, all_directories, self.update_console
-            )
-            self.controller.set_loop_mode(self.loop_mode)
-            self.controller.volume = self.volume
-            self.controller.player.audio_set_volume(self.volume)
-            self.controller.set_volume_save_callback(self._save_volume_callback)
-            self.controller.set_watch_history_callback(self.watch_history_manager.track_video_playback)
-            self.controller.set_resume_manager(self.resume_manager)
-            self.controller.set_start_index(0)
-            self.controller.set_video_change_callback(self.on_video_changed)
-
-            if self.player_thread and self.player_thread.is_alive():
-                self.controller.running = False
-                self.player_thread.join(timeout=1.0)
-
-            self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
-            self.player_thread.start()
-
-            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
-            self.keys_thread.start()
-
-            def init_overlay_delayed():
-                time.sleep(1)
-                self.controller.init_overlay()
-
-            ManagedThread(target=init_overlay_delayed, name="InitOverlay").start()
-
-        def _open_grid_view(self, videos):
-            if not videos:
-                messagebox.showwarning("Warning", "No videos to display")
-                return
-
-            self.grid_view_manager.video_preview_manager = self.video_preview_manager
-            self.grid_view_manager.show_grid_view(videos, self.video_preview_manager)
-
-        def toggle_ai_mode(self):
-            if self.ai_mode:
-                self.ai_mode = False
-                self.ai_button.config(text="AI Mode")
-                self.update_console("Normal mode enabled")
-                self.clear_exclusion_list()
-                self.update_ui_for_mode()
-                self.save_preferences()
-                return
-
-            app_settings = self.settings_manager.get_settings()
-            self.ai_index_path = app_settings.ai_index_path
-
-            required_files = ["clip_index.faiss", "text_index.faiss", "metadata.pkl", "tfidf_index.pkl"]
-            files_exist = all(os.path.exists(os.path.join(self.ai_index_path, f)) for f in required_files)
-
-            if not os.path.exists(self.ai_index_path) or not files_exist:
-                result = messagebox.askyesno(
-                    "AI Index Not Found",
-                    f"AI index files not found in:\n{self.ai_index_path}\n\n"
-                    "Would you like to open Settings to configure the AI index path or run preprocessing?"
-                )
-                if result:
-                    self.settings_manager.show_settings()
-                return
-
-            self.ai_button.config(text="Loading...", state=tk.DISABLED)
-            self.show_ai_loading_progress()
-            self.update_console("Initializing AI models in background...")
-
-            def load_ai_models():
-                try:
-                    from enhanced_model import HighAccuracyVideoSearcher
-
-                    clip_index_path = os.path.join(self.ai_index_path, "clip_index.faiss")
-                    text_index_path = os.path.join(self.ai_index_path, "text_index.faiss")
-                    metadata_path = os.path.join(self.ai_index_path, "metadata.pkl")
-                    tfidf_path = os.path.join(self.ai_index_path, "tfidf_index.pkl")
-
-                    searcher = HighAccuracyVideoSearcher(clip_index_path, text_index_path, metadata_path, tfidf_path)
-
-                    def finalize_ai_mode():
-                        self.ai_searcher = searcher
-                        self.ai_mode = True
-                        self.ai_button.config(text="Normal Mode", state=tk.NORMAL)
-                        self.update_console("AI Mode enabled - Search functionality ready")
-                        self.update_ui_for_mode()
-                        self.save_preferences()
-
-                    self.root.after(0, finalize_ai_mode)
-
-                except ImportError as e:
-                    def show_import_error():
-                        messagebox.showerror("Error", f"Missing dependencies for AI search: {e}")
-                        self.ai_button.config(text="AI Mode", state=tk.NORMAL)
-
-                    self.root.after(0, show_import_error)
-
-                except Exception as e:
-                    def show_general_error():
-                        messagebox.showerror("Error", f"Failed to initialize AI searcher: {e}")
-                        self.ai_button.config(text="AI Mode", state=tk.NORMAL)
-
-                    self.root.after(0, show_general_error)
-
-            ManagedThread(target=load_ai_models, name="LoadAIModels").start()
-
-        def show_ai_loading_progress(self):
-            if not hasattr(self, '_ai_loading_dots'):
-                self._ai_loading_dots = 0
-
-            if hasattr(self, 'ai_button') and self.ai_button.cget('text') == "Loading...":
-                dots = "." * (self._ai_loading_dots % 4)
-                self.ai_button.config(text=f"Loading{dots}")
-                self._ai_loading_dots += 1
-
-                self.root.after(500, self.show_ai_loading_progress)
-
-        def update_ui_for_mode(self):
-            if self.ai_mode:
-                self.ai_search_frame.pack(fill=tk.X, pady=(0, 10))
-                if hasattr(self, 'search_frame'):
-                    self.search_frame.pack_forget()
-                self.normal_mode_frame.pack_forget()
-
-                self.exclude_button.pack_forget()
-                self.include_button.pack_forget()
-                self.exclude_all_button.pack_forget()
-                self.clear_exclusions_button.pack_forget()
-                self.toggle_excluded_only_check.pack_forget()
-
-                self.selected_dir_label.config(text="AI Search Mode - Enter query to search videos")
-            else:
-                self.ai_search_frame.pack_forget()
-                if hasattr(self, 'search_frame'):
-                    self.search_frame.pack_forget()
-                    self.search_frame.pack(fill=tk.X, pady=(0, 10))
-
-                self.normal_mode_frame.pack_forget()
-                self.normal_mode_frame.pack(fill=tk.X)
-
-                if hasattr(self, 'exclusion_buttons_row'):
-                    self.exclusion_buttons_row.pack_forget()
-                    self.exclusion_buttons_row.pack(fill=tk.X, pady=(5, 0))
-
-                self.exclude_button.pack(side=tk.LEFT, padx=(0, 5))
-                self.include_button.pack(side=tk.LEFT, padx=(0, 5))
-                self.exclude_all_button.pack(side=tk.LEFT, padx=(0, 5))
-                self.clear_exclusions_button.pack(side=tk.LEFT)
-                self.toggle_excluded_only_check.pack(side=tk.LEFT, padx=(0, 10))
-
-                selected_dir = self.get_current_selected_directory()
-                if selected_dir:
-                    self.load_subdirectories(selected_dir)
-                else:
-                    self.clear_exclusion_list()
-
-        def perform_ai_search(self):
-            if not self.ai_searcher:
-                messagebox.showerror("Error", "AI searcher not initialized")
-                return
-
-            query = self.ai_search_entry.get().strip()
-            if not query:
-                messagebox.showwarning("Warning", "Please enter a search query")
-                return
-
-            selected_dir = self.get_current_selected_directory()
-            if not selected_dir:
-                messagebox.showwarning("Warning", "Please select a directory first")
-                return
-
-            self.ai_search_button.config(text="Searching...", state=tk.DISABLED)
-            self.exclusion_listbox.delete(0, tk.END)
-            self.exclusion_listbox.insert(tk.END, "Searching...")
-
-            self.update_console(f"Searching for: '{query}' in background...")
-
-            def search_worker():
-                try:
-                    if not self.ai_searcher.has_videos_from_directory(selected_dir):
-                        def show_warning():
-                            messagebox.showwarning("Warning",
-                                                   f"No videos from '{os.path.basename(selected_dir)}' found in AI index")
-                            self.ai_search_button.config(text="Search", state=tk.NORMAL)
-
-                        self.root.after(0, show_warning)
-                        return
-
-                    total_videos = self.ai_searcher.get_video_count_for_directory(selected_dir)
-                    self.root.after(0, lambda: self.update_console(
-                        f"Searching {total_videos} indexed videos from '{os.path.basename(selected_dir)}'..."))
-
-                    filtered_results = self.ai_searcher.query_filtered_by_directory(
-                        query, selected_dir, top_k=100,
-                        clip_weight=0.35, text_weight=0.35, tfidf_weight=0.3
-                    )
-
-                    def update_ui():
-                        self.ai_search_button.config(text="Search", state=tk.NORMAL)
-                        self.exclusion_listbox.delete(0, tk.END)
-                        self.current_subdirs_mapping = {}
-
-                        if not filtered_results:
-                            self.exclusion_listbox.insert(tk.END,
-                                                          f"No videos from '{os.path.basename(selected_dir)}' match '{query}'")
-                            self.exclusion_listbox.insert(tk.END,
-                                                          "Try a different search term or check if this directory was included in AI preprocessing")
-                            self.update_console("No matching videos found in selected directory")
-                            return
-
-                        try:
-                            min_score = float(self.min_score_entry.get().strip())
-                        except (ValueError, AttributeError):
-                            min_score = 0.0
-
-                        final_results = [r for r in filtered_results if r.get('score', 0) >= min_score]
-
-                        if not final_results:
-                            self.exclusion_listbox.insert(tk.END, f"No results with score >= {min_score}")
-                            self.update_console(f"No results found with minimum score {min_score}")
-                            return
-
-                        self.selected_dir_label.config(
-                            text=f"AI Search: '{query}' - {len(final_results)} results (score >= {min_score})")
-
-                        for idx, result in enumerate(final_results):
-                            try:
-                                video_path = result['video_path']
-                                rel_path = os.path.relpath(video_path, selected_dir)
-                            except ValueError:
-                                video_path = result['video_path']
-                                rel_path = os.path.basename(video_path)
-
-                            score = result.get('score', 0)
-                            frame_count = result.get('frame_count', 0)
-                            display_name = f"▶ {rel_path} (score: {score:.3f}, frames: {frame_count})"
-                            self.exclusion_listbox.insert(tk.END, display_name)
-                            self.current_subdirs_mapping[idx] = video_path
-
-                        self.update_console(f"Found {len(final_results)} videos with score >= {min_score}")
-                        self.video_preview_manager.attach_to_listbox(
-                            self.exclusion_listbox,
-                            self.current_subdirs_mapping
-                        )
-
-                    self.root.after(0, update_ui)
-
-                except Exception as e:
-                    def show_error():
-                        self.ai_search_button.config(text="Search", state=tk.NORMAL)
-                        self.exclusion_listbox.delete(0, tk.END)
-                        self.exclusion_listbox.insert(tk.END, f"Search error: {e}")
-                        self.update_console(f"AI search error: {e}")
-
-                    self.root.after(0, show_error)
-
-            ManagedThread(target=search_worker, name="AISearch").start()
 
         def on_directory_focus_out(self, event):
             selection = self.dir_listbox.curselection()
@@ -1097,21 +805,21 @@ def select_multiple_folders_and_play():
             self.exclusion_section = tk.Frame(self.content_frame, bg=self.bg_color)
             self.exclusion_section.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(10, 0))
 
-            header_row = tk.Frame(self.exclusion_section, bg=self.bg_color)
-            header_row.pack(fill=tk.X, pady=(0, 10))
+            exclusion_header_frame = tk.Frame(self.exclusion_section, bg=self.bg_color)
+            exclusion_header_frame.pack(fill=tk.X, pady=(0, 10))
 
-            exclusion_header = tk.Label(header_row, text="Subdirectories and Videos",
+            exclusion_header = tk.Label(exclusion_header_frame, text="Subdirectories and Videos",
                                         font=self.header_font, bg=self.bg_color, fg=self.text_color)
             exclusion_header.pack(side=tk.LEFT, anchor='w')
 
             self.video_count_label = tk.Label(
-                header_row,
-                text="Total Videos: 0",
-                font=self.small_font,
+                exclusion_header_frame,
+                text="  —  0 videos",
+                font=self.normal_font,
                 bg=self.bg_color,
-                fg=self.text_color
+                fg="#888888"
             )
-            self.video_count_label.pack(side=tk.LEFT, padx=(10, 0))
+            self.video_count_label.pack(side=tk.LEFT, anchor='w')
 
             self.selected_dir_label = tk.Label(
                 self.exclusion_section,
@@ -1185,11 +893,12 @@ def select_multiple_folders_and_play():
             self.exclusion_listbox.bind("<Double-Button-1>", self._on_double_click)
             self._create_context_menu()
 
-            exclusion_buttons_frame = tk.Frame(self.exclusion_section, bg=self.bg_color)
-            exclusion_buttons_frame.pack(fill=tk.X, pady=(10, 0))
+            self.exclusion_buttons_frame = tk.Frame(self.exclusion_section, bg=self.bg_color)
+            self.exclusion_buttons_frame.pack(fill=tk.X, pady=(10, 0))
 
-            self.ai_search_frame = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
+            self.ai_search_frame = tk.Frame(self.exclusion_buttons_frame, bg=self.bg_color)
             self.ai_search_frame.pack(fill=tk.X, pady=(0, 10))
+            self.ai_search_frame.pack_forget()  # ← ADD THIS LINE (hidden by default, shown only in AI mode)
 
             search_label = tk.Label(self.ai_search_frame, text="",
                                     font=self.small_font, bg=self.bg_color, fg=self.text_color)
@@ -1206,7 +915,7 @@ def select_multiple_folders_and_play():
                 relief=tk.FLAT,
                 bd=1,
                 highlightthickness=1,
-                highlightbackground="#e0e0e0"
+                highlightbackground="#e0e0e0",
             )
             self.ai_search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
             self.ai_search_entry.bind('<Return>', lambda e: self.perform_ai_search())
@@ -1239,20 +948,19 @@ def select_multiple_folders_and_play():
             )
             self.ai_search_button.pack(side=tk.RIGHT)
 
-            self.normal_mode_frame = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
+            self.normal_mode_frame = tk.Frame(self.exclusion_buttons_frame, bg=self.bg_color)
             self.normal_mode_frame.pack(fill=tk.X)
 
             checkboxes_row = tk.Frame(self.normal_mode_frame, bg=self.bg_color)
             checkboxes_row.pack(fill=tk.X, pady=(0, 5))
 
-            checkboxes_row = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
+            checkboxes_row = tk.Frame(self.exclusion_buttons_frame, bg=self.bg_color)
             checkboxes_row.pack(fill=tk.X, pady=(0, 5))
 
             self.show_videos_var = tk.BooleanVar(value=self.show_videos)
             self.excluded_only_var = tk.BooleanVar(value=self.show_only_excluded)
             self.expand_all_var = tk.BooleanVar(value=self.expand_all_default)
             self.save_directories_var = tk.BooleanVar(value=self.save_directories)
-
 
             self.toggle_videos_check = ttk.Checkbutton(
                 checkboxes_row,
@@ -1298,52 +1006,187 @@ def select_multiple_folders_and_play():
                 variable=self.smart_resume_var,
                 command=self.toggle_smart_resume
             )
-            self.smart_resume_check.pack(side=tk.LEFT, padx=(10, 0))
+            self.smart_resume_check.pack(side=tk.LEFT, padx=(0, 0))
 
-            buttons_row = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
-            buttons_row.pack(fill=tk.X, pady=(5, 0))
-
-            self.include_button = self.create_button(
-                buttons_row,
-                text="Include Selected",
-                command=self.include_subdirectories,
-                variant="success",
-                size="sm"
-            )
-            self.include_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.exclude_button = self.create_button(
-                buttons_row,
-                text="Exclude Selected",
-                command=self.exclude_subdirectories,
-                variant="danger",
-                size="sm"
-            )
-            self.exclude_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.exclude_all_button = self.create_button(
-                buttons_row,
-                text="Exclude All",
-                command=self.exclude_all_subdirectories,
-                variant="warning",
-                size="sm"
-            )
-            self.exclude_all_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.clear_exclusions_button = self.create_button(
-                buttons_row,
-                text="Clear All Exclusions",
-                command=self.clear_all_exclusions,
-                variant="secondary",
-                size="sm"
-            )
-            self.clear_exclusions_button.pack(side=tk.LEFT)
-
-            buttons_row3 = tk.Frame(exclusion_buttons_frame, bg=self.bg_color)
-            buttons_row3.pack(fill=tk.X, pady=(10, 0))
+            self.speed_var = tk.DoubleVar(value=1.0)
 
         def _create_context_menu(self):
             pass
+
+        def _select_all_main_dirs(self, event=None):
+            self.dir_listbox.selection_set(0, tk.END)
+            self.on_directory_select(None)
+            return "break"
+
+        def _on_main_dir_left_click(self, event):
+            index = self.dir_listbox.nearest(event.y)
+            if index < 0 or index >= self.dir_listbox.size():
+                return
+
+            self._drag_start_index = index
+            ctrl_held = bool(event.state & 0x4)
+            shift_held = bool(event.state & 0x1)
+            current_selection = list(self.dir_listbox.curselection())
+
+            if not ctrl_held and not shift_held:
+                if current_selection == [index]:
+                    self.dir_listbox.selection_clear(0, tk.END)
+                    self.current_selected_dir_index = None
+                    self.clear_exclusion_list()
+                    self._is_filtered_mode = False
+                    return "break"
+
+            if shift_held:
+                if not hasattr(self, '_main_dir_anchor') or self._main_dir_anchor is None:
+                    self._main_dir_anchor = current_selection[0] if current_selection else 0
+                self.dir_listbox.selection_clear(0, tk.END)
+                start = min(self._main_dir_anchor, index)
+                end = max(self._main_dir_anchor, index)
+                for i in range(start, end + 1):
+                    self.dir_listbox.selection_set(i)
+                self.dir_listbox.activate(index)
+                self.on_directory_select(None)
+                return "break"
+            elif ctrl_held:
+                if index in current_selection:
+                    self.dir_listbox.selection_clear(index)
+                else:
+                    self.dir_listbox.selection_set(index)
+                self._main_dir_anchor = index
+                self.dir_listbox.activate(index)
+                self.on_directory_select(None)
+                return "break"
+            else:
+                if current_selection == [index]:
+                    self.dir_listbox.selection_clear(0, tk.END)
+                    self.current_selected_dir_index = None
+                    self._is_filtered_mode = False
+                    self.clear_exclusion_list()
+                    return "break"
+
+                self.dir_listbox.selection_clear(0, tk.END)
+                self.dir_listbox.selection_set(index)
+                self.dir_listbox.activate(index)
+                self._main_dir_anchor = index
+                self.on_directory_select(None)
+                return "break"
+
+        def _on_drag(self, event):
+            pass
+
+        def _on_drop(self, event):
+            if not hasattr(self, '_drag_start_index') or self._drag_start_index is None:
+                return
+
+            drop_index = self.dir_listbox.nearest(event.y)
+            if drop_index < 0:
+                drop_index = 0
+            if drop_index >= self.dir_listbox.size():
+                drop_index = self.dir_listbox.size() - 1
+
+            if drop_index != self._drag_start_index:
+                # Reorder selected_dirs
+                dir_to_move = self.selected_dirs.pop(self._drag_start_index)
+                self.selected_dirs.insert(drop_index, dir_to_move)
+
+                # Reorder listbox items
+                text = self.dir_listbox.get(self._drag_start_index)
+                self.dir_listbox.delete(self._drag_start_index)
+                self.dir_listbox.insert(drop_index, text)
+
+                # Keep the moved item selected
+                self.dir_listbox.selection_clear(0, tk.END)
+                self.dir_listbox.selection_set(drop_index)
+                self.dir_listbox.activate(drop_index)
+                self.current_selected_dir_index = drop_index
+
+                # Trigger directory select to update other UI parts
+                self.on_directory_select(None)
+
+            self._drag_start_index = None
+
+        def _show_main_dir_context_menu(self, event):
+            index = self.dir_listbox.nearest(event.y)
+            selection = self.dir_listbox.curselection()
+
+            if index >= 0 and index not in selection:
+                self.dir_listbox.selection_clear(0, tk.END)
+                self.dir_listbox.selection_set(index)
+                self.dir_listbox.activate(index)
+                self._main_dir_anchor = index
+                self.on_directory_select(None)
+                selection = self.dir_listbox.curselection()
+
+            if not selection:
+                return
+
+            context_menu = tk.Menu(self.root, tearoff=0)
+            context_menu.add_command(label="Play Selected", command=self._play_selected_main_dirs)
+            context_menu.add_command(label="Open in Grid View", command=self._open_grid_view_main_dirs)
+            context_menu.add_separator()
+            context_menu.add_command(label="Remove Selected", command=self.remove_directory)
+
+            context_menu.post(event.x_root, event.y_root)
+
+        def _play_selected_main_dirs(self):
+            selection = self.dir_listbox.curselection()
+            if not selection:
+                return
+
+            all_videos = []
+            for i in selection:
+                if i < len(self.selected_dirs):
+                    root_dir = self.selected_dirs[i]
+                    cache = self.scan_cache.get(root_dir)
+                    if cache:
+                        videos, _, _ = cache
+                        filtered_videos = [
+                            v for v in videos
+                            if not self.is_video_excluded(root_dir, v)
+                        ]
+                    else:
+                        videos = gather_videos(root_dir)
+                        filtered_videos = [
+                            v for v in videos
+                            if not self.is_video_excluded(root_dir, v)
+                        ]
+                    all_videos.extend(filtered_videos)
+
+            if not all_videos:
+                messagebox.showinfo("Information", "No videos found in selected directories.")
+                return
+
+            self._play_grid_videos(all_videos)
+
+        def _open_grid_view_main_dirs(self):
+            selection = self.dir_listbox.curselection()
+            if not selection:
+                return
+
+            all_videos = []
+            for i in selection:
+                if i < len(self.selected_dirs):
+                    root_dir = self.selected_dirs[i]
+                    cache = self.scan_cache.get(root_dir)
+                    if cache:
+                        videos, _, _ = cache
+                        filtered_videos = [
+                            v for v in videos
+                            if not self.is_video_excluded(root_dir, v)
+                        ]
+                    else:
+                        videos = gather_videos(root_dir)
+                        filtered_videos = [
+                            v for v in videos
+                            if not self.is_video_excluded(root_dir, v)
+                        ]
+                    all_videos.extend(filtered_videos)
+
+            if not all_videos:
+                messagebox.showinfo("Information", "No videos found in selected directories.")
+                return
+
+            self._open_grid_view(all_videos)
 
         def _on_left_click(self, event):
             index = self.exclusion_listbox.nearest(event.y)
@@ -1406,6 +1249,14 @@ def select_multiple_folders_and_play():
             if not selection:
                 return
 
+            if index >= 0 and index < listbox.size() and index not in selection:
+                video_path = self.current_subdirs_mapping.get(index)
+                if video_path and os.path.isfile(video_path) and is_video(video_path):
+                    self.video_preview_manager.right_clicked_item = index
+                    self.video_preview_manager._show_video_preview(video_path, event.x_root, event.y_root)
+                    return
+                return
+
             context_menu = tk.Menu(self.root, tearoff=0)
 
             first_index = selection[0]
@@ -1447,13 +1298,20 @@ def select_multiple_folders_and_play():
                 label="Include Selected",
                 command=self.include_subdirectories
             )
+            context_menu.add_command(
+                label="Exclude All",
+                command=self.exclude_all_subdirectories
+            )
+            context_menu.add_command(
+                label="Clear All Exclusions",
+                command=self.clear_all_exclusions
+            )
 
             context_menu.add_separator()
             context_menu.add_command(
                 label="Add to Playlist",
                 command=lambda: self._context_add_to_playlist(selection)
             )
-
 
             context_menu.add_command(
                 label="⭐ Add to Favorites",
@@ -1474,6 +1332,37 @@ def select_multiple_folders_and_play():
                 label="Play Next",
                 command=lambda: self._context_add_to_queue(selection, mode="next")
             )
+
+            context_menu.add_separator()
+            # ── Window 1 — always available, always 3 players ─────────────
+            context_menu.add_command(
+                label="▶ Win 1 › Player 1",
+                command=lambda: self._context_play_in_dual_player(selection, win_id=1, slot=1)
+            )
+            context_menu.add_command(
+                label="▶ Win 1 › Player 2",
+                command=lambda: self._context_play_in_dual_player(selection, win_id=1, slot=2)
+            )
+            context_menu.add_command(
+                label="▶ Win 1 › Player 3",
+                command=lambda: self._context_play_in_dual_player(selection, win_id=1, slot=3)
+            )
+            # ── Window 2 — only shown when enabled in Settings ────────────
+            if (getattr(self, 'settings_manager', None) and
+                    self.settings_manager.get_settings().dual_window_enabled):
+                context_menu.add_separator()
+                context_menu.add_command(
+                    label="▶ Win 2 › Player 1",
+                    command=lambda: self._context_play_in_dual_player(selection, win_id=2, slot=1)
+                )
+                context_menu.add_command(
+                    label="▶ Win 2 › Player 2",
+                    command=lambda: self._context_play_in_dual_player(selection, win_id=2, slot=2)
+                )
+                context_menu.add_command(
+                    label="▶ Win 2 › Player 3",
+                    command=lambda: self._context_play_in_dual_player(selection, win_id=2, slot=3)
+                )
 
             context_menu.add_separator()
 
@@ -1504,6 +1393,19 @@ def select_multiple_folders_and_play():
                     self.root.after(100, lambda: context_menu.destroy())
                 except:
                     pass
+
+        def _context_play_in_dual_player(self, selection, win_id: int, slot: int):
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                return
+
+            final_videos = self._resolve_selection_indices_to_videos(selected_dir, selection)
+            if not final_videos:
+                messagebox.showwarning("No Videos", "No valid non-excluded videos found in selection.")
+                return
+
+            self.dual_player_manager.load_videos_into_slot(win_id, slot, final_videos)
+            self.update_console(f"Sent {len(final_videos)} video(s) to Window {win_id} · Player {slot}")
 
         def _show_favorites_manager(self):
             selected_dir = self.get_current_selected_directory()
@@ -1564,8 +1466,12 @@ def select_multiple_folders_and_play():
                 return
 
             if self.controller:
-                self.controller.stop()
-                cleanup_hotkeys()
+                try:
+                    self.controller.stop()
+                except Exception:
+                    pass
+                self.controller = None
+                # cleanup_hotkeys()
 
             all_video_to_dir = {v: os.path.dirname(v) for v in videos}
             all_directories = sorted(list(set(all_video_to_dir.values())))
@@ -1573,11 +1479,10 @@ def select_multiple_folders_and_play():
             self.update_console(f"Playing {len(videos)} videos from favorites")
 
             self.controller = VLCPlayerControllerForMultipleDirectory(
-                videos, all_video_to_dir, all_directories, self.update_console
+                videos, all_video_to_dir, all_directories, self.update_console,
+                volume=self.volume, is_muted=self.is_muted
             )
             self.controller.set_loop_mode(self.loop_mode)
-            self.controller.volume = self.volume
-            self.controller.player.audio_set_volume(self.volume)
             self.controller.set_volume_save_callback(self._save_volume_callback)
             self.controller.set_watch_history_callback(self.watch_history_manager.track_video_playback)
             self.controller.set_resume_manager(self.resume_manager)
@@ -1588,26 +1493,145 @@ def select_multiple_folders_and_play():
 
             self.controller.set_start_index(0)
             self.controller.set_video_change_callback(self.on_video_changed)
+            self.controller.set_stop_callback(self._on_player_stopped)
 
             if self.player_thread and self.player_thread.is_alive():
                 self.controller.running = False
-                self.player_thread.join(timeout=1.0)
+                self.player_thread.join(timeout=3.0)
 
             self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
             self.player_thread.start()
 
-            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
+            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller, self.settings_manager.get_settings().hotkeys if hasattr(self, "settings_manager") else None), daemon=True)
             self.keys_thread.start()
 
-            def init_overlay_delayed():
+            def init_overlay_delayed(ctrl=self.controller):
                 time.sleep(1)
-                self.controller.init_overlay()
+                if self.controller is ctrl and ctrl.running:
+                    ctrl.init_overlay()
 
-            threading.Thread(target=init_overlay_delayed, daemon=True).start()
+            ManagedThread(target=init_overlay_delayed, name="InitOverlay").start()
 
         def _select_all_items(self, listbox):
             listbox.selection_clear(0, tk.END)
             listbox.selection_set(0, tk.END)
+
+        def _context_open_grid_view(self, selection):
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                return
+
+            self.exclusion_listbox.selection_clear(0, tk.END)
+            for idx in selection:
+                self.exclusion_listbox.selection_set(idx)
+
+            self._show_grid_view()
+
+        def _context_copy_selected(self, selection):
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                return
+
+            paths_to_copy = []
+            for index in selection:
+                item_path = self.current_subdirs_mapping.get(index)
+                if item_path:
+                    paths_to_copy.append(item_path)
+
+            if paths_to_copy:
+                file_list = "\0".join(paths_to_copy) + "\0"
+                file_struct = struct.pack("Iiiii", 20, 0, 0, 0, len(paths_to_copy))
+                files_encoded = file_list.encode("utf-16le") + b"\0\0"
+                data = file_struct + files_encoded
+
+                try:
+                    import win32clipboard as wcb
+                    import win32con
+                    wcb.OpenClipboard()
+                    wcb.EmptyClipboard()
+                    wcb.SetClipboardData(win32con.CF_HDROP, data)
+                    wcb.CloseClipboard()
+                    self.update_console(f"Copied {len(paths_to_copy)} item(s) to clipboard")
+                except Exception as e:
+                    self.update_console(f"Error copying to clipboard: {e}")
+
+        def _context_add_to_playlist(self, selection):
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                return
+
+            selected_videos = []
+            for index in selection:
+                item_path = self.current_subdirs_mapping.get(index)
+                if item_path and os.path.isfile(item_path) and is_video(item_path):
+                    if not self.is_video_excluded(selected_dir, item_path):
+                        selected_videos.append(item_path)
+                elif item_path and os.path.isdir(item_path):
+                    for root, dirs, files in os.walk(item_path):
+                        for file in files:
+                            full_path = os.path.join(root, file)
+                            if is_video(full_path):
+                                if not self.is_video_excluded(selected_dir, full_path):
+                                    selected_videos.append(full_path)
+
+            if selected_videos:
+                self.playlist_manager.add_videos_to_playlist([], selected_videos)
+
+        def _context_copy_path(self, file_path):
+            try:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(file_path)
+                self.update_console(f"Copied path: {file_path}")
+            except Exception as e:
+                self.update_console(f"Error copying path: {e}")
+
+        def _context_open_location(self, file_path):
+            try:
+                import subprocess
+                if os.name == 'nt':
+                    subprocess.Popen(f'explorer /select,"{file_path}"')
+                elif os.name == 'posix':
+                    if sys.platform == 'darwin':
+                        subprocess.Popen(['open', '-R', file_path])
+                    else:
+                        subprocess.Popen(['xdg-open', os.path.dirname(file_path)])
+                self.update_console(f"Opened location: {os.path.dirname(file_path)}")
+            except Exception as e:
+                self.update_console(f"Error opening location: {e}")
+                messagebox.showerror("Error", f"Could not open file location: {e}")
+
+        def _context_show_properties(self, file_path):
+            try:
+                stat_info = os.stat(file_path)
+                size_mb = stat_info.st_size / (1024 * 1024)
+                modified = datetime.fromtimestamp(stat_info.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+
+                info = f"File: {os.path.basename(file_path)}\n\n"
+                info += f"Path: {file_path}\n\n"
+                info += f"Size: {size_mb:.2f} MB ({stat_info.st_size:,} bytes)\n\n"
+                info += f"Modified: {modified}\n\n"
+
+                try:
+                    import cv2
+                    cap = cv2.VideoCapture(file_path)
+                    if cap.isOpened():
+                        fps = cap.get(cv2.CAP_PROP_FPS)
+                        frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                        duration = frame_count / fps if fps > 0 else 0
+                        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+                        info += f"Duration: {int(duration // 60)}:{int(duration % 60):02d}\n"
+                        info += f"Resolution: {width}x{height}\n"
+                        info += f"FPS: {fps:.2f}\n"
+                        cap.release()
+                except:
+                    pass
+
+                messagebox.showinfo("Properties", info)
+                self.update_console(f"Showing properties for: {os.path.basename(file_path)}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not retrieve properties: {e}")
 
         def _on_double_click(self, event):
             if not self.current_subdirs_mapping:
@@ -1664,6 +1688,162 @@ def select_multiple_folders_and_play():
             self.root.after(100, self.play_videos)
 
             return "break"
+
+        def on_search_changed(self, event=None):
+            try:
+                new_query = self.search_entry.get().strip().lower()
+            except Exception:
+                new_query = ""
+            if new_query == self.search_query:
+                return
+            self.search_query = new_query
+            selected_dir = self.get_current_selected_directory()
+            if selected_dir:
+                self.load_subdirectories(selected_dir)
+
+        def clear_search(self):
+            if hasattr(self, 'search_entry'):
+                self.search_entry.delete(0, tk.END)
+                self.on_search_changed()
+
+        def matches_search(self, path, search_query):
+            if not search_query:
+                return True
+
+            basename = os.path.basename(path).lower()
+            if search_query in basename:
+                return True
+
+            if os.path.isdir(path):
+                try:
+                    for root, dirs, files in os.walk(path):
+                        for d in dirs:
+                            if search_query in d.lower():
+                                return True
+                        for f in files:
+                            if is_video(f) and search_query in f.lower():
+                                return True
+                except (PermissionError, OSError):
+                    pass
+
+            return False
+
+        def is_child_of_matching_parent(self, path, base, search_query):
+            if not search_query:
+                return False
+
+            current = os.path.dirname(path)
+            while current != base and len(current) > len(base):
+                if search_query in os.path.basename(current).lower():
+                    return True
+                current = os.path.dirname(current)
+            return False
+
+        def get_current_selected_directory(self):
+            selection = self.dir_listbox.curselection()
+            if selection:
+                return self.selected_dirs[selection[0]]
+            elif self.current_selected_dir_index is not None and self.current_selected_dir_index < len(
+                    self.selected_dirs):
+                return self.selected_dirs[self.current_selected_dir_index]
+            return None
+
+        def get_all_videos_for_statistics(self):
+            all_videos = []
+            for directory in self.selected_dirs:
+                cache = self.scan_cache.get(directory)
+                if cache:
+                    videos, _, _ = cache
+                    for video in videos:
+                        if not self.is_video_excluded(directory, video):
+                            all_videos.append(video)
+            return all_videos
+
+        def is_video_in_excluded_directory(self, video_path, excluded_subdirs):
+            video_dir = os.path.dirname(video_path)
+
+            for excluded_subdir in excluded_subdirs:
+                excluded_subdir = os.path.normpath(excluded_subdir)
+                video_dir_norm = os.path.normpath(video_dir)
+
+                if video_dir_norm == excluded_subdir:
+                    return True
+
+                if video_dir_norm.startswith(excluded_subdir + os.sep):
+                    return True
+
+            return False
+
+        def is_video_excluded(self, root_dir, video_path):
+            excluded_videos = self.excluded_videos.get(root_dir, [])
+            video_path = os.path.normpath(video_path)
+            if video_path in excluded_videos:
+                return True
+            excluded_subdirs = self.excluded_subdirs.get(root_dir, [])
+            return self.is_video_in_excluded_directory(video_path, excluded_subdirs)
+
+        def is_directory_excluded(self, directory_path, excluded_subdirs):
+            for excluded_subdir in excluded_subdirs:
+                excluded_subdir = os.path.normpath(excluded_subdir)
+                directory_path_norm = os.path.normpath(directory_path)
+
+                if directory_path_norm == excluded_subdir:
+                    return True
+
+                if directory_path_norm.startswith(excluded_subdir + os.sep):
+                    return True
+
+            return False
+
+        def get_all_subdirectories_of_path(self, parent_path, target_path):
+            subpaths = []
+            try:
+                base = os.path.normpath(target_path)
+                subpaths.append(base)
+                for root, dirs, files in os.walk(base):
+                    for d in dirs:
+                        subpaths.append(os.path.join(root, d))
+                    for f in files:
+                        full = os.path.join(root, f)
+                        if is_video(full):
+                            subpaths.append(full)
+            except Exception as e:
+                self.update_console(f"Error getting subdirectories of {target_path}: {e}")
+
+            return subpaths
+
+        def update_video_count(self):
+            total_videos = 0
+            total_excluded = 0
+            pending = 0
+
+            for directory in self.selected_dirs:
+                cache = self.scan_cache.get(directory)
+                if not cache:
+                    pending += 1
+                    continue
+                videos, _, _ = cache
+
+                excluded_subdirs = self.excluded_subdirs.get(directory, [])
+                excluded_videos = self.excluded_videos.get(directory, [])
+                if excluded_subdirs or excluded_videos:
+                    filtered_videos = []
+                    for video in videos:
+                        if not self.is_video_excluded(directory, video):
+                            filtered_videos.append(video)
+                    total_videos += len(filtered_videos)
+                else:
+                    total_videos += len(videos)
+
+            self.video_count = total_videos
+            suffix = f" (scanning {pending}…)" if pending else ""
+            self.video_count_label.config(text=f"  —  {self.video_count} videos{suffix}")
+
+            if total_excluded > 0:
+                self.update_console(
+                    f"Total: {total_videos} videos selected, {total_excluded} excluded from {len(self.selected_dirs)} directories")
+            elif not pending:
+                self.update_console(f"Total: {total_videos} videos selected from {len(self.selected_dirs)} directories")
 
         def _apply_filters_and_refresh(self):
             selected_dir = self.get_current_selected_directory()
@@ -1790,14 +1970,64 @@ def select_multiple_folders_and_play():
 
             threading.Thread(target=process_in_thread, daemon=True).start()
 
+        def _reapply_filtered_view(self, scroll_pos=None):
+            if not hasattr(self, '_filtered_videos') or not hasattr(self, '_base_directory'):
+                return
+
+            selected_dir = self._base_directory
+            original_filtered = self._filtered_videos
+
+            filtered_sorted = original_filtered
+
+            self.exclusion_listbox.delete(0, tk.END)
+            self.current_subdirs_mapping = {}
+
+            if not filtered_sorted:
+                self.exclusion_listbox.insert(tk.END, "No videos match the current filters")
+                return
+
+            for idx, video_path in enumerate(filtered_sorted):
+                try:
+                    rel_path = os.path.relpath(video_path, selected_dir)
+                except ValueError:
+                    rel_path = os.path.basename(video_path)
+
+                display_name = f"▶ {rel_path}"
+
+                if self.is_video_excluded(selected_dir, video_path):
+                    display_name += " 🚫[EXCLUDED]"
+
+                self.exclusion_listbox.insert(tk.END, display_name)
+                self.current_subdirs_mapping[idx] = video_path
+
+            self.selected_dir_label.config(
+                text=f"Filtered: {len(filtered_sorted)} videos in '{os.path.basename(selected_dir)}'"
+            )
+
+            if hasattr(self, 'video_preview_manager'):
+                self.video_preview_manager.attach_to_listbox(
+                    self.exclusion_listbox,
+                    self.current_subdirs_mapping
+                )
+
+            if scroll_pos:
+                try:
+                    self.exclusion_listbox.yview_moveto(scroll_pos[0])
+                except:
+                    pass
+
         def play_videos(self):
             if not self.selected_dirs:
                 messagebox.showwarning("No Directories", "Please select at least one directory.")
                 return
 
             if self.controller:
-                self.controller.stop()
-                cleanup_hotkeys()
+                try:
+                    self.controller.stop()
+                except Exception:
+                    pass
+                self.controller = None
+                # cleanup_hotkeys()
 
             self.root.config(cursor="wait")
             self.root.update()
@@ -1850,11 +2080,10 @@ def select_multiple_folders_and_play():
                         def _start_filtered_player():
                             self.update_console(f"Playing {len(filtered_videos)} filtered videos")
                             self.controller = VLCPlayerControllerForMultipleDirectory(
-                                filtered_videos, all_video_to_dir, all_directories, self.update_console
+                                filtered_videos, all_video_to_dir, all_directories, self.update_console,
+                                volume=self.volume, is_muted=self.is_muted
                             )
                             self.controller.set_loop_mode(self.loop_mode)
-                            self.controller.volume = self.volume
-                            self.controller.player.audio_set_volume(self.volume)
                             self.controller.set_volume_save_callback(self._save_volume_callback)
                             self.controller.set_watch_history_callback(
                                 self.watch_history_manager.track_video_playback
@@ -1868,15 +2097,16 @@ def select_multiple_folders_and_play():
 
                             self.controller.set_start_index(0)
                             self.controller.set_video_change_callback(self.on_video_changed)
+                            self.controller.set_stop_callback(self._on_player_stopped)
 
                             if self.player_thread and self.player_thread.is_alive():
                                 self.controller.running = False
-                                self.player_thread.join(timeout=1.0)
+                                self.player_thread.join(timeout=3.0)
 
                             self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                             self.player_thread.start()
 
-                            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller),
+                            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller, self.settings_manager.get_settings().hotkeys if hasattr(self, "settings_manager") else None),
                                                                 daemon=True)
                             self.keys_thread.start()
                             self.root.config(cursor="")
@@ -1928,11 +2158,10 @@ def select_multiple_folders_and_play():
                             self.update_console(
                                 f"Playing {len(final_videos)} selected filtered videos")
                             self.controller = VLCPlayerControllerForMultipleDirectory(
-                                final_videos, all_video_to_dir, all_directories, self.update_console
+                                final_videos, all_video_to_dir, all_directories, self.update_console,
+                                volume=self.volume, is_muted=self.is_muted
                             )
                             self.controller.set_loop_mode(self.loop_mode)
-                            self.controller.volume = self.volume
-                            self.controller.player.audio_set_volume(self.volume)
                             self.controller.set_volume_save_callback(self._save_volume_callback)
                             self.controller.set_watch_history_callback(
                                 self.watch_history_manager.track_video_playback
@@ -1946,15 +2175,16 @@ def select_multiple_folders_and_play():
 
                             self.controller.set_start_index(0)
                             self.controller.set_video_change_callback(self.on_video_changed)
+                            self.controller.set_stop_callback(self._on_player_stopped)
 
                             if self.player_thread and self.player_thread.is_alive():
                                 self.controller.running = False
-                                self.player_thread.join(timeout=1.0)
+                                self.player_thread.join(timeout=3.0)
 
                             self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                             self.player_thread.start()
 
-                            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller),
+                            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller, self.settings_manager.get_settings().hotkeys if hasattr(self, "settings_manager") else None),
                                                                 daemon=True)
                             self.keys_thread.start()
                             self.root.config(cursor="")
@@ -2006,11 +2236,10 @@ def select_multiple_folders_and_play():
                             self.update_console(
                                 f"Playing {len(final_videos)} selected videos")
                             self.controller = VLCPlayerControllerForMultipleDirectory(
-                                final_videos, all_video_to_dir, all_directories, self.update_console
+                                final_videos, all_video_to_dir, all_directories, self.update_console,
+                                volume=self.volume, is_muted=self.is_muted
                             )
                             self.controller.set_loop_mode(self.loop_mode)
-                            self.controller.volume = self.volume
-                            self.controller.player.audio_set_volume(self.volume)
                             self.controller.set_volume_save_callback(self._save_volume_callback)
                             self.controller.set_watch_history_callback(
                                 self.watch_history_manager.track_video_playback
@@ -2024,15 +2253,16 @@ def select_multiple_folders_and_play():
 
                             self.controller.set_start_index(0)
                             self.controller.set_video_change_callback(self.on_video_changed)
+                            self.controller.set_stop_callback(self._on_player_stopped)
 
                             if self.player_thread and self.player_thread.is_alive():
                                 self.controller.running = False
-                                self.player_thread.join(timeout=1.0)
+                                self.player_thread.join(timeout=3.0)
 
                             self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                             self.player_thread.start()
 
-                            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller),
+                            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller, self.settings_manager.get_settings().hotkeys if hasattr(self, "settings_manager") else None),
                                                                 daemon=True)
                             self.keys_thread.start()
                             self.root.config(cursor="")
@@ -2163,7 +2393,6 @@ def select_multiple_folders_and_play():
                     if not cache:
                         continue
                     videos, video_to_dir, directories = cache
-                    # Avoid normalizing HTTP URLs
                     videos = [v if self._is_stream_url(v) else os.path.normpath(v) for v in videos]
                     new_map = {}
                     for k, v in video_to_dir.items():
@@ -2213,10 +2442,10 @@ def select_multiple_folders_and_play():
 
                     self.update_console(f"Playing from {len(all_directories)} directories")
                     self.controller = VLCPlayerControllerForMultipleDirectory(all_videos, all_video_to_dir,
-                                                                              all_directories, self.update_console)
+                                                                              all_directories, self.update_console,
+                                                                              volume=self.volume,
+                                                                              is_muted=self.is_muted)
                     self.controller.set_loop_mode(self.loop_mode)
-                    self.controller.volume = self.volume
-                    self.controller.player.audio_set_volume(self.volume)
                     self.controller.set_volume_save_callback(self._save_volume_callback)
                     self.controller.set_watch_history_callback(
                         self.watch_history_manager.track_video_playback
@@ -2241,15 +2470,16 @@ def select_multiple_folders_and_play():
                     self.controller.set_start_index(start_index)
 
                     self.controller.set_video_change_callback(self.on_video_changed)
+                    self.controller.set_stop_callback(self._on_player_stopped)
 
                     if self.player_thread and self.player_thread.is_alive():
                         self.controller.running = False
-                        self.player_thread.join(timeout=1.0)
+                        self.player_thread.join(timeout=3.0)
 
                     self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                     self.player_thread.start()
 
-                    self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
+                    self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller, self.settings_manager.get_settings().hotkeys if hasattr(self, "settings_manager") else None), daemon=True)
                     self.keys_thread.start()
                     if self.voice_enabled and self.voice_manager:
                         self.voice_manager.stop_listening()
@@ -2266,15 +2496,190 @@ def select_multiple_folders_and_play():
                                 self.voice_button.config(text="🎤 Voice Off")
                     self.root.config(cursor="")
 
-                    def init_overlay_delayed():
+                    def init_overlay_delayed(ctrl=self.controller):
                         time.sleep(1)
-                        self.controller.init_overlay()
+                        if self.controller is ctrl and ctrl.running:
+                            ctrl.init_overlay()
 
-                    threading.Thread(target=init_overlay_delayed, daemon=True).start()
+                    ManagedThread(target=init_overlay_delayed, name="InitOverlay").start()
 
                 self.root.after(0, _start_player)
 
             ManagedThread(target=_run, name="PlayVideos").start()
+
+        def on_video_changed(self, video_index, video_path):
+            if hasattr(self, 'filter_sort_manager'):
+                self.filter_sort_manager.metadata_cache.update_play_stats(video_path)
+            self.last_played_video_index = video_index
+            self.last_played_video_path = video_path
+            if self.smart_resume_var.get():
+                self.save_preferences()
+
+            self.grid_view_manager.mark_now_playing(video_path)
+            self._now_playing_video_path = os.path.normpath(video_path) if video_path else None
+            self._update_tree_now_playing()
+
+        def _on_player_stopped(self):
+            self._now_playing_video_path = None
+            self.root.after(0, self._clear_now_playing)
+
+        def _clear_now_playing(self):
+            self.grid_view_manager.mark_now_playing(None)
+            self._update_tree_now_playing()
+
+        def _update_tree_now_playing(self):
+            try:
+                if not hasattr(self, 'current_subdirs_mapping') or not self.current_subdirs_mapping:
+                    return
+                now = getattr(self, '_now_playing_video_path', None)
+                for idx in range(self.exclusion_listbox.size()):
+                    item_path = self.current_subdirs_mapping.get(idx)
+                    if not item_path:
+                        continue
+                    current_text = self.exclusion_listbox.get(idx)
+                    is_now = (now and os.path.normpath(item_path) == now)
+                    had_tag = " ▶▶▶" in current_text
+                    if is_now and not had_tag:
+                        self.exclusion_listbox.delete(idx)
+                        self.exclusion_listbox.insert(idx, current_text + " ▶▶▶")
+                        self.exclusion_listbox.itemconfig(idx, fg="#00aa44")
+                    elif not is_now and had_tag:
+                        self.exclusion_listbox.delete(idx)
+                        self.exclusion_listbox.insert(idx, current_text.replace(" ▶▶▶", ""))
+                        self.exclusion_listbox.itemconfig(idx, fg=self.text_color)
+                    elif is_now and had_tag:
+                        self.exclusion_listbox.itemconfig(idx, fg="#00aa44")
+            except Exception:
+                pass
+
+        def on_directory_select(self, event):
+            self._is_filtered_mode = False
+
+            selection = self.dir_listbox.curselection()
+            if not selection:
+                if self.current_selected_dir_index is not None:
+                    selected_dir = self.selected_dirs[self.current_selected_dir_index]
+                    self.load_subdirectories(selected_dir, max_depth=20)
+                else:
+                    self.clear_exclusion_list()
+                return
+
+            selected_index = selection[0]
+            if selected_index >= len(self.selected_dirs):
+                return
+
+            self.current_selected_dir_index = selected_index
+            selected_dir = self.selected_dirs[selected_index]
+            self.expanded_paths.clear()
+            self.collapsed_paths.clear()
+            self.load_subdirectories(selected_dir, max_depth=20)
+
+        def get_all_subdirectories(self, directory, prefix="", max_depth=20, current_depth=0):
+            if current_depth >= max_depth:
+                return []
+
+            subdirs = []
+            try:
+                items = sorted(os.listdir(directory))
+                for item in items:
+                    item_path = os.path.join(directory, item)
+                    if os.path.isdir(item_path) or is_video(item_path):
+                        display_name = prefix + item
+                        subdirs.append((item_path, display_name))
+
+                        nested_subdirs = self.get_all_subdirectories(
+                            item_path,
+                            prefix + item + "/",
+                            max_depth,
+                            current_depth + 1
+                        )
+                        subdirs.extend(nested_subdirs)
+            except (PermissionError, OSError):
+                pass
+
+            return subdirs
+
+        def clear_exclusion_list(self):
+            self.selected_dir_label.config(text="Select a directory to see its folders and videos")
+            self.exclusion_listbox.delete(0, tk.END)
+            self.current_subdirs_mapping = {}
+
+        def exclude_all_subdirectories(self):
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                messagebox.showinfo("Information", "Please select a directory first.")
+                return
+
+            is_filtered_mode = hasattr(self, '_is_filtered_mode') and self._is_filtered_mode
+
+            self.exclusion_listbox.delete(0, tk.END)
+            self.exclusion_listbox.insert(tk.END, "Excluding all... Please wait")
+
+            def worker(dir_path=selected_dir):
+                dir_paths = []
+                file_paths = []
+
+                displayed_items = set()
+                if hasattr(self, 'search_query') and self.search_query:
+                    for idx in range(len(self.current_subdirs_mapping)):
+                        if idx in self.current_subdirs_mapping:
+                            displayed_items.add(self.current_subdirs_mapping[idx])
+
+                try:
+                    base = os.path.normpath(dir_path)
+                    for root, dirs, files in os.walk(base):
+                        for d in dirs:
+                            subdir_path = os.path.join(root, d)
+                            if not displayed_items or subdir_path in displayed_items:
+                                dir_paths.append(subdir_path)
+                        for f in files:
+                            full = os.path.join(root, f)
+                            if is_video(full):
+                                if not displayed_items or full in displayed_items:
+                                    file_paths.append(full)
+                except Exception as e:
+                    self.root.after(0, lambda: self.update_console(f"Error during Exclude All: {e}"))
+                    self.root.after(0, lambda: [self.exclusion_listbox.delete(0, tk.END),
+                                                self.exclusion_listbox.insert(tk.END, f"Error: {e}")])
+                    return
+
+                def apply_and_refresh():
+                    if dir_paths:
+                        if dir_path not in self.excluded_subdirs:
+                            self.excluded_subdirs[dir_path] = []
+                        existing = set(self.excluded_subdirs[dir_path])
+                        for dp in dir_paths:
+                            if dp not in existing:
+                                self.excluded_subdirs[dir_path].append(dp)
+
+                    if file_paths:
+                        if dir_path not in self.excluded_videos:
+                            self.excluded_videos[dir_path] = []
+                        existing = set(self.excluded_videos[dir_path])
+                        for fp in file_paths:
+                            if fp not in existing:
+                                self.excluded_videos[dir_path].append(fp)
+
+                    total = len(dir_paths) + len(file_paths)
+                    filter_msg = " (matching search filter)" if displayed_items else ""
+                    self.update_console(
+                        f"Excluded {total} items from '{os.path.basename(dir_path)}'{filter_msg}")
+
+                    scroll_pos = self.exclusion_listbox.yview()
+
+                    if is_filtered_mode and hasattr(self, '_filtered_videos'):
+                        self._reapply_filtered_view(scroll_pos)
+                    else:
+                        self.load_subdirectories(dir_path, restore_scroll=scroll_pos)
+
+                    self.update_video_count()
+                    self.exclusion_listbox.selection_clear(0, tk.END)
+                    if self.save_directories:
+                        self.save_preferences()
+
+                self.root.after(0, apply_and_refresh)
+
+            ManagedThread(target=worker, name="ExcludeAllWorker").start()
 
         def exclude_subdirectories(self):
             selected_dir = self.get_current_selected_directory()
@@ -2498,450 +2903,6 @@ def select_multiple_folders_and_play():
 
             ManagedThread(target=worker, name="IncludeWorker").start()
 
-        def exclude_all_subdirectories(self):
-            selected_dir = self.get_current_selected_directory()
-            if not selected_dir:
-                messagebox.showinfo("Information", "Please select a directory first.")
-                return
-
-            is_filtered_mode = hasattr(self, '_is_filtered_mode') and self._is_filtered_mode
-
-            self.exclusion_listbox.delete(0, tk.END)
-            self.exclusion_listbox.insert(tk.END, "Excluding all... Please wait")
-
-            def worker(dir_path=selected_dir):
-                dir_paths = []
-                file_paths = []
-
-                displayed_items = set()
-                if hasattr(self, 'search_query') and self.search_query:
-                    for idx in range(len(self.current_subdirs_mapping)):
-                        if idx in self.current_subdirs_mapping:
-                            displayed_items.add(self.current_subdirs_mapping[idx])
-
-                try:
-                    base = os.path.normpath(dir_path)
-                    for root, dirs, files in os.walk(base):
-                        for d in dirs:
-                            subdir_path = os.path.join(root, d)
-                            if not displayed_items or subdir_path in displayed_items:
-                                dir_paths.append(subdir_path)
-                        for f in files:
-                            full = os.path.join(root, f)
-                            if is_video(full):
-                                if not displayed_items or full in displayed_items:
-                                    file_paths.append(full)
-                except Exception as e:
-                    self.root.after(0, lambda: self.update_console(f"Error during Exclude All: {e}"))
-                    self.root.after(0, lambda: [self.exclusion_listbox.delete(0, tk.END),
-                                                self.exclusion_listbox.insert(tk.END, f"Error: {e}")])
-                    return
-
-                def apply_and_refresh():
-                    if dir_paths:
-                        if dir_path not in self.excluded_subdirs:
-                            self.excluded_subdirs[dir_path] = []
-                        existing = set(self.excluded_subdirs[dir_path])
-                        for dp in dir_paths:
-                            if dp not in existing:
-                                self.excluded_subdirs[dir_path].append(dp)
-
-                    if file_paths:
-                        if dir_path not in self.excluded_videos:
-                            self.excluded_videos[dir_path] = []
-                        existing = set(self.excluded_videos[dir_path])
-                        for fp in file_paths:
-                            if fp not in existing:
-                                self.excluded_videos[dir_path].append(fp)
-
-                    total = len(dir_paths) + len(file_paths)
-                    filter_msg = " (matching search filter)" if displayed_items else ""
-                    self.update_console(
-                        f"Excluded {total} items from '{os.path.basename(dir_path)}'{filter_msg}")
-
-                    scroll_pos = self.exclusion_listbox.yview()
-
-                    if is_filtered_mode and hasattr(self, '_filtered_videos'):
-                        self._reapply_filtered_view(scroll_pos)
-                    else:
-                        self.load_subdirectories(dir_path, restore_scroll=scroll_pos)
-
-                    self.update_video_count()
-                    self.exclusion_listbox.selection_clear(0, tk.END)
-                    if self.save_directories:
-                        self.save_preferences()
-
-                self.root.after(0, apply_and_refresh)
-
-            ManagedThread(target=worker, name="ExcludeAllWorker").start()
-
-        def clear_all_exclusions(self):
-            selected_dir = self.get_current_selected_directory()
-            if not selected_dir:
-                messagebox.showinfo("Information", "Please select a directory first.")
-                return
-
-            is_filtered_mode = hasattr(self, '_is_filtered_mode') and self._is_filtered_mode
-
-            had_subdir_excl = selected_dir in self.excluded_subdirs
-            had_video_excl = selected_dir in self.excluded_videos
-            if had_subdir_excl or had_video_excl:
-                excluded_count = (len(self.excluded_subdirs.get(selected_dir, [])) +
-                                  len(self.excluded_videos.get(selected_dir, [])))
-                result = messagebox.askyesno(
-                    "Confirm",
-                    f"Clear all exclusions for {os.path.basename(selected_dir)}?"
-                )
-                if result:
-                    if had_subdir_excl:
-                        del self.excluded_subdirs[selected_dir]
-                    if had_video_excl:
-                        del self.excluded_videos[selected_dir]
-                    self.update_console(
-                        f"Cleared all {excluded_count} exclusions for '{os.path.basename(selected_dir)}'")
-                    if self.save_directories:
-                        self.save_preferences()
-
-                    scroll_pos = self.exclusion_listbox.yview()
-
-                    if is_filtered_mode and hasattr(self, '_filtered_videos'):
-                        self._reapply_filtered_view(scroll_pos)
-                    else:
-                        self.load_subdirectories(selected_dir)
-
-                    self.update_video_count()
-
-        def _reapply_filtered_view(self, scroll_pos=None):
-            if not hasattr(self, '_filtered_videos') or not hasattr(self, '_base_directory'):
-                return
-
-            selected_dir = self._base_directory
-            original_filtered = self._filtered_videos
-
-            filtered_sorted = original_filtered
-
-            self.exclusion_listbox.delete(0, tk.END)
-            self.current_subdirs_mapping = {}
-
-            if not filtered_sorted:
-                self.exclusion_listbox.insert(tk.END, "No videos match the current filters")
-                return
-
-            for idx, video_path in enumerate(filtered_sorted):
-                try:
-                    rel_path = os.path.relpath(video_path, selected_dir)
-                except ValueError:
-                    rel_path = os.path.basename(video_path)
-
-                display_name = f"▶ {rel_path}"
-
-                if self.is_video_excluded(selected_dir, video_path):
-                    display_name += " 🚫[EXCLUDED]"
-
-                self.exclusion_listbox.insert(tk.END, display_name)
-                self.current_subdirs_mapping[idx] = video_path
-
-            self.selected_dir_label.config(
-                text=f"Filtered: {len(filtered_sorted)} videos in '{os.path.basename(selected_dir)}'"
-            )
-
-            if hasattr(self, 'video_preview_manager'):
-                self.video_preview_manager.attach_to_listbox(
-                    self.exclusion_listbox,
-                    self.current_subdirs_mapping
-                )
-
-            if scroll_pos:
-                try:
-                    self.exclusion_listbox.yview_moveto(scroll_pos[0])
-                except:
-                    pass
-
-        def on_directory_select(self, event):
-            self._is_filtered_mode = False
-
-            selection = self.dir_listbox.curselection()
-            if not selection:
-                if self.current_selected_dir_index is not None:
-                    selected_dir = self.selected_dirs[self.current_selected_dir_index]
-                    self.load_subdirectories(selected_dir, max_depth=20)
-                else:
-                    self.clear_exclusion_list()
-                return
-
-            selected_index = selection[0]
-            if selected_index >= len(self.selected_dirs):
-                return
-
-            self.current_selected_dir_index = selected_index
-            selected_dir = self.selected_dirs[selected_index]
-            self.expanded_paths.clear()
-            self.collapsed_paths.clear()
-            self.load_subdirectories(selected_dir, max_depth=20)
-
-
-        def _context_open_grid_view(self, selection):
-            selected_dir = self.get_current_selected_directory()
-            if not selected_dir:
-                return
-
-            self.exclusion_listbox.selection_clear(0, tk.END)
-            for idx in selection:
-                self.exclusion_listbox.selection_set(idx)
-
-            self._show_grid_view()
-
-        def _context_copy_selected(self, selection):
-            selected_dir = self.get_current_selected_directory()
-            if not selected_dir:
-                return
-
-            paths_to_copy = []
-            for index in selection:
-                item_path = self.current_subdirs_mapping.get(index)
-                if item_path:
-                    paths_to_copy.append(item_path)
-
-            if paths_to_copy:
-                file_list = "\0".join(paths_to_copy) + "\0"
-                file_struct = struct.pack("Iiiii", 20, 0, 0, 0, len(paths_to_copy))
-                files_encoded = file_list.encode("utf-16le") + b"\0\0"
-                data = file_struct + files_encoded
-
-                try:
-                    wcb.OpenClipboard()
-                    wcb.EmptyClipboard()
-                    wcb.SetClipboardData(win32con.CF_HDROP, data)
-                    wcb.CloseClipboard()
-                    self.update_console(f"Copied {len(paths_to_copy)} item(s) to clipboard")
-                except Exception as e:
-                    self.update_console(f"Error copying to clipboard: {e}")
-
-        def _context_add_to_playlist(self, selection):
-            selected_dir = self.get_current_selected_directory()
-            if not selected_dir:
-                return
-
-            selected_videos = []
-            for index in selection:
-                item_path = self.current_subdirs_mapping.get(index)
-                if item_path and os.path.isfile(item_path) and is_video(item_path):
-                    if not self.is_video_excluded(selected_dir, item_path):
-                        selected_videos.append(item_path)
-                elif item_path and os.path.isdir(item_path):
-                    for root, dirs, files in os.walk(item_path):
-                        for file in files:
-                            full_path = os.path.join(root, file)
-                            if is_video(full_path):
-                                if not self.is_video_excluded(selected_dir, full_path):
-                                    selected_videos.append(full_path)
-
-            if selected_videos:
-                self.playlist_manager.add_videos_to_playlist([], selected_videos)
-
-        def _context_copy_path(self, file_path):
-            try:
-                self.root.clipboard_clear()
-                self.root.clipboard_append(file_path)
-                self.update_console(f"Copied path: {file_path}")
-            except Exception as e:
-                self.update_console(f"Error copying path: {e}")
-
-        def _context_open_location(self, file_path):
-            try:
-                import subprocess
-                if os.name == 'nt':
-                    subprocess.Popen(f'explorer /select,"{file_path}"')
-                elif os.name == 'posix':
-                    if sys.platform == 'darwin':
-                        subprocess.Popen(['open', '-R', file_path])
-                    else:
-                        subprocess.Popen(['xdg-open', os.path.dirname(file_path)])
-                self.update_console(f"Opened location: {os.path.dirname(file_path)}")
-            except Exception as e:
-                self.update_console(f"Error opening location: {e}")
-                messagebox.showerror("Error", f"Could not open file location: {e}")
-
-        def _context_show_properties(self, file_path):
-            try:
-                stat_info = os.stat(file_path)
-                size_mb = stat_info.st_size / (1024 * 1024)
-                modified = datetime.fromtimestamp(stat_info.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-
-                info = f"File: {os.path.basename(file_path)}\n\n"
-                info += f"Path: {file_path}\n\n"
-                info += f"Size: {size_mb:.2f} MB ({stat_info.st_size:,} bytes)\n\n"
-                info += f"Modified: {modified}\n\n"
-
-                try:
-                    import cv2
-                    cap = cv2.VideoCapture(file_path)
-                    if cap.isOpened():
-                        fps = cap.get(cv2.CAP_PROP_FPS)
-                        frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-                        duration = frame_count / fps if fps > 0 else 0
-                        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-                        info += f"Duration: {int(duration // 60)}:{int(duration % 60):02d}\n"
-                        info += f"Resolution: {width}x{height}\n"
-                        info += f"FPS: {fps:.2f}\n"
-                        cap.release()
-                except:
-                    pass
-
-                messagebox.showinfo("Properties", info)
-                self.update_console(f"Showing properties for: {os.path.basename(file_path)}")
-            except Exception as e:
-                messagebox.showerror("Error", f"Could not retrieve properties: {e}")
-
-
-        def get_current_selected_directory(self):
-            selection = self.dir_listbox.curselection()
-            if selection:
-                return self.selected_dirs[selection[0]]
-            elif self.current_selected_dir_index is not None and self.current_selected_dir_index < len(
-                    self.selected_dirs):
-                return self.selected_dirs[self.current_selected_dir_index]
-            return None
-
-        def get_all_videos_for_statistics(self):
-            all_videos = []
-            for directory in self.selected_dirs:
-                cache = self.scan_cache.get(directory)
-                if cache:
-                    videos, _, _ = cache
-                    for video in videos:
-                        if not self.is_video_excluded(directory, video):
-                            all_videos.append(video)
-            return all_videos
-
-        def is_video_in_excluded_directory(self, video_path, excluded_subdirs):
-            video_dir = os.path.dirname(video_path)
-
-            for excluded_subdir in excluded_subdirs:
-                excluded_subdir = os.path.normpath(excluded_subdir)
-                video_dir_norm = os.path.normpath(video_dir)
-
-                if video_dir_norm == excluded_subdir:
-                    return True
-
-                if video_dir_norm.startswith(excluded_subdir + os.sep):
-                    return True
-
-            return False
-
-        def is_video_excluded(self, root_dir, video_path):
-            excluded_videos = self.excluded_videos.get(root_dir, [])
-            video_path = os.path.normpath(video_path)
-            if video_path in excluded_videos:
-                return True
-            excluded_subdirs = self.excluded_subdirs.get(root_dir, [])
-            return self.is_video_in_excluded_directory(video_path, excluded_subdirs)
-
-        def is_directory_excluded(self, directory_path, excluded_subdirs):
-            for excluded_subdir in excluded_subdirs:
-                excluded_subdir = os.path.normpath(excluded_subdir)
-                directory_path_norm = os.path.normpath(directory_path)
-
-                if directory_path_norm == excluded_subdir:
-                    return True
-
-                if directory_path_norm.startswith(excluded_subdir + os.sep):
-                    return True
-
-            return False
-
-        def get_all_subdirectories_of_path(self, parent_path, target_path):
-            subpaths = []
-            try:
-                base = os.path.normpath(target_path)
-                subpaths.append(base)
-                for root, dirs, files in os.walk(base):
-                    for d in dirs:
-                        subpaths.append(os.path.join(root, d))
-                    for f in files:
-                        full = os.path.join(root, f)
-                        if is_video(full):
-                            subpaths.append(full)
-            except Exception as e:
-                self.update_console(f"Error getting subdirectories of {target_path}: {e}")
-
-            return subpaths
-
-        def update_video_count(self):
-            total_videos = 0
-            total_excluded = 0
-            pending = 0
-
-            for directory in self.selected_dirs:
-                cache = self.scan_cache.get(directory)
-                if not cache:
-                    pending += 1
-                    continue
-                videos, _, _ = cache
-
-                excluded_subdirs = self.excluded_subdirs.get(directory, [])
-                excluded_videos = self.excluded_videos.get(directory, [])
-                if excluded_subdirs or excluded_videos:
-                    filtered_videos = []
-                    for video in videos:
-                        if not self.is_video_excluded(directory, video):
-                            filtered_videos.append(video)
-                    total_videos += len(filtered_videos)
-                else:
-                    total_videos += len(videos)
-
-            self.video_count = total_videos
-            suffix = f" (scanning {pending} dir(s)...)" if pending else ""
-            self.video_count_label.config(text=f"Total Videos: {self.video_count}{suffix}")
-
-            if total_excluded > 0:
-                self.update_console(
-                    f"Total: {total_videos} videos selected, {total_excluded} excluded from {len(self.selected_dirs)} directories")
-            elif not pending:
-                self.update_console(f"Total: {total_videos} videos selected from {len(self.selected_dirs)} directories")
-
-
-        def on_video_changed(self, video_index, video_path):
-            if hasattr(self, 'filter_sort_manager'):
-                self.filter_sort_manager.metadata_cache.update_play_stats(video_path)
-            self.last_played_video_index = video_index
-            self.last_played_video_path = video_path
-            if self.smart_resume_var.get():
-                self.save_preferences()
-
-        def get_all_subdirectories(self, directory, prefix="", max_depth=20, current_depth=0):
-            if current_depth >= max_depth:
-                return []
-
-            subdirs = []
-            try:
-                items = sorted(os.listdir(directory))
-                for item in items:
-                    item_path = os.path.join(directory, item)
-                    if os.path.isdir(item_path) or is_video(item_path):
-                        display_name = prefix + item
-                        subdirs.append((item_path, display_name))
-
-                        nested_subdirs = self.get_all_subdirectories(
-                            item_path,
-                            prefix + item + "/",
-                            max_depth,
-                            current_depth + 1
-                        )
-                        subdirs.extend(nested_subdirs)
-            except (PermissionError, OSError):
-                pass
-
-            return subdirs
-
-        def clear_exclusion_list(self):
-            self.selected_dir_label.config(text="Select a directory to see its folders and videos")
-            self.exclusion_listbox.delete(0, tk.END)
-            self.current_subdirs_mapping = {}
-
-
         def expand_all_directories(self):
             selected_dir = self.get_current_selected_directory()
             if selected_dir:
@@ -2989,17 +2950,63 @@ def select_multiple_folders_and_play():
             self.save_directories = bool(self.save_directories_var.get())
             self.save_preferences()
 
+        def clear_all_exclusions(self):
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                messagebox.showinfo("Information", "Please select a directory first.")
+                return
+
+            is_filtered_mode = hasattr(self, '_is_filtered_mode') and self._is_filtered_mode
+
+            had_subdir_excl = selected_dir in self.excluded_subdirs
+            had_video_excl = selected_dir in self.excluded_videos
+            if had_subdir_excl or had_video_excl:
+                excluded_count = (len(self.excluded_subdirs.get(selected_dir, [])) +
+                                  len(self.excluded_videos.get(selected_dir, [])))
+                result = messagebox.askyesno(
+                    "Confirm",
+                    f"Clear all exclusions for {os.path.basename(selected_dir)}?"
+                )
+                if result:
+                    if had_subdir_excl:
+                        del self.excluded_subdirs[selected_dir]
+                    if had_video_excl:
+                        del self.excluded_videos[selected_dir]
+                    self.update_console(
+                        f"Cleared all {excluded_count} exclusions for '{os.path.basename(selected_dir)}'")
+                    if self.save_directories:
+                        self.save_preferences()
+
+                    scroll_pos = self.exclusion_listbox.yview()
+
+                    if is_filtered_mode and hasattr(self, '_filtered_videos'):
+                        self._reapply_filtered_view(scroll_pos)
+                    else:
+                        self.load_subdirectories(selected_dir)
+
+                    self.update_video_count()
+
         def load_subdirectories(self, directory, max_depth=20, restore_path=None, restore_scroll=None):
             self.current_max_depth = max_depth
             if self.show_only_excluded:
                 self.selected_dir_label.config(text=f"Excluded items in: {os.path.basename(directory)}")
             else:
-                self.selected_dir_label.config(text=f"All items in: {os.path.basename(directory)}")
+                _cache = self.scan_cache.get(directory)
+                if _cache:
+                    _videos, _, _ = _cache
+                    _excluded_subdirs = self.excluded_subdirs.get(directory, [])
+                    _excluded_videos = self.excluded_videos.get(directory, [])
+                    if _excluded_subdirs or _excluded_videos:
+                        _count = sum(1 for v in _videos if not self.is_video_excluded(directory, v))
+                    else:
+                        _count = len(_videos)
+                    self.selected_dir_label.config(text=f"All items in: {os.path.basename(directory)} ({_count} videos)")
+                else:
+                    self.selected_dir_label.config(text=f"All items in: {os.path.basename(directory)}")
             self.exclusion_listbox.delete(0, tk.END)
             self.exclusion_listbox.insert(tk.END, "Loading...")
             self.current_subdirs_mapping = {}
 
-            # Special handling for non-filesystem pseudo directories (e.g., Google Drive streaming)
             try:
                 if isinstance(directory, str) and directory.startswith("gdrive://"):
                     cache = self.scan_cache.get(directory)
@@ -3007,9 +3014,7 @@ def select_multiple_folders_and_play():
                     if cache:
                         videos, video_to_dir, directories = cache
 
-                        # If this is a folder pseudo dir, we can try to show a recursive tree
                         if directory.startswith("gdrive://folder/"):
-                            # Obtain names and structure from manager cached tree
                             tree = None
                             try:
                                 if self.drive_manager:
@@ -3017,7 +3022,6 @@ def select_multiple_folders_and_play():
                             except Exception:
                                 tree = None
 
-                            # Determine the subtree to display: all dirs under 'directory'
                             dir_prefix = directory.rstrip('/')
                             subdirs = []
                             for d in directories:
@@ -3025,7 +3029,6 @@ def select_multiple_folders_and_play():
                                     subdirs.append(d)
                             subdirs = sorted(subdirs, key=lambda s: (s.count('/'), s))
 
-                            # Build a relative depth for indentation
                             base_depth = dir_prefix.count('/')
 
                             for d in subdirs:
@@ -3033,12 +3036,10 @@ def select_multiple_folders_and_play():
                                 name = os.path.basename(d)
                                 if tree and 'dir_names' in tree:
                                     name = tree['dir_names'].get(d, name)
-                                # Skip the base itself for visual clarity; still list its files separately below
                                 if d != dir_prefix:
                                     indented = ("  " * rel_depth) + '📁' + name
                                     items.append((d, indented))
 
-                                # Files directly in this directory d
                                 if self.show_videos:
                                     for v in videos:
                                         parent = video_to_dir.get(v)
@@ -3047,12 +3048,10 @@ def select_multiple_folders_and_play():
                                             if tree and 'file_names' in tree:
                                                 vname = tree['file_names'].get(v)
                                             if not vname:
-                                                # fallback to last segment of URL id
                                                 vname = 'Drive Stream'
                                             ind = ("  " * (rel_depth + 1)) + '▶ ' + vname
                                             items.append((v, ind))
                         else:
-                            # Single file pseudo dir
                             for v in videos:
                                 display = '▶ Drive Stream'
                                 items.append((v, display))
@@ -3067,7 +3066,6 @@ def select_multiple_folders_and_play():
                             for idx, (p, name) in enumerate(items):
                                 self.exclusion_listbox.insert(tk.END, name)
                                 self.current_subdirs_mapping[idx] = p
-                        # Restore scroll position if provided
                         if restore_scroll:
                             try:
                                 self.exclusion_listbox.yview_moveto(restore_scroll[0])
@@ -3077,7 +3075,6 @@ def select_multiple_folders_and_play():
                     self.root.after(0, _post_drive_items)
                     return
             except Exception:
-                # Fall through to normal handling on any unexpected error
                 pass
 
             if not hasattr(self, '_subdir_load_token'):
@@ -3127,7 +3124,7 @@ def select_multiple_folders_and_play():
                             can_show_children = is_expanded_here
 
                         dir_name_matches = (not getattr(self, 'search_query', None)) or (
-                                    self.search_query in os.path.basename(root).lower())
+                                self.search_query in os.path.basename(root).lower())
                         is_child_of_match = self.is_child_of_matching_parent(root, base,
                                                                              getattr(self, 'search_query', None))
                         dir_has_matching_children = self.matches_search(root,
@@ -3155,7 +3152,7 @@ def select_multiple_folders_and_play():
                                             include_vid = (not only_excluded) or (full_path in excluded_vid_set)
 
                                             video_name_matches = (not getattr(self, 'search_query', None)) or (
-                                                        self.search_query in entry.name.lower())
+                                                    self.search_query in entry.name.lower())
                                             show_this_video = video_name_matches or dir_name_matches or is_child_of_match
 
                                             if include_vid and show_this_video and show_this_dir:
@@ -3205,7 +3202,6 @@ def select_multiple_folders_and_play():
                                     self.exclusion_listbox,
                                     self.current_subdirs_mapping
                                 )
-
                                 if target_index is not None:
                                     self.exclusion_listbox.selection_clear(0, tk.END)
                                     self.exclusion_listbox.selection_set(target_index)
@@ -3215,541 +3211,425 @@ def select_multiple_folders_and_play():
                                 if restore_scroll:
                                     self.exclusion_listbox.yview_moveto(restore_scroll[0])
 
+                                self._update_tree_now_playing()
+
                         insert_chunk(0)
 
                     self.root.after(0, post_chunks)
 
                 except Exception as e:
-                    def post_error():
+                    err_msg = str(e)
+                    def post_error(msg=err_msg):
                         if self._subdir_load_token is not token:
                             return
                         self.exclusion_listbox.delete(0, tk.END)
-                        self.exclusion_listbox.insert(tk.END, f"Error loading subdirectories: {str(e)}")
+                        self.exclusion_listbox.insert(tk.END, f"Error loading subdirectories: {msg}")
                         self.current_subdirs_mapping = {}
                     self.root.after(0, post_error)
 
             ManagedThread(target=build_and_post, name="LoadSubdirs").start()
 
-        def on_search_changed(self, event=None):
-            self.search_query = self.search_entry.get().strip().lower()
-            selected_dir = self.get_current_selected_directory()
-            if selected_dir:
-                self.load_subdirectories(selected_dir, max_depth=self.current_max_depth)
-
-        def clear_search(self):
-            self.search_entry.delete(0, tk.END)
-            self.search_query = ""
-            selected_dir = self.get_current_selected_directory()
-            if selected_dir:
-                self.load_subdirectories(selected_dir, max_depth=self.current_max_depth)
-
-        def matches_search(self, path, search_query):
-            if not search_query:
-                return True
-
-            basename = os.path.basename(path).lower()
-            if search_query in basename:
-                return True
-
-            if os.path.isdir(path):
-                try:
-                    for root, dirs, files in os.walk(path):
-                        for d in dirs:
-                            if search_query in d.lower():
-                                return True
-                        for f in files:
-                            if is_video(f) and search_query in f.lower():
-                                return True
-                except (PermissionError, OSError):
-                    pass
-
-            return False
-
-        def is_child_of_matching_parent(self, path, base, search_query):
-            if not search_query:
-                return False
-
-            current = os.path.dirname(path)
-            while current != base and len(current) > len(base):
-                if search_query in os.path.basename(current).lower():
-                    return True
-                current = os.path.dirname(current)
-            return False
-
         def setup_action_buttons(self):
-            self.button_frame = tk.Frame(self.main_frame, bg=self.bg_color)
-            self.button_frame.pack(fill=tk.X, pady=(0, 15))
+            # ── Custom toolbar frame packed above main_frame ──────────────────────
+            def _tb_colors():
+                if self.dark_mode:
+                    return {
+                        "bg":        "#1E1F22",
+                        "fg":        "#A9B7C6",
+                        "hover_bg":  "#2D5A8E",
+                        "hover_fg":  "#FFFFFF",
+                        "active_bg": "#1A4070",
+                        "active_fg": "#FFFFFF",
+                        "play_fg":   "#FF6B6B",
+                        "play_hover":"#C0392B",
+                        "sep":       "#3A3B3E",
+                    }
+                else:
+                    return {
+                        "bg":        "#ECECEC",
+                        "fg":        "#2B2B2B",
+                        "hover_bg":  "#DCDCDC",
+                        "hover_fg":  "#000000",
+                        "active_bg": "#CCCCCC",
+                        "active_fg": "#000000",
+                        "play_fg":   "#c0392b",
+                        "play_hover":"#992d22",
+                        "play_hover_bg": "#c0392b",
+                        "sep":       "#E0E0E0",
+                    }
 
-            dir_buttons_frame = tk.Frame(self.button_frame, bg=self.bg_color)
-            dir_buttons_frame.pack(side=tk.LEFT)
+            self._tb_colors = _tb_colors
 
-            self.add_button = self.create_button(
-                dir_buttons_frame,
-                text="Add Directory",
-                command=self.add_directory,
-                variant="primary",
-                size="md"
-            )
-            self.add_button.pack(side=tk.LEFT, padx=(0, 5))
+            self.toolbar = tk.Frame(self.root, bg=_tb_colors()["bg"], height=28)
+            self.toolbar.pack(side=tk.TOP, fill=tk.X, before=self.main_frame)
+            self.toolbar.pack_propagate(False)
 
-            # Add Google Drive Link button
-            self.add_drive_button = self.create_button(
-                dir_buttons_frame,
-                text="Add Drive Link",
-                command=self.add_drive_link,
-                variant="primary",
-                size="md"
-            )
-            self.add_drive_button.pack(side=tk.LEFT, padx=(0, 5))
+            self._toolbar_btns = {}   # label -> tk.Label widget
 
-            self.remove_button = self.create_button(
-                dir_buttons_frame,
-                text="Remove Selected",
-                command=self.remove_directory,
-                variant="secondary",
-                size="md"
-            )
-            self.remove_button.pack(side=tk.LEFT)
+            def make_dropdown_menu(entries):
+                """entries: list of (label, command) or None for separator."""
+                c = _tb_colors()
+                menu = tk.Menu(self.root, tearoff=0,
+                               bg=c["bg"], fg=c["fg"],
+                               activebackground=c["hover_bg"],
+                               activeforeground=c["hover_fg"],
+                               relief="flat", bd=1,
+                               font=("Segoe UI", 9))
+                for entry in entries:
+                    if entry is None:
+                        menu.add_separator()
+                    else:
+                        lbl, cmd = entry
+                        menu.add_command(label=lbl, command=cmd)
+                return menu
 
-            theme_frame = tk.Frame(self.button_frame, bg=self.bg_color)
-            theme_frame.pack(side=tk.LEFT, expand=True)
+            def make_toolbar_btn(text, command=None, menu=None, is_action=False, play=False):
+                c = _tb_colors()
+                fg = c["play_fg"] if play else c["fg"]
+                font_weight = "bold" if play else "normal"
+                btn = tk.Label(
+                    self.toolbar,
+                    text=text,
+                    bg=c["bg"],
+                    fg=fg,
+                    font=("Segoe UI", 9, font_weight),
+                    padx=10, pady=4,
+                    cursor="hand2"
+                )
+                btn.pack(side=tk.LEFT)
+                self._toolbar_btns[text] = btn
 
-            self.filter_sort_button = self.create_button(
-                theme_frame,
-                text="Filter/Sort",
-                command=self._show_filter_dialog,
-                variant="primary",
-                size="md"
-            )
-            self.filter_sort_button.pack(side=tk.LEFT, padx=(0, 10))
+                def on_enter(e, b=btn):
+                    cc = _tb_colors()
+                    b.config(bg=cc["hover_bg"], fg=cc["hover_fg"])
 
-            self.ai_button = self.create_button(
-                theme_frame,
-                text="AI Mode" if not self.ai_mode else "Normal Mode",
-                command=self.toggle_ai_mode,
-                variant="warning",
-                size="md"
-            )
-            self.ai_button.pack(side=tk.LEFT, padx=(0, 10))
+                def on_leave(e, b=btn, p=play):
+                    cc = _tb_colors()
+                    b.config(bg=cc["bg"], fg=cc["play_fg"] if p else cc["fg"])
 
-            self.theme_button = self.create_button(
-                theme_frame,
-                text="Dark Mode" if not self.dark_mode else "Light Mode",
-                command=self.toggle_theme,
-                variant="theme",
-                size="md"
-            )
-            self.theme_button.pack(side=tk.LEFT, padx=(0, 10))
+                def on_press(e, b=btn):
+                    cc = _tb_colors()
+                    b.config(bg=cc["active_bg"], fg=cc["active_fg"])
 
-            self.settings_button = self.create_button(
-                theme_frame,
-                text="Settings",
-                command=self._show_settings,
-                variant="settings",
-                size="md"
-            )
-            self.settings_button.pack(side=tk.LEFT, padx=(0, 10))
+                def on_release(e, b=btn, m=menu, cmd=command):
+                    cc = _tb_colors()
+                    b.config(bg=cc["hover_bg"], fg=cc["hover_fg"])
+                    if m:
+                        try:
+                            m.tk_popup(b.winfo_rootx(), b.winfo_rooty() + b.winfo_height())
+                        finally:
+                            m.grab_release()
+                    elif cmd:
+                        cmd()
+
+                btn.bind("<Enter>",          on_enter)
+                btn.bind("<Leave>",          on_leave)
+                btn.bind("<ButtonPress-1>",  on_press)
+                btn.bind("<ButtonRelease-1>",on_release)
+                return btn
+
+            # ── File ──────────────────────────────────────────────────────────────
+            file_menu = make_dropdown_menu([
+                ("Add Directory",           self.add_directory),
+                ("Add Google Drive Link",   self.add_drive_link),
+                None,
+                ("Exit",                    self.cancel),
+            ])
+            make_toolbar_btn("File", menu=file_menu)
+
+            # ── View ──────────────────────────────────────────────────────────────
+            view_menu = make_dropdown_menu([
+                ("Show/Hide Console",       self.toggle_console),
+                None,
+                ("Filter / Sort",           self._show_filter_dialog),
+            ])
+            make_toolbar_btn("View", menu=view_menu)
+
+            # ── Playback ──────────────────────────────────────────────────────────
+            self._loop_mode_var = tk.StringVar(value=self.loop_mode)
+            c = _tb_colors()
+            _sel_color = "#4A9EFF" if self.dark_mode else "#2d89ef"
+            loop_sub = tk.Menu(self.root, tearoff=0,
+                               bg=c["bg"], fg=c["fg"],
+                               activebackground=c["hover_bg"],
+                               activeforeground=c["hover_fg"],
+                               selectcolor=_sel_color,
+                               relief="flat", bd=1,
+                               font=("Segoe UI", 9))
+            for mode, lbl in [("loop_on", "Loop On"), ("loop_off", "Loop Off"), ("shuffle", "Shuffle")]:
+                loop_sub.add_radiobutton(
+                    label=lbl,
+                    variable=self._loop_mode_var,
+                    value=mode,
+                    command=lambda m=mode: self._set_loop_mode_menu(m))
+            self._loop_sub_menu = loop_sub
+
+            playback_menu = tk.Menu(self.root, tearoff=0,
+                                    bg=c["bg"], fg=c["fg"],
+                                    activebackground=c["hover_bg"],
+                                    activeforeground=c["hover_fg"],
+                                    relief="flat", bd=1,
+                                    font=("Segoe UI", 9))
+            playback_menu.add_cascade(label="Loop Mode", menu=loop_sub)
+            playback_menu.add_separator()
+            playback_menu.add_command(label="Sleep Timer", command=self._show_sleep_timer_dialog)
+            make_toolbar_btn("Playback", menu=playback_menu)
+
+            make_toolbar_btn("Settings", command=self._show_settings)
+
+            self.ai_toolbar_btn = make_toolbar_btn("● Normal Mode", command=self.toggle_ai_mode)
+            self.ai_mode_indicator = self.ai_toolbar_btn  # same widget, keep references working
 
             if self.voice_available:
-                self.voice_button = self.create_button(
-                    theme_frame,
-                    text="🎤 Voice Off",
-                    command=self.toggle_voice_commands,
-                    variant="warning",
-                    size="md"
-                )
-                self.voice_button.pack(side=tk.LEFT, padx=(0, 10))
-
-            self.dual_player_button = self.create_button(
-              theme_frame,
-              text="Dual Player",
-              command=self._open_dual_player,
-              variant="primary",
-              size="md"
-            )
-            self.dual_player_button.pack(side=tk.LEFT, padx=(0, 10))
-
-            action_buttons_frame = tk.Frame(self.button_frame, bg=self.bg_color)
-            action_buttons_frame.pack(side=tk.RIGHT)
-
-            self.cancel_button = self.create_button(
-                action_buttons_frame,
-                text="Close",
-                command=self.cancel,
-                variant="secondary",
-                size="md"
-            )
-            self.cancel_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.loop_toggle_button = self.create_button(
-                action_buttons_frame,
-                text=self._get_loop_icon(),
-                command=self.toggle_loop_mode,
-                variant="danger",
-                size="lg",
-                font=(self.normal_font.name, self.normal_font.actual()['size'], 'bold')
-            )
-            self.loop_toggle_button.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.play_button = self.create_button(
-                action_buttons_frame,
-                text="▶ Play Videos",
-                command=self.play_videos,
-                variant="danger",
-                size="lg",
-                font=(self.normal_font.name, self.normal_font.actual()['size'], 'bold')
-            )
-            self.play_button.pack(side=tk.LEFT)
-
-        def toggle_voice_commands(self):
-            """Toggle voice command recognition on/off"""
-            if not self.voice_available:
-                messagebox.showinfo("Voice Commands",
-                                    "Voice commands require: pip install SpeechRecognition pyaudio")
-                return
-
-            if not self.controller:
-                messagebox.showwarning("No Player",
-                                       "Please start video playback first")
-                return
-
-            if not self.voice_enabled:
-                # Start voice commands
-                if not self.voice_manager:
-                    try:
-                        self.voice_manager = VoiceCommandManager(
-                            self.controller,
-                            self.update_console
-                        )
-                    except Exception as e:
-                        messagebox.showerror("Voice Error", f"Failed to initialize: {e}")
-                        return
-
-                if self.voice_manager.start_listening():
-                    self.voice_enabled = True
-                    self.voice_button.config(text="🎤 Voice On")
-                    self.update_console("Voice commands activated")
-
-                    # Show available commands
-                    self._show_voice_commands()
-                else:
-                    messagebox.showerror("Voice Error", "Failed to start voice recognition")
+                self.voice_toolbar_btn = make_toolbar_btn("🎤 Voice Off", command=self.toggle_voice_commands)
             else:
-                # Stop voice commands
-                self.voice_manager.stop_listening()
-                self.voice_enabled = False
-                self.voice_button.config(text="🎤 Voice Off")
-                self.update_console("Voice commands deactivated")
+                self.voice_toolbar_btn = None
 
-        def _show_voice_commands(self):
-            """Show dialog with available voice commands"""
-            if not self.voice_manager:
-                return
-
-            commands_window = tk.Toplevel(self.root)
-            commands_window.title("Voice Commands")
-            commands_window.geometry("500x600")
-            commands_window.configure(bg=self.bg_color)
-            commands_window.transient(self.root)
-
-            # Header
-            header = tk.Label(
-                commands_window,
-                text="Available Voice Commands",
-                font=self.header_font,
-                bg=self.bg_color,
-                fg=self.text_color
-            )
-            header.pack(pady=10)
-
-            # Wake word info
-            if self.voice_manager.use_wake_word:
-                wake_info = tk.Label(
-                    commands_window,
-                    text=f"Wake words: {', '.join(self.voice_manager.wake_words)}",
-                    font=self.small_font,
-                    bg=self.bg_color,
-                    fg=self.accent_color
-                )
-                wake_info.pack(pady=5)
-
-            # Commands list
-            frame = tk.Frame(commands_window, bg=self.bg_color)
-            frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
-
-            scrollbar = tk.Scrollbar(frame)
-            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-            text = tk.Text(
-                frame,
-                wrap=tk.WORD,
-                yscrollcommand=scrollbar.set,
-                font=self.normal_font,
-                bg=self.listbox_bg,
-                fg=self.listbox_fg,
-                relief=tk.FLAT,
-                padx=10,
-                pady=10
-            )
-            text.pack(fill=tk.BOTH, expand=True)
-            scrollbar.config(command=text.yview)
-
-            # Group commands by category
-            categories = {
-                "Playback": ["play", "pause", "stop", "resume"],
-                "Navigation": ["next", "previous", "skip", "back", "next folder", "previous folder"],
-                "Seeking": ["forward", "rewind", "fast forward"],
-                "Volume": ["volume up", "volume down", "louder", "quieter", "mute", "unmute"],
-                "Display": ["fullscreen", "exit fullscreen", "screenshot", "overlay"],
-                "Speed": ["speed up", "slow down", "normal speed", "faster", "slower"],
-                "Advanced": [
-                    "volume [0-100]",
-                    "speed [0.25-2.0]",
-                    "skip [N] seconds",
-                    "back [N] seconds"
-                ]
+            _media_pill_commands = {
+                "🎵 Playlist":   self._manage_playlists,
+                "⬛ Queue":      self._show_queue_manager,
+                "♥ Favourites": self._show_favorites_manager,
+                "🕐 History":   self._show_watch_history,
             }
 
-            for category, commands in categories.items():
-                text.insert(tk.END, f"\n{category}:\n", "category")
-                for cmd in commands:
-                    text.insert(tk.END, f"  • {cmd}\n")
+            self._media_pill_btns = {}
 
-            text.tag_config("category", font=(self.header_font.name, 11, "bold"))
-            text.config(state=tk.DISABLED)
+            def _make_media_pill(label):
+                a = self.pill_accents(label)  # palette lives in ThemeSelector
+                c = _tb_colors()
+                btn = tk.Label(
+                    self.toolbar,
+                    text=label,
+                    bg=c["bg"],
+                    fg=a[0],
+                    font=("Segoe UI", 9, "bold"),
+                    padx=9, pady=3,
+                    cursor="hand2",
+                    relief="flat",
+                    highlightthickness=1,
+                    highlightbackground=a[0],
+                    highlightcolor=a[0],
+                )
+                btn.pack(side=tk.LEFT, padx=(0, 3), pady=2)
+                self._media_pill_btns[label] = btn
 
-            # Buttons
-            button_frame = tk.Frame(commands_window, bg=self.bg_color)
-            button_frame.pack(pady=10)
+                def on_enter(e, b=btn, lbl=label):
+                    a = self.pill_accents(lbl)
+                    b.config(bg=a[1], fg=a[2], highlightbackground=a[1])
+                def on_leave(e, b=btn, lbl=label):
+                    a = self.pill_accents(lbl); cc = _tb_colors()
+                    b.config(bg=cc["bg"], fg=a[0], highlightbackground=a[0])
+                def on_press(e, b=btn, lbl=label):
+                    a = self.pill_accents(lbl)
+                    b.config(bg=a[3], fg=a[2], highlightbackground=a[3])
+                def on_release(e, b=btn, lbl=label, cmd=_media_pill_commands[label]):
+                    a = self.pill_accents(lbl)
+                    b.config(bg=a[1], fg=a[2], highlightbackground=a[1])
+                    cmd()
 
-            toggle_wake = self.create_button(
-                button_frame,
-                text="Toggle Wake Word",
-                command=lambda: self._toggle_wake_word_dialog(commands_window),
-                variant="secondary",
-                size="sm"
+                btn.bind("<Enter>",           on_enter)
+                btn.bind("<Leave>",           on_leave)
+                btn.bind("<ButtonPress-1>",   on_press)
+                btn.bind("<ButtonRelease-1>", on_release)
+
+            for _pill_label in ["🎵 Playlist", "⬛ Queue", "♥ Favourites", "🕐 History"]:
+                _make_media_pill(_pill_label)
+
+            self.sleep_countdown_label = tk.Label(
+                self.toolbar,
+                text="",
+                bg=_tb_colors()["bg"],
+                fg=_tb_colors()["fg"],
+                font=("Segoe UI", 9),
+                padx=8, pady=4,
+                cursor="hand2"
             )
-            toggle_wake.pack(side=tk.LEFT, padx=5)
+            self.sleep_countdown_label.pack(side=tk.RIGHT, padx=(0, 2))
 
-            close_btn = self.create_button(
-                button_frame,
-                text="Close",
-                command=commands_window.destroy,
-                variant="primary",
-                size="sm"
+            def _sleep_label_click(e):
+                if not getattr(self, '_sleep_timer_end', None):
+                    return
+                try:
+                    if getattr(self, '_sleep_timer_paused', False):
+                        # resume: restart the after job and countdown
+                        import time as _time
+                        remaining_ms = int(self._sleep_timer_remaining * 1000)
+                        self._sleep_timer_end = _time.time() + self._sleep_timer_remaining
+                        self._sleep_timer_job = self.root.after(remaining_ms, self._sleep_timer_fired)
+                        self._sleep_timer_paused = False
+                        self._start_sleep_countdown()
+                        if self.controller:
+                            self.controller.player.pause()
+                    else:
+                        # pause: cancel the after job, store remaining
+                        import time as _time
+                        if self._sleep_timer_job:
+                            self.root.after_cancel(self._sleep_timer_job)
+                            self._sleep_timer_job = None
+                        if hasattr(self, '_sleep_countdown_job') and self._sleep_countdown_job:
+                            self.root.after_cancel(self._sleep_countdown_job)
+                            self._sleep_countdown_job = None
+                        self._sleep_timer_remaining = max(0, self._sleep_timer_end - _time.time())
+                        self._sleep_timer_paused = True
+                        if hasattr(self, 'sleep_countdown_label'):
+                            mins = int(self._sleep_timer_remaining) // 60
+                            secs = int(self._sleep_timer_remaining) % 60
+                            self.sleep_countdown_label.config(text=f"⏸ {mins}:{secs:02d}")
+                        if self.controller:
+                            self.controller.player.pause()
+                except Exception:
+                    pass
+
+            self.sleep_countdown_label.bind("<ButtonRelease-1>", _sleep_label_click)
+
+            # theme toggle
+            self.theme_toolbar_btn = tk.Label(
+                self.toolbar,
+                text="🌙" if not self.dark_mode else "☀",
+                bg=_tb_colors()["bg"],
+                fg=_tb_colors()["fg"],
+                font=("Segoe UI", 10),
+                padx=8, pady=4,
+                cursor="hand2"
             )
-            close_btn.pack(side=tk.LEFT, padx=5)
+            self.theme_toolbar_btn.pack(side=tk.RIGHT, padx=(0, 2))
 
-        def _toggle_wake_word_dialog(self, parent_window):
-            """Toggle wake word and update the commands window"""
-            if self.voice_manager:
-                self.voice_manager.toggle_wake_word()
-                parent_window.destroy()
-                self._show_voice_commands()
+            def _theme_enter(e):
+                cc = _tb_colors(); self.theme_toolbar_btn.config(bg=cc["hover_bg"], fg=cc["hover_fg"])
+            def _theme_leave(e):
+                cc = _tb_colors(); self.theme_toolbar_btn.config(bg=cc["bg"], fg=cc["fg"])
+            def _theme_press(e):
+                cc = _tb_colors(); self.theme_toolbar_btn.config(bg=cc["active_bg"], fg=cc["active_fg"])
+            def _theme_release(e):
+                cc = _tb_colors(); self.theme_toolbar_btn.config(bg=cc["hover_bg"], fg=cc["hover_fg"])
+                self._toggle_theme_menu()
+            self.theme_toolbar_btn.bind("<Enter>",          _theme_enter)
+            self.theme_toolbar_btn.bind("<Leave>",          _theme_leave)
+            self.theme_toolbar_btn.bind("<ButtonPress-1>",  _theme_press)
+            self.theme_toolbar_btn.bind("<ButtonRelease-1>",_theme_release)
+
+            # play button
+            self.play_toolbar_btn = tk.Label(
+                self.toolbar,
+                text="▶  Play Videos",
+                bg=_tb_colors()["bg"],
+                fg=_tb_colors()["play_fg"],
+                font=("Segoe UI", 9, "bold"),
+                padx=12, pady=4,
+                cursor="hand2"
+            )
+            self.play_toolbar_btn.pack(side=tk.RIGHT, padx=(0, 6))
+
+            def _play_enter(e):
+                cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc.get("play_hover_bg", cc["hover_bg"]), fg="#FFFFFF")
+            def _play_leave(e):
+                cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc["bg"], fg=cc["play_fg"])
+            def _play_press(e):
+                cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc.get("play_hover_bg", cc["active_bg"]), fg="#FFFFFF")
+            def _play_release(e):
+                cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc["hover_bg"], fg="#FFFFFF")
+                self.play_videos()
+            self.play_toolbar_btn.bind("<Enter>",          _play_enter)
+            self.play_toolbar_btn.bind("<Leave>",          _play_leave)
+            self.play_toolbar_btn.bind("<ButtonPress-1>",  _play_press)
+            self.play_toolbar_btn.bind("<ButtonRelease-1>",_play_release)
+
+            # placeholder so toggle_console's before= ref works
+            self.button_frame = tk.Frame(self.main_frame, bg=self.bg_color)
+            self.button_frame.pack(fill=tk.X)
+
+        def _show_sleep_timer_dialog(self):
+            # if timer already running, cancel it
+            if getattr(self, '_sleep_timer_job', None):
+                self.root.after_cancel(self._sleep_timer_job)
+                self._sleep_timer_job = None
+                if hasattr(self, '_sleep_countdown_job') and self._sleep_countdown_job:
+                    self.root.after_cancel(self._sleep_countdown_job)
+                    self._sleep_countdown_job = None
+                self._sleep_timer_end = None
+                self._sleep_timer_paused = False
+                if hasattr(self, 'sleep_countdown_label'):
+                    self.sleep_countdown_label.config(text="")
+                self.update_console("Sleep timer cancelled")
+                return
+
+            dlg = tk.Toplevel(self.root)
+            dlg.title("Sleep Timer")
+            dlg.geometry("300x160")
+            dlg.configure(bg=self.bg_color)
+            dlg.transient(self.root)
+            dlg.grab_set()
+            dlg.resizable(False, False)
+
+            tk.Label(dlg, text="Stop playback after (minutes):",
+                     font=self.normal_font, bg=self.bg_color,
+                     fg=self.text_color).pack(pady=(20, 8))
+
+            minutes_var = tk.IntVar(value=30)
+            spin = tk.Spinbox(dlg, from_=1, to=300,
+                              textvariable=minutes_var,
+                              font=self.normal_font, width=8,
+                              bg=self.bg_color, fg=self.text_color)
+            spin.pack()
+
+            def start():
+                import time as _time
+                minutes = minutes_var.get()
+                ms = minutes * 60 * 1000
+                self._sleep_timer_end = _time.time() + (minutes * 60)
+                self._sleep_timer_job = self.root.after(ms, self._sleep_timer_fired)
+                self._start_sleep_countdown()
+                self.update_console(f"Sleep timer set for {minutes} minutes")
+                dlg.destroy()
+
+            self.create_button(dlg, "Set Timer", start, "primary", "md").pack(pady=15)
+            dlg.bind("<Return>", lambda e: start())
+
+        def _start_sleep_countdown(self):
+            import time as _time
+
+            def tick():
+                if not getattr(self, '_sleep_timer_end', None):
+                    return
+                if getattr(self, '_sleep_timer_paused', False):
+                    return
+                remaining = int(self._sleep_timer_end - _time.time())
+                if remaining <= 0:
+                    return
+                mins = remaining // 60
+                secs = remaining % 60
+                if hasattr(self, 'sleep_countdown_label'):
+                    self.sleep_countdown_label.config(text=f"⏾ {mins}:{secs:02d}")
+                self._sleep_countdown_job = self.root.after(1000, tick)
+
+            self._sleep_countdown_job = None
+            tick()
+
+        def _sleep_timer_fired(self):
+            self._sleep_timer_job = None
+            self._sleep_timer_end = None
+            self._sleep_timer_paused = False
+            if hasattr(self, '_sleep_countdown_job') and self._sleep_countdown_job:
+                self.root.after_cancel(self._sleep_countdown_job)
+                self._sleep_countdown_job = None
+            if hasattr(self, 'sleep_countdown_label'):
+                self.sleep_countdown_label.config(text="")
+            self.update_console("Sleep timer: stopping playback")
+            if self.controller:
+                try:
+                    self.controller.stop()
+                except Exception:
+                    pass
+                self.controller = None
+                from key_press import cleanup_hotkeys
+                cleanup_hotkeys()
 
         def setup_status_section(self):
-            self.status_frame = tk.Frame(self.main_frame, bg=self.bg_color)
-            self.status_frame.pack(fill=tk.X)
-
-        def _add_directory_from_ipc(self, directory):
-            if directory not in self.selected_dirs:
-                self.selected_dirs.append(directory)
-                display_name = directory
-                if len(directory) > 60:
-                    display_name = os.path.basename(directory)
-                    parent = os.path.dirname(directory)
-                    if parent:
-                        display_name = f"{os.path.basename(parent)}/{display_name}"
-                    display_name = f".../{display_name}"
-                self.dir_listbox.insert(tk.END, display_name)
-                self.update_console(f"Added directory from IPC: {directory}")
-                self._submit_scan(directory)
-                self.update_video_count()
-                self.save_preferences()
-
-        def _open_dual_player(self):
-            if hasattr(self, 'dual_player_manager'):
-                self.dual_player_manager.show()
-
-                selected_dir = self.get_current_selected_directory()
-                if selected_dir:
-                    cache = self.scan_cache.get(selected_dir)
-                    if cache:
-                        videos, _, _ = cache
-                        filtered = [v for v in videos
-                                    if not self.is_video_excluded(selected_dir, v)]
-                        if filtered:
-                            self.root.after(
-                                400,
-                                lambda: self.dual_player_manager.preload(
-                                    videos1=filtered[:200]
-                                )
-                            )
-
-        def _select_all_main_dirs(self, event=None):
-            self.dir_listbox.selection_set(0, tk.END)
-            self.on_directory_select(None)
-            return "break"
-
-        def _on_main_dir_left_click(self, event):
-            index = self.dir_listbox.nearest(event.y)
-            if index < 0 or index >= self.dir_listbox.size():
-                return
-
-            self._drag_start_index = index
-            ctrl_held = bool(event.state & 0x4)
-            shift_held = bool(event.state & 0x1)
-            current_selection = list(self.dir_listbox.curselection())
-
-            if not ctrl_held and not shift_held:
-                if current_selection == [index]:
-                    self.dir_listbox.selection_clear(0, tk.END)
-                    self.current_selected_dir_index = None
-                    self.clear_exclusion_list()
-                    self._is_filtered_mode = False
-                    return "break"
-
-            if shift_held:
-                if not hasattr(self, '_main_dir_anchor') or self._main_dir_anchor is None:
-                    self._main_dir_anchor = current_selection[0] if current_selection else 0
-                self.dir_listbox.selection_clear(0, tk.END)
-                start = min(self._main_dir_anchor, index)
-                end = max(self._main_dir_anchor, index)
-                for i in range(start, end + 1):
-                    self.dir_listbox.selection_set(i)
-                self.dir_listbox.activate(index)
-                self.on_directory_select(None)
-                return "break"
-            elif ctrl_held:
-                if index in current_selection:
-                    self.dir_listbox.selection_clear(index)
-                else:
-                    self.dir_listbox.selection_set(index)
-                self._main_dir_anchor = index
-                self.dir_listbox.activate(index)
-                self.on_directory_select(None)
-                return "break"
-            else:
-                if current_selection == [index]:
-                    self.dir_listbox.selection_clear(0, tk.END)
-                    self.current_selected_dir_index = None
-                    self._is_filtered_mode = False
-                    self.clear_exclusion_list()
-                    return "break"
-
-                self.dir_listbox.selection_clear(0, tk.END)
-                self.dir_listbox.selection_set(index)
-                self.dir_listbox.activate(index)
-                self._main_dir_anchor = index
-                self.on_directory_select(None)
-                return "break"
-
-        def _on_drag(self, event):
+            # Video count is now shown inline in the exclusion section header
             pass
 
-        def _on_drop(self, event):
-            if not hasattr(self, '_drag_start_index') or self._drag_start_index is None:
-                return
-
-            drop_index = self.dir_listbox.nearest(event.y)
-            if drop_index < 0:
-                drop_index = self.dir_listbox.size() - 1
-
-            if drop_index != self._drag_start_index:
-                # Reorder selected_dirs
-                item = self.selected_dirs.pop(self._drag_start_index)
-                self.selected_dirs.insert(drop_index, item)
-
-                # Reorder listbox display
-                display_item = self.dir_listbox.get(self._drag_start_index)
-                self.dir_listbox.delete(self._drag_start_index)
-                self.dir_listbox.insert(drop_index, display_item)
-
-                # Update selection
-                self.dir_listbox.selection_clear(0, tk.END)
-                self.dir_listbox.selection_set(drop_index)
-                self.dir_listbox.activate(drop_index)
-                self.current_selected_dir_index = drop_index
-
-                # Trigger directory select to update other UI parts
-                self.on_directory_select(None)
-
-            self._drag_start_index = None
-
-        def _show_main_dir_context_menu(self, event):
-            index = self.dir_listbox.nearest(event.y)
-            selection = self.dir_listbox.curselection()
-
-            if index >= 0 and index not in selection:
-                self.dir_listbox.selection_clear(0, tk.END)
-                self.dir_listbox.selection_set(index)
-                self.dir_listbox.activate(index)
-                self._main_dir_anchor = index
-                self.on_directory_select(None)
-                selection = self.dir_listbox.curselection()
-
-            if not selection:
-                return
-
-            context_menu = tk.Menu(self.root, tearoff=0)
-            context_menu.add_command(label="Play Selected", command=self._play_selected_main_dirs)
-            context_menu.add_command(label="Open in Grid View", command=self._open_grid_view_main_dirs)
-            context_menu.add_separator()
-            context_menu.add_command(label="Remove Selected", command=self.remove_directory)
-
-            context_menu.post(event.x_root, event.y_root)
-
-        def _play_selected_main_dirs(self):
-            selection = self.dir_listbox.curselection()
-            if not selection:
-                return
-
-            all_videos = []
-            for i in selection:
-                if i < len(self.selected_dirs):
-                    root_dir = self.selected_dirs[i]
-                    excluded_subdirs = self.excluded_subdirs.get(root_dir, [])
-                    excluded_files = self.excluded_videos.get(root_dir, [])
-
-                    videos = gather_videos(root_dir)
-                    filtered_videos = []
-                    for v_path in videos:
-                        if not self.is_video_in_excluded_directory(v_path, excluded_subdirs) and \
-                           v_path not in excluded_files:
-                            filtered_videos.append(v_path)
-                    all_videos.extend(filtered_videos)
-
-            if not all_videos:
-                messagebox.showinfo("Information", "No videos found in selected directories.")
-                return
-
-            self._play_grid_videos(all_videos)
-
-        def _open_grid_view_main_dirs(self):
-            selection = self.dir_listbox.curselection()
-            if not selection:
-                return
-
-            all_videos = []
-            for i in selection:
-                if i < len(self.selected_dirs):
-                    root_dir = self.selected_dirs[i]
-                    excluded_subdirs = self.excluded_subdirs.get(root_dir, [])
-                    excluded_files = self.excluded_videos.get(root_dir, [])
-
-                    videos = gather_videos(root_dir)
-                    filtered_videos = []
-                    for v_path in videos:
-                        if not self.is_video_in_excluded_directory(v_path, excluded_subdirs) and \
-                           v_path not in excluded_files:
-                            filtered_videos.append(v_path)
-                    all_videos.extend(filtered_videos)
-
-            if not all_videos:
-                messagebox.showinfo("Information", "No videos found in selected directories.")
-                return
-
-            self._open_grid_view(all_videos)
+        def _show_filter_dialog(self):
+            self.filter_sort_ui.show_filter_dialog()
 
         def add_directory(self):
             directory = filedialog.askdirectory(title="Select a Directory")
@@ -3770,311 +3650,6 @@ def select_multiple_folders_and_play():
                 self._submit_scan(directory)
                 self.update_video_count()
                 self.save_preferences()
-
-        def _ask_drive_link_dialog(self):
-            """Modern, themed popup to input a Google Drive link. Returns URL or None."""
-            dlg = tk.Toplevel(self.root)
-            dlg.title("Add Google Drive Link")
-            dlg.configure(bg=self.bg_color)
-            dlg.transient(self.root)
-            dlg.grab_set()
-
-            # Window size and positioning
-            dlg.geometry("560x260")
-            try:
-                dlg.update_idletasks()
-                x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (560 // 2)
-                y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (260 // 2)
-                dlg.geometry(f"+{x}+{y}")
-            except Exception:
-                pass
-
-            result = {"url": None}
-
-            container = tk.Frame(dlg, bg=self.bg_color)
-            container.pack(fill=tk.BOTH, expand=True, padx=18, pady=16)
-
-            # Header
-            header = tk.Label(
-                container,
-                text="Add Google Drive Link",
-                font=self.header_font,
-                bg=self.bg_color,
-                fg=self.text_color
-            )
-            header.pack(anchor="w")
-
-            # Helper text
-            helper = tk.Label(
-                container,
-                text="Paste a public Google Drive folder or file link. The folder structure will be preserved.",
-                font=self.small_font,
-                bg=self.bg_color,
-                fg=self.accent_color,
-                wraplength=520,
-                justify=tk.LEFT
-            )
-            helper.pack(anchor="w", pady=(6, 10))
-
-            entry_frame = tk.Frame(container, bg=self.bg_color)
-            entry_frame.pack(fill=tk.X)
-
-            url_var = tk.StringVar()
-            entry = tk.Entry(
-                entry_frame,
-                textvariable=url_var,
-                font=self.normal_font,
-                bg=self.listbox_bg,
-                fg=self.listbox_fg,
-                relief=tk.FLAT,
-                insertbackground=self.text_color,
-                highlightthickness=1,
-                highlightbackground=self.accent_color,
-                highlightcolor=self.accent_color
-            )
-            entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=6)
-
-            def paste_clipboard():
-                try:
-                    wcb.OpenClipboard()
-                    data = wcb.GetClipboardData(win32con.CF_UNICODETEXT)
-                    wcb.CloseClipboard()
-                    if data:
-                        url_var.set(data.strip())
-                        entry.icursor(tk.END)
-                        validate_now()
-                except Exception:
-                    pass
-
-            paste_btn = self.create_button(
-                entry_frame,
-                text="Paste",
-                command=paste_clipboard,
-                variant="secondary",
-                size="sm"
-            )
-            paste_btn.pack(side=tk.LEFT, padx=(8, 0))
-
-            # Validation label
-            validate_lbl = tk.Label(
-                container,
-                text="",
-                font=self.small_font,
-                bg=self.bg_color,
-                fg="#e17055"  # subtle warning color
-            )
-            validate_lbl.pack(anchor="w", pady=(6, 0))
-
-            btns = tk.Frame(container, bg=self.bg_color)
-            btns.pack(anchor="e", pady=(14, 0))
-
-            def validate_url(u: str) -> bool:
-                if not u:
-                    return False
-                try:
-                    # Use Drive manager's parser for authoritative validation
-                    return self.drive_manager is not None and (self.drive_manager._extract_id_and_type(u) is not None)
-                except Exception:
-                    return "drive.google.com" in u
-
-            def validate_now():
-                u = url_var.get().strip()
-                if not u:
-                    validate_lbl.config(text="Please enter a link.")
-                    return False
-                if not validate_url(u):
-                    validate_lbl.config(text="This doesn't look like a public Google Drive link.")
-                    return False
-                validate_lbl.config(text="")
-                return True
-
-            def on_submit():
-                if validate_now():
-                    result["url"] = url_var.get().strip()
-                    dlg.destroy()
-
-            def on_cancel():
-                result["url"] = None
-                dlg.destroy()
-
-            add_btn = self.create_button(
-                btns,
-                text="Add Link",
-                command=on_submit,
-                variant="primary",
-                size="md"
-            )
-            add_btn.pack(side=tk.RIGHT, padx=(8, 0))
-
-            cancel_btn = self.create_button(
-                btns,
-                text="Cancel",
-                command=on_cancel,
-                variant="secondary",
-                size="md"
-            )
-            cancel_btn.pack(side=tk.RIGHT)
-
-            # Prefill from clipboard if it looks like a Drive URL
-            try:
-                wcb.OpenClipboard()
-                data = wcb.GetClipboardData(win32con.CF_UNICODETEXT)
-                wcb.CloseClipboard()
-                if data and ("drive.google.com" in data or "id=" in data):
-                    url_var.set(data.strip())
-                    entry.icursor(tk.END)
-            except Exception:
-                pass
-
-            # Key bindings
-            dlg.bind("<Return>", lambda _e: on_submit())
-            dlg.bind("<Escape>", lambda _e: on_cancel())
-
-            entry.focus_set()
-            self.root.wait_window(dlg)
-            return result["url"]
-
-        def add_drive_link(self):
-            if not self.drive_manager:
-                messagebox.showerror("Google Drive", "Google Drive integration is unavailable.")
-                return
-
-            url = self._ask_drive_link_dialog()
-            if not url:
-                return
-
-            self.update_console("Processing Google Drive link for streaming…")
-
-            # Show a small modal progress window so the user knows it's working
-            progress_window = tk.Toplevel(self.root)
-            progress_window.title("Google Drive")
-            progress_window.geometry("420x140")
-            progress_window.configure(bg=self.bg_color)
-            progress_window.transient(self.root)
-            progress_window.grab_set()
-
-            lbl = tk.Label(
-                progress_window,
-                text="Fetching contents… Large Drive folders can take a while…",
-                font=self.normal_font,
-                bg=self.bg_color,
-                fg=self.text_color,
-                wraplength=380,
-                justify=tk.LEFT,
-            )
-            lbl.pack(padx=16, pady=(16, 8), anchor="w")
-
-            bar = ttk.Progressbar(progress_window, mode='indeterminate', length=380)
-            bar.pack(padx=16, pady=(0, 8))
-            try:
-                bar.start(10)
-            except Exception:
-                pass
-
-            status_lbl = tk.Label(
-                progress_window,
-                text="Starting…",
-                font=self.small_font,
-                bg=self.bg_color,
-                fg="#666666",
-                wraplength=380,
-                justify=tk.LEFT,
-            )
-            status_lbl.pack(padx=16, pady=(0, 8), anchor="w")
-
-            # Disable the Add button while working, if present
-            try:
-                if hasattr(self, 'add_drive_button') and self.add_drive_button:
-                    self.add_drive_button.configure(state=tk.DISABLED)
-            except Exception:
-                pass
-
-            def set_status(msg: str):
-                try:
-                    status_lbl.config(text=msg)
-                    self.update_console(msg)
-                except Exception:
-                    pass
-
-            def finish_cleanup():
-                try:
-                    bar.stop()
-                except Exception:
-                    pass
-                try:
-                    progress_window.destroy()
-                except Exception:
-                    pass
-                try:
-                    if hasattr(self, 'add_drive_button') and self.add_drive_button:
-                        self.add_drive_button.configure(state=tk.NORMAL)
-                except Exception:
-                    pass
-
-            # Validate URL and make source descriptor first
-            try:
-                source = self.drive_manager.make_source_from_url(url)
-                if not source:
-                    raise ValueError("Unrecognized Google Drive link.")
-            except Exception as e:
-                finish_cleanup()
-                messagebox.showerror("Google Drive", str(e))
-                self.update_console(f"Google Drive error: {e}")
-                return
-
-            def worker():
-                try:
-                    kind = source.get("kind")
-                    if kind == "folder":
-                        folder_id = source["id"]
-                        pseudo_dir = f"gdrive://folder/{folder_id}"
-                        # Duplicate check on UI thread state snapshot
-                        if pseudo_dir in self.selected_dirs:
-                            self.root.after(0, lambda: (set_status("Drive link already added."), finish_cleanup()))
-                            return
-                        self.root.after(0, lambda: set_status("Listing folder recursively…"))
-                        videos, video_to_dir, directories = self.drive_manager.gather_videos_with_directories_for_source(source)
-
-                        def apply_folder():
-                            self.scan_cache.set(pseudo_dir, (videos, video_to_dir, directories))
-                            self.selected_dirs.append(pseudo_dir)
-                            display_name = f"Drive Folder {folder_id}"
-                            self.dir_listbox.insert(tk.END, display_name)
-                            self.update_console(f"Added Google Drive folder for streaming: {folder_id} with {len(videos)} videos")
-                            self.update_video_count()
-                            self.save_preferences()
-                            finish_cleanup()
-
-                        self.root.after(0, apply_folder)
-                    else:
-                        # Single file streaming
-                        file_id = source["id"]
-                        pseudo_dir = f"gdrive://file/{file_id}"
-                        if pseudo_dir in self.selected_dirs:
-                            self.root.after(0, lambda: (set_status("Drive link already added."), finish_cleanup()))
-                            return
-                        self.root.after(0, lambda: set_status("Preparing file stream…"))
-                        videos, video_to_dir, directories = self.drive_manager.gather_videos_with_directories_for_source(source)
-
-                        def apply_file():
-                            self.scan_cache.set(pseudo_dir, (videos, video_to_dir, directories))
-                            self.selected_dirs.append(pseudo_dir)
-                            display_name = f"Drive File {file_id}"
-                            self.dir_listbox.insert(tk.END, display_name)
-                            self.update_console(f"Added Google Drive file for streaming: {file_id}")
-                            self.update_video_count()
-                            self.save_preferences()
-                            finish_cleanup()
-
-                        self.root.after(0, apply_file)
-                except Exception as e:
-                    def on_err():
-                        finish_cleanup()
-                        messagebox.showerror("Google Drive", f"Failed to add link: {e}")
-                        self.update_console(f"Google Drive error: {e}")
-                    self.root.after(0, on_err)
-
-            ManagedThread(target=worker, name="AddDriveLink").start()
 
         def remove_directory(self):
             selected_indices = self.dir_listbox.curselection()
@@ -4127,91 +3702,6 @@ def select_multiple_folders_and_play():
                     displayed_items.append(path)
 
             return displayed_items
-
-        # --- Helpers for playing selections that may include streaming URLs and pseudo directories ---
-        def _is_stream_url(self, path: str) -> bool:
-            return isinstance(path, str) and (path.startswith("http://") or path.startswith("https://"))
-
-        def _collect_videos_from_pseudo_dir(self, root_pseudo_dir: str, pseudo_dir: str) -> list:
-            """
-            Given a gdrive pseudo root (one of self.selected_dirs) and a pseudo_dir within that tree,
-            collect all videos whose parent is this pseudo_dir or any of its descendants.
-            """
-            cache = self.scan_cache.get(root_pseudo_dir)
-            if not cache:
-                return []
-            videos, video_to_dir, directories = cache
-            results = []
-            prefix = pseudo_dir.rstrip('/') + '/'
-            for v in videos:
-                parent = video_to_dir.get(v)
-                if not parent:
-                    continue
-                if parent == pseudo_dir or parent.startswith(prefix):
-                    results.append(v)
-            return results
-
-        def _resolve_selection_indices_to_videos(self, selected_dir, indices) -> list:
-            """
-            Resolve listbox indices into a list of playable videos, supporting:
-            - local files
-            - http(s) streaming URLs
-            - local folders (recursive)
-            - gdrive pseudo folders (gdrive://folder/..)
-            Applies exclusions for the selected_dir.
-            """
-            collected = []
-            for index in indices:
-                item_path = self.current_subdirs_mapping.get(index)
-                if not item_path:
-                    continue
-
-                # Stream URL
-                if self._is_stream_url(item_path):
-                    if not self.is_video_excluded(selected_dir, item_path):
-                        collected.append(item_path)
-                    continue
-
-                # gdrive pseudo folder
-                if isinstance(item_path, str) and item_path.startswith("gdrive://folder/"):
-                    # Find the root pseudo directory for this item (the one present in selected_dirs)
-                    root_pseudo = None
-                    for d in self.selected_dirs:
-                        if isinstance(d, str) and d.startswith("gdrive://folder/") and item_path.startswith(d):
-                            root_pseudo = d
-                            break
-                    if root_pseudo:
-                        for v in self._collect_videos_from_pseudo_dir(root_pseudo, item_path):
-                            if not self.is_video_excluded(root_pseudo, v):
-                                collected.append(v)
-                    continue
-
-                # Local file
-                if os.path.isfile(item_path) and is_video(item_path):
-                    if not self.is_video_excluded(selected_dir, item_path):
-                        collected.append(item_path)
-                    continue
-
-                # Local directory
-                if os.path.isdir(item_path):
-                    try:
-                        for root, dirs, files in os.walk(item_path):
-                            for f in files:
-                                full_path = os.path.join(root, f)
-                                if is_video(full_path) and not self.is_video_excluded(selected_dir, full_path):
-                                    collected.append(full_path)
-                    except Exception as e:
-                        self.update_console(f"Error reading folder {item_path}: {e}")
-
-            # Deduplicate, avoid normalizing HTTP URLs
-            seen = set()
-            final_videos = []
-            for v in collected:
-                v_norm = v if self._is_stream_url(v) else os.path.normpath(v)
-                if v_norm not in seen:
-                    seen.add(v_norm)
-                    final_videos.append(v_norm)
-            return final_videos
 
         def draw_slider(self):
             if not hasattr(self, 'speed_canvas'):
@@ -4306,41 +3796,126 @@ def select_multiple_folders_and_play():
                 self.update_console("Playback speed reset to 1.0×")
             self.draw_slider()
 
-        def _add_to_playlist(self):
-            if self.ai_mode and self.current_subdirs_mapping:
-                selection = self.exclusion_listbox.curselection()
-                if selection:
-                    search_active = hasattr(self, 'search_query') and self.search_query
-                    filter_msg = " from search results" if search_active else ""
-
-                    # Include stream URLs too
-                    selected_videos = []
-                    for index in selection:
-                        if index in self.current_subdirs_mapping:
-                            path = self.current_subdirs_mapping[index]
-                            if (self._is_stream_url(path)) or (os.path.isfile(path) and is_video(path)):
-                                selected_videos.append(path)
-
-                    if selected_videos:
-                        self.playlist_manager.add_videos_to_playlist([], selected_videos)
-                        self.update_console(f"Added {len(selected_videos)} selected videos{filter_msg} to playlist")
-                    else:
-                        messagebox.showwarning("Warning", "No valid selected videos found")
-                else:
-                    ai_video_paths = []
-                    for i in range(len(self.current_subdirs_mapping)):
-                        if i in self.current_subdirs_mapping:
-                            path = self.current_subdirs_mapping[i]
-                            if (self._is_stream_url(path)) or (os.path.isfile(path) and is_video(path)):
-                                ai_video_paths.append(path)
-
-                    if ai_video_paths:
-                        self.playlist_manager.add_videos_to_playlist([], ai_video_paths)
-                        self.update_console(f"Added {len(ai_video_paths)} AI search results to playlist")
-                    else:
-                        messagebox.showwarning("Warning", "No valid videos found in AI search results")
+        def _show_grid_view(self):
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                messagebox.showwarning("Warning", "Please select a directory first")
                 return
 
+            exclusion_selection = self.exclusion_listbox.curselection()
+
+            if exclusion_selection:
+                self.update_console("Loading grid view for selected items...")
+
+                def collect_selected_videos():
+                    selected_videos = []
+                    selected_folders = []
+
+                    for index in exclusion_selection:
+                        item_path = self.current_subdirs_mapping.get(index)
+                        if not item_path:
+                            continue
+
+                        if os.path.isfile(item_path) and is_video(item_path):
+                            if not self.is_video_excluded(selected_dir, item_path):
+                                selected_videos.append(item_path)
+                        elif os.path.isdir(item_path):
+                            selected_folders.append(item_path)
+
+                    for folder in selected_folders:
+                        try:
+                            for root, dirs, files in os.walk(folder):
+                                for f in files:
+                                    full_path = os.path.join(root, f)
+                                    if is_video(full_path):
+                                        if not self.is_video_excluded(selected_dir, full_path):
+                                            selected_videos.append(full_path)
+                        except Exception as e:
+                            self.update_console(f"Error reading folder {folder}: {e}")
+
+                    seen = set()
+                    final_videos = []
+                    for v in selected_videos:
+                        v_norm = os.path.normpath(v)
+                        if v_norm not in seen:
+                            seen.add(v_norm)
+                            final_videos.append(v_norm)
+
+                    if final_videos:
+                        self.root.after(0, lambda: self._open_grid_view(final_videos))
+                    else:
+                        self.root.after(0, lambda: messagebox.showwarning("Warning", "No videos found in selection"))
+
+                threading.Thread(target=collect_selected_videos, daemon=True).start()
+            else:
+                self.update_console("Loading grid view for entire directory...")
+
+                def collect_all_videos():
+                    cache = self.scan_cache.get(selected_dir)
+                    if cache:
+                        videos, _, _ = cache
+                        filtered = [v for v in videos if not self.is_video_excluded(selected_dir, v)]
+                        self.root.after(0, lambda: self._open_grid_view(filtered))
+                    else:
+                        self.root.after(0, lambda: messagebox.showwarning("Warning", "No videos found"))
+
+                threading.Thread(target=collect_all_videos, daemon=True).start()
+
+        def _open_grid_view(self, videos):
+            if not videos:
+                messagebox.showwarning("Warning", "No videos to display")
+                return
+
+            self.grid_view_manager.video_preview_manager = self.video_preview_manager
+            self.grid_view_manager.show_grid_view(videos, self.video_preview_manager)
+
+        def _play_grid_videos(self, videos):
+            if not videos:
+                return
+
+            if self.controller:
+                try:
+                    self.controller.stop()
+                except Exception:
+                    pass
+                self.controller = None
+                # cleanup_hotkeys()
+
+            all_video_to_dir = {v: os.path.dirname(v) for v in videos}
+            all_directories = sorted(list(set(all_video_to_dir.values())))
+
+            self.update_console(f"Playing {len(videos)} videos from grid selection")
+
+            self.controller = VLCPlayerControllerForMultipleDirectory(
+                videos, all_video_to_dir, all_directories, self.update_console,
+                volume=self.volume, is_muted=self.is_muted
+            )
+            self.controller.set_loop_mode(self.loop_mode)
+            self.controller.set_volume_save_callback(self._save_volume_callback)
+            self.controller.set_watch_history_callback(self.watch_history_manager.track_video_playback)
+            self.controller.set_resume_manager(self.resume_manager)
+            self.controller.set_start_index(0)
+            self.controller.set_video_change_callback(self.on_video_changed)
+            self.controller.set_stop_callback(self._on_player_stopped)
+
+            if self.player_thread and self.player_thread.is_alive():
+                self.controller.running = False
+                self.player_thread.join(timeout=3.0)
+
+            self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
+            self.player_thread.start()
+
+            self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller, self.settings_manager.get_settings().hotkeys if hasattr(self, "settings_manager") else None), daemon=True)
+            self.keys_thread.start()
+
+            def init_overlay_delayed(ctrl=self.controller):
+                time.sleep(1)
+                if self.controller is ctrl and ctrl.running:
+                    ctrl.init_overlay()
+
+            ManagedThread(target=init_overlay_delayed, name="InitOverlay").start()
+
+        def _add_to_playlist(self):
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
                 messagebox.showwarning("Warning", "Please select a directory first")
@@ -4349,7 +3924,6 @@ def select_multiple_folders_and_play():
             selection = self.exclusion_listbox.curselection()
 
             if selection:
-                # Use resolver to support stream URLs and gdrive pseudo folders
                 selected_videos = self._resolve_selection_indices_to_videos(selected_dir, selection)
 
                 if selected_videos:
@@ -4358,7 +3932,6 @@ def select_multiple_folders_and_play():
                 else:
                     messagebox.showwarning("Warning", "No videos found in selected items")
             else:
-                # self.add_to_playlist_button.config(text="Adding...", state=tk.DISABLED)
                 search_active = hasattr(self, 'search_query') and self.search_query
                 if search_active:
                     self.update_console("Collecting all search results for playlist...")
@@ -4387,7 +3960,6 @@ def select_multiple_folders_and_play():
                                         all_videos.append(video)
 
                         def finish_collection():
-                            # self.add_to_playlist_button.config(text="Add to Playlist", state=tk.NORMAL)
                             if all_videos:
                                 self.playlist_manager.add_videos_to_playlist([], all_videos)
                                 self.update_console(f"Added all {len(all_videos)} videos to playlist")
@@ -4398,7 +3970,6 @@ def select_multiple_folders_and_play():
 
                     except Exception as e:
                         def show_error():
-                            # self.add_to_playlist_button.config(text="Add to Playlist", state=tk.NORMAL)
                             messagebox.showerror("Error", f"Failed to collect videos: {e}")
 
                         self.root.after(0, show_error)
@@ -4414,8 +3985,12 @@ def select_multiple_folders_and_play():
                 return
 
             if self.controller:
-                self.controller.stop()
-                cleanup_hotkeys()
+                try:
+                    self.controller.stop()
+                except Exception:
+                    pass
+                self.controller = None
+                # cleanup_hotkeys()
 
             self.update_console("=" * 100)
             self.update_console("STARTING PLAYLIST PLAYBACK")
@@ -4426,7 +4001,6 @@ def select_multiple_folders_and_play():
 
             for video_path in videos:
                 if self._is_stream_url(video_path):
-                    # Map stream URLs to a synthetic directory key
                     video_dir = "STREAMS"
                     all_video_to_dir[video_path] = video_dir
                     if video_dir not in all_directories:
@@ -4447,11 +4021,10 @@ def select_multiple_folders_and_play():
             def start_playlist_player():
                 self.update_console(f"Playing playlist with {len(valid_videos)} videos")
                 self.controller = VLCPlayerControllerForMultipleDirectory(
-                    valid_videos, all_video_to_dir, all_directories, self.update_console
+                    valid_videos, all_video_to_dir, all_directories, self.update_console,
+                    volume=self.volume, is_muted=self.is_muted
                 )
                 self.controller.set_loop_mode(self.loop_mode)
-                self.controller.volume = self.volume
-                self.controller.player.audio_set_volume(self.volume)
                 self.controller.set_volume_save_callback(self._save_volume_callback)
                 self.controller.set_watch_history_callback(
                     self.watch_history_manager.track_video_playback
@@ -4465,15 +4038,16 @@ def select_multiple_folders_and_play():
 
                 self.controller.set_start_index(0)
                 self.controller.set_video_change_callback(self.on_video_changed)
+                self.controller.set_stop_callback(self._on_player_stopped)
 
                 if self.player_thread and self.player_thread.is_alive():
                     self.controller.running = False
-                    self.player_thread.join(timeout=1.0)
+                    self.player_thread.join(timeout=3.0)
 
                 self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                 self.player_thread.start()
 
-                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
+                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller, self.settings_manager.get_settings().hotkeys if hasattr(self, "settings_manager") else None), daemon=True)
                 self.keys_thread.start()
                 time.sleep(1)
                 self.controller.init_overlay()
@@ -4505,8 +4079,12 @@ def select_multiple_folders_and_play():
                 return
 
             if self.controller:
-                self.controller.stop()
-                cleanup_hotkeys()
+                try:
+                    self.controller.stop()
+                except Exception:
+                    pass
+                self.controller = None
+                # cleanup_hotkeys()
 
             all_video_to_dir = {}
             all_directories = []
@@ -4533,11 +4111,10 @@ def select_multiple_folders_and_play():
             def start_queue_player():
                 self.update_console(f"Playing queue with {len(valid_videos)} videos")
                 self.controller = VLCPlayerControllerForMultipleDirectory(
-                    valid_videos, all_video_to_dir, all_directories, self.update_console
+                    valid_videos, all_video_to_dir, all_directories, self.update_console,
+                    volume=self.volume, is_muted=self.is_muted
                 )
                 self.controller.set_loop_mode("loop_off")
-                self.controller.volume = self.volume
-                self.controller.player.audio_set_volume(self.volume)
                 self.controller.set_volume_save_callback(self._save_volume_callback)
                 self.controller.set_watch_history_callback(
                     self.watch_history_manager.track_video_playback
@@ -4554,15 +4131,16 @@ def select_multiple_folders_and_play():
 
                 self.controller.set_start_index(0)
                 self.controller.set_video_change_callback(self.on_video_changed)
+                self.controller.set_stop_callback(self._on_player_stopped)
 
                 if self.player_thread and self.player_thread.is_alive():
                     self.controller.running = False
-                    self.player_thread.join(timeout=1.0)
+                    self.player_thread.join(timeout=3.0)
 
                 self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                 self.player_thread.start()
 
-                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
+                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller, self.settings_manager.get_settings().hotkeys if hasattr(self, "settings_manager") else None), daemon=True)
                 self.keys_thread.start()
                 time.sleep(1)
                 self.controller.init_overlay()
@@ -4578,8 +4156,12 @@ def select_multiple_folders_and_play():
                 return
 
             if self.controller:
-                self.controller.stop()
-                cleanup_hotkeys()
+                try:
+                    self.controller.stop()
+                except Exception:
+                    pass
+                self.controller = None
+                # cleanup_hotkeys()
 
             self.update_console("=" * 100)
             self.update_console("STARTING HISTORY VIDEO PLAYBACK")
@@ -4610,11 +4192,10 @@ def select_multiple_folders_and_play():
             def start_history_player():
                 self.update_console(f"Playing {len(valid_videos)} videos from history")
                 self.controller = VLCPlayerControllerForMultipleDirectory(
-                    valid_videos, all_video_to_dir, all_directories, self.update_console
+                    valid_videos, all_video_to_dir, all_directories, self.update_console,
+                    volume=self.volume, is_muted=self.is_muted
                 )
                 self.controller.set_loop_mode(self.loop_mode)
-                self.controller.volume = self.volume
-                self.controller.player.audio_set_volume(self.volume)
                 self.controller.set_volume_save_callback(self._save_volume_callback)
                 self.controller.set_watch_history_callback(
                     self.watch_history_manager.track_video_playback
@@ -4628,15 +4209,16 @@ def select_multiple_folders_and_play():
 
                 self.controller.set_start_index(0)
                 self.controller.set_video_change_callback(self.on_video_changed)
+                self.controller.set_stop_callback(self._on_player_stopped)
 
                 if self.player_thread and self.player_thread.is_alive():
                     self.controller.running = False
-                    self.player_thread.join(timeout=1.0)
+                    self.player_thread.join(timeout=3.0)
 
                 self.player_thread = threading.Thread(target=self.controller.run, daemon=True)
                 self.player_thread.start()
 
-                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller), daemon=True)
+                self.keys_thread = threading.Thread(target=lambda: listen_keys(self.controller, self.settings_manager.get_settings().hotkeys if hasattr(self, "settings_manager") else None), daemon=True)
                 self.keys_thread.start()
                 time.sleep(1)
                 self.controller.init_overlay()
@@ -4653,13 +4235,391 @@ def select_multiple_folders_and_play():
         def _show_settings(self):
             self.settings_manager.show_settings()
 
-        def _show_filter_dialog(self):
-            self.filter_sort_ui.show_filter_dialog()
+        def _open_dual_player(self, win_id: int = 1):
+            selected_dir = self.get_current_selected_directory()
+            if selected_dir:
+                cache = self.scan_cache.get(selected_dir)
+                if cache:
+                    videos, _, _ = cache
+                    filtered = [v for v in videos
+                                if not self.is_video_excluded(selected_dir, v)]
+                    if filtered:
+                        self.dual_player_manager.load_videos_into_slot(win_id, 1, filtered[:200])
+                        return
+            self.dual_player_manager.show(win_id)
 
-
-        def _save_volume_callback(self, volume):
+        def _save_volume_callback(self, volume, is_muted=None):
             self.volume = volume
+            if is_muted is not None:
+                self.is_muted = is_muted
             self.save_preferences()
+
+        def _is_stream_url(self, path: str) -> bool:
+            return isinstance(path, str) and (path.startswith("http://") or path.startswith("https://"))
+
+        def _collect_videos_from_pseudo_dir(self, root_pseudo_dir: str, pseudo_dir: str) -> list:
+            cache = self.scan_cache.get(root_pseudo_dir)
+            if not cache:
+                return []
+            videos, video_to_dir, directories = cache
+            results = []
+            prefix = pseudo_dir.rstrip('/') + '/'
+            for v in videos:
+                parent = video_to_dir.get(v)
+                if not parent:
+                    continue
+                if parent == pseudo_dir or parent.startswith(prefix):
+                    results.append(v)
+            return results
+
+        def _resolve_selection_indices_to_videos(self, selected_dir, indices) -> list:
+            collected = []
+            for index in indices:
+                item_path = self.current_subdirs_mapping.get(index)
+                if not item_path:
+                    continue
+
+                if self._is_stream_url(item_path):
+                    if not self.is_video_excluded(selected_dir, item_path):
+                        collected.append(item_path)
+                    continue
+
+                if isinstance(item_path, str) and item_path.startswith("gdrive://folder/"):
+                    root_pseudo = None
+                    for d in self.selected_dirs:
+                        if isinstance(d, str) and d.startswith("gdrive://folder/") and item_path.startswith(d):
+                            root_pseudo = d
+                            break
+                    if root_pseudo:
+                        for v in self._collect_videos_from_pseudo_dir(root_pseudo, item_path):
+                            if not self.is_video_excluded(root_pseudo, v):
+                                collected.append(v)
+                    continue
+
+                if os.path.isfile(item_path) and is_video(item_path):
+                    if not self.is_video_excluded(selected_dir, item_path):
+                        collected.append(item_path)
+                    continue
+
+                if os.path.isdir(item_path):
+                    try:
+                        for root, dirs, files in os.walk(item_path):
+                            for f in files:
+                                full_path = os.path.join(root, f)
+                                if is_video(full_path) and not self.is_video_excluded(selected_dir, full_path):
+                                    collected.append(full_path)
+                    except Exception as e:
+                        self.update_console(f"Error reading folder {item_path}: {e}")
+
+            seen = set()
+            final_videos = []
+            for v in collected:
+                v_norm = v if self._is_stream_url(v) else os.path.normpath(v)
+                if v_norm not in seen:
+                    seen.add(v_norm)
+                    final_videos.append(v_norm)
+            return final_videos
+
+        def _ask_drive_link_dialog(self):
+            dlg = tk.Toplevel(self.root)
+            dlg.title("Add Google Drive Link")
+            dlg.configure(bg=self.bg_color)
+            dlg.transient(self.root)
+            dlg.grab_set()
+
+            dlg.geometry("560x260")
+            try:
+                dlg.update_idletasks()
+                x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (560 // 2)
+                y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (260 // 2)
+                dlg.geometry(f"+{x}+{y}")
+            except Exception:
+                pass
+
+            result = {"url": None}
+
+            container = tk.Frame(dlg, bg=self.bg_color)
+            container.pack(fill=tk.BOTH, expand=True, padx=18, pady=16)
+
+            header = tk.Label(
+                container,
+                text="Add Google Drive Link",
+                font=self.header_font,
+                bg=self.bg_color,
+                fg=self.text_color
+            )
+            header.pack(anchor="w")
+
+            helper = tk.Label(
+                container,
+                text="Paste a public Google Drive folder or file link. The folder structure will be preserved.",
+                font=self.small_font,
+                bg=self.bg_color,
+                fg=self.accent_color,
+                wraplength=520,
+                justify=tk.LEFT
+            )
+            helper.pack(anchor="w", pady=(6, 10))
+
+            entry_frame = tk.Frame(container, bg=self.bg_color)
+            entry_frame.pack(fill=tk.X)
+
+            url_var = tk.StringVar()
+            entry = tk.Entry(
+                entry_frame,
+                textvariable=url_var,
+                font=self.normal_font,
+                bg=self.listbox_bg,
+                fg=self.listbox_fg,
+                relief=tk.FLAT,
+                insertbackground=self.text_color,
+                highlightthickness=1,
+                highlightbackground=self.accent_color,
+                highlightcolor=self.accent_color
+            )
+            entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=6)
+
+            def paste_clipboard():
+                try:
+                    import win32clipboard as wcb
+                    import win32con
+                    wcb.OpenClipboard()
+                    data = wcb.GetClipboardData(win32con.CF_UNICODETEXT)
+                    wcb.CloseClipboard()
+                    if data:
+                        url_var.set(data.strip())
+                        entry.icursor(tk.END)
+                        validate_now()
+                except Exception:
+                    pass
+
+            paste_btn = self.create_button(
+                entry_frame,
+                text="Paste",
+                command=paste_clipboard,
+                variant="secondary",
+                size="sm"
+            )
+            paste_btn.pack(side=tk.LEFT, padx=(8, 0))
+
+            validate_lbl = tk.Label(
+                container,
+                text="",
+                font=self.small_font,
+                bg=self.bg_color,
+                fg="#e17055"
+            )
+            validate_lbl.pack(anchor="w", pady=(6, 0))
+
+            btns = tk.Frame(container, bg=self.bg_color)
+            btns.pack(anchor="e", pady=(14, 0))
+
+            def validate_url(u: str) -> bool:
+                if not u:
+                    return False
+                try:
+                    return self.drive_manager is not None and (self.drive_manager._extract_id_and_type(u) is not None)
+                except Exception:
+                    return "drive.google.com" in u
+
+            def validate_now():
+                u = url_var.get().strip()
+                if not u:
+                    validate_lbl.config(text="Please enter a link.")
+                    return False
+                if not validate_url(u):
+                    validate_lbl.config(text="This doesn't look like a public Google Drive link.")
+                    return False
+                validate_lbl.config(text="")
+                return True
+
+            def on_submit():
+                if validate_now():
+                    result["url"] = url_var.get().strip()
+                    dlg.destroy()
+
+            def on_cancel():
+                result["url"] = None
+                dlg.destroy()
+
+            add_btn = self.create_button(
+                btns,
+                text="Add Link",
+                command=on_submit,
+                variant="primary",
+                size="md"
+            )
+            add_btn.pack(side=tk.RIGHT, padx=(8, 0))
+
+            cancel_btn = self.create_button(
+                btns,
+                text="Cancel",
+                command=on_cancel,
+                variant="secondary",
+                size="md"
+            )
+            cancel_btn.pack(side=tk.RIGHT)
+
+            try:
+                import win32clipboard as wcb
+                import win32con
+                wcb.OpenClipboard()
+                data = wcb.GetClipboardData(win32con.CF_UNICODETEXT)
+                wcb.CloseClipboard()
+                if data and ("drive.google.com" in data or "id=" in data):
+                    url_var.set(data.strip())
+                    entry.icursor(tk.END)
+            except Exception:
+                pass
+
+            dlg.bind("<Return>", lambda _e: on_submit())
+            dlg.bind("<Escape>", lambda _e: on_cancel())
+
+            entry.focus_set()
+            self.root.wait_window(dlg)
+            return result["url"]
+
+        def add_drive_link(self):
+            if not self.drive_manager:
+                messagebox.showerror("Google Drive", "Google Drive integration is unavailable.")
+                return
+
+            url = self._ask_drive_link_dialog()
+            if not url:
+                return
+
+            self.update_console("Processing Google Drive link for streaming…")
+
+            progress_window = tk.Toplevel(self.root)
+            progress_window.title("Google Drive")
+            progress_window.geometry("420x140")
+            progress_window.configure(bg=self.bg_color)
+            progress_window.transient(self.root)
+            progress_window.grab_set()
+
+            lbl = tk.Label(
+                progress_window,
+                text="Fetching contents… Large Drive folders can take a while…",
+                font=self.normal_font,
+                bg=self.bg_color,
+                fg=self.text_color,
+                wraplength=380,
+                justify=tk.LEFT,
+            )
+            lbl.pack(padx=16, pady=(16, 8), anchor="w")
+
+            bar = ttk.Progressbar(progress_window, mode='indeterminate', length=380)
+            bar.pack(padx=16, pady=(0, 8))
+            try:
+                bar.start(10)
+            except Exception:
+                pass
+
+            status_lbl = tk.Label(
+                progress_window,
+                text="Starting…",
+                font=self.small_font,
+                bg=self.bg_color,
+                fg="#666666",
+                wraplength=380,
+                justify=tk.LEFT,
+            )
+            status_lbl.pack(padx=16, pady=(0, 8), anchor="w")
+
+            try:
+                if hasattr(self, 'add_drive_button') and self.add_drive_button:
+                    self.add_drive_button.configure(state=tk.DISABLED)
+            except Exception:
+                pass
+
+            def set_status(msg: str):
+                try:
+                    status_lbl.config(text=msg)
+                    self.update_console(msg)
+                except Exception:
+                    pass
+
+            def finish_cleanup():
+                try:
+                    bar.stop()
+                except Exception:
+                    pass
+                try:
+                    progress_window.destroy()
+                except Exception:
+                    pass
+                try:
+                    if hasattr(self, 'add_drive_button') and self.add_drive_button:
+                        self.add_drive_button.configure(state=tk.NORMAL)
+                except Exception:
+                    pass
+
+            try:
+                source = self.drive_manager.make_source_from_url(url)
+                if not source:
+                    raise ValueError("Unrecognized Google Drive link.")
+            except Exception as e:
+                finish_cleanup()
+                messagebox.showerror("Google Drive", str(e))
+                self.update_console(f"Google Drive error: {e}")
+                return
+
+            def worker():
+                try:
+                    kind = source.get("kind")
+                    if kind == "folder":
+                        folder_id = source["id"]
+                        pseudo_dir = f"gdrive://folder/{folder_id}"
+                        # Duplicate check on UI thread state snapshot
+                        if pseudo_dir in self.selected_dirs:
+                            self.root.after(0, lambda: (set_status("Drive link already added."), finish_cleanup()))
+                            return
+                        self.root.after(0, lambda: set_status("Listing folder recursively…"))
+                        videos, video_to_dir, directories = self.drive_manager.gather_videos_with_directories_for_source(
+                            source)
+
+                        def apply_folder():
+                            self.scan_cache.set(pseudo_dir, (videos, video_to_dir, directories))
+                            self.selected_dirs.append(pseudo_dir)
+                            display_name = f"Drive Folder {folder_id}"
+                            self.dir_listbox.insert(tk.END, display_name)
+                            self.update_console(
+                                f"Added Google Drive folder for streaming: {folder_id} with {len(videos)} videos")
+                            self.update_video_count()
+                            self.save_preferences()
+                            finish_cleanup()
+
+                        self.root.after(0, apply_folder)
+                    else:
+                        file_id = source["id"]
+                        pseudo_dir = f"gdrive://file/{file_id}"
+                        if pseudo_dir in self.selected_dirs:
+                            self.root.after(0, lambda: (set_status("Drive link already added."), finish_cleanup()))
+                            return
+                        self.root.after(0, lambda: set_status("Preparing file stream…"))
+                        videos, video_to_dir, directories = self.drive_manager.gather_videos_with_directories_for_source(
+                            source)
+
+                        def apply_file():
+                            self.scan_cache.set(pseudo_dir, (videos, video_to_dir, directories))
+                            self.selected_dirs.append(pseudo_dir)
+                            display_name = f"Drive File {file_id}"
+                            self.dir_listbox.insert(tk.END, display_name)
+                            self.update_console(f"Added Google Drive file for streaming: {file_id}")
+                            self.update_video_count()
+                            self.save_preferences()
+                            finish_cleanup()
+
+                        self.root.after(0, apply_file)
+                except Exception as e:
+                    def on_err():
+                        finish_cleanup()
+                        messagebox.showerror("Google Drive", f"Failed to add link: {e}")
+                        self.update_console(f"Google Drive error: {e}")
+
+                    self.root.after(0, on_err)
+
+            ManagedThread(target=worker, name="AddDriveLink").start()
 
         def _on_settings_changed(self, new_settings):
             self.ai_index_path = new_settings.ai_index_path
@@ -4678,9 +4638,30 @@ def select_multiple_folders_and_play():
 
                 if not files_exist:
                     self.ai_mode = False
-                    self.ai_button.config(text="AI Mode")
+                    if hasattr(self, 'ai_mode_indicator'):
+                        self.ai_mode_indicator.config(text="● Normal", fg="#888888")
+                    if hasattr(self, 'ai_toolbar_btn'):
+                        self.ai_toolbar_btn.config(text="● Normal Mode")
                     self.update_console("AI mode disabled - index files not found at new path")
                     self.update_ui_for_mode()
+
+            if hasattr(self, 'dual_player_manager'):
+                # Player count per window is always 3; no need to call set_player_count.
+                # Toggle Win 2 grid-view callbacks based on the dual_window_enabled setting.
+                if new_settings.dual_window_enabled:
+                    self.grid_view_manager.set_play_in_dual_player_win2_1_callback(
+                        lambda videos: self.dual_player_manager.load_videos_into_slot(2, 1, videos)
+                    )
+                    self.grid_view_manager.set_play_in_dual_player_win2_2_callback(
+                        lambda videos: self.dual_player_manager.load_videos_into_slot(2, 2, videos)
+                    )
+                    self.grid_view_manager.set_play_in_dual_player_win2_3_callback(
+                        lambda videos: self.dual_player_manager.load_videos_into_slot(2, 3, videos)
+                    )
+                else:
+                    self.grid_view_manager.set_play_in_dual_player_win2_1_callback(None)
+                    self.grid_view_manager.set_play_in_dual_player_win2_2_callback(None)
+                    self.grid_view_manager.set_play_in_dual_player_win2_3_callback(None)
 
 
         def _clear_thumbnail_cache(self):
@@ -4692,6 +4673,266 @@ def select_multiple_folders_and_play():
                 self.update_console(f"Error clearing thumbnail cache: {e}")
                 return False
 
+
+        def toggle_ai_mode(self):
+            if self.ai_mode:
+                self.ai_mode = False
+                if hasattr(self, 'ai_mode_indicator'):
+                    self.ai_mode_indicator.config(text="● Normal", fg="#888888")
+                if hasattr(self, 'ai_toolbar_btn'):
+                    self.ai_toolbar_btn.config(text="● Normal Mode")
+                self.update_console("Normal mode enabled")
+                self.clear_exclusion_list()
+                self.update_ui_for_mode()
+                self.save_preferences()
+                return
+
+            app_settings = self.settings_manager.get_settings()
+            self.ai_index_path = app_settings.ai_index_path
+
+            required_files = ["clip_index.faiss", "text_index.faiss", "metadata.pkl", "tfidf_index.pkl"]
+            files_exist = all(os.path.exists(os.path.join(self.ai_index_path, f)) for f in required_files)
+
+            if not os.path.exists(self.ai_index_path) or not files_exist:
+                result = messagebox.askyesno(
+                    "AI Index Not Found",
+                    f"AI index files not found in:\n{self.ai_index_path}\n\n"
+                    "Would you like to open Settings to configure the AI index path or run preprocessing?"
+                )
+                if result:
+                    self.settings_manager.show_settings()
+                return
+
+            if hasattr(self, 'ai_mode_indicator'):
+                self.ai_mode_indicator.config(text="⟳ Loading...", fg="#f39c12")
+            if hasattr(self, 'ai_toolbar_btn'):
+                self.ai_toolbar_btn.config(text="Loading...")
+            self.show_ai_loading_progress()
+            self.update_console("Initializing AI models in background...")
+
+            def load_ai_models():
+                try:
+                    from enhanced_model import HighAccuracyVideoSearcher
+
+                    clip_index_path = os.path.join(self.ai_index_path, "clip_index.faiss")
+                    text_index_path = os.path.join(self.ai_index_path, "text_index.faiss")
+                    metadata_path = os.path.join(self.ai_index_path, "metadata.pkl")
+                    tfidf_path = os.path.join(self.ai_index_path, "tfidf_index.pkl")
+
+                    searcher = HighAccuracyVideoSearcher(clip_index_path, text_index_path, metadata_path, tfidf_path)
+
+                    def finalize_ai_mode():
+                        self.ai_searcher = searcher
+                        self.ai_mode = True
+                        if hasattr(self, 'ai_toolbar_btn'):
+                            self.ai_toolbar_btn.config(text="● AI Mode")
+                        self.update_console("AI Mode enabled - Search functionality ready")
+                        self.update_ui_for_mode()
+                        self.save_preferences()
+
+                    self.root.after(0, finalize_ai_mode)
+
+                except ImportError as e:
+                    def show_import_error():
+                        messagebox.showerror("Error", f"Missing dependencies for AI search: {e}")
+                        if hasattr(self, 'ai_toolbar_btn'):
+                            self.ai_toolbar_btn.config(text="● Normal Mode")
+
+                    self.root.after(0, show_import_error)
+
+                except Exception as e:
+                    def show_general_error():
+                        messagebox.showerror("Error", f"Failed to initialize AI searcher: {e}")
+                        if hasattr(self, 'ai_toolbar_btn'):
+                            self.ai_toolbar_btn.config(text="● Normal Mode")
+
+                    self.root.after(0, show_general_error)
+
+            ManagedThread(target=load_ai_models, name="LoadAIModels").start()
+
+        def show_ai_loading_progress(self):
+            if not hasattr(self, '_ai_loading_dots'):
+                self._ai_loading_dots = 0
+
+            if hasattr(self, 'ai_toolbar_btn') and self.ai_toolbar_btn.cget('text').startswith("Loading"):
+                dots = "." * (self._ai_loading_dots % 4)
+                self.ai_toolbar_btn.config(text=f"Loading{dots}")
+                self._ai_loading_dots += 1
+                self.root.after(500, self.show_ai_loading_progress)
+
+        def update_ui_for_mode(self):
+            if self.ai_mode:
+                self.ai_search_frame.pack(fill=tk.X, pady=(0, 10))
+                if hasattr(self, 'search_frame'):
+                    self.search_frame.pack_forget()
+                self.normal_mode_frame.pack_forget()
+                self.toggle_excluded_only_check.pack_forget()
+
+                self.selected_dir_label.config(text="AI Search Mode - Enter query to search videos")
+            else:
+                self.ai_search_frame.pack_forget()
+                if hasattr(self, 'search_frame'):
+                    self.search_frame.pack_forget()
+                    self.search_frame.pack(fill=tk.X, pady=(0, 10))
+
+                self.normal_mode_frame.pack_forget()
+                self.normal_mode_frame.pack(fill=tk.X)
+
+                if hasattr(self, 'exclusion_buttons_row'):
+                    self.exclusion_buttons_row.pack_forget()
+                    self.exclusion_buttons_row.pack(fill=tk.X, pady=(5, 0))
+
+                self.toggle_excluded_only_check.pack(side=tk.LEFT, padx=(0, 10))
+
+                selected_dir = self.get_current_selected_directory()
+                if selected_dir:
+                    self.load_subdirectories(selected_dir)
+                else:
+                    self.clear_exclusion_list()
+
+        def perform_ai_search(self):
+            if not self.ai_searcher:
+                messagebox.showerror("Error", "AI searcher not initialized")
+                return
+
+            query = self.ai_search_entry.get().strip()
+            if not query:
+                messagebox.showwarning("Warning", "Please enter a search query")
+                return
+
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                messagebox.showwarning("Warning", "Please select a directory first")
+                return
+
+            self.ai_search_button.config(text="Searching...", state=tk.DISABLED)
+            self.exclusion_listbox.delete(0, tk.END)
+            self.exclusion_listbox.insert(tk.END, "Searching...")
+
+            self.update_console(f"Searching for: '{query}' in background...")
+
+            def search_worker():
+                try:
+                    if not self.ai_searcher.has_videos_from_directory(selected_dir):
+                        def show_warning():
+                            messagebox.showwarning("Warning",
+                                                   f"No videos from '{os.path.basename(selected_dir)}' found in AI index")
+                            self.ai_search_button.config(text="Search", state=tk.NORMAL)
+
+                        self.root.after(0, show_warning)
+                        return
+
+                    total_videos = self.ai_searcher.get_video_count_for_directory(selected_dir)
+                    self.root.after(0, lambda: self.update_console(
+                        f"Searching {total_videos} indexed videos from '{os.path.basename(selected_dir)}'..."))
+
+                    filtered_results = self.ai_searcher.query_filtered_by_directory(
+                        query, selected_dir, top_k=100,
+                        clip_weight=0.35, text_weight=0.35, tfidf_weight=0.3
+                    )
+
+                    def update_ui():
+                        self.ai_search_button.config(text="Search", state=tk.NORMAL)
+                        self.exclusion_listbox.delete(0, tk.END)
+                        self.current_subdirs_mapping = {}
+
+                        if not filtered_results:
+                            self.exclusion_listbox.insert(tk.END,
+                                                          f"No videos from '{os.path.basename(selected_dir)}' match '{query}'")
+                            self.exclusion_listbox.insert(tk.END,
+                                                          "Try a different search term or check if this directory was included in AI preprocessing")
+                            self.update_console("No matching videos found in selected directory")
+                            return
+
+                        try:
+                            min_score = float(self.min_score_entry.get().strip())
+                        except (ValueError, AttributeError):
+                            min_score = 0.0
+
+                        final_results = [r for r in filtered_results if r.get('score', 0) >= min_score]
+
+                        if not final_results:
+                            self.exclusion_listbox.insert(tk.END, f"No results with score >= {min_score}")
+                            self.update_console(f"No results found with minimum score {min_score}")
+                            return
+
+                        self.selected_dir_label.config(
+                            text=f"AI Search: '{query}' - {len(final_results)} results (score >= {min_score})")
+
+                        for idx, result in enumerate(final_results):
+                            try:
+                                video_path = result['video_path']
+                                rel_path = os.path.relpath(video_path, selected_dir)
+                            except ValueError:
+                                video_path = result['video_path']
+                                rel_path = os.path.basename(video_path)
+
+                            score = result.get('score', 0)
+                            frame_count = result.get('frame_count', 0)
+                            display_name = f"▶ {rel_path} (score: {score:.3f}, frames: {frame_count})"
+                            self.exclusion_listbox.insert(tk.END, display_name)
+                            self.current_subdirs_mapping[idx] = video_path
+
+                        self.update_console(f"Found {len(final_results)} videos with score >= {min_score}")
+                        self.video_preview_manager.attach_to_listbox(
+                            self.exclusion_listbox,
+                            self.current_subdirs_mapping
+                        )
+
+                    self.root.after(0, update_ui)
+
+                except Exception as e:
+                    def show_error():
+                        self.ai_search_button.config(text="Search", state=tk.NORMAL)
+                        self.exclusion_listbox.delete(0, tk.END)
+                        self.exclusion_listbox.insert(tk.END, f"Search error: {e}")
+                        self.update_console(f"AI search error: {e}")
+
+                    self.root.after(0, show_error)
+
+            ManagedThread(target=search_worker, name="AISearch").start()
+
+        def toggle_voice_commands(self):
+            """Toggle voice command recognition on/off"""
+            if not self.voice_available:
+                messagebox.showinfo("Voice Commands",
+                                    "Voice commands require: pip install SpeechRecognition pyaudio")
+                return
+
+            if not self.controller:
+                messagebox.showwarning("No Player",
+                                       "Please start video playback first")
+                return
+
+            if not self.voice_enabled:
+                # Start voice commands
+                if not self.voice_manager:
+                    try:
+                        self.voice_manager = VoiceCommandManager(
+                            self.controller,
+                            self.update_console
+                        )
+                    except Exception as e:
+                        messagebox.showerror("Voice Error", f"Failed to initialize: {e}")
+                        return
+
+                if self.voice_manager.start_listening():
+                    self.voice_enabled = True
+                    self.voice_button.config(text="🎤 Voice On")
+                    self.update_console("Voice commands activated")
+
+                    # Show available commands
+                    self._show_voice_commands()
+                else:
+                    messagebox.showerror("Voice Error", "Failed to start voice recognition")
+            else:
+                # Stop voice commands
+                self.voice_manager.stop_listening()
+                self.voice_enabled = False
+                self.voice_button.config(text="🎤 Voice Off")
+                self.update_console("Voice commands deactivated")
+
+
         def cancel(self):
             if self.controller:
                 if self.start_from_last_played and hasattr(self.controller, 'index'):
@@ -4701,7 +4942,7 @@ def select_multiple_folders_and_play():
                     self.save_preferences()
 
                 self.controller.stop()
-            cleanup_hotkeys()
+            # cleanup_hotkeys()
             try:
                 if hasattr(self, 'executor'):
                     self.executor.shutdown(wait=False, cancel_futures=True)
@@ -4728,12 +4969,6 @@ def select_multiple_folders_and_play():
             except Exception:
                 pass
 
-            if hasattr(self, 'voice_manager') and self.voice_manager:
-                try:
-                    self.voice_manager.cleanup()
-                except Exception:
-                    pass
-
             try:
                 self.root.quit()
                 self.root.destroy()
@@ -4745,7 +4980,7 @@ def select_multiple_folders_and_play():
             except:
                 os._exit(0)
 
-    root = tk.Tk()
+    root = TkinterDnD.Tk()
     app = DirectorySelector(root)
     root.mainloop()
 
