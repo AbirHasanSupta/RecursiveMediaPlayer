@@ -311,12 +311,14 @@ class SettingsUI:
     """UI for settings management following Interface Segregation Principle"""
 
     def __init__(self, parent, theme_provider, settings: SettingsData,
-                 console_callback: Callable = None, on_settings_changed: Callable = None):
+                 console_callback: Callable = None, on_settings_changed: Callable = None,
+                 enable_ai: bool = True):
         self.parent = parent
         self.theme_provider = theme_provider
         self.settings = settings
         self.console_callback = console_callback
         self.on_settings_changed = on_settings_changed
+        self.enable_ai = enable_ai
 
         self.settings_window = None
         self.preprocessing_runner = PreprocessingRunner(console_callback)
@@ -362,8 +364,9 @@ class SettingsUI:
         general_frame = self._create_general_settings_tab(notebook)
         notebook.add(general_frame, text="General Settings")
 
-        ai_frame = self._create_ai_settings_tab(notebook)
-        notebook.add(ai_frame, text="AI & Preprocessing")
+        if self.enable_ai:
+            ai_frame = self._create_ai_settings_tab(notebook)
+            notebook.add(ai_frame, text="AI & Preprocessing")
 
         shortcuts_frame = self._create_shortcuts_tab(notebook)
         notebook.add(shortcuts_frame, text="⌨ Keyboard Shortcuts")
@@ -1212,6 +1215,8 @@ class SettingsUI:
 
     def _update_index_info(self):
         """Update index information display"""
+        if not self.ai_index_path_var or not self.index_info_label:
+            return
         index_path = self.ai_index_path_var.get()
 
         if not os.path.exists(index_path):
@@ -1382,13 +1387,20 @@ class SettingsUI:
 
     def _populate_ui_from_settings(self, settings: SettingsData):
         """Populate UI fields from settings object"""
-        self.ai_index_path_var.set(settings.ai_index_path)
-        self.workers_var.set(settings.preprocessing_workers)
-        self.max_frames_var.set(settings.max_frames_per_video)
-        self.cleanup_days_var.set(settings.auto_cleanup_days)
-        self.gpu_acceleration_var.set(settings.enable_gpu_acceleration)
-        self.incremental_var.set(settings.incremental_preprocessing)
-        self.skip_raw_var.set(settings.skip_raw_directories)
+        if self.ai_index_path_var:
+            self.ai_index_path_var.set(settings.ai_index_path)
+        if self.workers_var:
+            self.workers_var.set(settings.preprocessing_workers)
+        if self.max_frames_var:
+            self.max_frames_var.set(settings.max_frames_per_video)
+        if self.cleanup_days_var:
+            self.cleanup_days_var.set(settings.auto_cleanup_days)
+        if self.gpu_acceleration_var:
+            self.gpu_acceleration_var.set(settings.enable_gpu_acceleration)
+        if self.incremental_var:
+            self.incremental_var.set(settings.incremental_preprocessing)
+        if self.skip_raw_var:
+            self.skip_raw_var.set(settings.skip_raw_directories)
         self.preview_duration_var.set(settings.preview_duration)
         self.use_video_preview_var.set(settings.use_video_preview)
         self.enable_watch_history_var.set(settings.enable_watch_history)
@@ -1408,13 +1420,20 @@ class SettingsUI:
 
     def _apply_current_settings(self):
         """Apply current UI values to settings object"""
-        self.settings.ai_index_path = self.ai_index_path_var.get()
-        self.settings.preprocessing_workers = self.workers_var.get()
-        self.settings.max_frames_per_video = self.max_frames_var.get()
-        self.settings.auto_cleanup_days = self.cleanup_days_var.get()
-        self.settings.enable_gpu_acceleration = self.gpu_acceleration_var.get()
-        self.settings.incremental_preprocessing = self.incremental_var.get()
-        self.settings.skip_raw_directories = self.skip_raw_var.get()
+        if self.ai_index_path_var:
+            self.settings.ai_index_path = self.ai_index_path_var.get()
+        if self.workers_var:
+            self.settings.preprocessing_workers = self.workers_var.get()
+        if self.max_frames_var:
+            self.settings.max_frames_per_video = self.max_frames_var.get()
+        if self.cleanup_days_var:
+            self.settings.auto_cleanup_days = self.cleanup_days_var.get()
+        if self.gpu_acceleration_var:
+            self.settings.enable_gpu_acceleration = self.gpu_acceleration_var.get()
+        if self.incremental_var:
+            self.settings.incremental_preprocessing = self.incremental_var.get()
+        if self.skip_raw_var:
+            self.settings.skip_raw_directories = self.skip_raw_var.get()
         self.settings.preview_duration = self.preview_duration_var.get()
         self.settings.use_video_preview = self.use_video_preview_var.get()
         self.settings.enable_watch_history = self.enable_watch_history_var.get()
@@ -1444,10 +1463,10 @@ class SettingsUI:
 class SettingsManager:
     """Main settings manager following Dependency Inversion Principle"""
 
-    def __init__(self, parent, theme_provider, console_callback: Callable = None):
+    def __init__(self, parent, theme_provider, console_callback: Callable = None, enable_ai: bool = True):
         self.storage = SettingsStorage()
         self.settings = self.storage.load_settings()
-        self.ui = SettingsUI(parent, theme_provider, self.settings, console_callback, self._on_settings_changed)
+        self.ui = SettingsUI(parent, theme_provider, self.settings, console_callback, self._on_settings_changed, enable_ai=enable_ai)
 
         self._settings_changed_callbacks = []
         # Optional callback that re-registers hotkeys in the player immediately.

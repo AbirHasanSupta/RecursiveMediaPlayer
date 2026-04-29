@@ -236,7 +236,7 @@ def select_multiple_folders_and_play():
             else:
                 self.selected_dirs = []
 
-            self.settings_manager = SettingsManager(self.root, self, self.update_console)
+            self.settings_manager = SettingsManager(self.root, self, self.update_console, enable_ai=True)
             self.settings_manager.add_settings_changed_callback(self._on_settings_changed)
             self.settings_manager.set_hotkey_reload_callback(
                 lambda hk: reload_hotkeys(self.controller, hk)
