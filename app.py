@@ -4773,7 +4773,7 @@ def select_multiple_folders_and_play():
                 self.ai_search_frame.pack_forget()
                 if hasattr(self, 'search_frame'):
                     self.search_frame.pack_forget()
-                    self.search_frame.pack(fill=tk.X, pady=(0, 10))
+                    self.search_frame.pack(fill=tk.X, pady=(0, 10), before=self.exclusion_frame)
 
                 self.normal_mode_frame.pack_forget()
                 self.normal_mode_frame.pack(fill=tk.X)
