@@ -18,6 +18,7 @@ A sophisticated video player application with AI-powered semantic search capabil
 - **Google Drive Support**: Stream and download videos directly from public Google Drive folders or links
 - **Voice Commands**: Control playback and navigation using natural voice commands
 - **Dual Player Mode**: Play and compare two videos side-by-side
+- **Embedded Player**: Integrated, high-performance video playback with rich controls
 - **Favorites System**: Bookmark and organize your favorite videos for quick access
 - **Video Queue**: Manual queue management for fine-tuned playback order
 - **Settings Management**: Persistent save/load for all user and application preferences
@@ -72,7 +73,9 @@ pip install -r requirements\ai_requirements.txt
 2. Install Python dependencies: `pip install -r requirements\requirements.txt`
 3. (Optional) For AI search: `pip install -r requirements\ai_requirements.txt`
 4. Ensure VLC Media Player is installed and accessible
-5. Run the application: `python app.py`
+5. Run the application: 
+   - For standard mode: `python build_app.py` (uses high-performance Embedded Player)
+   - For AI-powered mode: `python app.py` (uses VLC Player Controller for integration)
 
 ## Usage
 
@@ -80,42 +83,75 @@ pip install -r requirements\ai_requirements.txt
 
 1. **Launch the application**:
    ```cmd
-   python app.py
+   python build_app.py
    ```
+   *Note: Use `python app.py` if you want to use AI search features.*
 2. **Add directories**: Click "Add Directory" to select folders containing videos
 3. **Configure exclusions** (optional): Select directories/videos to exclude from playback
 4. **Start playback**: Click "Play Videos" to begin
 
 ### Keyboard Controls During Playback
 
+The application features comprehensive hotkey support. All shortcuts can be customized in the **Settings > Shortcuts** tab.
+
+#### General Controls
 | Key           | Action                                           |
 |---------------|--------------------------------------------------|
 | `Space`       | Pause/Resume                                     |
-| `D`           | Next video                                       |
-| `A`           | Previous video                                   |
+| `Esc`         | Stop playback + Exit fullscreen                  |
+| `F` / `Enter` | Toggle fullscreen                                |
+| `I`           | Toggle Overlay                                   |
+| `V`           | Toggle voice commands (AI-powered mode)          |
+| `Ctrl+C`      | Copy current video path                          |
+| `T`           | Take screenshot                                  |
+
+#### Navigation
+| Key           | Action                                           |
+|---------------|--------------------------------------------------|
+| `D` / `PageUp`| Next video                                       |
+| `A` / `PageDn`| Previous video                                   |
 | `E`           | Next directory                                   |
 | `Q`           | Previous directory                               |
-| `W`           | Volume up                                        |
-| `S`           | Volume down                                      |
-| `M`           | Toggle Mute                                      |
-| `I`           | Toggle Overlay                                   |
 | `Right Arrow` | Fast forward (200ms)                             |
 | `Left Arrow`  | Rewind (200ms)                                   |
-| `F`           | Toggle fullscreen                                |
+| `Ctrl+Right`  | Fast forward (5s)                                |
+| `Ctrl+Left`   | Rewind (5s)                                      |
+| `Shift+Right` | Fast forward (60s)                               |
+| `Shift+Left`  | Rewind (60s)                                     |
+| `N`           | Next chapter                                     |
+| `B`           | Previous chapter                                 |
+
+#### Audio & Display
+| Key           | Action                                           |
+|---------------|--------------------------------------------------|
+| `W` / `Up`    | Volume up                                        |
+| `S` / `Down`  | Volume down                                      |
+| `M`           | Toggle Mute                                      |
 | `1`           | Switch to monitor 1                              |
 | `2`           | Switch to monitor 2                              |
+| `Shift+F`     | Toggle dual player fullscreen                    |
+
+#### Video Adjustments
+| Key           | Action                                           |
+|---------------|--------------------------------------------------|
 | `+/=`         | Increase playback speed                          |
 | `-`           | Decrease playback speed                          |
-| `0`           | Reset speed to 1.0x                              |
-| `R`           | Rotate video 90° clockwise (cycles 0→90→180→270) |
-| `Ctrl+=`      | Zoom in (+10%)                                   |
-| `Ctrl+-`      | Zoom out (-10%)                                  |
-| `Ctrl+0`      | Reset zoom to 100%                               |
-| `T`           | Take screenshot                                  |
-| `V`           | Toggle voice commands                            |
-| `Ctrl+C`      | Copy current video path                          |
-| `Esc`         | Stop playback + Exit dual player fullscreen      |
-| `Shift+F`     | Toggle dual player fullscreen                    |
+| `0` / `KP_0`  | Reset speed to 1.0x                              |
+| `R`           | Rotate video 90° clockwise                       |
+| `H`           | Flip video horizontally                          |
+| `Ctrl+=` / `Z`| Zoom in (+10%)                                   |
+| `Ctrl+-` / `z`| Zoom out (-10%)                                  |
+| `Ctrl+0` / `X`| Reset zoom to 100%                               |
+
+#### Advanced Features
+| Key           | Action                                           |
+|---------------|--------------------------------------------------|
+| `U`           | Cycle through subtitles                          |
+| `Ctrl+U`      | Disable subtitles                                |
+| `[`           | Set A-B loop point A                             |
+| `]`           | Set A-B loop point B                             |
+| `\`           | Clear A-B loop                                   |
+| `O`           | Cycle loop modes (Loop all / Loop one / Shuffle) |
 
 ## AI Search System
 
@@ -189,6 +225,7 @@ The application saves preferences automatically:
 - Selected directories
 - Exclusion lists  
 - Theme preference
+- Hotkey customizations (rebindable in the "Shortcuts" tab)
 - Playback position (if resume enabled)
 - UI layout preferences
 
@@ -214,10 +251,12 @@ The application uses specific locations for different types of data:
 
 ```
 Recursive Video Player/
-├── app.py                    # Main GUI application entry point
-├── build_app.py              # Extended application features and UI
+├── build_app.py                   # Main GUI application entry point (Standard, uses Embedded Player)
+├── app.py                    # GUI application with AI search features (uses VLC Controller)
+├── build.py                  # Build script for creating the executable
+├── embedded_player.py        # Integrated video playback component used by build_app.py
 ├── enhanced_model.py         # AI search system and model logic
-├── vlc_player_controller.py  # Video playback controller and VLC integration
+├── vlc_player_controller.py  # Video playback controller used by app.py
 ├── key_press.py              # Global keyboard hotkey handling
 ├── theme.py                  # Theme and UI styling configuration
 ├── utils.py                  # Utility functions for file and video processing
@@ -239,6 +278,24 @@ Recursive Video Player/
 │   └── ai_requirements.txt   # AI/ML dependencies
 └── README.md                 # This file
 ```
+
+## Build and Distribution
+
+The project includes a build system to create a standalone Windows executable.
+
+### Building the Executable
+1. Ensure `pyinstaller` is installed: `pip install pyinstaller`
+2. Run the build script:
+   ```cmd
+   python build.py
+   ```
+This script will:
+- Write version information.
+- Clean previous build artifacts.
+- Use `video_player.spec` to build a lightweight version (using `build_app.py`) without AI dependencies.
+- Output the executable to `dist/RecursiveVideoPlayer/RecursiveVideoPlayer.exe`.
+
+*Note: The standalone build intentionally excludes AI features to maintain a smaller file size and reduce system requirements.*
 
 ## Performance Notes
 
