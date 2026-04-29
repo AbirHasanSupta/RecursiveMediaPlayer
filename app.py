@@ -673,7 +673,7 @@ def select_multiple_folders_and_play():
             self.console_scrollbar.config(command=self.console_text.yview)
 
             self.update_console("Video Player Console Ready")
-            self.update_console(f"version{__version__}  commit:{__commit__}  built:{__build__}")
+            self.update_console(f"version:{__version__}  commit:{__commit__}  built:{__build__}")
             self.update_console("Select directories and click 'Play Videos' to start")
 
         def update_console(self, message):
