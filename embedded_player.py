@@ -186,7 +186,7 @@ class EmbeddedPlayer:
     # ═══════════════════════════════════════════════════════════════════
 
     def _build_ui(self):
-        self._win = tk.Toplevel(self.parent)
+        self._win = tk.Toplevel()
         self._win.title("Recursive Video Player")
         self._win.geometry("1280x720+80+50")
         self._win.configure(bg=_BG)
