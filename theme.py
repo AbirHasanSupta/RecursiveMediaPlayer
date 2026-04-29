@@ -361,6 +361,7 @@ class ThemeSelector:
 
         self.update_all_buttons()
         self.update_frames_recursive(self.root)
+        self._apply_theme_to_toplevels()
 
     def _get_loop_icon(self):
         icons = {
@@ -400,39 +401,185 @@ class ThemeSelector:
         self.save_preferences()
 
     def update_all_buttons(self):
+        suffixes = ('_button', '_btn')
         for attr_name in dir(self):
-            if attr_name.endswith('_button') and hasattr(self, attr_name):
-                button = getattr(self, attr_name)
-                if isinstance(button, tk.Button):
-                    if hasattr(button, '_variant'):
-                        variant = button._variant
-                    else:
-                        text = button.cget('text').lower()
-                        if 'exclude' in text and 'all' in text:
-                            variant = 'warning'
-                        elif 'exclude' in text:
-                            variant = 'danger'
-                        elif 'include' in text:
-                            variant = 'success'
-                        elif 'play' in text:
-                            variant = 'danger'
-                        elif 'add' in text:
-                            variant = 'primary'
-                        elif 'playlist' in text.lower():
-                            variant = 'playlist'
-                        elif 'history' in text.lower():
-                            variant = 'history'
-                        elif 'settings' in text.lower():
-                            variant = 'settings'
-                        else:
-                            variant = 'secondary'
+            if not any(attr_name.endswith(s) for s in suffixes):
+                continue
+            if not hasattr(self, attr_name):
+                continue
+            button = getattr(self, attr_name)
+            if not isinstance(button, tk.Button):
+                continue
+            variant = getattr(button, '_variant', None)
+            if variant is None:
+                text = button.cget('text').lower()
+                if 'exclude' in text and 'all' in text:
+                    variant = 'warning'
+                elif 'exclude' in text:
+                    variant = 'danger'
+                elif 'include' in text:
+                    variant = 'success'
+                elif 'play' in text:
+                    variant = 'danger'
+                elif 'add' in text:
+                    variant = 'primary'
+                elif 'playlist' in text:
+                    variant = 'playlist'
+                elif 'history' in text:
+                    variant = 'history'
+                elif 'settings' in text:
+                    variant = 'settings'
+                else:
+                    variant = 'secondary'
+            colors = self.get_button_colors(variant)
+            button.configure(
+                bg=colors['bg'],
+                fg=colors['fg'],
+                activebackground=colors['active']
+            )
 
+        # Also update buttons on any registered manager UIs
+        for manager_ui in getattr(self, '_manager_uis', []):
+            try:
+                for attr_name in dir(manager_ui):
+                    if not any(attr_name.endswith(s) for s in suffixes):
+                        continue
+                    button = getattr(manager_ui, attr_name, None)
+                    if not isinstance(button, tk.Button):
+                        continue
+                    variant = getattr(button, '_variant', 'secondary')
                     colors = self.get_button_colors(variant)
                     button.configure(
                         bg=colors['bg'],
                         fg=colors['fg'],
                         activebackground=colors['active']
                     )
+            except Exception:
+                pass
+
+    def register_manager_ui(self, manager_ui):
+        """Register a manager UI object so apply_theme() can restyle it on theme toggle."""
+        if not hasattr(self, '_manager_uis'):
+            self._manager_uis = []
+        if manager_ui not in self._manager_uis:
+            self._manager_uis.append(manager_ui)
+
+    def _apply_theme_to_toplevels(self):
+        """
+        Restyle every open manager Toplevel when the theme changes.
+        Each manager UI must expose a `_window` attribute (the Toplevel)
+        and a `_rebuild_theme()` method that re-applies bg/fg/accent colours.
+        Uses update_frames_recursive as a fallback for any plain frames/labels.
+        """
+        for manager_ui in getattr(self, '_manager_uis', []):
+            try:
+                # Find the window attribute (favorites_window, queue_window, etc.)
+                window = None
+                for attr in ('favorites_window', 'queue_window', 'history_window',
+                             'playlist_window'):
+                    w = getattr(manager_ui, attr, None)
+                    if w and w.winfo_exists():
+                        window = w
+                        break
+
+                if window is None:
+                    continue
+
+                # Restyle the window background
+                window.configure(bg=self.bg_color)
+
+                # Walk all widgets inside the Toplevel and recolour
+                # standard frames/labels/entries.  Accent-coloured header
+                # bands and cards are identified by their stored _accent tag.
+                self._restyle_toplevel(window)
+
+            except Exception:
+                pass
+
+    def _restyle_toplevel(self, window):
+        """
+        Recursively restyle a Toplevel's widget tree to match the current theme.
+        Widgets that carry a `_accent` attribute keep their accent colour.
+        Widgets that carry a `_variant` attribute (buttons) are re-coloured via
+        get_button_colors().
+        """
+        def _walk(widget):
+            try:
+                # Buttons with _variant
+                if isinstance(widget, tk.Button) and hasattr(widget, '_variant'):
+                    colors = self.get_button_colors(widget._variant)
+                    widget.configure(
+                        bg=colors['bg'],
+                        fg=colors['fg'],
+                        activebackground=colors['active'],
+                    )
+                    # re-bind hover so active colour is also correct
+                    bg, active = colors['bg'], colors['active']
+                    widget.bind("<Enter>", lambda e, b=active: widget.configure(bg=b))
+                    widget.bind("<Leave>", lambda e, b=bg:    widget.configure(bg=b))
+                    return  # don't recurse into button
+
+                # Frames tagged as accent bands — skip (keep accent colour)
+                if isinstance(widget, tk.Frame) and getattr(widget, '_accent', False):
+                    for child in widget.winfo_children():
+                        _walk(child)
+                    return
+
+                # Card frames (listbox containers) — set to listbox_bg
+                if isinstance(widget, tk.Frame) and getattr(widget, '_card', False):
+                    widget.configure(
+                        bg=self.listbox_bg,
+                        highlightbackground=self.frame_border,
+                    )
+                    for child in widget.winfo_children():
+                        _walk(child)
+                    return
+
+                # Plain frames
+                if isinstance(widget, (tk.Frame,)):
+                    widget.configure(bg=self.bg_color)
+
+                # Labels — muted, normal, or inside accent band (handled above)
+                if isinstance(widget, tk.Label):
+                    if getattr(widget, '_muted', False):
+                        widget.configure(bg=self.bg_color, fg=self.muted_fg)
+                    elif getattr(widget, '_badge', False):
+                        widget.configure(bg=self.badge_bg, fg=self.badge_fg)
+                    else:
+                        widget.configure(bg=self.bg_color, fg=self.text_color)
+
+                # Listboxes
+                if isinstance(widget, tk.Listbox):
+                    widget.configure(
+                        bg=self.listbox_bg,
+                        fg=self.listbox_fg,
+                        selectbackground=self.listbox_select_bg,
+                    )
+
+                # Entry widgets
+                if isinstance(widget, tk.Entry):
+                    widget.configure(
+                        bg=self.entry_bg,
+                        fg=self.entry_fg,
+                        insertbackground=self.entry_fg,
+                        highlightbackground=self.entry_border,
+                    )
+
+                # Text widgets (description boxes)
+                if isinstance(widget, tk.Text):
+                    widget.configure(
+                        bg=self.entry_bg,
+                        fg=self.entry_fg,
+                        insertbackground=self.entry_fg,
+                    )
+
+                for child in widget.winfo_children():
+                    _walk(child)
+
+            except tk.TclError:
+                pass
+
+        _walk(window)
 
     def get_button_colors(self, variant):
         if self.dark_mode:

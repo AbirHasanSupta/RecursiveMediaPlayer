@@ -232,6 +232,7 @@ class FavoritesUI:
         self.dragging_index = None
         self.video_preview_manager = None
         self.grid_view_manager = None
+        self.theme_provider.register_manager_ui(self)
 
     def show_favorites_manager(self, selected_directory: str = None):
         if self.favorites_window and self.favorites_window.winfo_exists():
@@ -242,9 +243,15 @@ class FavoritesUI:
             return
 
         self.favorites_window = tk.Toplevel(self.parent)
-        self.favorites_window.title("Favorites Manager")
-        self.favorites_window.geometry("900x600")
+        self.favorites_window.title("Favourites")
+        self.favorites_window.geometry("820x620")
+        self.favorites_window.minsize(640, 480)
         self.favorites_window.configure(bg=self.theme_provider.bg_color)
+
+        self.favorites_window.update_idletasks()
+        px = self.parent.winfo_rootx() + (self.parent.winfo_width() - 820) // 2
+        py = self.parent.winfo_rooty() + (self.parent.winfo_height() - 620) // 2
+        self.favorites_window.geometry(f"820x620+{max(0, px)}+{max(0, py)}")
 
         self.current_directory = selected_directory
         self._setup_favorites_ui()
@@ -252,95 +259,85 @@ class FavoritesUI:
             self._refresh_favorites_list()
 
     def _setup_favorites_ui(self):
-        main_frame = tk.Frame(self.favorites_window, bg=self.theme_provider.bg_color)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        tp = self.theme_provider
+        ACCENT = "#FF9F43" if tp.dark_mode else "#e67e22"
+        PANEL = tp.listbox_bg
 
-        header_frame = tk.Frame(main_frame, bg=self.theme_provider.bg_color)
-        header_frame.pack(fill=tk.X, pady=(0, 20))
-
-        title_label = tk.Label(
-            header_frame,
-            text="⭐ Favorites Manager",
-            font=self.theme_provider.header_font,
-            bg=self.theme_provider.bg_color,
-            fg=self.theme_provider.text_color
-        )
-        title_label.pack(side=tk.LEFT)
-
-        self.info_label = tk.Label(
-            header_frame,
-            text="",
-            font=self.theme_provider.small_font,
-            bg=self.theme_provider.bg_color,
-            fg="#666666"
-        )
+        # ── Header band ───────────────────────────────────────────────────────
+        band = tk.Frame(self.favorites_window, bg=ACCENT)
+        band.pack(fill=tk.X)
+        hrow = tk.Frame(band, bg=ACCENT)
+        hrow.pack(fill=tk.X, padx=20, pady=14)
+        tk.Label(hrow, text="♥  Favourites",
+                 font=tp.header_font, bg=ACCENT, fg="white").pack(side=tk.LEFT)
+        self.info_label = tk.Label(hrow, text="",
+                                   font=tp.small_font, bg=ACCENT, fg="white")
         self.info_label.pack(side=tk.RIGHT)
 
-        self.directory_label = tk.Label(
-            main_frame,
-            text="",
-            font=self.theme_provider.small_font,
-            bg=self.theme_provider.bg_color,
-            fg="#666666"
-        )
-        self.directory_label.pack(anchor='w', pady=(0, 10))
+        # ── Directory chip ─────────────────────────────────────────────────────
+        chip_bar = tk.Frame(self.favorites_window, bg=tp.bg_color)
+        chip_bar.pack(fill=tk.X, padx=20, pady=(12, 0))
+        self.directory_label = tk.Label(chip_bar, text="", font=tp.small_font,
+                                        bg=tp.badge_bg, fg=tp.muted_fg,
+                                        padx=10, pady=4, relief=tk.FLAT)
+        self.directory_label.pack(side=tk.LEFT)
 
-        list_frame = tk.Frame(
-            main_frame,
-            bg=self.theme_provider.bg_color,
-            highlightbackground="#cccccc",
-            highlightthickness=1
-        )
-        list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+        # ── Card ──────────────────────────────────────────────────────────────
+        body = tk.Frame(self.favorites_window, bg=tp.bg_color)
+        body.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
 
-        scrollbar = tk.Scrollbar(list_frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        card = tk.Frame(body, bg=PANEL,
+                        highlightbackground=tp.frame_border, highlightthickness=1)
+        card.pack(fill=tk.BOTH, expand=True)
+
+        col_hdr = tk.Frame(card, bg=tp.badge_bg)
+        col_hdr.pack(fill=tk.X)
+        tk.Label(col_hdr, text="  #    VIDEO", font=tp.small_font,
+                 bg=tp.badge_bg, fg=tp.muted_fg, pady=6, anchor="w"
+                 ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
+        tk.Label(col_hdr, text="drag to reorder  •  double-click to play  ",
+                 font=tp.small_font, bg=tp.badge_bg, fg=tp.muted_fg, pady=6
+                 ).pack(side=tk.RIGHT)
+        tk.Frame(card, bg=tp.frame_border, height=1).pack(fill=tk.X)
+
+        lb_row = tk.Frame(card, bg=PANEL)
+        lb_row.pack(fill=tk.BOTH, expand=True)
+
+        sb = tk.Scrollbar(lb_row, width=10, relief=tk.FLAT, bd=0)
+        sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
 
         self.favorites_listbox = tk.Listbox(
-            list_frame,
-            selectmode=tk.MULTIPLE,
-            yscrollcommand=scrollbar.set,
-            font=self.theme_provider.normal_font,
-            bg=self.theme_provider.listbox_bg,
-            fg=self.theme_provider.listbox_fg,
-            selectbackground=self.theme_provider.accent_color,
-            selectforeground="white",
-            relief=tk.FLAT,
-            bd=0
-        )
-        self.favorites_listbox.pack(fill=tk.BOTH, expand=True)
-        scrollbar.config(command=self.favorites_listbox.yview)
+            lb_row, selectmode=tk.MULTIPLE, yscrollcommand=sb.set,
+            font=tp.normal_font, bg=PANEL, fg=tp.listbox_fg,
+            selectbackground=ACCENT, selectforeground="white",
+            activestyle="none", relief=tk.FLAT, bd=0, highlightthickness=0)
+        self.favorites_listbox.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        sb.config(command=self.favorites_listbox.yview)
 
-        self.favorites_listbox.bind('<Double-Button-1>', self._on_double_click)
-        self.favorites_listbox.bind('<Button-1>', self._on_mouse_down)
-        self.favorites_listbox.bind('<Button-3>', self._on_right_click)
-        self.favorites_listbox.bind('<B1-Motion>', self._on_mouse_drag)
-        self.favorites_listbox.bind('<ButtonRelease-1>', self._on_mouse_release)
+        self.favorites_listbox.bind("<Double-Button-1>", self._on_double_click)
+        self.favorites_listbox.bind("<Button-1>", self._on_mouse_down)
+        self.favorites_listbox.bind("<Button-3>", self._on_right_click)
+        self.favorites_listbox.bind("<B1-Motion>", self._on_mouse_drag)
+        self.favorites_listbox.bind("<ButtonRelease-1>", self._on_mouse_release)
 
-        button_frame = tk.Frame(main_frame, bg=self.theme_provider.bg_color)
-        button_frame.pack(fill=tk.X)
+        # ── Action bar ────────────────────────────────────────────────────────
+        # LEFT:  Clear All (warning/destructive)
+        # RIGHT: Play All (success/primary)  ·  Close
+        action = tk.Frame(self.favorites_window, bg=tp.bg_color)
+        action.pack(fill=tk.X, padx=20, pady=14)
 
-        left_buttons = tk.Frame(button_frame, bg=self.theme_provider.bg_color)
-        left_buttons.pack(side=tk.LEFT)
+        left = tk.Frame(action, bg=tp.bg_color)
+        left.pack(side=tk.LEFT)
+        right = tk.Frame(action, bg=tp.bg_color)
+        right.pack(side=tk.RIGHT)
 
+        tp.create_button(left, "Clear All", self._clear_all,
+                         "warning", "md").pack(side=tk.LEFT)
 
-        self.play_all_btn = self.theme_provider.create_button(
-            left_buttons, "▶ Play All", self._play_all, "primary", "md"
-        )
-        self.play_all_btn.pack(side=tk.LEFT, padx=(0, 5))
-
-        self.clear_btn = self.theme_provider.create_button(
-            left_buttons, "Clear All", self._clear_all, "warning", "md"
-        )
-        self.clear_btn.pack(side=tk.LEFT)
-
-        right_buttons = tk.Frame(button_frame, bg=self.theme_provider.bg_color)
-        right_buttons.pack(side=tk.RIGHT)
-
-        self.close_btn = self.theme_provider.create_button(
-            right_buttons, "Close", self.favorites_window.destroy, "secondary", "md"
-        )
-        self.close_btn.pack(side=tk.RIGHT)
+        tp.create_button(right, "▶  Play All", self._play_all,
+                         "success", "md").pack(side=tk.LEFT, padx=(0, 8))
+        tp.create_button(right, "Close", self.favorites_window.destroy,
+                         "secondary", "md").pack(side=tk.LEFT)
 
     def _on_right_click(self, event):
         """Handle right-click on favorites"""
@@ -475,28 +472,34 @@ class FavoritesUI:
             return
 
         def refresh():
+            tp = self.theme_provider
             self.favorites_listbox.delete(0, tk.END)
-            self.favorite_entries = self.favorite_service.get_favorites_by_directory(self.current_directory)
+            self.favorite_entries = self.favorite_service.get_favorites_by_directory(
+                self.current_directory)
+
+            dir_name = os.path.basename(self.current_directory)
+            self.directory_label.config(text=f"  📁  {dir_name}  ")
 
             if not self.favorite_entries:
-                self.favorites_listbox.insert(tk.END, "No favorites in this directory")
-                self.info_label.config(text="No favorites")
-                self.directory_label.config(text="")
+                self.favorites_listbox.configure(fg=tp.muted_fg)
+                self.favorites_listbox.insert(tk.END, "")
+                self.favorites_listbox.insert(tk.END, "   No favourites in this directory.")
+                self.favorites_listbox.insert(tk.END, "   Right-click a video to add one.")
+                self.info_label.config(text="0 videos")
                 return
 
+            self.favorites_listbox.configure(fg=tp.listbox_fg)
             video_mapping = {}
-            for i, favorite in enumerate(self.favorite_entries):
-                display_name = f"{i + 1}. ▶ {favorite.video_name}"
-                self.favorites_listbox.insert(tk.END, display_name)
-                video_mapping[i] = favorite.video_path
+            for i, fav in enumerate(self.favorite_entries):
+                self.favorites_listbox.insert(tk.END, f"   {i + 1}.   {fav.video_name}")
+                video_mapping[i] = fav.video_path
 
-            self.info_label.config(text=f"{len(self.favorite_entries)} favorite(s)")
-            self.directory_label.config(
-                text=f"Directory: {os.path.basename(self.current_directory)}"
-            )
+            count = len(self.favorite_entries)
+            self.info_label.config(text=f"{count} video{'s' if count != 1 else ''}")
 
-            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
-                self.video_preview_manager.attach_to_listbox(self.favorites_listbox, video_mapping)
+            if hasattr(self, "video_preview_manager") and self.video_preview_manager:
+                self.video_preview_manager.attach_to_listbox(
+                    self.favorites_listbox, video_mapping)
 
         if threading.current_thread() is threading.main_thread():
             refresh()
