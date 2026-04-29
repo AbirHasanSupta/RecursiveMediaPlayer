@@ -1248,8 +1248,6 @@ class EmbeddedPlayer:
             self._btn_ab_clr.config(fg=_TXT_DIM)
         except Exception:
             pass
-        if self.logger:
-            self.logger("A-B loop cleared")
 
     def _start_ab_monitor(self):
         self._cancel_ab_monitor()
