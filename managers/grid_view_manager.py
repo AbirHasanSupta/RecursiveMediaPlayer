@@ -201,6 +201,13 @@ class GridViewManager:
         with self.loading_lock:
             self.is_loading = True
 
+        try:
+            self.thumbnail_executor.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+        max_workers = min(8, (multiprocessing.cpu_count() or 4))
+        self.thumbnail_executor = ManagedExecutor(ThreadPoolExecutor, max_workers=max_workers)
+
         self.video_preview_manager = video_preview_manager
         t = self._tok()
 
@@ -403,11 +410,7 @@ class GridViewManager:
                 self.canvas.unbind_all("<MouseWheel>")
             except Exception:
                 pass
-            if hasattr(self, 'thumbnail_executor'):
-                try:
-                    self.thumbnail_executor.shutdown(wait=False, cancel_futures=True)
-                except Exception:
-                    pass
+
             self._photo_cache.clear()
             self.now_playing_path = None
             if self._search_timer:

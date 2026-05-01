@@ -1160,10 +1160,11 @@ def select_multiple_folders_and_play():
             if not selection:
                 return
 
-            all_videos = []
-            for i in selection:
-                if i < len(self.selected_dirs):
-                    root_dir = self.selected_dirs[i]
+            selected_dirs = [self.selected_dirs[i] for i in selection if i < len(self.selected_dirs)]
+
+            def _open():
+                all_videos = []
+                for root_dir in selected_dirs:
                     cache = self.scan_cache.get(root_dir)
                     if cache:
                         videos, _, _ = cache
@@ -1179,11 +1180,12 @@ def select_multiple_folders_and_play():
                         ]
                     all_videos.extend(filtered_videos)
 
-            if not all_videos:
-                messagebox.showinfo("Information", "No videos found in selected directories.")
-                return
+                if not all_videos:
+                    messagebox.showinfo("Information", "No videos found in selected directories.")
+                    return
+                self._open_grid_view(all_videos)
 
-            self._open_grid_view(all_videos)
+            self._wait_for_scans_then(selected_dirs, _open)
 
         def _on_left_click(self, event):
             index = self.exclusion_listbox.nearest(event.y)
@@ -1727,10 +1729,15 @@ def select_multiple_folders_and_play():
         def get_current_selected_directory(self):
             selection = self.dir_listbox.curselection()
             if selection:
-                return self.selected_dirs[selection[0]]
-            elif self.current_selected_dir_index is not None and self.current_selected_dir_index < len(
+                idx = selection[0]
+                if idx < len(self.selected_dirs):
+                    self.current_selected_dir_index = idx
+                    return self.selected_dirs[idx]
+            if self.current_selected_dir_index is not None and self.current_selected_dir_index < len(
                     self.selected_dirs):
                 return self.selected_dirs[self.current_selected_dir_index]
+            if self.selected_dirs:
+                return self.selected_dirs[-1]
             return None
 
         def get_all_videos_for_statistics(self):
@@ -3534,6 +3541,19 @@ def select_multiple_folders_and_play():
                 self.update_console("Playback speed reset to 1.0×")
             self.draw_slider()
 
+        def _wait_for_scans_then(self, directories, callback):
+            def _wait():
+                deadline = time.time() + 15.0
+                while time.time() < deadline:
+                    with self._pending_scans_lock:
+                        still_pending = [d for d in directories if d in self.pending_scans]
+                    if not still_pending:
+                        break
+                    time.sleep(0.1)
+                self.root.after(0, callback)
+
+            ManagedThread(target=_wait, name="WaitForScans").start()
+
         def _show_grid_view(self):
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
@@ -3584,7 +3604,16 @@ def select_multiple_folders_and_play():
                     else:
                         self.root.after(0, lambda: messagebox.showwarning("Warning", "No videos found in selection"))
 
-                threading.Thread(target=collect_selected_videos, daemon=True).start()
+                relevant_dirs = list({os.path.dirname(self.current_subdirs_mapping.get(i, ''))
+                                      for i in exclusion_selection})
+
+                cur = self.get_current_selected_directory()
+                if cur:
+                    relevant_dirs.append(cur)
+                relevant_dirs = list(set(d for d in relevant_dirs if d))
+                self._wait_for_scans_then(relevant_dirs,
+                                          lambda: threading.Thread(target=collect_selected_videos, daemon=True).start())
+
             else:
                 self.update_console("Loading grid view for entire directory...")
 
@@ -3597,7 +3626,8 @@ def select_multiple_folders_and_play():
                     else:
                         self.root.after(0, lambda: messagebox.showwarning("Warning", "No videos found"))
 
-                threading.Thread(target=collect_all_videos, daemon=True).start()
+                self._wait_for_scans_then([selected_dir], lambda: threading.Thread(target=collect_all_videos, daemon=True).start())
+
 
         def _open_grid_view(self, videos):
             if not videos:
