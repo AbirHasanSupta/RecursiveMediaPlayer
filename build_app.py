@@ -1,3 +1,5 @@
+from embedded_player import EmbeddedPlayer
+
 try:
     from version import __version__, __commit__, __build__
 except ImportError:
@@ -1116,7 +1118,6 @@ def select_multiple_folders_and_play():
                 messagebox.showinfo("Information", "No videos found in selected directories.")
                 return
 
-            from embedded_player import EmbeddedPlayer
             all_directories = sorted(list(dict.fromkeys(all_video_to_dir[v] for v in all_videos)))
 
             # Start from the first selected main directory
@@ -1130,6 +1131,13 @@ def select_multiple_folders_and_play():
                             break
             except Exception:
                 pass
+
+            if self._active_player is not None:
+                try:
+                    self._active_player._close()
+                except Exception:
+                    pass
+                self._active_player = None
 
             player = EmbeddedPlayer(
                 parent=self.root,
@@ -1476,7 +1484,13 @@ def select_multiple_folders_and_play():
 
             self.update_console(f"Playing {len(videos)} videos from favorites")
 
-            from embedded_player import EmbeddedPlayer
+            if self._active_player is not None:
+                try:
+                    self._active_player._close()
+                except Exception:
+                    pass
+                self._active_player = None
+
             player = EmbeddedPlayer(
                 parent=self.root,
                 videos=videos,
@@ -2052,7 +2066,6 @@ def select_multiple_folders_and_play():
 
         def play_videos(self):
             """Launch EmbeddedPlayer for the full video list."""
-            from embedded_player import EmbeddedPlayer
 
             videos, video_to_dir, directories = self._build_video_list()
 
@@ -2105,6 +2118,13 @@ def select_multiple_folders_and_play():
             is_muted = getattr(self, 'is_muted', False)
             loop     = getattr(self, 'loop_mode', 'loop_on')
 
+            if self._active_player is not None:
+                try:
+                    self._active_player._close()
+                except Exception:
+                    pass
+                self._active_player = None
+
             player = EmbeddedPlayer(
                 parent=self.root,
                 videos=videos,
@@ -2134,7 +2154,6 @@ def select_multiple_folders_and_play():
         def play_selected_videos(self):
             """Launch EmbeddedPlayer for the videos currently selected in the listbox,
             honouring all active exclusions and expanding folder selections."""
-            from embedded_player import EmbeddedPlayer
 
             selected_dir = self.get_current_selected_directory()
 
@@ -2200,6 +2219,13 @@ def select_multiple_folders_and_play():
             loop     = getattr(self, 'loop_mode', 'loop_on')
 
             self.update_console(f"Playing {len(selected_videos)} selected video(s)")
+
+            if self._active_player is not None:
+                try:
+                    self._active_player._close()
+                except Exception:
+                    pass
+                self._active_player = None
 
             player = EmbeddedPlayer(
                 parent=self.root,
@@ -3641,8 +3667,6 @@ def select_multiple_folders_and_play():
             if not videos:
                 return
 
-            from embedded_player import EmbeddedPlayer
-
             if self._active_player is not None:
                 try:
                     self._active_player._close()
@@ -3667,6 +3691,13 @@ def select_multiple_folders_and_play():
             vol      = getattr(self, 'volume', 50)
             is_muted = getattr(self, 'is_muted', False)
             loop     = getattr(self, 'loop_mode', 'loop_on')
+
+            if self._active_player is not None:
+                try:
+                    self._active_player._close()
+                except Exception:
+                    pass
+                self._active_player = None
 
             player = EmbeddedPlayer(
                 parent=self.root,
@@ -3795,7 +3826,14 @@ def select_multiple_folders_and_play():
                 return
 
             self.update_console(f"Playing playlist with {len(valid_videos)} videos")
-            from embedded_player import EmbeddedPlayer
+
+            if self._active_player is not None:
+                try:
+                    self._active_player._close()
+                except Exception:
+                    pass
+                self._active_player = None
+
             player = EmbeddedPlayer(
                 parent=self.root,
                 videos=valid_videos,
@@ -3874,7 +3912,14 @@ def select_multiple_folders_and_play():
                 return
 
             self.update_console(f"Playing queue with {len(valid_videos)} videos")
-            from embedded_player import EmbeddedPlayer
+
+            if self._active_player is not None:
+                try:
+                    self._active_player._close()
+                except Exception:
+                    pass
+                self._active_player = None
+
             player = EmbeddedPlayer(
                 parent=self.root,
                 videos=valid_videos,
@@ -3941,7 +3986,14 @@ def select_multiple_folders_and_play():
                 return
 
             self.update_console(f"Playing {len(valid_videos)} videos from history")
-            from embedded_player import EmbeddedPlayer
+
+            if self._active_player is not None:
+                try:
+                    self._active_player._close()
+                except Exception:
+                    pass
+                self._active_player = None
+
             player = EmbeddedPlayer(
                 parent=self.root,
                 videos=valid_videos,
