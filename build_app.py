@@ -1654,7 +1654,7 @@ def select_multiple_folders_and_play():
                     listbox.selection_clear(0, tk.END)
                     listbox.selection_set(index)
                     listbox.activate(index)
-                    self.root.after(100, self.play_videos)
+                    self.root.after(100, lambda p=target_path: self._play_from_double_click(p))
                 return "break"
 
             if os.path.isdir(target_path):
@@ -1686,7 +1686,7 @@ def select_multiple_folders_and_play():
             listbox.selection_set(index)
             listbox.activate(index)
 
-            self.root.after(100, self.play_videos)
+            self.root.after(100, lambda: self._play_from_double_click(target_path))
 
             return "break"
 
@@ -2140,6 +2140,48 @@ def select_multiple_folders_and_play():
             )
             player.on_loop_change = self._save_loop_callback
             player.on_close_save  = self._on_player_close_save
+            player.on_video_changed = self.on_video_changed
+            player.on_add_to_playlist = lambda vids: self.playlist_manager.add_videos_to_playlist([], vids)
+            player.on_add_to_queue = lambda vids: self.queue_manager.add_to_queue(vids, added_from="player")
+            player.on_add_to_favourites = lambda vids: self.favorites_manager.add_to_favorites(vids,
+                                                                                               self.get_current_selected_directory() or os.path.dirname(
+                                                                                                   vids[0]))
+            player.set_hotkeys(self.settings_manager.get_settings().hotkeys)
+
+            player.play()
+            self._active_player = player
+
+        def _play_from_double_click(self, target_path):
+            videos = [target_path]
+            video_to_dir = {target_path: os.path.dirname(target_path)}
+            directories = [os.path.dirname(target_path)]
+
+            vol = getattr(self, 'volume', 50)
+            is_muted = getattr(self, 'is_muted', False)
+            loop = getattr(self, 'loop_mode', 'loop_on')
+
+            if self._active_player is not None:
+                try:
+                    self._active_player._close()
+                except Exception:
+                    pass
+                self._active_player = None
+
+            player = EmbeddedPlayer(
+                parent=self.root,
+                videos=videos,
+                video_to_dir=video_to_dir,
+                directories=directories,
+                start_index=0,
+                volume=vol,
+                is_muted=is_muted,
+                loop_mode=loop,
+                logger=self.update_console,
+                on_close=self._on_player_closed,
+                on_volume_change=self._save_volume_callback,
+            )
+            player.on_loop_change = self._save_loop_callback
+            player.on_close_save = self._on_player_close_save
             player.on_video_changed = self.on_video_changed
             player.on_add_to_playlist = lambda vids: self.playlist_manager.add_videos_to_playlist([], vids)
             player.on_add_to_queue = lambda vids: self.queue_manager.add_to_queue(vids, added_from="player")
