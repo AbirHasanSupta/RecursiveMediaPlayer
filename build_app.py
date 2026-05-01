@@ -10,8 +10,7 @@ from tkinter import filedialog, messagebox, ttk
 from tkinter.font import Font
 import os
 import sys
-import multiprocessing
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 
 from key_press import listen_keys, cleanup_hotkeys, reload_hotkeys
 from managers.favorites_manager import FavoritesManager
@@ -170,7 +169,7 @@ def select_multiple_folders_and_play():
             self.pending_scans = set()
             self._pending_scans_lock = threading.RLock()
             max_workers = min(8, (os.cpu_count() or 4))
-            self.executor = ManagedExecutor(ProcessPoolExecutor, max_workers=max_workers)
+            self.executor = ManagedExecutor(ThreadPoolExecutor, max_workers=max_workers)
             self.resource_manager = get_resource_manager()
             self.resource_manager.register_cleanup_callback(self._cleanup_scan_cache)
             self.resource_manager.register_cleanup_callback(self._cleanup_player_threads)
@@ -4444,5 +4443,4 @@ def select_multiple_folders_and_play():
 
 
 if __name__ == "__main__":
-    multiprocessing.freeze_support()
     select_multiple_folders_and_play()

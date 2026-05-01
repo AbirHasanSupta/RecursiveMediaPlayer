@@ -466,6 +466,8 @@ class VideoPreviewTooltip:
     def show_preview(self, video_path: str, thumbnail_data: str, x: int, y: int):
         if self.tooltip_window:
             self.hide_preview()
+            import time as _time
+            _time.sleep(0.05)
         try:
             import base64
             is_video = thumbnail_data.startswith("VIDEO:")
@@ -653,13 +655,46 @@ class VideoPreviewTooltip:
             return 0, 0, 1920, 1080
 
     def hide_preview(self):
-        if self.tooltip_window:
+        win = self.tooltip_window
+        self.tooltip_window = None
+        self.is_visible = False
+        if win:
             try:
-                self.tooltip_window.destroy()
+                player = getattr(win, '_player', None)
+                instance = getattr(win, '_instance', None)
+                tmp = getattr(win, '_tmp_path', None)
+                win._player = None
+                win._instance = None
+                win._tmp_path = None
+                if player:
+                    try:
+                        player.stop()
+                    except Exception:
+                        pass
+                    try:
+                        player.set_hwnd(0)
+                    except Exception:
+                        try:
+                            player.set_xwindow(0)
+                        except Exception:
+                            pass
+                    try:
+                        player.release()
+                    except Exception:
+                        pass
+                if instance:
+                    try:
+                        instance.release()
+                    except Exception:
+                        pass
+                if tmp:
+                    _safe_unlink(tmp)
             except Exception:
                 pass
-            self.tooltip_window = None
-        self.is_visible = False
+            try:
+                win.destroy()
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------
