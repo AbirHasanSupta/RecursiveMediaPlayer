@@ -2355,6 +2355,7 @@ def select_multiple_folders_and_play():
                 if not hasattr(self, 'current_subdirs_mapping') or not self.current_subdirs_mapping:
                     return
                 now = getattr(self, '_now_playing_video_path', None)
+                current_selection = set(self.exclusion_listbox.curselection())
                 for idx in range(self.exclusion_listbox.size()):
                     item_path = self.current_subdirs_mapping.get(idx)
                     if not item_path:
@@ -2366,10 +2367,14 @@ def select_multiple_folders_and_play():
                         self.exclusion_listbox.delete(idx)
                         self.exclusion_listbox.insert(idx, current_text + " ▶▶▶")
                         self.exclusion_listbox.itemconfig(idx, fg="#00aa44")
+                        if idx in current_selection:
+                            self.exclusion_listbox.selection_set(idx)
                     elif not is_now and had_tag:
                         self.exclusion_listbox.delete(idx)
                         self.exclusion_listbox.insert(idx, current_text.replace(" ▶▶▶", ""))
                         self.exclusion_listbox.itemconfig(idx, fg=self.text_color)
+                        if idx in current_selection:
+                            self.exclusion_listbox.selection_set(idx)
                     elif is_now and had_tag:
                         self.exclusion_listbox.itemconfig(idx, fg="#00aa44")
             except Exception:
@@ -3705,7 +3710,7 @@ def select_multiple_folders_and_play():
             self.grid_view_manager.video_preview_manager = self.video_preview_manager
             self.grid_view_manager.show_grid_view(videos, self.video_preview_manager)
 
-        def _play_grid_videos(self, videos):
+        def _play_grid_videos(self, videos, start_index=0):
             if not videos:
                 return
 
@@ -3746,7 +3751,7 @@ def select_multiple_folders_and_play():
                 videos=videos,
                 video_to_dir=all_video_to_dir,
                 directories=all_directories,
-                start_index=0,
+                start_index=start_index,
                 volume=vol,
                 is_muted=is_muted,
                 loop_mode=loop,

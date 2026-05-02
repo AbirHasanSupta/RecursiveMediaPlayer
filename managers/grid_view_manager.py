@@ -58,6 +58,7 @@ class GridViewManager:
         self._now_playing_badge = None
         self._last_anchor_path = None
         self._search_timer = None
+        self._hovered_card_path = None
 
         # callbacks
         self.play_callback = None
@@ -1069,8 +1070,17 @@ class GridViewManager:
 
     def _play_selected(self):
         videos = self._get_selected_videos()
-        if videos and self.play_callback:
-            self.play_callback(videos)
+        if not videos or not self.play_callback:
+            return
+        start_index = 0
+        hovered = self._hovered_card_path
+        if hovered and hovered in videos:
+            start_index = videos.index(hovered)
+        if start_index == 0:
+            hovered = getattr(self, '_last_right_clicked_path', None)
+            if hovered and hovered in videos:
+                start_index = videos.index(hovered)
+        self.play_callback(videos, start_index=start_index)
 
     def _play_single(self, vp):
         old = self.selected_items.copy()
@@ -1181,9 +1191,10 @@ class GridViewManager:
         self._update_selection_label()
 
     def _on_card_enter(self, event, vp):
+        self._hovered_card_path = vp
         card = self.card_widgets.get(vp)
         if card and card.winfo_exists():
-            is_sel  = vp in self.selected_items
+            is_sel = vp in self.selected_items
             is_excl = vp in self.excluded_items
             if not is_sel and not is_excl:
                 t = self._tok()
@@ -1196,11 +1207,12 @@ class GridViewManager:
                                 lbl.configure(bg=t['card_hover'])
 
     def _on_card_leave(self, event, vp):
+        self._hovered_card_path = None
         if self.video_preview_manager:
             self.video_preview_manager.tooltip.hide_preview()
         card = self.card_widgets.get(vp)
         if card and card.winfo_exists():
-            is_sel  = vp in self.selected_items
+            is_sel = vp in self.selected_items
             is_excl = vp in self.excluded_items
             if not is_sel and not is_excl:
                 t = self._tok()
@@ -1230,6 +1242,7 @@ class GridViewManager:
                 self.video_preview_manager._generate_thumbnail_async(
                     vp_norm, event.x_root, event.y_root)
             return
+        self._last_right_clicked_path = vp
         self._show_context_menu(event, vp)
 
     # ─────────────────────────────────────────────────────────────────────────
