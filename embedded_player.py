@@ -144,6 +144,9 @@ class EmbeddedPlayer:
         self._rotation_index = 0          # index into _ROTATION_STEPS: 0/1/2/3
         self._flip_h         = False      # horizontal flip toggled
         self._borderless     = False
+        self._titlebar = None
+        self._titlebar_job = None
+        self._titlebar_anim = None
         self._pre_bl_geo     = "1280x720"
         self._chapters_visible = True     # initially assume chapters exist (packed in UI)
 
@@ -1432,12 +1435,13 @@ class EmbeddedPlayer:
             sh = self._win.winfo_screenheight()
             self._win.geometry(f"{sw}x{sh}+0+0")
             self._force_hide_bar()
+            self._build_titlebar()
         else:
             self._win.overrideredirect(False)
             self._win.geometry(self._pre_bl_geo)
+            self._destroy_titlebar()
         self._win.lift()
         self._win.focus_force()
-        # Re-bind VLC after geometry change
         self._embed()
 
     def _escape(self):
@@ -1445,11 +1449,158 @@ class EmbeddedPlayer:
             self._borderless = False
             self._win.overrideredirect(False)
             self._win.geometry(self._pre_bl_geo)
+            self._destroy_titlebar()
             self._win.lift()
             self._win.focus_force()
             self._embed()
         else:
             self._close()
+
+    def _build_titlebar(self):
+        TB_H = 32
+        self._tb_h = TB_H
+        self._tb_shown = False
+        self._tb_y = -TB_H  # starts hidden above screen
+
+        self._titlebar = tk.Frame(self._win, bg="#1a1a1a",
+                                  highlightthickness=0, height=TB_H)
+        self._titlebar.place(x=0, y=-TB_H,
+                             width=self._win.winfo_screenwidth(), height=TB_H)
+        self._titlebar.lift()
+
+        # — close button
+        btn_close = tk.Button(self._titlebar, text="✕", command=self._close,
+                              bg="#1a1a1a", fg=_TXT, bd=0, padx=10, pady=0,
+                              relief=tk.FLAT, cursor="hand2",
+                              activebackground="#e50914", activeforeground="white",
+                              font=("Segoe UI", 10))
+        btn_close.pack(side=tk.RIGHT)
+
+        # — maximise / restore (cosmetic — toggles borderless off)
+        btn_max = tk.Button(self._titlebar, text="🗖", command=self._toggle_borderless,
+                            bg="#1a1a1a", fg=_TXT, bd=0, padx=10, pady=0,
+                            relief=tk.FLAT, cursor="hand2",
+                            activebackground="#333333", activeforeground="white",
+                            font=("Segoe UI", 10))
+        btn_max.pack(side=tk.RIGHT)
+
+        # — minimise
+        btn_min = tk.Button(self._titlebar, text="—",
+                            command=self._borderless_minimize,
+                            bg="#1a1a1a", fg=_TXT, bd=0, padx=10, pady=0,
+                            relief=tk.FLAT, cursor="hand2",
+                            activebackground="#333333", activeforeground="white",
+                            font=("Segoe UI", 10))
+        btn_min.pack(side=tk.RIGHT)
+
+        # title label
+        tk.Label(self._titlebar, text="Recursive Video Player",
+                 bg="#1a1a1a", fg=_TXT_DIM,
+                 font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=12)
+
+        # hover zone: invisible 4px strip at top of screen
+        self._tb_zone = tk.Frame(self._win, bg="black", height=4,
+                                 highlightthickness=0)
+        self._tb_zone.place(x=0, y=0, width=self._win.winfo_screenwidth(), height=4)
+        self._tb_zone.lift()
+        self._tb_zone.bind("<Enter>", lambda e: self._titlebar_slide_in())
+
+        self._titlebar.bind("<Leave>", lambda e: self._titlebar_schedule_hide())
+        self._titlebar.bind("<Enter>", lambda e: self._titlebar_cancel_hide())
+        for child in self._titlebar.winfo_children():
+            child.bind("<Enter>", lambda e: self._titlebar_cancel_hide(), add="+")
+            child.bind("<Leave>", lambda e: self._titlebar_schedule_hide(), add="+")
+
+    def _destroy_titlebar(self):
+        if self._titlebar_anim:
+            try:
+                self._win.after_cancel(self._titlebar_anim)
+            except Exception:
+                pass
+            self._titlebar_anim = None
+        if self._titlebar_job:
+            try:
+                self._win.after_cancel(self._titlebar_job)
+            except Exception:
+                pass
+            self._titlebar_job = None
+        if self._titlebar:
+            try:
+                self._titlebar.destroy()
+            except Exception:
+                pass
+            self._titlebar = None
+        if hasattr(self, '_tb_zone') and self._tb_zone:
+            try:
+                self._tb_zone.destroy()
+            except Exception:
+                pass
+            self._tb_zone = None
+
+    def _titlebar_slide_in(self):
+        self._titlebar_cancel_hide()
+        if self._tb_shown:
+            return
+        self._tb_shown = True
+        self._tb_y = -self._tb_h
+        self._titlebar_animate_to(0)
+
+    def _titlebar_animate_to(self, target_y, step=3):
+        if not self._titlebar:
+            return
+        if self._titlebar_anim:
+            try:
+                self._win.after_cancel(self._titlebar_anim)
+            except Exception:
+                pass
+
+        def _tick():
+            if not self._titlebar:
+                return
+            y = self._tb_y
+            if y < target_y:
+                y = min(y + step, target_y)
+            elif y > target_y:
+                y = max(y - step, target_y)
+            self._tb_y = y
+            try:
+                self._titlebar.place(x=0, y=y,
+                                     width=self._win.winfo_screenwidth(),
+                                     height=self._tb_h)
+                self._tb_zone.lift()
+                self._titlebar.lift()
+            except Exception:
+                return
+            if y != target_y:
+                self._titlebar_anim = self._win.after(8, _tick)
+            else:
+                self._titlebar_anim = None
+                if target_y < 0:
+                    self._tb_shown = False
+
+        _tick()
+
+    def _titlebar_schedule_hide(self, delay=1800):
+        self._titlebar_cancel_hide()
+        if self._titlebar:
+            self._titlebar_job = self._win.after(
+                delay, lambda: self._titlebar_animate_to(-self._tb_h))
+
+    def _titlebar_cancel_hide(self):
+        if self._titlebar_job:
+            try:
+                self._win.after_cancel(self._titlebar_job)
+            except Exception:
+                pass
+            self._titlebar_job = None
+
+    def _borderless_minimize(self):
+        self._borderless = False
+        self._win.overrideredirect(False)
+        self._destroy_titlebar()
+        self._win.geometry(self._pre_bl_geo)
+        self._win.update_idletasks()
+        self._win.iconify()
 
     # ═══════════════════════════════════════════════════════════════════
     # CONTROL BAR SHOW / HIDE
@@ -1741,7 +1892,8 @@ class EmbeddedPlayer:
 
         # cancel pending jobs
         for attr in ("_hide_job", "_poll_job", "_update_job",
-                     "_ab_monitor_job", "_sleep_timer_job"):
+                     "_ab_monitor_job", "_sleep_timer_job",
+                     "_titlebar_job", "_titlebar_anim"):
             job = getattr(self, attr, None)
             if job:
                 try:
