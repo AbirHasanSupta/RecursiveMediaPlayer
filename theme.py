@@ -750,6 +750,11 @@ class ThemeSelector:
                 text=self._get_loop_icon(), bg=cc["bg"], fg=cc["fg"])
         if hasattr(self, '_loop_mode_var'):
             self._loop_mode_var.set(mode)
+        if self._active_player is not None:
+            try:
+                self._active_player.loop_mode = mode
+            except Exception:
+                pass
         if self.controller:
             self.controller.set_loop_mode(self.loop_mode)
         self.update_console(f"Loop mode: {mode}")
