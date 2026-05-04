@@ -55,7 +55,10 @@ def main():
             shutil.rmtree(dir_name)
             print(f"  Removed: {dir_name}")
 
+    print("\n[3/6] Installing PyInstaller...")
     subprocess.run([sys.executable, '-m', 'pip', 'install', 'pyinstaller'], check=True)
+
+    print("\n[4/6] Verifying build spec...")
 
     print("\n[5/6] Building with PyInstaller...")
     subprocess.run([sys.executable, '-m', 'PyInstaller', 'video_player.spec', '--clean'], check=True)
