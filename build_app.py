@@ -958,14 +958,6 @@ def select_multiple_folders_and_play():
             self.save_directories_check.pack(side=tk.LEFT, padx=(0, 10))
 
             self.smart_resume_var = tk.BooleanVar(value=self.smart_resume_enabled)
-            self.smart_resume_check = ttk.Checkbutton(
-                checkboxes_row,
-                text="Resume Playback",
-                style="Modern.TCheckbutton",
-                variable=self.smart_resume_var,
-                command=self.toggle_smart_resume
-            )
-            self.smart_resume_check.pack(side=tk.LEFT, padx=(0, 0))
 
             self.speed_var = tk.DoubleVar(value=1.0)
 
@@ -1157,6 +1149,8 @@ def select_multiple_folders_and_play():
             player.on_add_to_favourites = lambda vids: self.favorites_manager.add_to_favorites(vids, self.get_current_selected_directory() or os.path.dirname(vids[0]))
             player.set_hotkeys(self.settings_manager.get_settings().hotkeys)
 
+            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+                player.set_seek_preview_manager(self.video_preview_manager)
             player.play()
             self._active_player = player
 
@@ -1508,7 +1502,8 @@ def select_multiple_folders_and_play():
                                                                                                self.get_current_selected_directory() or os.path.dirname(
                                                                                                    vids[0]))
             player.set_hotkeys(self.settings_manager.get_settings().hotkeys)
-
+            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+                player.set_seek_preview_manager(self.video_preview_manager)
             player.play()
             self._active_player = player
 
@@ -2144,7 +2139,8 @@ def select_multiple_folders_and_play():
                                                                                                self.get_current_selected_directory() or os.path.dirname(
                                                                                                    vids[0]))
             player.set_hotkeys(self.settings_manager.get_settings().hotkeys)
-
+            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+                player.set_seek_preview_manager(self.video_preview_manager)
             player.play()
             self._active_player = player
 
@@ -2186,7 +2182,8 @@ def select_multiple_folders_and_play():
                                                                                                self.get_current_selected_directory() or os.path.dirname(
                                                                                                    vids[0]))
             player.set_hotkeys(self.settings_manager.get_settings().hotkeys)
-
+            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+                player.set_seek_preview_manager(self.video_preview_manager)
             player.play()
             self._active_player = player
 
@@ -2288,7 +2285,8 @@ def select_multiple_folders_and_play():
                                                                                                self.get_current_selected_directory() or os.path.dirname(
                                                                                                    vids[0]))
             player.set_hotkeys(self.settings_manager.get_settings().hotkeys)
-
+            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+                player.set_seek_preview_manager(self.video_preview_manager)
             player.play()
             self._active_player = player
 
@@ -3635,7 +3633,8 @@ def select_multiple_folders_and_play():
                                                                                                self.get_current_selected_directory() or os.path.dirname(
                                                                                                    vids[0]))
             player.set_hotkeys(self.settings_manager.get_settings().hotkeys)
-
+            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+                player.set_seek_preview_manager(self.video_preview_manager)
             player.play()
             self._active_player = player
 
@@ -3770,7 +3769,8 @@ def select_multiple_folders_and_play():
                                                                                                self.get_current_selected_directory() or os.path.dirname(
                                                                                                    vids[0]))
             player.set_hotkeys(self.settings_manager.get_settings().hotkeys)
-
+            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+                player.set_seek_preview_manager(self.video_preview_manager)
             player.play()
             self._active_player = player
 
@@ -3856,7 +3856,8 @@ def select_multiple_folders_and_play():
                                                                                                self.get_current_selected_directory() or os.path.dirname(
                                                                                                    vids[0]))
             player.set_hotkeys(self.settings_manager.get_settings().hotkeys)
-
+            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+                player.set_seek_preview_manager(self.video_preview_manager)
             player.play()
             self._active_player = player
 
@@ -3930,7 +3931,8 @@ def select_multiple_folders_and_play():
                                                                                                self.get_current_selected_directory() or os.path.dirname(
                                                                                                    vids[0]))
             player.set_hotkeys(self.settings_manager.get_settings().hotkeys)
-
+            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+                player.set_seek_preview_manager(self.video_preview_manager)
             player.play()
             self._active_player = player
 

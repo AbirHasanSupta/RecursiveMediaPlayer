@@ -306,8 +306,14 @@ class EmbeddedPlayer:
         self._seek.bind("<B1-Motion>",       self._seek_drag)
         self._seek.bind("<ButtonRelease-1>", self._seek_release)
         self._seek.bind("<Configure>",       lambda e: self._draw_seek())
-        self._seek.bind("<Enter>",  lambda e: (self._set_seek_hover(True),  self._cancel_hide()))
-        self._seek.bind("<Leave>",  lambda e: (self._set_seek_hover(False), self._schedule_hide()))
+        self._seek.bind("<Enter>", lambda e: (self._set_seek_hover(True), self._cancel_hide()))
+        self._seek.bind("<Leave>",
+                        lambda e: (self._set_seek_hover(False), self._hide_seek_preview(), self._schedule_hide()))
+        self._seek.bind("<Motion>", lambda e: self._show_seek_preview(e.x))
+        self._seek_preview_win = None
+        self._seek_preview_lbl = None
+        self._seek_preview_time = None
+        self._seek_preview_mgr = None
 
         # ═══════════════════════════════════════════════════════════════
         # ROW 3 — control buttons
@@ -679,6 +685,9 @@ class EmbeddedPlayer:
         path = self.videos[idx]
 
         self._clear_ab()
+        self._hide_seek_preview()
+        if self._seek_preview_mgr and self.videos:
+            self._seek_preview_mgr.seek_preview.ensure_generated(self.videos[idx])
         self._embed()
         media = self._instance.media_new(path)
         self._player.set_media(media)
@@ -754,6 +763,62 @@ class EmbeddedPlayer:
         else:
             self._play_index((self.index + 1) % len(self.videos))
 
+    def set_seek_preview_manager(self, manager):
+        """Called by build_app.py after construction to wire up seek scrubbing."""
+        self._seek_preview_mgr = manager
+        if self.videos:
+            manager.seek_preview.ensure_generated(self.videos[self.index])
+
+    def _show_seek_preview(self, x: int):
+        if not self._seek_preview_mgr or not self.videos:
+            return
+        try:
+            w = self._seek.winfo_width()
+            dur = self._player.get_length() or 0
+            if w <= 1 or dur <= 0:
+                return
+            frac = max(0.0, min(1.0, x / w))
+            pos_ms = int(frac * dur)
+            photo = self._seek_preview_mgr.seek_preview.get_frame(
+                self.videos[self.index], pos_ms)
+            time_str = _fmt(pos_ms)
+
+            if self._seek_preview_win is None or not self._seek_preview_win.winfo_exists():
+                self._seek_preview_win = tk.Toplevel(self._win)
+                self._seek_preview_win.overrideredirect(True)
+                self._seek_preview_win.attributes('-topmost', True)
+                self._seek_preview_win.configure(bg="#111111")
+                self._seek_preview_lbl = tk.Label(
+                    self._seek_preview_win, bg="#111111", bd=0)
+                self._seek_preview_lbl.pack()
+                self._seek_preview_time = tk.Label(
+                    self._seek_preview_win,
+                    bg="#111111", fg="#ffffff",
+                    font=("Segoe UI", 8))
+                self._seek_preview_time.pack(pady=(0, 2))
+
+            if photo:
+                self._seek_preview_lbl.configure(image=photo)
+                self._seek_preview_lbl.image = photo
+            self._seek_preview_time.configure(text=time_str)
+
+            sx = self._seek.winfo_rootx() + x - 80
+            sy = self._seek.winfo_rooty() - 115
+            self._seek_preview_win.geometry(f"160x105+{sx}+{sy}")
+            self._seek_preview_win.deiconify()
+        except Exception:
+            pass
+
+    def _hide_seek_preview(self):
+        if self._seek_preview_win:
+            try:
+                self._seek_preview_win.withdraw()
+                if self._seek_preview_lbl:
+                    self._seek_preview_lbl.configure(image='')
+                    self._seek_preview_lbl.image = None
+            except Exception:
+                pass
+
     # ═══════════════════════════════════════════════════════════════════
     # TRANSPORT CONTROLS
     # ═══════════════════════════════════════════════════════════════════
@@ -765,15 +830,18 @@ class EmbeddedPlayer:
             self._player.play()
 
     def _next(self):
+        self._hide_seek_preview()
         self._play_index((self.index + 1) % len(self.videos))
 
     def _prev(self):
+        self._hide_seek_preview()
         self._play_index((self.index - 1) % len(self.videos))
 
     def _stop(self):
         self._player.stop()
 
     def _next_dir(self):
+        self._hide_seek_preview()
         cur = self.video_to_dir.get(self.videos[self.index])
         if not cur or cur not in self.directories:
             return
@@ -784,6 +852,7 @@ class EmbeddedPlayer:
                 return
 
     def _prev_dir(self):
+        self._hide_seek_preview()
         cur = self.video_to_dir.get(self.videos[self.index])
         if not cur or cur not in self.directories:
             return
@@ -1905,6 +1974,14 @@ class EmbeddedPlayer:
         self._running = False
         # Stop A-B loop monitor
         self._ab_loop_active = False
+
+        self._hide_seek_preview()
+        if self._seek_preview_win:
+            try:
+                self._seek_preview_win.destroy()
+            except Exception:
+                pass
+            self._seek_preview_win = None
 
         # Unbind hotkey cbids we registered so nothing fires after destroy
         for seq, cbid in getattr(self, '_registered_cbids', []):

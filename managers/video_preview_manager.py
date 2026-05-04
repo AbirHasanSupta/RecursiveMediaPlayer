@@ -880,6 +880,7 @@ class VideoPreviewManager:
         self.storage = ThumbnailStorage()
         self.generator = ThumbnailGenerator()
         self.tooltip = VideoPreviewTooltip(parent)
+        self.seek_preview = SeekPreviewCache()
 
         # In-memory LRU cache: norm_path → PhotoImage
         self.lru_cache = LRUPhotoCache(maxsize=self.LRU_SIZE)
@@ -911,6 +912,7 @@ class VideoPreviewManager:
         self.current_mapping = None
         self.right_clicked_item = None
 
+
         self._load_thumbnails()
 
     # ------------------------------------------------------------------
@@ -921,6 +923,7 @@ class VideoPreviewManager:
         try:
             self._prefetch.stop()
             self._cancel_save_timer()
+            self.seek_preview.clear()
             # Always flush index on exit — even if not dirty — so any
             # blobs written this session are indexed for next startup.
             self._flush_index()
@@ -1276,3 +1279,85 @@ class VideoPreviewManager:
                     f"Evicted {len(to_remove)} cached thumbnails for "
                     f"'{os.path.basename(dir_path)}'"
                 )
+
+
+class SeekPreviewCache:
+    """
+    Generates and caches thumbnail frames for seek-bar scrubbing.
+    Frames are keyed by (norm_path, interval_index) where interval is every
+    INTERVAL_S seconds.  Generation runs in a background thread per video.
+    """
+
+    INTERVAL_S   = 5      # one frame every N seconds
+    THUMB_W      = 160
+    THUMB_H      = 90
+    JPEG_QUALITY = 60
+
+    def __init__(self):
+        self._cache: Dict[str, Dict[int, ImageTk.PhotoImage]] = {}
+        self._lock  = threading.Lock()
+        self._generating: set = set()
+
+    def get_frame(self, video_path: str, position_ms: int) -> Optional[ImageTk.PhotoImage]:
+        norm = os.path.normpath(video_path)
+        idx  = int(position_ms / 1000) // self.INTERVAL_S
+        with self._lock:
+            frames = self._cache.get(norm)
+            if frames:
+                if idx in frames:
+                    return frames[idx]
+                best = min(frames.keys(), key=lambda k: abs(k - idx), default=None)
+                if best is not None:
+                    return frames[best]
+        return None
+
+    def ensure_generated(self, video_path: str):
+        norm = os.path.normpath(video_path)
+        with self._lock:
+            if norm in self._cache or norm in self._generating:
+                return
+            self._generating.add(norm)
+        threading.Thread(target=self._generate, args=(norm,), daemon=True).start()
+
+    def _generate(self, norm: str):
+        try:
+            cap = cv2.VideoCapture(norm)
+            if not cap.isOpened():
+                return
+            fps         = cap.get(cv2.CAP_PROP_FPS) or 25
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            duration_s  = total_frames / fps
+            frames: Dict[int, ImageTk.PhotoImage] = {}
+
+            idx = 0
+            t   = 0.0
+            while t < duration_s:
+                frame_no = int(t * fps)
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no)
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    small = cv2.resize(frame, (self.THUMB_W, self.THUMB_H),
+                                       interpolation=cv2.INTER_AREA)
+                    rgb   = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+                    photo = ImageTk.PhotoImage(Image.fromarray(rgb))
+                    frames[idx] = photo
+                idx += 1
+                t   += self.INTERVAL_S
+
+            cap.release()
+            with self._lock:
+                self._cache[norm] = frames
+        except Exception as e:
+            print(f"[SeekPreview] {e}")
+        finally:
+            with self._lock:
+                self._generating.discard(norm)
+
+    def evict(self, video_path: str):
+        norm = os.path.normpath(video_path)
+        with self._lock:
+            self._cache.pop(norm, None)
+
+    def clear(self):
+        with self._lock:
+            self._cache.clear()
