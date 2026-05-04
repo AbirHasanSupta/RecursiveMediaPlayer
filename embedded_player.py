@@ -1431,9 +1431,20 @@ class EmbeddedPlayer:
         if self._borderless:
             self._pre_bl_geo = self._win.geometry()
             self._win.overrideredirect(True)
+            wx = self._win.winfo_x()
+            wy = self._win.winfo_y()
             sw = self._win.winfo_screenwidth()
             sh = self._win.winfo_screenheight()
-            self._win.geometry(f"{sw}x{sh}+0+0")
+            if _get_monitors:
+                try:
+                    for m in _get_monitors():
+                        if m.x <= wx < m.x + m.width and m.y <= wy < m.y + m.height:
+                            sw, sh = m.width, m.height
+                            wx, wy = m.x, m.y
+                            break
+                except Exception:
+                    pass
+            self._win.geometry(f"{sw}x{sh}+{wx}+{wy}")
             self._force_hide_bar()
             self._build_titlebar()
         else:
@@ -1465,7 +1476,7 @@ class EmbeddedPlayer:
         self._titlebar = tk.Frame(self._win, bg="#1a1a1a",
                                   highlightthickness=0, height=TB_H)
         self._titlebar.place(x=0, y=-TB_H,
-                             width=self._win.winfo_screenwidth(), height=TB_H)
+                             width=self._win.winfo_width(), height=TB_H)
         self._titlebar.lift()
 
         # — close button
@@ -1501,7 +1512,7 @@ class EmbeddedPlayer:
         # hover zone: invisible 4px strip at top of screen
         self._tb_zone = tk.Frame(self._win, bg="black", height=4,
                                  highlightthickness=0)
-        self._tb_zone.place(x=0, y=0, width=self._win.winfo_screenwidth(), height=4)
+        self._tb_zone.place(x=0, y=0, width=self._win.winfo_width(), height=4)
         self._tb_zone.lift()
         self._tb_zone.bind("<Enter>", lambda e: self._titlebar_slide_in())
 
@@ -1565,7 +1576,7 @@ class EmbeddedPlayer:
             self._tb_y = y
             try:
                 self._titlebar.place(x=0, y=y,
-                                     width=self._win.winfo_screenwidth(),
+                                     width=self._win.winfo_width(),
                                      height=self._tb_h)
                 self._tb_zone.lift()
                 self._titlebar.lift()
