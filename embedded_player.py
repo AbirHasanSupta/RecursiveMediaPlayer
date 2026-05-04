@@ -1510,10 +1510,12 @@ class EmbeddedPlayer:
                  font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=12)
 
         # hover zone: invisible 4px strip at top of screen
-        self._tb_zone = tk.Frame(self._win, bg="black", height=4,
+        self._tb_zone = tk.Frame(self._win, bg="black", height=8,
                                  highlightthickness=0)
-        self._tb_zone.place(x=0, y=0, width=self._win.winfo_width(), height=4)
+        self._tb_zone.place(x=0, y=0, width=self._win.winfo_width(), height=8)
         self._tb_zone.lift()
+        self._tb_zone.bind("<Configure>", lambda e: self._tb_zone.lift())
+        self._win.bind("<Configure>", lambda e: self._reposition_tb_zone(), add=True)
         self._tb_zone.bind("<Enter>", lambda e: self._titlebar_slide_in())
 
         self._titlebar.bind("<Leave>", lambda e: self._titlebar_schedule_hide())
@@ -1547,6 +1549,17 @@ class EmbeddedPlayer:
             except Exception:
                 pass
             self._tb_zone = None
+
+    def _reposition_tb_zone(self):
+        if not self._borderless or not hasattr(self, '_tb_zone') or not self._tb_zone:
+            return
+        try:
+            self._tb_zone.place(x=0, y=0, width=self._win.winfo_width(), height=4)
+            self._tb_zone.lift()
+            if self._titlebar:
+                self._titlebar.lift()
+        except Exception:
+            pass
 
     def _titlebar_slide_in(self):
         self._titlebar_cancel_hide()

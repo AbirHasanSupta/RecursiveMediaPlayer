@@ -95,9 +95,6 @@ def select_multiple_folders_and_play():
             self.collapsed_paths = set()
             self.current_max_depth = 20
             self.loop_mode = "loop_on"
-            self._sleep_timer_job = None
-            self._sleep_countdown_job = None
-            self._sleep_timer_end = None
             self._active_player = None
 
             preferences = self.config.load_preferences()
@@ -3204,8 +3201,6 @@ def select_multiple_folders_and_play():
                                     relief="flat", bd=1,
                                     font=("Segoe UI", 9))
             playback_menu.add_cascade(label="Loop Mode", menu=loop_sub)
-            playback_menu.add_separator()
-            playback_menu.add_command(label="Sleep Timer", command=self._show_sleep_timer_dialog)
             make_toolbar_btn("Playback", menu=playback_menu)
 
             make_toolbar_btn("Settings", command=self._show_settings)
@@ -3259,53 +3254,6 @@ def select_multiple_folders_and_play():
 
             for _pill_label in ["🎵 Playlist", "⬛ Queue", "♥ Favourites", "🕐 History"]:
                 _make_media_pill(_pill_label)
-
-            self.sleep_countdown_label = tk.Label(
-                self.toolbar,
-                text="",
-                bg=_tb_colors()["bg"],
-                fg=_tb_colors()["fg"],
-                font=("Segoe UI", 9),
-                padx=8, pady=4,
-                cursor="hand2"
-            )
-            self.sleep_countdown_label.pack(side=tk.RIGHT, padx=(0, 2))
-
-            def _sleep_label_click(e):
-                if not getattr(self, '_sleep_timer_end', None):
-                    return
-                try:
-                    if getattr(self, '_sleep_timer_paused', False):
-                        # resume: restart the after job and countdown
-                        import time as _time
-                        remaining_ms = int(self._sleep_timer_remaining * 1000)
-                        self._sleep_timer_end = _time.time() + self._sleep_timer_remaining
-                        self._sleep_timer_job = self.root.after(remaining_ms, self._sleep_timer_fired)
-                        self._sleep_timer_paused = False
-                        self._start_sleep_countdown()
-                        if self.controller:
-                            self.controller.player.pause()
-                    else:
-                        # pause: cancel the after job, store remaining
-                        import time as _time
-                        if self._sleep_timer_job:
-                            self.root.after_cancel(self._sleep_timer_job)
-                            self._sleep_timer_job = None
-                        if hasattr(self, '_sleep_countdown_job') and self._sleep_countdown_job:
-                            self.root.after_cancel(self._sleep_countdown_job)
-                            self._sleep_countdown_job = None
-                        self._sleep_timer_remaining = max(0, self._sleep_timer_end - _time.time())
-                        self._sleep_timer_paused = True
-                        if hasattr(self, 'sleep_countdown_label'):
-                            mins = int(self._sleep_timer_remaining) // 60
-                            secs = int(self._sleep_timer_remaining) % 60
-                            self.sleep_countdown_label.config(text=f"⏸ {mins}:{secs:02d}")
-                        if self.controller:
-                            self.controller.player.pause()
-                except Exception:
-                    pass
-
-            self.sleep_countdown_label.bind("<ButtonRelease-1>", _sleep_label_click)
 
             # theme toggle
             self.theme_toolbar_btn = tk.Label(
@@ -3362,90 +3310,6 @@ def select_multiple_folders_and_play():
             # placeholder so toggle_console's before= ref works
             self.button_frame = tk.Frame(self.main_frame, bg=self.bg_color)
             self.button_frame.pack(fill=tk.X)
-
-        def _show_sleep_timer_dialog(self):
-            # if timer already running, cancel it
-            if getattr(self, '_sleep_timer_job', None):
-                self.root.after_cancel(self._sleep_timer_job)
-                self._sleep_timer_job = None
-                if hasattr(self, '_sleep_countdown_job') and self._sleep_countdown_job:
-                    self.root.after_cancel(self._sleep_countdown_job)
-                    self._sleep_countdown_job = None
-                self._sleep_timer_end = None
-                self._sleep_timer_paused = False
-                if hasattr(self, 'sleep_countdown_label'):
-                    self.sleep_countdown_label.config(text="")
-                self.update_console("Sleep timer cancelled")
-                return
-
-            dlg = tk.Toplevel(self.root)
-            dlg.title("Sleep Timer")
-            dlg.geometry("300x160")
-            dlg.configure(bg=self.bg_color)
-            dlg.transient(self.root)
-            dlg.grab_set()
-            dlg.resizable(False, False)
-
-            tk.Label(dlg, text="Stop playback after (minutes):",
-                     font=self.normal_font, bg=self.bg_color,
-                     fg=self.text_color).pack(pady=(20, 8))
-
-            minutes_var = tk.IntVar(value=30)
-            spin = tk.Spinbox(dlg, from_=1, to=300,
-                              textvariable=minutes_var,
-                              font=self.normal_font, width=8,
-                              bg=self.bg_color, fg=self.text_color)
-            spin.pack()
-
-            def start():
-                import time as _time
-                minutes = minutes_var.get()
-                ms = minutes * 60 * 1000
-                self._sleep_timer_end = _time.time() + (minutes * 60)
-                self._sleep_timer_job = self.root.after(ms, self._sleep_timer_fired)
-                self._start_sleep_countdown()
-                self.update_console(f"Sleep timer set for {minutes} minutes")
-                dlg.destroy()
-
-            self.create_button(dlg, "Set Timer", start, "primary", "md").pack(pady=15)
-            dlg.bind("<Return>", lambda e: start())
-
-        def _start_sleep_countdown(self):
-            import time as _time
-
-            def tick():
-                if not getattr(self, '_sleep_timer_end', None):
-                    return
-                if getattr(self, '_sleep_timer_paused', False):
-                    return
-                remaining = int(self._sleep_timer_end - _time.time())
-                if remaining <= 0:
-                    return
-                mins = remaining // 60
-                secs = remaining % 60
-                if hasattr(self, 'sleep_countdown_label'):
-                    self.sleep_countdown_label.config(text=f"⏾ {mins}:{secs:02d}")
-                self._sleep_countdown_job = self.root.after(1000, tick)
-
-            self._sleep_countdown_job = None
-            tick()
-
-        def _sleep_timer_fired(self):
-            self._sleep_timer_job = None
-            self._sleep_timer_end = None
-            self._sleep_timer_paused = False
-            if hasattr(self, '_sleep_countdown_job') and self._sleep_countdown_job:
-                self.root.after_cancel(self._sleep_countdown_job)
-                self._sleep_countdown_job = None
-            if hasattr(self, 'sleep_countdown_label'):
-                self.sleep_countdown_label.config(text="")
-            self.update_console("Sleep timer: stopping playback")
-            if self._active_player is not None:
-                try:
-                    self._active_player._close()
-                except Exception:
-                    pass
-                self._active_player = None
 
         def setup_status_section(self):
             # Video count is now shown inline in the exclusion section header
