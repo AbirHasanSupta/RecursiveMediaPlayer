@@ -744,15 +744,13 @@ class ThemeSelector:
     def _set_loop_mode_menu(self, mode):
         """Set loop mode from menu and refresh toolbar button."""
         self.loop_mode = mode
-        if hasattr(self, 'loop_toolbar_btn') and hasattr(self, '_tb_colors'):
-            cc = self._tb_colors()
-            self.loop_toolbar_btn.config(
-                text=self._get_loop_icon(), bg=cc["bg"], fg=cc["fg"])
         if hasattr(self, '_loop_mode_var'):
             self._loop_mode_var.set(mode)
         if self._active_player is not None:
             try:
                 self._active_player.loop_mode = mode
+                labels = {"loop_on": "↺  Loop", "loop_off": "→  Once", "shuffle": "⇄  Shuffle"}
+                self._active_player._btn_loop.config(text=labels[mode])
             except Exception:
                 pass
         if self.controller:

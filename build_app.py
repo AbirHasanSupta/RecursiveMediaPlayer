@@ -2309,6 +2309,11 @@ def select_multiple_folders_and_play():
                     self.loop_toggle_button.config(text=self._get_loop_icon())
                 except Exception:
                     pass
+            if hasattr(self, '_loop_mode_var'):
+                try:
+                    self._loop_mode_var.set(loop_mode)
+                except Exception:
+                    pass
             self.save_preferences()
 
         def _on_player_close_save(self, index: int, path: str,
