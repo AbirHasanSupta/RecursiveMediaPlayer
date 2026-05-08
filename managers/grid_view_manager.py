@@ -390,6 +390,8 @@ class GridViewManager:
                              lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
         self.canvas.bind("<Configure>",
                          lambda e: self.canvas.itemconfig(canvas_frame, width=e.width))
+        self.canvas.bind("<Button-1>", lambda e: self._clear_selection())
+        self.grid_frame.bind("<Button-1>", lambda e: self._clear_selection())
 
         def _on_mousewheel(e):
             if self.canvas.winfo_exists():

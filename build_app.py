@@ -1849,11 +1849,15 @@ def select_multiple_folders_and_play():
             suffix = f" (scanning {pending}…)" if pending else ""
             self.video_count_label.config(text=f"  —  {self.video_count} videos{suffix}")
 
-            if total_excluded > 0:
-                self.update_console(
-                    f"Total: {total_videos} videos selected, {total_excluded} excluded from {len(self.selected_dirs)} directories")
-            elif not pending:
-                self.update_console(f"Total: {total_videos} videos selected from {len(self.selected_dirs)} directories")
+            if not pending and not hasattr(self, '_last_reported_video_count') or \
+                    (not pending and getattr(self, '_last_reported_video_count', None) != total_videos):
+                self._last_reported_video_count = total_videos
+                if total_excluded > 0:
+                    self.update_console(
+                        f"Total: {total_videos} videos selected, {total_excluded} excluded from {len(self.selected_dirs)} directories")
+                else:
+                    self.update_console(
+                        f"Total: {total_videos} videos from {len(self.selected_dirs)} director{'ies' if len(self.selected_dirs) != 1 else 'y'}")
 
         def _apply_filters_and_refresh(self):
             selected_dir = self.get_current_selected_directory()
