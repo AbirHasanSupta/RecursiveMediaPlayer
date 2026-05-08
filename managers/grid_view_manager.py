@@ -213,6 +213,7 @@ class GridViewManager:
         t = self._tok()
 
         self.grid_window = tk.Toplevel(self.root)
+        self.grid_window.withdraw()
         self.grid_window.title("Video Gallery")
         self.grid_window.geometry("1600x900")
         self.grid_window.configure(bg=t['bg'])
@@ -226,6 +227,10 @@ class GridViewManager:
         self._pages_cache = None
 
         self._build_ui(videos, t)
+
+        from icon_helper import apply_icon
+        apply_icon(self.grid_window)
+        self.grid_window.deiconify()
 
     def _build_ui(self, videos, t):
         """Construct the entire window layout."""

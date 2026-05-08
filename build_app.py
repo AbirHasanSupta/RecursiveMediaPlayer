@@ -1,4 +1,6 @@
 from embedded_player import EmbeddedPlayer
+from icon_helper import apply_icon
+from splash import show_splash
 
 try:
     from version import __version__, __commit__, __build__
@@ -116,13 +118,23 @@ def select_multiple_folders_and_play():
             self.setup_theme()
 
             root.title("Recursive Video Player")
-            root.geometry("1600x900")
+            sw = root.winfo_screenwidth()
+            sh = root.winfo_screenheight()
+            restore_w = max(1280, int(sw * 0.75))
+            restore_h = max(720, int(sh * 0.75))
+            cx = (sw - restore_w) // 2
+            cy = (sh - restore_h) // 2
+            root.geometry(f"{restore_w}x{restore_h}+{cx}+{cy}")
+
             try:
                 root.state('zoomed')
             except:
                 pass
+
+            root.minsize(900, 600)
             root.protocol("WM_DELETE_WINDOW", self.cancel)
             root.configure(bg=self.bg_color)
+            apply_icon(root)
 
             try:
                 self.drive_manager = GoogleDriveManager()
@@ -1850,6 +1862,7 @@ def select_multiple_folders_and_play():
                 return
 
             progress_window = tk.Toplevel(self.root)
+            apply_icon(progress_window)
             progress_window.title("Applying Filters")
             progress_window.geometry("400x150")
             progress_window.configure(bg=self.bg_color)
@@ -4033,6 +4046,7 @@ def select_multiple_folders_and_play():
 
         def _ask_drive_link_dialog(self):
             dlg = tk.Toplevel(self.root)
+            dlg.withdraw()
             dlg.title("Add Google Drive Link")
             dlg.configure(bg=self.bg_color)
             dlg.transient(self.root)
@@ -4187,6 +4201,8 @@ def select_multiple_folders_and_play():
             dlg.bind("<Escape>", lambda _e: on_cancel())
 
             entry.focus_set()
+            apply_icon(dlg)
+            dlg.deiconify()
             self.root.wait_window(dlg)
             return result["url"]
 
@@ -4202,6 +4218,7 @@ def select_multiple_folders_and_play():
             self.update_console("Processing Google Drive link for streaming…")
 
             progress_window = tk.Toplevel(self.root)
+            progress_window.withdraw()
             progress_window.title("Google Drive")
             progress_window.geometry("420x140")
             progress_window.configure(bg=self.bg_color)
@@ -4236,6 +4253,9 @@ def select_multiple_folders_and_play():
                 justify=tk.LEFT,
             )
             status_lbl.pack(padx=16, pady=(0, 8), anchor="w")
+
+            apply_icon(progress_window)
+            progress_window.deiconify()
 
             try:
                 if hasattr(self, 'add_drive_button') and self.add_drive_button:
@@ -4438,7 +4458,14 @@ def select_multiple_folders_and_play():
                 os._exit(0)
 
     root = TkinterDnD.Tk()
-    app = DirectorySelector(root)
+    root.withdraw()
+
+    def _launch():
+        DirectorySelector(root)
+        root.update_idletasks()
+        root.deiconify()
+
+    show_splash(root, on_done=_launch, duration_ms=1500)
     root.mainloop()
 
 

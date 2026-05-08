@@ -62,16 +62,20 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
-        # Include only non-AI Python files
+        # ── icon & splash asset ──────────────────────────────────────────────
+        ('icon.ico', '.'),
+
+        # ── source files ─────────────────────────────────────────────────────
+        ('icon_helper.py', '.'),
+        ('splash.py', '.'),
         ('key_press.py', '.'),
         ('theme.py', '.'),
         ('utils.py', '.'),
         ('vlc_player_controller.py', '.'),
+        ('embedded_player.py', '.'),
 
-        # Include managers directory
+        # ── managers package ─────────────────────────────────────────────────
         ('managers', 'managers'),
-
-        # NOTE: enhanced_model.py and model_path_helper.py are NOT included
     ],
     hiddenimports=hidden_imports,
     hookspath=[],
@@ -121,7 +125,8 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
+    # ── custom Windows taskbar / .exe icon ───────────────────────────────────
+    icon='icon.ico',
 )
 
 coll = COLLECT(

@@ -341,6 +341,7 @@ class QueueUI:
             return
 
         self.queue_window = tk.Toplevel(self.parent)
+        self.queue_window.withdraw()
         self.queue_window.title("Playback Queue")
         self.queue_window.geometry("820x620")
         self.queue_window.minsize(640, 480)
@@ -353,6 +354,10 @@ class QueueUI:
 
         self._setup_queue_ui()
         self._refresh_queue()
+
+        from icon_helper import apply_icon
+        apply_icon(self.queue_window)
+        self.queue_window.deiconify()
 
     def _setup_queue_ui(self):
         tp = self.theme_provider

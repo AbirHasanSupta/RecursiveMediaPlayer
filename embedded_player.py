@@ -33,6 +33,9 @@ from pathlib import Path
 from typing import Optional, List, Dict, Callable
 
 import vlc
+
+from icon_helper import apply_icon
+
 try:
     from screeninfo import get_monitors as _get_monitors
 except Exception:
@@ -190,40 +193,35 @@ class EmbeddedPlayer:
 
     def _build_ui(self):
         self._win = tk.Toplevel()
+        self._win.withdraw()
         self._win.title("Recursive Video Player")
         self._win.geometry("1280x720+80+50")
         self._win.configure(bg=_BG)
         self._win.minsize(640, 400)
         self._win.protocol("WM_DELETE_WINDOW", self._close)
+        apply_icon(self._win)
 
-        # ── video canvas ──────────────────────────────────────────────
         self._canvas = tk.Canvas(self._win, bg="black",
                                  highlightthickness=0, cursor="none")
         self._canvas.pack(fill=tk.BOTH, expand=True)
 
-        # ── floating control bar ──────────────────────────────────────
         self._bar = tk.Frame(self._win, bg=_CTRL_BG, highlightthickness=0)
         self._build_bar()
-        # Keep bar out of the pack/grid layout so it never influences window geometry.
-        # It is shown exclusively via place() when needed.
         self._bar.place_forget()
 
-        # ── canvas bindings ───────────────────────────────────────────
-        self._canvas.bind("<Motion>",          lambda e: self._show_bar())
-        self._canvas.bind("<Button-1>",        lambda e: self._toggle_pause())
+        self._canvas.bind("<Motion>", lambda e: self._show_bar())
+        self._canvas.bind("<Button-1>", lambda e: self._toggle_pause())
         self._canvas.bind("<Double-Button-1>", lambda e: self._toggle_borderless())
-        self._canvas.bind("<MouseWheel>",      self._canvas_wheel)
-        self._canvas.bind("<Configure>",       lambda e: self._place_bar())
+        self._canvas.bind("<MouseWheel>", self._canvas_wheel)
+        self._canvas.bind("<Configure>", lambda e: self._place_bar())
 
-        # ── window-level key bindings (all shortcuts) ─────────────────
         self._bind_keys()
 
-        # Realize HWND before any play() call
         self._win.update_idletasks()
+        self._win.deiconify()
 
         self._start_poll()
         self._schedule_refresh()
-        # Force initial chapter visibility check after UI is fully built
         self._win.after(100, lambda: self._refresh_display())
 
     def _build_bar(self):

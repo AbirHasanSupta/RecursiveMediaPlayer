@@ -903,19 +903,24 @@ class DualPlayerWindow:
     def _build_window(self):
         bg = self.theme.bg_color
         self.window = tk.Toplevel(self.parent)
+        self.window.withdraw()
         self.window.title(f"Video Player — Window {self.win_id}")
         self.window.geometry("1200x700")
         self.window.configure(bg=bg)
         self.window.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._borderless = False
-        self.window.bind("<F>",      lambda e: self._toggle_borderless())
+        self.window.bind("<F>", lambda e: self._toggle_borderless())
         self.window.bind("<Escape>", lambda e: self._exit_borderless())
 
         self._player_area = tk.Frame(self.window, bg=bg)
         self._player_area.pack(fill=tk.BOTH, expand=True)
 
         self._show_placeholder()
+
+        from icon_helper import apply_icon
+        apply_icon(self.window)
+        self.window.deiconify()
 
     def _toggle_borderless(self):
         self._borderless = not self._borderless

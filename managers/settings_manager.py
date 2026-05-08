@@ -347,6 +347,7 @@ class SettingsUI:
             return
 
         self.settings_window = tk.Toplevel(self.parent)
+        self.settings_window.withdraw()
         self.settings_window.title("Application Settings")
         self.settings_window.geometry("700x880")
         self.settings_window.configure(bg=self.theme_provider.bg_color)
@@ -355,6 +356,10 @@ class SettingsUI:
         self._setup_settings_ui()
         self.settings_window.transient(self.parent)
         self.settings_window.grab_set()
+
+        from icon_helper import apply_icon
+        apply_icon(self.settings_window)
+        self.settings_window.deiconify()
 
     def _setup_settings_ui(self):
         """Setup the settings UI components"""
@@ -936,6 +941,7 @@ class SettingsUI:
             btn.config(bg=active_bg, fg='white', relief=tk.SUNKEN)
 
             overlay = tk.Toplevel(self.settings_window)
+            overlay.withdraw()
             overlay.title("Press new key…")
             overlay.geometry("340x120")
             overlay.configure(bg=self.theme_provider.bg_color)
@@ -1100,6 +1106,9 @@ class SettingsUI:
             overlay.bind('<KeyPress>', _finish_capture)
             overlay.protocol("WM_DELETE_WINDOW", _cancel)
             overlay.focus_force()
+            from icon_helper import apply_icon
+            apply_icon(overlay)
+            overlay.deiconify()
 
         def _add_group(parent_frame, title, action_ids):
             section = tk.LabelFrame(

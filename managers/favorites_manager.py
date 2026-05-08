@@ -243,6 +243,7 @@ class FavoritesUI:
             return
 
         self.favorites_window = tk.Toplevel(self.parent)
+        self.favorites_window.withdraw()
         self.favorites_window.title("Favourites")
         self.favorites_window.geometry("820x620")
         self.favorites_window.minsize(640, 480)
@@ -257,6 +258,10 @@ class FavoritesUI:
         self._setup_favorites_ui()
         if selected_directory:
             self._refresh_favorites_list()
+
+        from icon_helper import apply_icon
+        apply_icon(self.favorites_window)
+        self.favorites_window.deiconify()
 
     def _setup_favorites_ui(self):
         tp = self.theme_provider

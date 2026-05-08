@@ -27,12 +27,17 @@ class FilterSortUI:
             return
 
         self.filter_window = tk.Toplevel(self.parent)
+        self.filter_window.withdraw()
         self.filter_window.title("Advanced Filters & Sorting")
         self.filter_window.geometry("1600x900")
         self.filter_window.configure(bg=self.theme_provider.bg_color)
         self.filter_window.minsize(700, 450)
 
         self._setup_filter_ui()
+
+        from icon_helper import apply_icon
+        apply_icon(self.filter_window)
+        self.filter_window.deiconify()
 
     def _setup_filter_ui(self):
         """Setup filter UI components"""

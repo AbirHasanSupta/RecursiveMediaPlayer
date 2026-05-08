@@ -177,6 +177,7 @@ class PlaylistUI:
             return
 
         self.playlist_window = tk.Toplevel(self.parent)
+        self.playlist_window.withdraw()
         self.playlist_window.title("Playlists")
         self.playlist_window.geometry("1020x640")
         self.playlist_window.minsize(760, 500)
@@ -189,6 +190,10 @@ class PlaylistUI:
 
         self._setup_playlist_manager_ui()
         self._refresh_playlist_list()
+
+        from icon_helper import apply_icon
+        apply_icon(self.playlist_window)
+        self.playlist_window.deiconify()
 
     def _setup_playlist_manager_ui(self):
         tp = self.theme_provider
@@ -830,6 +835,9 @@ class PlaylistInfoDialog:
         ))
 
         self._setup_dialog(name, description)
+        from icon_helper import apply_icon
+        apply_icon(self.dialog)
+        self.dialog.deiconify()
 
     def _setup_dialog(self, name: str, description: str):
         tp = self.theme_provider
@@ -967,6 +975,7 @@ class PlaylistManager:
         PANEL = tp.listbox_bg
 
         dialog = tk.Toplevel(self.ui.parent)
+        dialog.withdraw()
         dialog.title("Add to Playlist")
         dialog.geometry("420x360")
         dialog.minsize(360, 300)
@@ -1049,6 +1058,9 @@ class PlaylistManager:
         tp.create_button(right, "Add to Selected", add_to_existing, "success", "md").pack(side=tk.LEFT, padx=(0, 8))
         tp.create_button(right, "Cancel", dialog.destroy, "secondary", "md").pack(side=tk.LEFT)
 
+        from icon_helper import apply_icon
+        apply_icon(dialog)
+        dialog.deiconify()
         self.ui.parent.wait_window(dialog)
 
     def _on_play_playlist(self, videos: List[str]):

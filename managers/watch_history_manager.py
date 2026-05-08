@@ -351,6 +351,7 @@ class WatchHistoryUI:
             return
 
         self.history_window = tk.Toplevel(self.parent)
+        self.history_window.withdraw()
         self.history_window.title("Watch History")
         self.history_window.geometry("960x640")
         self.history_window.minsize(720, 500)
@@ -363,6 +364,10 @@ class WatchHistoryUI:
 
         self._setup_history_ui()
         self._refresh_history_list()
+
+        from icon_helper import apply_icon
+        apply_icon(self.history_window)
+        self.history_window.deiconify()
 
     def _setup_history_ui(self):
         tp = self.theme_provider
