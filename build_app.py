@@ -1953,7 +1953,7 @@ def select_multiple_folders_and_play():
                             except ValueError:
                                 rel_path = os.path.basename(video_path)
 
-                            display_name = f"▶ {rel_path}"
+                            display_name = f"🎬 {rel_path}"
 
                             if self.is_video_excluded(selected_dir, video_path):
                                 display_name += " 🚫[EXCLUDED]"
@@ -2009,7 +2009,7 @@ def select_multiple_folders_and_play():
                 except ValueError:
                     rel_path = os.path.basename(video_path)
 
-                display_name = f"▶ {rel_path}"
+                display_name = f"🎬 {rel_path}"
 
                 if self.is_video_excluded(selected_dir, video_path):
                     display_name += " 🚫[EXCLUDED]"
@@ -2896,11 +2896,11 @@ def select_multiple_folders_and_play():
                                                 vname = tree['file_names'].get(v)
                                             if not vname:
                                                 vname = 'Drive Stream'
-                                            ind = ("  " * (rel_depth + 1)) + '▶ ' + vname
+                                            ind = ("  " * (rel_depth + 1)) + '🎬 ' + vname
                                             items.append((v, ind))
                         else:
                             for v in videos:
-                                display = '▶ Drive Stream'
+                                display = '🎬 Drive Stream'
                                 items.append((v, display))
 
                     def _post_drive_items():
@@ -3003,7 +3003,7 @@ def select_multiple_folders_and_play():
                                             show_this_video = video_name_matches or dir_name_matches or is_child_of_match
 
                                             if include_vid and show_this_video and show_this_dir:
-                                                v_name = ("  " * (indent_level + 1)) + '▶' + entry.name
+                                                v_name = ("  " * (indent_level + 1)) + '🎬' + entry.name
                                                 if self.favorites_manager.is_favorite(full_path, base):
                                                     v_name += " ⭐"
                                                 if full_path in excluded_vid_set:
