@@ -1507,6 +1507,8 @@ def select_multiple_folders_and_play():
                 on_close=self._on_player_closed,
                 on_volume_change=self._save_volume_callback,
             )
+            player.on_loop_change = self._save_loop_callback
+            player.on_close_save = self._on_player_close_save
             player.on_video_changed = self.on_video_changed
             player.on_add_to_playlist = lambda vids: self.playlist_manager.add_videos_to_playlist([], vids)
             player.on_add_to_queue = lambda vids: self.queue_manager.add_to_queue(vids, added_from="player")
@@ -3643,6 +3645,8 @@ def select_multiple_folders_and_play():
                 on_close=self._on_player_closed,
                 on_volume_change=self._save_volume_callback,
             )
+            player.on_loop_change = self._save_loop_callback
+            player.on_close_save = self._on_player_close_save
             player.on_video_changed = self.on_video_changed
             player.on_add_to_playlist = lambda vids: self.playlist_manager.add_videos_to_playlist([], vids)
             player.on_add_to_queue = lambda vids: self.queue_manager.add_to_queue(vids, added_from="player")
@@ -3779,6 +3783,8 @@ def select_multiple_folders_and_play():
                 on_close=self._on_player_closed,
                 on_volume_change=self._save_volume_callback,
             )
+            player.on_loop_change = self._save_loop_callback
+            player.on_close_save = self._on_player_close_save
             player.on_video_changed = self.on_video_changed
             player.on_add_to_playlist = lambda vids: self.playlist_manager.add_videos_to_playlist([], vids)
             player.on_add_to_queue = lambda vids: self.queue_manager.add_to_queue(vids, added_from="player")
@@ -3866,6 +3872,8 @@ def select_multiple_folders_and_play():
                 on_close=self._on_player_closed,
                 on_volume_change=self._save_volume_callback,
             )
+            player.on_loop_change = self._save_loop_callback
+            player.on_close_save = self._on_player_close_save
             player.on_video_changed = self.on_video_changed
             player.on_add_to_playlist = lambda vids: self.playlist_manager.add_videos_to_playlist([], vids)
             player.on_add_to_queue = lambda vids: self.queue_manager.add_to_queue(vids, added_from="player")
@@ -3941,6 +3949,8 @@ def select_multiple_folders_and_play():
                 on_close=self._on_player_closed,
                 on_volume_change=self._save_volume_callback,
             )
+            player.on_loop_change = self._save_loop_callback
+            player.on_close_save = self._on_player_close_save
             player.on_video_changed = self.on_video_changed
             player.on_add_to_playlist = lambda vids: self.playlist_manager.add_videos_to_playlist([], vids)
             player.on_add_to_queue = lambda vids: self.queue_manager.add_to_queue(vids, added_from="player")
