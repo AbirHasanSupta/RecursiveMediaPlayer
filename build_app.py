@@ -1106,19 +1106,44 @@ def select_multiple_folders_and_play():
             context_menu.add_command(label="Open in Grid View",
                 command=lambda: self._context_open_grid_view(selection))
 
+            selected_dir = self.get_current_selected_directory()
+            excluded_dir_set = set(os.path.normpath(p) for p in self.excluded_subdirs.get(selected_dir, [])) if selected_dir else set()
+
+            sel_paths = [self.current_subdirs_mapping.get(iid) for iid in selection]
+            sel_paths = [p for p in sel_paths if p]
+
+            has_non_excluded = any(
+                not (self.is_video_excluded(selected_dir, p) if (selected_dir and os.path.isfile(p)) else os.path.normpath(p) in excluded_dir_set)
+                for p in sel_paths
+            )
+            has_excluded = any(
+                (self.is_video_excluded(selected_dir, p) if (selected_dir and os.path.isfile(p)) else os.path.normpath(p) in excluded_dir_set)
+                for p in sel_paths
+            )
+
+            sel_video_paths = [p for p in sel_paths if os.path.isfile(p) and is_video(p)]
+            has_non_fav_videos = (selected_dir and hasattr(self, 'favorites_manager') and sel_video_paths and
+                any(not self.favorites_manager.is_favorite(p, selected_dir) for p in sel_video_paths))
+            has_fav = (selected_dir and hasattr(self, 'favorites_manager') and sel_video_paths and
+                any(self.favorites_manager.is_favorite(p, selected_dir) for p in sel_video_paths))
+
             context_menu.add_separator()
-            context_menu.add_command(label="Exclude Selected",  command=self.exclude_subdirectories)
-            context_menu.add_command(label="Include Selected",  command=self.include_subdirectories)
+            if has_non_excluded:
+                context_menu.add_command(label="Exclude Selected", command=self.exclude_subdirectories)
+            if has_excluded:
+                context_menu.add_command(label="Include Selected", command=self.include_subdirectories)
             context_menu.add_command(label="Exclude All",       command=self.exclude_all_subdirectories)
             context_menu.add_command(label="Clear All Exclusions", command=self.clear_all_exclusions)
 
             context_menu.add_separator()
-            context_menu.add_command(label="Add to Playlist",
+            context_menu.add_command(label="🎵 Add to Playlist",
                 command=lambda: self._context_add_to_playlist(selection))
-            context_menu.add_command(label="⭐ Add to Favorites",
-                command=lambda: self._context_add_to_favorites(selection))
-            context_menu.add_command(label="★ Remove from Favorites",
-                command=lambda: self._context_remove_from_favorites(selection))
+            if has_non_fav_videos:
+                context_menu.add_command(label="⭐ Add to Favorites",
+                    command=lambda: self._context_add_to_favorites(selection))
+            if has_fav:
+                context_menu.add_command(label="★ Remove from Favorites",
+                    command=lambda: self._context_remove_from_favorites(selection))
 
             context_menu.add_separator()
             context_menu.add_command(label="Add to Queue",
