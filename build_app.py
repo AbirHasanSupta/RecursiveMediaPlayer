@@ -1195,7 +1195,7 @@ def select_multiple_folders_and_play():
                 return "video_fav"
             return "video"
 
-        def _label_for_item(self, path, is_dir, excluded_dir_set, excluded_vid_set):
+        def _label_for_item(self, path, is_dir, excluded_dir_set, excluded_vid_set, base=None):
             """Return the display text for a tree row."""
             name = os.path.basename(path) if path != os.path.normpath(path) else os.path.basename(path)
 
@@ -1208,7 +1208,7 @@ def select_multiple_folders_and_play():
             # video
             is_excl = path in excluded_vid_set
             is_fav  = (hasattr(self, 'favorites_manager') and
-                       self.favorites_manager.is_favorite(path, os.path.dirname(path)))
+                       self.favorites_manager.is_favorite(path, base if base else os.path.dirname(path)))
             is_now  = (
                 getattr(self, '_now_playing_video_path', None) is not None
                 and os.path.normpath(path) == self._now_playing_video_path
@@ -1392,7 +1392,7 @@ def select_multiple_folders_and_play():
                                 parent_iid, path, is_dir, iid = items[i]
                                 norm_p = os.path.normpath(path)
                                 tag    = self._tag_for_item(path, base, excluded_dir_set, excluded_vid_set)
-                                label  = self._label_for_item(path, is_dir, excluded_dir_set, excluded_vid_set)
+                                label  = self._label_for_item(path, is_dir, excluded_dir_set, excluded_vid_set, base)
 
                                 # Determine initial open state for folders
                                 open_state = False
@@ -1553,7 +1553,7 @@ def select_multiple_folders_and_play():
                     tag    = self._tag_for_item(path, selected_dir,
                                                 excluded_dir_set, excluded_vid_set,
                                                 is_now_playing=bool(is_now))
-                    label  = self._label_for_item(path, False, excluded_dir_set, excluded_vid_set)
+                    label  = self._label_for_item(path, False, excluded_dir_set, excluded_vid_set, selected_dir)
                     try:
                         self.exclusion_tree.item(iid, text=label, tags=(tag,))
                     except tk.TclError:
