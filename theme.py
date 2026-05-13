@@ -300,6 +300,15 @@ class ThemeSelector:
         if hasattr(self, 'console_scrollbar') and self.dark_mode:
             self.console_scrollbar.configure(bg=self.console_bg, troughcolor=self.console_bg)
 
+        # Update exclusion container border color
+        if hasattr(self, 'exclusion_frame'):
+            for child in self.exclusion_frame.winfo_children():
+                if isinstance(child, tk.Frame):
+                    child.configure(
+                        bg=self.listbox_bg,
+                        highlightbackground=self.frame_border
+                    )
+
         self.update_container_borders()
         self._apply_menubar_colors()
 
@@ -527,7 +536,7 @@ class ThemeSelector:
         if hasattr(self, 'exclusion_frame'):
             for child in self.exclusion_frame.winfo_children():
                 if isinstance(child, tk.Frame):
-                    child.configure(bg=self.bg_color,
+                    child.configure(bg=self.listbox_bg,
                                     highlightbackground=self.frame_border, highlightthickness=1)
                     break
 

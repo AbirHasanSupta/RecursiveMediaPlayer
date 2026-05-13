@@ -758,6 +758,13 @@ def select_multiple_folders_and_play():
                 borderwidth=0,
                 relief="flat",
             )
+            try:
+                style.element_create("ExclusionTree.treearea", "from", "default")
+            except Exception:
+                pass
+            style.layout("ExclusionTree.Treeview", [
+                ("ExclusionTree.Treeview.treearea", {"sticky": "nswe"})
+            ])
             style.configure(
                 "ExclusionTree.Treeview.Heading",
                 background=heading_bg,
@@ -870,6 +877,12 @@ def select_multiple_folders_and_play():
             self.exclusion_tree.bind("<Button-3>",        self._show_context_menu)
             self.exclusion_tree.bind("<<TreeviewOpen>>",  self._on_tree_open)
             self.exclusion_tree.bind("<<TreeviewClose>>", self._on_tree_close)
+            self.exclusion_tree.bind("<Control-a>",
+                                     lambda e: (self.exclusion_tree.selection_set(self._tree_get_all_iids()), "break")[
+                                         1])
+            self.exclusion_tree.bind("<Control-A>",
+                                     lambda e: (self.exclusion_tree.selection_set(self._tree_get_all_iids()), "break")[
+                                         1])
 
             # ── Checkboxes row ────────────────────────────────────────────────
             self.exclusion_buttons_frame = tk.Frame(self.exclusion_section, bg=self.bg_color)
@@ -1201,8 +1214,8 @@ def select_multiple_folders_and_play():
                 and os.path.normpath(path) == self._now_playing_video_path
             )
 
-            prefix = "▶ " if not is_now else "▶▶ "
-            fav    = " ★" if is_fav else ""
+            prefix = "🎬 " if not is_now else "▶▶ "
+            fav = " ⭐" if is_fav else ""
             excl   = "  ⊘ excluded" if is_excl else ""
             now    = "  ▮▮▮" if is_now else ""
             return f"{prefix}{name}{fav}{excl}{now}"
@@ -1315,14 +1328,16 @@ def select_multiple_folders_and_play():
                         is_excl_dir = norm_root in excluded_dir_set
                         include_dir = (not only_excl) or is_excl_dir
 
-                        if include_dir and show_this_dir and norm_root != base_norm:
+                        if norm_root == base_norm:
+                            iid = next_iid()
+                            path_to_iid[norm_root] = iid
+                            items.append(("", root, True, iid))
+                        elif include_dir and show_this_dir:
                             parent_norm = os.path.normpath(os.path.dirname(root))
-                            parent_iid  = path_to_iid.get(parent_norm, "")
-                            iid         = next_iid()
+                            parent_iid = path_to_iid.get(parent_norm, "")
+                            iid = next_iid()
                             path_to_iid[norm_root] = iid
                             items.append((parent_iid, root, True, iid))
-                        elif norm_root == base_norm:
-                            path_to_iid[norm_root] = ""
 
                         if show_videos and can_show_children and show_this_dir:
                             try:
@@ -1494,13 +1509,13 @@ def select_multiple_folders_and_play():
                         parent_iid = dir_iids.get(parent_d, "")
                         iid        = nxt()
                         self.exclusion_tree.insert(parent_iid, tk.END, iid=iid,
-                                                   text=f"▶ {vname}", tags=("video",))
+                                                   text=f"🎬 {vname}", tags=("video",))
                         mapping[iid] = v
                 else:
                     for v in videos:
                         iid = nxt()
                         self.exclusion_tree.insert("", tk.END, iid=iid,
-                                                   text="▶ Drive Stream", tags=("video",))
+                                                   text="🎬 Drive Stream", tags=("video",))
                         mapping[iid] = v
 
                 self.current_subdirs_mapping = mapping
@@ -1627,13 +1642,13 @@ def select_multiple_folders_and_play():
 
                             if is_excl:
                                 tag   = "video_fav_excl" if is_fav else "video_excl"
-                                label = f"▶ {rel_path}  ⊘ excluded"
+                                label = f"🎬 {rel_path}  ⊘ excluded"
                             elif is_fav:
                                 tag   = "video_fav"
-                                label = f"▶ {rel_path} ★"
+                                label = f"🎬 {rel_path} ⭐"
                             else:
                                 tag   = "video"
-                                label = f"▶ {rel_path}"
+                                label = f"🎬 {rel_path}"
 
                             iid = f"f{idx}"
                             self.exclusion_tree.insert("", tk.END, iid=iid,
@@ -1688,13 +1703,13 @@ def select_multiple_folders_and_play():
 
                 if is_excl:
                     tag   = "video_fav_excl" if is_fav else "video_excl"
-                    label = f"▶ {rel_path}  ⊘ excluded"
+                    label = f"🎬 {rel_path}  ⊘ excluded"
                 elif is_fav:
                     tag   = "video_fav"
-                    label = f"▶ {rel_path} ★"
+                    label = f"🎬 {rel_path} ⭐"
                 else:
                     tag   = "video"
-                    label = f"▶ {rel_path}"
+                    label = f"🎬 {rel_path}"
 
                 iid = f"f{idx}"
                 self.exclusion_tree.insert("", tk.END, iid=iid, text=label, tags=(tag,))
