@@ -795,6 +795,10 @@ def select_multiple_folders_and_play():
             self.exclusion_tree.tag_configure("now_playing",     foreground=play_green, font=self.tree_font_bold,
                                               background=play_bg)
             self.exclusion_tree.tag_configure("placeholder",     foreground=muted,      font=self.tree_font_italic)
+            if hasattr(self, '_tree_header_frame'):
+                self._tree_header_frame.configure(bg=heading_bg)
+                self._tree_header_name_lbl.configure(bg=heading_bg, fg=heading_fg)
+                self._tree_header_size_lbl.configure(bg=heading_bg, fg=heading_fg)
 
 
         def setup_exclusion_section(self):
@@ -858,14 +862,30 @@ def select_multiple_folders_and_play():
                 exclusion_container,
                 style="ExclusionTree.Treeview",
                 selectmode="extended",
-                show="tree",
+                show="tree headings",
+                columns=("size",),
                 yscrollcommand=self.exclusion_scrollbar.set,
             )
-            self.exclusion_tree.pack(fill=tk.BOTH, expand=True)
+
             self.exclusion_scrollbar.config(command=self.exclusion_tree.yview)
 
-            # Column: single tree column — we use the tree indent + text
-            self.exclusion_tree.column("#0", width=500, minwidth=200, stretch=True)
+            self.exclusion_tree.column("#0", width=420, minwidth=200, stretch=True, anchor="w")
+            self.exclusion_tree.column("size", width=90, minwidth=70, stretch=False, anchor="e")
+            self.exclusion_tree["show"] = "tree"
+
+            self._tree_header_frame = tk.Frame(exclusion_container, bg=self.bg_color)
+            self._tree_header_frame.pack(side=tk.TOP, fill=tk.X)
+            self._tree_header_name_lbl = tk.Label(
+                self._tree_header_frame, text="Name", anchor="w",
+                font=self.small_font, bg=self.bg_color, fg=self.text_color, padx=4, pady=2
+            )
+            self._tree_header_name_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            self._tree_header_size_lbl = tk.Label(
+                self._tree_header_frame, text="Size", anchor="w", width=10,
+                font=self.small_font, bg=self.bg_color, fg=self.text_color, padx=4, pady=2
+            )
+            self._tree_header_size_lbl.pack(side=tk.RIGHT)
+            self.exclusion_tree.pack(fill=tk.BOTH, expand=True)
 
             # Configure tag colours for current theme
             self._configure_tree_style()
@@ -883,6 +903,8 @@ def select_multiple_folders_and_play():
             self.exclusion_tree.bind("<Control-A>",
                                      lambda e: (self.exclusion_tree.selection_set(self._tree_get_all_iids()), "break")[
                                          1])
+            self.exclusion_tree.bind("<Delete>", self._on_key_toggle_exclusion)
+            self.exclusion_tree.bind("<space>", self._on_key_toggle_exclusion)
 
             # ── Checkboxes row ────────────────────────────────────────────────
             self.exclusion_buttons_frame = tk.Frame(self.exclusion_section, bg=self.bg_color)
@@ -1021,6 +1043,27 @@ def select_multiple_folders_and_play():
 
             self.exclusion_tree.selection_set(iid)
             self._selection_anchor = iid
+            return "break"
+
+        def _on_key_toggle_exclusion(self, event):
+            selection = list(self.exclusion_tree.selection())
+            if not selection:
+                return "break"
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                return "break"
+            excluded_dir_set = set(os.path.normpath(p) for p in self.excluded_subdirs.get(selected_dir, []))
+            sel_paths = [self.current_subdirs_mapping.get(iid) for iid in selection]
+            sel_paths = [p for p in sel_paths if p]
+            has_non_excluded = any(
+                not (self.is_video_excluded(selected_dir, p) if os.path.isfile(p) else os.path.normpath(
+                    p) in excluded_dir_set)
+                for p in sel_paths
+            )
+            if has_non_excluded:
+                self.exclude_subdirectories()
+            else:
+                self.include_subdirectories()
             return "break"
 
         def _on_double_click(self, event):
@@ -1429,9 +1472,36 @@ def select_multiple_folders_and_play():
                                     else:
                                         open_state = norm_p in expanded
 
+                                def fmt_size(b):
+                                    if b >= 1024 ** 3:
+                                        return f"{b / 1024 ** 3:.2f} GB"
+                                    elif b >= 1024 ** 2:
+                                        return f"{b / 1024 ** 2:.1f} MB"
+                                    return f"{b // 1024} KB"
+
+                                if is_dir:
+                                    try:
+                                        total_size = 0
+                                        for dp, _, fnames in os.walk(path):
+                                            for fn in fnames:
+                                                try:
+                                                    total_size += os.path.getsize(os.path.join(dp, fn))
+                                                except Exception:
+                                                    pass
+                                        meta_size = fmt_size(total_size)
+                                    except Exception:
+                                        meta_size = ""
+                                    meta_count = ""
+                                else:
+                                    try:
+                                        meta_size = fmt_size(os.path.getsize(path))
+                                    except Exception:
+                                        meta_size = ""
+                                    meta_count = ""
                                 self.exclusion_tree.insert(
                                     parent_iid, tk.END, iid=iid,
-                                    text=label, tags=(tag,), open=open_state
+                                    text=label, tags=(tag,), open=open_state,
+                                    values=(meta_size, meta_count)
                                 )
                                 mapping[iid] = path
                                 if restore_norm and norm_p == restore_norm:
