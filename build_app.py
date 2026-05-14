@@ -1395,6 +1395,12 @@ def select_multiple_folders_and_play():
                     command=lambda: self._context_show_properties(first_path)
                 )
 
+            if len(selection) == 1 and first_path and os.path.isdir(first_path):
+                context_menu.add_command(label="Open Folder Location",
+                                         command=lambda: self._context_open_folder_location(first_path))
+                context_menu.add_command(label="Properties",
+                                         command=lambda: self._context_show_folder_properties(first_path))
+
             try:
                 context_menu.tk_popup(event.x_root, event.y_root)
             finally:
@@ -1591,6 +1597,52 @@ def select_multiple_folders_and_play():
                 self.update_console(f"Copied path: {file_path}")
             except Exception as e:
                 self.update_console(f"Error copying path: {e}")
+
+        def _context_show_folder_properties(self, folder_path):
+            try:
+                total_size = 0
+                file_count = 0
+                video_count = 0
+                for dirpath, _, filenames in os.walk(folder_path):
+                    for f in filenames:
+                        try:
+                            fp = os.path.join(dirpath, f)
+                            total_size += os.path.getsize(fp)
+                            file_count += 1
+                            if is_video(fp):
+                                video_count += 1
+                        except Exception:
+                            pass
+                size_mb = total_size / (1024 * 1024)
+                stat_info = os.stat(folder_path)
+                modified = datetime.fromtimestamp(stat_info.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+                info = (
+                    f"Folder: {os.path.basename(folder_path)}\n\n"
+                    f"Path: {folder_path}\n\n"
+                    f"Total Files: {file_count}\n\n"
+                    f"Video Files: {video_count}\n\n"
+                    f"Total Size: {size_mb:.2f} MB ({total_size:,} bytes)\n\n"
+                    f"Modified: {modified}"
+                )
+                messagebox.showinfo("Folder Properties", info)
+            except Exception as e:
+                self.update_console(f"Error getting folder properties: {e}")
+                messagebox.showerror("Error", f"Could not get folder properties: {e}")
+
+        def _context_open_folder_location(self, folder_path):
+            try:
+                import subprocess
+                if os.name == 'nt':
+                    subprocess.Popen(f'explorer /select,"{folder_path}"')
+                elif os.name == 'posix':
+                    if sys.platform == 'darwin':
+                        subprocess.Popen(['open', '-R', folder_path])
+                    else:
+                        subprocess.Popen(['xdg-open', os.path.dirname(folder_path)])
+                self.update_console(f"Opened location: {os.path.dirname(folder_path)}")
+            except Exception as e:
+                self.update_console(f"Error opening location: {e}")
+                messagebox.showerror("Error", f"Could not open folder location: {e}")
 
         def _context_open_location(self, file_path):
             try:
