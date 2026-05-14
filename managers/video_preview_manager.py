@@ -1139,17 +1139,38 @@ class VideoPreviewManager:
     # Event handlers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _identify_item(widget, y):
+        """Return the item id under y for both Treeview and Listbox."""
+        if hasattr(widget, 'identify_row'):
+            return widget.identify_row(y)
+        # tk.Listbox
+        index = widget.nearest(y)
+        if index < 0:
+            return None
+        bbox = widget.bbox(index)
+        if not bbox:
+            return None
+        return str(index)
+
+    @staticmethod
+    def _widget_has_selection(widget):
+        try:
+            return bool(widget.selection())
+        except Exception:
+            return bool(widget.curselection())
+
     def _on_right_click(self, event):
         if not self.current_mapping:
             return
         lb = event.widget
-        item = lb.identify_row(event.y)
+        item = self._identify_item(lb, event.y)
         if not item:
             return
         vp = self.current_mapping.get(item)
         if not vp or not os.path.isfile(vp):
             return
-        if not lb.selection():
+        if not self._widget_has_selection(lb):
             self.right_clicked_item = item
             self._show_video_preview(vp, event.x_root, event.y_root)
 
@@ -1157,7 +1178,7 @@ class VideoPreviewManager:
         if not self.tooltip.is_visible:
             return
         lb = event.widget
-        item = lb.identify_row(event.y)
+        item = self._identify_item(lb, event.y)
         if item != self.right_clicked_item:
             self.tooltip.hide_preview()
             self.right_clicked_item = None
