@@ -1495,8 +1495,13 @@ class EmbeddedPlayer:
         finally:
             menu.grab_release()
 
-    def _show_scrollable_picker(self, anchor_widget, items, current_idx, on_select):
-        """Generic scrollable picker popup anchored below a widget."""
+    def _show_scrollable_picker(self, anchor_widget, items, current_idx, on_select,
+                                on_reorder=None):
+        """Generic scrollable picker popup anchored below a widget.
+
+        on_reorder(new_order): called with list of original indices in new order
+                               when user drag-reorders rows.  If None, drag is disabled.
+        """
         if not items:
             return
 
@@ -1520,6 +1525,9 @@ class EmbeddedPlayer:
         inner = tk.Frame(canvas, bg="#1e1e1e")
         canvas_window = canvas.create_window(0, 0, anchor="nw", window=inner)
 
+        # order[i] = original index of the item currently at position i
+        order = list(range(len(items)))
+
         row_widgets = []
         for i, (label, is_current) in enumerate(items):
             fg = _ACCENT if is_current else _TXT
@@ -1528,22 +1536,33 @@ class EmbeddedPlayer:
             row.pack(fill=tk.X)
             row.pack_propagate(False)
 
+            if on_reorder:
+                drag_handle = tk.Label(row, text="⠿", bg=bg_default, fg=_TXT_DIM,
+                                       font=("Segoe UI", 9), cursor="fleur", width=2)
+                drag_handle.pack(side=tk.LEFT, padx=(2, 0))
+            else:
+                drag_handle = None
+
             prefix = tk.Label(row, text="▶" if is_current else " ",
                               bg=bg_default, fg=_ACCENT,
                               font=("Segoe UI", 8), width=2)
-            prefix.pack(side=tk.LEFT, padx=(4, 0))
+            prefix.pack(side=tk.LEFT, padx=(2, 0))
 
             lbl = tk.Label(row, text=label[:50] + ("…" if len(label) > 50 else ""),
                            anchor="w", bg=bg_default, fg=fg,
                            font=("Segoe UI", 8), cursor="hand2")
             lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 4))
 
-            row_widgets.append((row, prefix, lbl, bg_default))
+            row_widgets.append((row, prefix, lbl, bg_default, drag_handle))
 
-            def _enter(e, r=row, p=prefix, l=lbl):
+            def _enter(e, r=row, p=prefix, l=lbl, dh=drag_handle):
                 r.config(bg=_BTN_HVR); p.config(bg=_BTN_HVR); l.config(bg=_BTN_HVR)
-            def _leave(e, r=row, p=prefix, l=lbl, bg=bg_default):
+                if dh:
+                    dh.config(bg=_BTN_HVR)
+            def _leave(e, r=row, p=prefix, l=lbl, bg=bg_default, dh=drag_handle):
                 r.config(bg=bg); p.config(bg=bg); l.config(bg=bg)
+                if dh:
+                    dh.config(bg=bg)
             def _click(e, idx=i):
                 popup.destroy()
                 on_select(idx)
@@ -1552,6 +1571,90 @@ class EmbeddedPlayer:
                 w.bind("<Enter>", _enter)
                 w.bind("<Leave>", _leave)
                 w.bind("<Button-1>", _click)
+
+            if drag_handle:
+                drag_handle.bind("<Enter>", _enter)
+                drag_handle.bind("<Leave>", _leave)
+
+        # ── drag-to-reorder logic ─────────────────────────────────────
+        if on_reorder:
+            _drag = {"src": None, "ghost": None, "last_y": 0}
+
+            def _get_row_index_from_widget(w):
+                for pos, (r, p, l, bg, dh) in enumerate(row_widgets):
+                    if w in (r, p, l, dh):
+                        return pos
+                return None
+
+            def _drag_start(e):
+                src = _get_row_index_from_widget(e.widget)
+                if src is None:
+                    return
+                _drag["src"] = src
+                _drag["last_y"] = e.y_root
+                row, _, lbl, bg_def, dh = row_widgets[src]
+                ghost = tk.Toplevel(popup)
+                ghost.overrideredirect(True)
+                ghost.attributes('-topmost', True)
+                ghost.attributes('-alpha', 0.75)
+                ghost.configure(bg="#444444")
+                gl = tk.Label(ghost, text=lbl.cget("text"), bg="#444444", fg=_TXT,
+                              font=("Segoe UI", 8), padx=6, pady=3)
+                gl.pack()
+                ghost.geometry(f"+{e.x_root}+{e.y_root - ITEM_H // 2}")
+                _drag["ghost"] = ghost
+                row.config(bg="#333333")
+                if dh: dh.config(bg="#333333")
+
+            def _drag_motion(e):
+                if _drag["src"] is None or _drag["ghost"] is None:
+                    return
+                ghost = _drag["ghost"]
+                try:
+                    ghost.geometry(f"+{e.x_root}+{e.y_root - ITEM_H // 2}")
+                except Exception:
+                    pass
+                # determine target row from canvas-relative y
+                try:
+                    cy = canvas.canvasy(e.y_root - canvas.winfo_rooty())
+                    target = max(0, min(len(row_widgets) - 1, int(cy // ITEM_H)))
+                except Exception:
+                    return
+                src = _drag["src"]
+                if target == src:
+                    return
+                # reorder row_widgets and order lists
+                rw_item = row_widgets.pop(src)
+                row_widgets.insert(target, rw_item)
+                ord_item = order.pop(src)
+                order.insert(target, ord_item)
+                _drag["src"] = target
+                # re-pack all rows in new order
+                for rw, _, _, _, _ in row_widgets:
+                    rw.pack_forget()
+                for rw, _, _, _, _ in row_widgets:
+                    rw.pack(fill=tk.X)
+
+            def _drag_end(e):
+                if _drag["ghost"]:
+                    try:
+                        _drag["ghost"].destroy()
+                    except Exception:
+                        pass
+                    _drag["ghost"] = None
+                if _drag["src"] is not None:
+                    src = _drag["src"]
+                    row, p, l, bg_def, dh = row_widgets[src]
+                    row.config(bg=bg_def)
+                    if dh: dh.config(bg=bg_def)
+                    _drag["src"] = None
+                    on_reorder(list(order))
+
+            for pos, (row, prefix, lbl, bg_def, dh) in enumerate(row_widgets):
+                if dh:
+                    dh.bind("<Button-1>",   _drag_start)
+                    dh.bind("<B1-Motion>",  _drag_motion)
+                    dh.bind("<ButtonRelease-1>", _drag_end)
 
         inner.update_idletasks()
         total_h = inner.winfo_reqheight()
@@ -1605,6 +1708,33 @@ class EmbeddedPlayer:
             except Exception:
                 pass
 
+        # Auto-close 1s after mouse leaves popup
+        _leave_job = [None]
+
+        def _cancel_leave():
+            if _leave_job[0]:
+                try:
+                    popup.after_cancel(_leave_job[0])
+                except Exception:
+                    pass
+                _leave_job[0] = None
+
+        def _on_popup_leave(e):
+            _cancel_leave()
+            try:
+                if popup.winfo_exists():
+                    _leave_job[0] = popup.after(1000, lambda: popup.destroy() if popup.winfo_exists() else None)
+            except Exception:
+                pass
+
+        def _on_popup_enter(e):
+            _cancel_leave()
+
+        popup.bind("<Leave>", _on_popup_leave)
+        popup.bind("<Enter>", _on_popup_enter)
+        inner.bind("<Leave>", _on_popup_leave)
+        inner.bind("<Enter>", _on_popup_enter)
+
         popup.bind("<FocusOut>", lambda e: popup.destroy())
         self._win.bind("<Button-1>", _close_if_outside, add="+")
 
@@ -1622,9 +1752,22 @@ class EmbeddedPlayer:
         current_local = next((li for li, (gi, v) in enumerate(folder_videos)
                               if gi == self.index), 0)
 
+        def _reorder_videos(new_order):
+            cur_video = self.videos[self.index]
+            new_local_indices = [local_indices[j] for j in new_order]
+            new_videos = list(self.videos)
+            for dst, src in zip(local_indices, new_local_indices):
+                new_videos[dst] = self.videos[src]
+            self.videos = new_videos
+            try:
+                self.index = self.videos.index(cur_video)
+            except ValueError:
+                self.index = 0
+
         self._show_scrollable_picker(
             self._lbl_title, items, current_local,
-            lambda li: self._play_index(local_indices[li])
+            lambda li: self._play_index(local_indices[li]),
+            on_reorder=_reorder_videos,
         )
 
     def _show_dir_picker(self, event=None):
@@ -1647,7 +1790,7 @@ class EmbeddedPlayer:
                 self._play_index(idx)
 
         self._show_scrollable_picker(
-            self._lbl_dir, items, current_local, _on_select
+            self._lbl_dir, items, current_local, _on_select,
         )
 
     # ═══════════════════════════════════════════════════════════════════
