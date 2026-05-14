@@ -1117,7 +1117,7 @@ class VideoPreviewManager:
     # Listbox attachment
     # ------------------------------------------------------------------
 
-    def attach_to_listbox(self, listbox: tk.Listbox, video_mapping: Dict[int, str]):
+    def attach_to_listbox(self, listbox, video_mapping):
         self.current_listbox = listbox
         self.current_mapping = video_mapping
         listbox.bind("<Motion>", self._on_mouse_motion)
@@ -1143,22 +1143,22 @@ class VideoPreviewManager:
         if not self.current_mapping:
             return
         lb = event.widget
-        idx = lb.nearest(event.y)
-        if idx < 0 or idx >= lb.size():
+        item = lb.identify_row(event.y)
+        if not item:
             return
-        vp = self.current_mapping.get(idx)
+        vp = self.current_mapping.get(item)
         if not vp or not os.path.isfile(vp):
             return
-        if not lb.curselection():
-            self.right_clicked_item = idx
+        if not lb.selection():
+            self.right_clicked_item = item
             self._show_video_preview(vp, event.x_root, event.y_root)
 
     def _on_mouse_motion(self, event):
         if not self.tooltip.is_visible:
             return
         lb = event.widget
-        idx = lb.nearest(event.y)
-        if idx != self.right_clicked_item:
+        item = lb.identify_row(event.y)
+        if item != self.right_clicked_item:
             self.tooltip.hide_preview()
             self.right_clicked_item = None
 
