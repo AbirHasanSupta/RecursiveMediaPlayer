@@ -990,6 +990,8 @@ def select_multiple_folders_and_play():
                 return
 
             if not iid:
+                self.exclusion_tree.selection_remove(self.exclusion_tree.selection())
+                self._selection_anchor = None
                 return
 
             ctrl_held  = bool(event.state & 0x4)
