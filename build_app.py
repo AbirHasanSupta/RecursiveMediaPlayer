@@ -3527,12 +3527,12 @@ def select_multiple_folders_and_play():
             ])
             make_toolbar_btn("File", menu=file_menu)
 
-            view_menu = make_dropdown_menu([
-                ("Show/Hide Console", self.toggle_console),
+            self._view_menu = make_dropdown_menu([
+                ("Hide Console" if self.show_console else "Show Console", self.toggle_console),
                 None,
                 ("Filter / Sort",     self._show_filter_dialog),
             ])
-            make_toolbar_btn("View", menu=view_menu)
+            make_toolbar_btn("View", menu=self._view_menu)
 
             self._loop_mode_var = tk.StringVar(value=self.loop_mode)
             c = _tb_colors()
