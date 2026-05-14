@@ -1107,6 +1107,18 @@ def select_multiple_folders_and_play():
         # Context menu
         # ------------------------------------------------------------------
 
+        def _make_context_menu(self):
+            if self.dark_mode:
+                return tk.Menu(self.root, tearoff=0,
+                               bg="#313335", fg="#A9B7C6",
+                               activebackground="#2D5A8E", activeforeground="#FFFFFF",
+                               relief="flat", bd=1, font=("Segoe UI", 9))
+            else:
+                return tk.Menu(self.root, tearoff=0,
+                               bg="#f5f5f5", fg="#333333",
+                               activebackground="#3498db", activeforeground="#FFFFFF",
+                               relief="flat", bd=1, font=("Segoe UI", 9))
+
         def _show_context_menu(self, event):
             iid = self.exclusion_tree.identify_row(event.y)
             selection = list(self.exclusion_tree.selection())
@@ -1133,7 +1145,7 @@ def select_multiple_folders_and_play():
             first_iid  = selection[0]
             first_path = self.current_subdirs_mapping.get(first_iid)
 
-            context_menu = tk.Menu(self.root, tearoff=0)
+            context_menu = self._make_context_menu()
             context_menu.add_command(label="Play Selected", command=self.play_selected_videos)
             context_menu.add_separator()
 
@@ -2731,7 +2743,7 @@ def select_multiple_folders_and_play():
             if not selection:
                 return
 
-            context_menu = tk.Menu(self.root, tearoff=0)
+            context_menu = self._make_context_menu()
             context_menu.add_command(label="Play Selected",      command=self._play_selected_main_dirs)
             context_menu.add_command(label="Open in Grid View",  command=self._open_grid_view_main_dirs)
             context_menu.add_separator()

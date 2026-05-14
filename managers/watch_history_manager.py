@@ -577,7 +577,13 @@ class WatchHistoryUI:
             return
 
         # Create context menu
-        context_menu = tk.Menu(self.history_window, tearoff=0)
+        _tp = self.theme_provider
+        context_menu = tk.Menu(self.history_window, tearoff=0,
+                               bg="#313335" if _tp.dark_mode else "#f5f5f5",
+                               fg="#A9B7C6" if _tp.dark_mode else "#333333",
+                               activebackground="#2D5A8E" if _tp.dark_mode else "#3498db",
+                               activeforeground="#FFFFFF",
+                               relief="flat", bd=1, font=("Segoe UI", 9))
 
         # Get entries for selected items
         selected_entries = []
