@@ -487,6 +487,17 @@ class ThemeSelector:
                 if isinstance(widget, tk.Text):
                     widget.configure(bg=self.entry_bg, fg=self.entry_fg, insertbackground=self.entry_fg)
 
+                if isinstance(widget, ttk.Treeview):
+                    style_name = widget.cget("style") or "Treeview"
+                    s = ttk.Style()
+                    s.configure(style_name,
+                                background=self.listbox_bg,
+                                fieldbackground=self.listbox_bg,
+                                foreground=self.listbox_fg)
+                    s.map(style_name,
+                          background=[("selected", self.listbox_select_bg)],
+                          foreground=[("selected", "white")])
+
                 for child in widget.winfo_children():
                     _walk(child)
 
