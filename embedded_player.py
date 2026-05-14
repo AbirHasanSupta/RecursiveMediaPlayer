@@ -314,6 +314,7 @@ class EmbeddedPlayer:
         self._seek.bind("<Leave>",
                         lambda e: (self._set_seek_hover(False), self._hide_seek_preview(), self._schedule_hide()))
         self._seek.bind("<Motion>", lambda e: self._show_seek_preview(e.x))
+        self._seek.bind("<Button-3>", self._seek_right_click)
         self._seek_preview_win = None
         self._seek_preview_lbl = None
         self._seek_preview_time = None
@@ -1178,6 +1179,75 @@ class EmbeddedPlayer:
         except Exception as e:
             if self.logger:
                 self.logger(f"Screenshot error: {e}")
+
+    def _seek_right_click(self, e):
+        if self._ab_point_a is None or self._ab_point_b is None:
+            return
+        try:
+            w   = self._seek.winfo_width()
+            dur = self._player.get_length() or 1
+            ax  = int((self._ab_point_a / dur) * w)
+            bx  = int((self._ab_point_b / dur) * w)
+            if not (ax <= e.x <= bx):
+                return
+        except Exception:
+            return
+        menu = tk.Menu(self._win, tearoff=0, bg=_BTN, fg=_TXT,
+                       activebackground=_BTN_HVR, activeforeground=_TXT,
+                       relief=tk.FLAT, bd=0, font=("Segoe UI", 9))
+        menu.add_command(label="✂  Save as clip", command=self._save_clip)
+        try:
+            menu.tk_popup(e.x_root, e.y_root)
+        finally:
+            menu.grab_release()
+
+    def _save_clip(self):
+        if self._ab_point_a is None or self._ab_point_b is None:
+            if self.logger:
+                self.logger("Set A-B points before saving a clip")
+            return
+        try:
+            import shutil
+            if not shutil.which("ffmpeg"):
+                if self.logger:
+                    self.logger("ffmpeg not found — install ffmpeg to save clips")
+                return
+            vid     = self.videos[self.index]
+            ext     = os.path.splitext(vid)[1] or ".mp4"
+            stem    = os.path.splitext(os.path.basename(vid))[0]
+            ts      = datetime.now().strftime("%Y%m%d_%H%M%S")
+            out_dir = _get_pictures_dir() / "Recursive Media Player" / "Clips"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out     = out_dir / f"{stem}_clip_{ts}{ext}"
+            pt_a    = self._ab_point_a / 1000.0
+            pt_b    = self._ab_point_b / 1000.0
+            dur     = pt_b - pt_a
+            if self.logger:
+                self.logger(f"Saving clip {_fmt(self._ab_point_a)}–{_fmt(self._ab_point_b)} → {out.name}")
+
+            def _run():
+                import subprocess
+                try:
+                    subprocess.run(
+                        ["ffmpeg", "-y",
+                         "-ss", str(pt_a),
+                         "-i", vid,
+                         "-t", str(dur),
+                         "-c", "copy",
+                         str(out)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    if self.logger:
+                        self._win.after(0, lambda: self.logger(f"Clip saved: {out}"))
+                except Exception as ex:
+                    if self.logger:
+                        self._win.after(0, lambda: self.logger(f"Clip error: {ex}"))
+
+            threading.Thread(target=_run, daemon=True).start()
+        except Exception as e:
+            if self.logger:
+                self.logger(f"Clip error: {e}")
 
     # ═══════════════════════════════════════════════════════════════════
     # CHAPTER NAVIGATION  (mirrors vlc_player_controller.py)
