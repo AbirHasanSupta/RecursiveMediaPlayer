@@ -256,8 +256,11 @@ class EmbeddedPlayer:
         info.pack(fill=tk.X, padx=12, pady=(4, 1))
 
         self._lbl_title = tk.Label(info, text="", anchor="w",
-                                   font=F_SM, bg=_CTRL_BG, fg=_TXT)
-        self._lbl_title.pack(side=tk.LEFT, fill=tk.X, expand=True)
+                                   font=F_SM, bg=_CTRL_BG, fg=_TXT, cursor="hand2")
+        self._lbl_title.pack(side=tk.LEFT, padx=(0, 8))
+        self._lbl_title.bind("<Button-1>", lambda e: self._show_video_picker(e))
+        self._lbl_title.bind("<Enter>", lambda e: self._lbl_title.config(fg=_ACCENT))
+        self._lbl_title.bind("<Leave>", lambda e: self._lbl_title.config(fg=_TXT))
 
         # right-side status badges (packed right-to-left)
         self._lbl_time = tk.Label(info, text="0:00 / 0:00",
@@ -288,8 +291,11 @@ class EmbeddedPlayer:
 
         # directory name (dim, right of title)
         self._lbl_dir = tk.Label(info, text="",
-                                 font=F_XS, bg=_CTRL_BG, fg=_TXT_DIM)
+                                 font=F_XS, bg=_CTRL_BG, fg=_TXT_DIM, cursor="hand2")
         self._lbl_dir.pack(side=tk.RIGHT, padx=(0, 6))
+        self._lbl_dir.bind("<Button-1>", lambda e: self._show_dir_picker(e))
+        self._lbl_dir.bind("<Enter>", lambda e: self._lbl_dir.config(fg=_ACCENT))
+        self._lbl_dir.bind("<Leave>", lambda e: self._lbl_dir.config(fg=_TXT_DIM))
 
         # ═══════════════════════════════════════════════════════════════
         # ROW 2 — seek bar
@@ -1488,6 +1494,161 @@ class EmbeddedPlayer:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
+
+    def _show_scrollable_picker(self, anchor_widget, items, current_idx, on_select):
+        """Generic scrollable picker popup anchored below a widget."""
+        if not items:
+            return
+
+        popup = tk.Toplevel(self._win)
+        popup.overrideredirect(True)
+        popup.attributes('-topmost', True)
+        popup.configure(bg="#1e1e1e")
+
+        ITEM_H = 24
+        MAX_VISIBLE = 15
+        visible = min(len(items), MAX_VISIBLE)
+        width = 320
+
+        frame_outer = tk.Frame(popup, bg="#333333", bd=1)
+        frame_outer.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+
+        canvas = tk.Canvas(frame_outer, bg="#1e1e1e", highlightthickness=0,
+                           width=width, height=visible * ITEM_H)
+        canvas.pack(fill=tk.BOTH, expand=True)
+
+        inner = tk.Frame(canvas, bg="#1e1e1e")
+        canvas_window = canvas.create_window(0, 0, anchor="nw", window=inner)
+
+        row_widgets = []
+        for i, (label, is_current) in enumerate(items):
+            fg = _ACCENT if is_current else _TXT
+            bg_default = "#2a2a2a" if is_current else "#1e1e1e"
+            row = tk.Frame(inner, bg=bg_default, height=ITEM_H)
+            row.pack(fill=tk.X)
+            row.pack_propagate(False)
+
+            prefix = tk.Label(row, text="▶" if is_current else " ",
+                              bg=bg_default, fg=_ACCENT,
+                              font=("Segoe UI", 8), width=2)
+            prefix.pack(side=tk.LEFT, padx=(4, 0))
+
+            lbl = tk.Label(row, text=label[:50] + ("…" if len(label) > 50 else ""),
+                           anchor="w", bg=bg_default, fg=fg,
+                           font=("Segoe UI", 8), cursor="hand2")
+            lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 4))
+
+            row_widgets.append((row, prefix, lbl, bg_default))
+
+            def _enter(e, r=row, p=prefix, l=lbl):
+                r.config(bg=_BTN_HVR); p.config(bg=_BTN_HVR); l.config(bg=_BTN_HVR)
+            def _leave(e, r=row, p=prefix, l=lbl, bg=bg_default):
+                r.config(bg=bg); p.config(bg=bg); l.config(bg=bg)
+            def _click(e, idx=i):
+                popup.destroy()
+                on_select(idx)
+
+            for w in (row, prefix, lbl):
+                w.bind("<Enter>", _enter)
+                w.bind("<Leave>", _leave)
+                w.bind("<Button-1>", _click)
+
+        inner.update_idletasks()
+        total_h = inner.winfo_reqheight()
+        canvas.config(scrollregion=(0, 0, width, total_h))
+        canvas.itemconfig(canvas_window, width=width)
+
+        def _scroll(e):
+            try:
+                if popup.winfo_exists():
+                    canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
+            except Exception:
+                pass
+
+        popup.bind_all("<MouseWheel>", _scroll)
+        popup.bind("<Destroy>", lambda e: popup.unbind_all("<MouseWheel>"))
+
+        # Scroll current item into view
+        if len(items) > MAX_VISIBLE and current_idx >= 0:
+            frac = current_idx / len(items)
+            canvas.yview_moveto(max(0.0, frac - (MAX_VISIBLE / 2) / len(items)))
+
+        # Position anchored to widget
+        ax = anchor_widget.winfo_rootx()
+        ay = anchor_widget.winfo_rooty()
+        ph = visible * ITEM_H + 4
+
+        # Detect which monitor the player window is on
+        mx, my, mw, mh = 0, 0, popup.winfo_screenwidth(), popup.winfo_screenheight()
+        if _get_monitors:
+            try:
+                wx = self._win.winfo_rootx()
+                wy = self._win.winfo_rooty()
+                for m in _get_monitors():
+                    if m.x <= wx < m.x + m.width and m.y <= wy < m.y + m.height:
+                        mx, my, mw, mh = m.x, m.y, m.width, m.height
+                        break
+            except Exception:
+                pass
+
+        px = min(ax, mx + mw - width - 4)
+        px = max(px, mx)
+        py = ay - ph if ay + ph > my + mh else ay
+        popup.geometry(f"{width}x{ph}+{px}+{py}")
+
+        # Close on outside click or loss of focus
+        def _close_if_outside(e):
+            try:
+                if not (popup.winfo_rootx() <= e.x_root <= popup.winfo_rootx() + width and
+                        popup.winfo_rooty() <= e.y_root <= popup.winfo_rooty() + ph):
+                    popup.destroy()
+            except Exception:
+                pass
+
+        popup.bind("<FocusOut>", lambda e: popup.destroy())
+        self._win.bind("<Button-1>", _close_if_outside, add="+")
+
+    def _show_video_picker(self, event=None):
+        if not self.videos:
+            return
+        cur_dir = self.video_to_dir.get(self.videos[self.index], "")
+        folder_videos = [(i, v) for i, v in enumerate(self.videos)
+                         if self.video_to_dir.get(v, "") == cur_dir]
+        if not folder_videos:
+            return
+
+        items = [(os.path.basename(v), i == self.index) for i, v in folder_videos]
+        local_indices = [i for i, v in folder_videos]
+        current_local = next((li for li, (gi, v) in enumerate(folder_videos)
+                              if gi == self.index), 0)
+
+        self._show_scrollable_picker(
+            self._lbl_title, items, current_local,
+            lambda li: self._play_index(local_indices[li])
+        )
+
+    def _show_dir_picker(self, event=None):
+        if not self.directories:
+            return
+        cur_dir = self.video_to_dir.get(self.videos[self.index], "")
+        current_local = next((i for i, d in enumerate(self.directories)
+                              if d == cur_dir), 0)
+
+        items = [(os.path.basename(d) if d else d, d == cur_dir)
+                 for d in self.directories]
+
+        first_indices = [next((i for i, v in enumerate(self.videos)
+                               if self.video_to_dir.get(v) == d), None)
+                         for d in self.directories]
+
+        def _on_select(li):
+            idx = first_indices[li]
+            if idx is not None:
+                self._play_index(idx)
+
+        self._show_scrollable_picker(
+            self._lbl_dir, items, current_local, _on_select
+        )
 
     # ═══════════════════════════════════════════════════════════════════
     # FULLSCREEN / BORDERLESS
