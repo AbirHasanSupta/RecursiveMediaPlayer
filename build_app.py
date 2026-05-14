@@ -637,6 +637,10 @@ def select_multiple_folders_and_play():
                 self.console_section.pack(fill=tk.X, pady=(0, 15), before=self.button_frame)
             else:
                 self.console_section.pack_forget()
+            try:
+                self._view_menu.entryconfig(0, label="Hide Console" if self.show_console else "Show Console")
+            except Exception:
+                pass
             self.save_preferences()
 
         def _submit_scan(self, directory):
