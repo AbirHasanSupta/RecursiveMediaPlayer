@@ -180,6 +180,7 @@ class VideoThumbnail:
             "blob": str(self.blob_path) if self.blob_path else None,
             "is_video": self.is_video,
             "hash_key": self.hash_key,
+            "write_time": time.time(),
         }
 
     @classmethod
@@ -234,10 +235,11 @@ class ThumbnailStorage:
             except Exception as e:
                 print(f"[ThumbnailStorage] save_index error: {e}")
 
-    def write_blob(self, key: str, data: bytes, ext: str) -> Path:
+    def write_blob(self, key: str, data: bytes, ext: str, index: dict = None) -> Path:
         blob_path = self.blobs_dir / (key + ext)
         blob_path.write_bytes(data)
-        # blob_path = _hide_file(blob_path)
+        if index is not None and key in index:
+            index[key]["write_time"] = time.time()
         return blob_path
 
     def delete_blob(self, blob_path: Optional[Path]):
@@ -248,18 +250,11 @@ class ThumbnailStorage:
         if len(index) <= self.MAX_ENTRIES:
             return index
 
-        def _mtime(entry):
-            bp = entry.get("blob")
-            if bp:
-                try:
-                    return Path(bp).stat().st_mtime
-                except OSError:
-                    pass
-            return 0.0
-
-        ordered = sorted(index.items(), key=lambda kv: _mtime(kv[1]), reverse=True)
+        ordered = sorted(index.items(),
+                         key=lambda kv: kv[1].get("write_time", 0.0),
+                         reverse=True)
         keep = dict(ordered[: self.MAX_ENTRIES])
-        for entry in dict(ordered[self.MAX_ENTRIES :]).values():
+        for entry in dict(ordered[self.MAX_ENTRIES:]).values():
             self.delete_blob(Path(entry["blob"]) if entry.get("blob") else None)
         return keep
 
@@ -458,16 +453,77 @@ class ThumbnailGenerator:
 # ---------------------------------------------------------------------------
 
 class VideoPreviewTooltip:
+    SQUARE = 300
+
     def __init__(self, parent):
         self.parent = parent
-        self.tooltip_window = None
         self.is_visible = False
+        self._toplevel: Optional[tk.Toplevel] = None
+        self._player = None
+        self._instance = None
+        self._label_widget: Optional[tk.Label] = None
+        self._name_label: Optional[tk.Label] = None
+        self._img_frame: Optional[tk.Frame] = None
+        self._tmp_path: Optional[str] = None
+        self._loop_id = None
 
+    # ------------------------------------------------------------------
+    # Internal: ensure the Toplevel exists (created once, reused)
+    # ------------------------------------------------------------------
+    def _ensure_toplevel(self):
+        if self._toplevel and self._toplevel.winfo_exists():
+            return
+        self._toplevel = tk.Toplevel(self.parent)
+        self._toplevel.wm_overrideredirect(True)
+        self._toplevel.configure(bg="black", relief="solid", bd=1)
+        self._toplevel.withdraw()
+        self._outer_frame = tk.Frame(self._toplevel, bg="black", padx=5, pady=5)
+        self._outer_frame.pack()
+        self._img_frame = tk.Frame(self._outer_frame, bg="black",
+                                   width=self.SQUARE, height=self.SQUARE)
+        self._img_frame.pack()
+        self._img_frame.pack_propagate(False)
+        self._label_widget = tk.Label(self._img_frame, bg="black")
+        self._label_widget.place(relx=0.5, rely=0.5, anchor="center")
+        self._name_label = tk.Label(self._outer_frame, bg="black", fg="white",
+                                    font=("Arial", 9), wraplength=self.SQUARE)
+        self._name_label.pack(pady=(5, 0))
+
+    # ------------------------------------------------------------------
+    # Internal: stop and release current VLC player without destroying Toplevel
+    # ------------------------------------------------------------------
+    def _release_player(self):
+        if self._loop_id:
+            try:
+                self._toplevel.after_cancel(self._loop_id)
+            except Exception:
+                pass
+            self._loop_id = None
+        if self._player:
+            try:
+                self._player.stop()
+                self._player.release()
+            except Exception:
+                pass
+            self._player = None
+        if self._instance:
+            try:
+                self._instance.release()
+            except Exception:
+                pass
+            self._instance = None
+        if self._tmp_path:
+            _safe_unlink(self._tmp_path)
+            self._tmp_path = None
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
     def show_preview(self, video_path: str, thumbnail_data: str, x: int, y: int):
-        if self.tooltip_window:
-            self.hide_preview()
-            import time as _time
-            _time.sleep(0.05)
+        self._release_player()
+        self._ensure_toplevel()
+        tw = self._toplevel
+
         try:
             import base64
             is_video = thumbnail_data.startswith("VIDEO:")
@@ -475,16 +531,23 @@ class VideoPreviewTooltip:
             fd, tmp_path = tempfile.mkstemp(suffix=".mp4" if is_video else ".jpg")
             os.close(fd)
             Path(tmp_path).write_bytes(raw_bytes)
+            self._tmp_path = tmp_path
 
-            self.tooltip_window = tk.Toplevel(self.parent)
-            self.tooltip_window.wm_overrideredirect(True)
-            self.tooltip_window.configure(bg="black", relief="solid", bd=1)
+            # Clear previous image label content
+            self._label_widget.configure(image="")
+            self._label_widget.image = None
 
-            # --- Fixed square canvas; video/image letterboxed/pillarboxed inside ---
-            SQUARE = 300  # fixed tooltip content size (pixels)
+            # Wipe old VLC child frames from img_frame
+            for child in self._img_frame.winfo_children():
+                if child is not self._label_widget:
+                    try:
+                        child.destroy()
+                    except Exception:
+                        pass
 
-            # Compute fitted dimensions that preserve the media's aspect ratio
-            # while fitting entirely within the SQUARE × SQUARE canvas.
+            S = self.SQUARE
+            fit_w = fit_h = S
+
             if is_video:
                 try:
                     _cap = cv2.VideoCapture(video_path)
@@ -492,116 +555,105 @@ class VideoPreviewTooltip:
                     vid_h = int(_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                     _cap.release()
                     if vid_w > 0 and vid_h > 0:
-                        scale = min(SQUARE / vid_w, SQUARE / vid_h)
+                        scale = min(S / vid_w, S / vid_h)
                         fit_w = max(2, int(vid_w * scale) & ~1)
                         fit_h = max(2, int(vid_h * scale) & ~1)
-                    else:
-                        fit_w = fit_h = SQUARE
                 except Exception:
-                    fit_w = fit_h = SQUARE
+                    pass
             else:
                 try:
                     _img = Image.open(tmp_path)
-                    img_w, img_h = _img.size
-                    scale = min(SQUARE / img_w, SQUARE / img_h)
-                    fit_w = max(1, int(img_w * scale))
-                    fit_h = max(1, int(img_h * scale))
+                    iw, ih = _img.size
+                    scale = min(S / iw, S / ih)
+                    fit_w = max(1, int(iw * scale))
+                    fit_h = max(1, int(ih * scale))
                 except Exception:
-                    fit_w = fit_h = SQUARE
+                    pass
 
-            tw = SQUARE + 20
-            th = SQUARE + 42
-
+            tip_w = S + 20
+            tip_h = S + 42
             mon_x, mon_y, mon_w, mon_h = self._get_monitor_geometry(x, y)
-            tip_x = min(x + 10, mon_x + mon_w - tw - 10)
-            tip_y = min(y + 10, mon_y + mon_h - th - 10)
+            tip_x = min(x + 10, mon_x + mon_w - tip_w - 10)
+            tip_y = min(y + 10, mon_y + mon_h - tip_h - 10)
             tip_x = max(tip_x, mon_x + 2)
             tip_y = max(tip_y, mon_y + 2)
-            self.tooltip_window.geometry(f"+{tip_x}+{tip_y}")
-
-            frame = tk.Frame(self.tooltip_window, bg="black", padx=5, pady=5)
-            frame.pack()
-
-            if is_video:
-                try:
-                    import vlc
-                    inst = vlc.Instance("--no-xlib", "--quiet", "--no-audio")
-                    player = inst.media_player_new()
-                    player.audio_set_mute(True)
-                    player.audio_set_volume(0)
-
-                    # Outer black container — always SQUARE × SQUARE
-                    container = tk.Frame(frame, bg="black", width=SQUARE, height=SQUARE)
-                    container.pack()
-                    container.pack_propagate(False)
-
-                    # Inner player frame — fitted size, centred inside the container
-                    pad_x = (SQUARE - fit_w) // 2
-                    pad_y = (SQUARE - fit_h) // 2
-                    vf = tk.Frame(container, bg="black", width=fit_w, height=fit_h)
-                    vf.place(x=pad_x, y=pad_y)
-                    vf.pack_propagate(False)
-
-                    if os.name == "nt":
-                        player.set_hwnd(vf.winfo_id())
-                    else:
-                        player.set_xwindow(vf.winfo_id())
-                    player.set_media(inst.media_new(tmp_path))
-                    player.play()
-
-                    def _loop():
-                        if self.tooltip_window:
-                            if player.get_state() == vlc.State.Ended:
-                                player.stop()
-                                player.play()
-                            self.tooltip_window.after(100, _loop)
-
-                    self.tooltip_window.after(100, _loop)
-                    self.tooltip_window._player = player
-                    self.tooltip_window._instance = inst
-                    self.tooltip_window._tmp_path = tmp_path
-                except ImportError:
-                    _safe_unlink(tmp_path)
-                    tk.Label(frame, text="VLC not available", bg="black", fg="yellow").pack()
-            else:
-                # Letterbox/pillarbox: paste fitted image onto a black SQUARE canvas
-                canvas_img = Image.new("RGB", (SQUARE, SQUARE), (0, 0, 0))
-                src = Image.open(tmp_path).resize((fit_w, fit_h), Image.Resampling.LANCZOS)
-                offset_x = (SQUARE - fit_w) // 2
-                offset_y = (SQUARE - fit_h) // 2
-                canvas_img.paste(src, (offset_x, offset_y))
-                photo = ImageTk.PhotoImage(canvas_img)
-                lbl = tk.Label(frame, image=photo, bg="black")
-                lbl.image = photo
-                lbl.pack()
-                self.tooltip_window._tmp_path = tmp_path
+            tw.geometry(f"+{tip_x}+{tip_y}")
 
             name = os.path.basename(video_path)
             if len(name) > 40:
                 name = name[:37] + "…"
-            tk.Label(frame, text=name, bg="black", fg="white",
-                     font=("Arial", 9), wraplength=SQUARE).pack(pady=(5, 0))
+            self._name_label.configure(text=name)
+
+            if is_video:
+                try:
+                    import vlc
+                    self._instance = vlc.Instance("--no-xlib", "--quiet", "--no-audio")
+                    self._player = self._instance.media_player_new()
+                    self._player.audio_set_mute(True)
+                    self._player.audio_set_volume(0)
+
+                    pad_x = (S - fit_w) // 2
+                    pad_y = (S - fit_h) // 2
+                    vf = tk.Frame(self._img_frame, bg="black", width=fit_w, height=fit_h)
+                    vf.place(x=pad_x, y=pad_y)
+                    vf.pack_propagate(False)
+                    tw.update_idletasks()
+
+                    if os.name == "nt":
+                        self._player.set_hwnd(vf.winfo_id())
+                    else:
+                        self._player.set_xwindow(vf.winfo_id())
+                    self._player.set_media(self._instance.media_new(tmp_path))
+                    self._player.play()
+
+                    player_ref = self._player
+
+                    def _loop():
+                        if not (self._toplevel and self._toplevel.winfo_exists()):
+                            return
+                        if self._player is player_ref:
+                            try:
+                                if self._player.get_state() == vlc.State.Ended:
+                                    self._player.stop()
+                                    self._player.play()
+                            except Exception:
+                                pass
+                            self._loop_id = self._toplevel.after(100, _loop)
+
+                    self._loop_id = tw.after(100, _loop)
+                    self._label_widget.place_forget()
+                except ImportError:
+                    _safe_unlink(tmp_path)
+                    self._tmp_path = None
+                    self._label_widget.configure(text="VLC not available", fg="yellow", image="")
+                    self._label_widget.place(relx=0.5, rely=0.5, anchor="center")
+            else:
+                canvas_img = Image.new("RGB", (S, S), (0, 0, 0))
+                src = Image.open(tmp_path).resize((fit_w, fit_h), Image.Resampling.LANCZOS)
+                canvas_img.paste(src, ((S - fit_w) // 2, (S - fit_h) // 2))
+                photo = ImageTk.PhotoImage(canvas_img)
+                self._label_widget.configure(image=photo, text="")
+                self._label_widget.image = photo
+                self._label_widget.place(relx=0.5, rely=0.5, anchor="center")
+
+            tw.deiconify()
+            tw.lift()
             self.is_visible = True
         except Exception as e:
             print(f"[Tooltip] error: {e}")
             self.hide_preview()
 
-    # ------------------------------------------------------------------
-    # Monitor geometry helper
-    # ------------------------------------------------------------------
+    def hide_preview(self):
+        self.is_visible = False
+        self._release_player()
+        if self._toplevel and self._toplevel.winfo_exists():
+            try:
+                self._toplevel.withdraw()
+            except Exception:
+                pass
 
     @staticmethod
     def _get_monitor_geometry(cursor_x: int, cursor_y: int):
-        """
-        Return (x, y, width, height) of the monitor that contains the given
-        screen-absolute cursor position.
-
-        Tries the platform-specific APIs first (Windows: ctypes EnumDisplayMonitors;
-        other: screeninfo or Gdk).  Falls back to Tkinter's virtual-screen origin
-        + winfo_screenwidth/height if nothing else is available (single-monitor
-        equivalent, keeps old behaviour).
-        """
-        # --- Windows ---
         if os.name == "nt":
             try:
                 import ctypes
@@ -653,48 +705,6 @@ class VideoPreviewTooltip:
             return vx, vy, sw, sh
         except Exception:
             return 0, 0, 1920, 1080
-
-    def hide_preview(self):
-        win = self.tooltip_window
-        self.tooltip_window = None
-        self.is_visible = False
-        if win:
-            try:
-                player = getattr(win, '_player', None)
-                instance = getattr(win, '_instance', None)
-                tmp = getattr(win, '_tmp_path', None)
-                win._player = None
-                win._instance = None
-                win._tmp_path = None
-                if player:
-                    try:
-                        player.stop()
-                    except Exception:
-                        pass
-                    try:
-                        player.set_hwnd(0)
-                    except Exception:
-                        try:
-                            player.set_xwindow(0)
-                        except Exception:
-                            pass
-                    try:
-                        player.release()
-                    except Exception:
-                        pass
-                if instance:
-                    try:
-                        instance.release()
-                    except Exception:
-                        pass
-                if tmp:
-                    _safe_unlink(tmp)
-            except Exception:
-                pass
-            try:
-                win.destroy()
-            except Exception:
-                pass
 
 
 # ---------------------------------------------------------------------------

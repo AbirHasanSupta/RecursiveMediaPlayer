@@ -1507,7 +1507,60 @@ class GridViewManager:
                 self.items.append(current_header)
                 self.items.extend(current_dir_items)
 
-        self.root.after(0, self._rebuild_grid)
+        self.root.after(0, self._apply_filter_visibility)
+
+    def _apply_filter_visibility(self):
+        page_items = self._get_page_items()
+        self._build_pagination_bar()
+
+        # Hide everything first
+        for card in self.card_widgets.values():
+            if card.winfo_exists():
+                card.grid_remove()
+        for it in self.items if hasattr(self, 'all_items') else []:
+            pass
+        for it in (self.all_items if hasattr(self, 'all_items') else self.items):
+            if it['type'] == 'header':
+                hw = it.get('_header_widget')
+                if hw and hw.winfo_exists():
+                    hw.grid_remove()
+
+        # Re-position visible items in correct filtered order
+        t = self._tok()
+        cols = self.grid_size_var.get()
+        grid_row = -1
+        video_col = 0
+
+        for item_data in page_items:
+            if item_data['type'] == 'header':
+                grid_row += 1
+                video_col = 0
+                hw = item_data.get('_header_widget')
+                if hw and hw.winfo_exists():
+                    hw.grid(row=grid_row, column=0, columnspan=cols,
+                            sticky='ew', padx=_CARD_PAD_X, pady=(28, 8))
+                else:
+                    return self._rebuild_grid()
+                grid_row += 1
+                continue
+
+            vp = item_data['path']
+            card = self.card_widgets.get(vp)
+            if card and card.winfo_exists():
+                card.grid(row=grid_row, column=video_col,
+                          padx=_CARD_PAD_X, pady=_CARD_PAD_Y, sticky='nsew')
+            else:
+                return self._rebuild_grid()
+
+            video_col += 1
+            if video_col >= cols:
+                video_col = 0
+                grid_row += 1
+
+        for i in range(cols):
+            self.grid_frame.columnconfigure(i, weight=1, uniform="col")
+
+        self._update_selection_label()
 
     # ─────────────────────────────────────────────────────────────────────────
     # Drag & drop – directory reorder (original)
