@@ -1394,10 +1394,9 @@ def select_multiple_folders_and_play():
                             return
 
                     path_to_iid = {}
-                    # Each item is now a 5-tuple: (parent_iid, path, is_dir, iid, size_str)
-                    # size_str is computed HERE in the background — never on the main thread.
                     items       = []
                     iid_counter = [0]
+                    file_sizes  = {}   # norm_path -> bytes, accumulated during walk
 
                     def next_iid():
                         iid_counter[0] += 1
@@ -1439,17 +1438,24 @@ def select_multiple_folders_and_play():
                         is_excl_dir = norm_root in excluded_dir_set
                         include_dir = (not only_excl) or is_excl_dir
 
+                        # Accumulate all file sizes in this folder for parent size roll-up
+                        dir_bytes = 0
+                        for fn in files:
+                            try:
+                                dir_bytes += os.path.getsize(os.path.join(root, fn))
+                            except Exception:
+                                pass
+                        file_sizes[norm_root] = file_sizes.get(norm_root, 0) + dir_bytes
+
                         if norm_root == base_norm:
                             iid = next_iid()
                             path_to_iid[norm_root] = iid
-                            # Root node: skip size computation (too expensive for large trees)
-                            items.append(("", root, True, iid, ""))
+                            items.append(("", root, True, iid, ""))  # size back-filled after walk
                         elif include_dir and show_this_dir:
                             parent_norm = os.path.normpath(os.path.dirname(root))
                             parent_iid = path_to_iid.get(parent_norm, "")
                             iid = next_iid()
                             path_to_iid[norm_root] = iid
-                            # ── FIX: compute size in background, not in insert_chunk ──
                             dir_size = _dir_size_str(root)
                             items.append((parent_iid, root, True, iid, dir_size))
 
@@ -1474,7 +1480,6 @@ def select_multiple_folders_and_play():
                                             parent_iid = path_to_iid.get(norm_root, "")
                                             iid        = next_iid()
                                             path_to_iid[norm_full] = iid
-                                            # ── FIX: compute file size here via entry.stat() ──
                                             try:
                                                 file_size = _fmt_size(entry.stat().st_size)
                                             except Exception:
@@ -1482,6 +1487,12 @@ def select_multiple_folders_and_play():
                                             items.append((parent_iid, full_path, False, iid, file_size))
                             except PermissionError:
                                 pass
+
+                    # Back-fill root node size from accumulated file_sizes across all subdirs
+                    if items:
+                        root_total = sum(file_sizes.values())
+                        pi, pp, pd, piid, _ = items[0]
+                        items[0] = (pi, pp, pd, piid, _fmt_size(root_total) if root_total else "")
 
                     def post_tree():
                         with self._subdir_load_lock:
@@ -1508,7 +1519,6 @@ def select_multiple_folders_and_play():
                                 return
                             end = min(start + chunk_size, total)
                             for i in range(start, end):
-                                # ── FIX: unpack 5-tuple — size_str already computed ──
                                 parent_iid, path, is_dir, iid, meta_size = items[i]
                                 norm_p = os.path.normpath(path)
                                 tag    = self._tag_for_item(path, base, excluded_dir_set, excluded_vid_set)
@@ -1521,7 +1531,6 @@ def select_multiple_folders_and_play():
                                     else:
                                         open_state = norm_p in expanded
 
-                                # No os.walk here — meta_size came from the background thread
                                 self.exclusion_tree.insert(
                                     parent_iid, tk.END, iid=iid,
                                     text=label, tags=(tag,), open=open_state,
