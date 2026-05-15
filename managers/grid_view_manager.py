@@ -394,10 +394,22 @@ class GridViewManager:
         self.grid_frame.bind("<Button-1>", lambda e: self._clear_selection())
 
         def _on_mousewheel(e):
-            if self.canvas.winfo_exists():
-                self.canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+            try:
+                if self.canvas.winfo_exists():
+                    self.canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+            except Exception:
+                pass
+
+        def _rebind_mousewheel(e=None):
+            try:
+                if self.canvas.winfo_exists():
+                    self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            except Exception:
+                pass
 
         self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        gw.bind("<FocusIn>", _rebind_mousewheel)
+        gw.bind("<Enter>", _rebind_mousewheel)
 
         # keyboard shortcuts
         gw.bind("<Control-a>", lambda e: self._select_all())
@@ -424,7 +436,6 @@ class GridViewManager:
             if self._search_timer:
                 self.root.after_cancel(self._search_timer)
                 self._search_timer = None
-            # ── ADD THIS LINE ────────────────────────────────────────────
             try:
                 self.grid_window.destroy()
             except Exception:
@@ -1697,12 +1708,6 @@ class GridViewManager:
                 self.root.after(0, self._relayout_grid)
 
     def _move_multiple_videos_before(self, paths, target):
-        """
-        Move all video items listed in `paths` to just before `target`.
-        `paths` is a list of full video paths, all belonging to the same folder.
-        The relative order of the moved items is preserved.
-        """
-        # Collect current indices of the videos to move
         indexed = []
         for p in paths:
             idx = next((i for i, it in enumerate(self.items)
@@ -1712,17 +1717,14 @@ class GridViewManager:
         if not indexed:
             return
 
-        # Sort by original position (so we remove them without messing up later indices)
         indexed.sort(key=lambda x: x[0])
 
-        # Remove the items in reverse order (to keep earlier indices valid)
         moved_items = []
         for idx, item in reversed(indexed):
             moved_items.append(item)
             del self.items[idx]
-        moved_items.reverse()   # restore original order
+        moved_items.reverse()
 
-        # Find insertion point after removal
         target_idx = next((i for i, it in enumerate(self.items)
                            if it['type'] == 'video' and it['path'] == target), None)
         if target_idx is None:
@@ -1732,7 +1734,6 @@ class GridViewManager:
                 self.items.insert(target_idx, item)
                 target_idx += 1
 
-        # Invalidate caches
         self._pages_cache = None
         if not self.search_var.get():
             self.all_items = self.items.copy()
@@ -2007,24 +2008,16 @@ class GridViewManager:
             pass
 
     def _relayout_grid(self):
-        """
-        Relayout the current page without destroying existing card/header widgets.
-        Only works when the drag does not change the page index.
-        Falls back to a full rebuild if the page changes or a widget is missing.
-        """
         t = self._tok()
         cols = self.grid_size_var.get()
 
         old_page = self._page
-        self._pages_cache = None               # force page recalculation
+        self._pages_cache = None
         new_page_items = self._get_page_items()
 
-        # If the page number changed (should only happen when dragging
-        # a folder across a page boundary), do a full rebuild.
         if self._page != old_page or not new_page_items:
             return self._rebuild_grid()
 
-        # Re‑position existing widgets according to the new order
         grid_row = -1
         video_col = 0
 
@@ -2043,7 +2036,6 @@ class GridViewManager:
                 grid_row += 1
                 continue
 
-            # Video item
             vp = item_data['path']
             card = self.card_widgets.get(vp)
             if card and card.winfo_exists():
@@ -2052,7 +2044,6 @@ class GridViewManager:
                     padx=_CARD_PAD_X, pady=_CARD_PAD_Y, sticky='nsew'
                 )
             else:
-                # Widget unexpectedly missing – fallback
                 return self._rebuild_grid()
 
             video_col += 1
