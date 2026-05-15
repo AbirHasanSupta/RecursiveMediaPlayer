@@ -99,6 +99,7 @@ def select_multiple_folders_and_play():
             self.loop_mode = "loop_on"
             self._active_player = None
             self._now_playing_video_path = None
+            self._cached_context_menu = None
 
             preferences = self.config.load_preferences()
             self.dark_mode = preferences['dark_mode']
@@ -1112,16 +1113,21 @@ def select_multiple_folders_and_play():
         # ------------------------------------------------------------------
 
         def _make_context_menu(self):
-            if self.dark_mode:
-                return tk.Menu(self.root, tearoff=0,
-                               bg="#313335", fg="#A9B7C6",
-                               activebackground="#2D5A8E", activeforeground="#FFFFFF",
-                               relief="flat", bd=1, font=("Segoe UI", 9))
-            else:
-                return tk.Menu(self.root, tearoff=0,
-                               bg="#f5f5f5", fg="#333333",
-                               activebackground="#3498db", activeforeground="#FFFFFF",
-                               relief="flat", bd=1, font=("Segoe UI", 9))
+            if not hasattr(self, '_cached_context_menu') or self._cached_context_menu is None:
+                if self.dark_mode:
+                    self._cached_context_menu = tk.Menu(
+                        self.root, tearoff=0,
+                        bg="#313335", fg="#A9B7C6",
+                        activebackground="#2D5A8E", activeforeground="#FFFFFF",
+                        relief="flat", bd=1, font=("Segoe UI", 9))
+                else:
+                    self._cached_context_menu = tk.Menu(
+                        self.root, tearoff=0,
+                        bg="#f5f5f5", fg="#333333",
+                        activebackground="#3498db", activeforeground="#FFFFFF",
+                        relief="flat", bd=1, font=("Segoe UI", 9))
+            self._cached_context_menu.delete(0, tk.END)
+            return self._cached_context_menu
 
         def _show_context_menu(self, event):
             iid = self.exclusion_tree.identify_row(event.y)
@@ -1133,12 +1139,10 @@ def select_multiple_folders_and_play():
                     self.video_preview_manager.right_clicked_item = iid
                     self.video_preview_manager._show_video_preview(path, event.x_root, event.y_root)
                     return
-                # Non-video unselected row: select it then show menu
                 self.exclusion_tree.selection_set(iid)
                 selection = [iid]
 
             if not selection:
-                # Right-click on empty space → show tooltip for nearest video
                 if iid:
                     path = self.current_subdirs_mapping.get(iid)
                     if path and os.path.isfile(path) and is_video(path):
@@ -1146,89 +1150,93 @@ def select_multiple_folders_and_play():
                         self.video_preview_manager._show_video_preview(path, event.x_root, event.y_root)
                 return
 
-            first_iid  = selection[0]
+            first_iid = selection[0]
             first_path = self.current_subdirs_mapping.get(first_iid)
 
             context_menu = self._make_context_menu()
             context_menu.add_command(label="Play Selected", command=self.play_selected_videos)
             context_menu.add_separator()
 
-            total_items    = self._tree_size()
+            total_items = self._tree_size()
             selected_count = len(selection)
 
             if selected_count < total_items:
                 context_menu.add_command(label="Select All",
-                    command=lambda: self.exclusion_tree.selection_set(self._tree_get_all_iids()))
+                                         command=lambda: self.exclusion_tree.selection_set(self._tree_get_all_iids()))
             if selected_count > 0:
                 context_menu.add_command(label="Unselect All",
-                    command=lambda: self.exclusion_tree.selection_remove(self._tree_get_all_iids()))
+                                         command=lambda: self.exclusion_tree.selection_remove(
+                                             self._tree_get_all_iids()))
 
             context_menu.add_separator()
             context_menu.add_command(label="Open in Grid View",
-                command=lambda: self._context_open_grid_view(selection))
+                                     command=lambda: self._context_open_grid_view(selection))
 
             selected_dir = self.get_current_selected_directory()
-            excluded_dir_set = set(os.path.normpath(p) for p in self.excluded_subdirs.get(selected_dir, [])) if selected_dir else set()
+            excluded_dir_set = set(
+                os.path.normpath(p) for p in self.excluded_subdirs.get(selected_dir, [])) if selected_dir else set()
 
             sel_paths = [self.current_subdirs_mapping.get(iid) for iid in selection]
             sel_paths = [p for p in sel_paths if p]
 
             has_non_excluded = any(
-                not (self.is_video_excluded(selected_dir, p) if (selected_dir and os.path.isfile(p)) else os.path.normpath(p) in excluded_dir_set)
+                not (self.is_video_excluded(selected_dir, p) if (
+                            selected_dir and os.path.isfile(p)) else os.path.normpath(p) in excluded_dir_set)
                 for p in sel_paths
             )
             has_excluded = any(
-                (self.is_video_excluded(selected_dir, p) if (selected_dir and os.path.isfile(p)) else os.path.normpath(p) in excluded_dir_set)
+                (self.is_video_excluded(selected_dir, p) if (selected_dir and os.path.isfile(p)) else os.path.normpath(
+                    p) in excluded_dir_set)
                 for p in sel_paths
             )
 
             sel_video_paths = [p for p in sel_paths if os.path.isfile(p) and is_video(p)]
             has_non_fav_videos = (selected_dir and hasattr(self, 'favorites_manager') and sel_video_paths and
-                any(not self.favorites_manager.is_favorite(p, selected_dir) for p in sel_video_paths))
+                                  any(not self.favorites_manager.is_favorite(p, selected_dir) for p in sel_video_paths))
             has_fav = (selected_dir and hasattr(self, 'favorites_manager') and sel_video_paths and
-                any(self.favorites_manager.is_favorite(p, selected_dir) for p in sel_video_paths))
+                       any(self.favorites_manager.is_favorite(p, selected_dir) for p in sel_video_paths))
 
             context_menu.add_separator()
             if has_non_excluded:
                 context_menu.add_command(label="Exclude Selected", command=self.exclude_subdirectories)
             if has_excluded:
                 context_menu.add_command(label="Include Selected", command=self.include_subdirectories)
-            context_menu.add_command(label="Exclude All",       command=self.exclude_all_subdirectories)
+            context_menu.add_command(label="Exclude All", command=self.exclude_all_subdirectories)
             context_menu.add_command(label="Clear All Exclusions", command=self.clear_all_exclusions)
 
             context_menu.add_separator()
             context_menu.add_command(label="🎵 Add to Playlist",
-                command=lambda: self._context_add_to_playlist(selection))
+                                     command=lambda: self._context_add_to_playlist(selection))
             if has_non_fav_videos:
                 context_menu.add_command(label="⭐ Add to Favorites",
-                    command=lambda: self._context_add_to_favorites(selection))
+                                         command=lambda: self._context_add_to_favorites(selection))
             if has_fav:
                 context_menu.add_command(label="★ Remove from Favorites",
-                    command=lambda: self._context_remove_from_favorites(selection))
+                                         command=lambda: self._context_remove_from_favorites(selection))
 
             context_menu.add_separator()
             context_menu.add_command(label="Add to Queue",
-                command=lambda: self._context_add_to_queue(selection, mode="queue"))
+                                     command=lambda: self._context_add_to_queue(selection, mode="queue"))
             context_menu.add_command(label="Play Next",
-                command=lambda: self._context_add_to_queue(selection, mode="next"))
+                                     command=lambda: self._context_add_to_queue(selection, mode="next"))
 
             context_menu.add_separator()
             context_menu.add_command(label="▶ Win 1 › Player 1",
-                command=lambda: self._context_play_in_dual_player(selection, win_id=1, slot=1))
+                                     command=lambda: self._context_play_in_dual_player(selection, win_id=1, slot=1))
             context_menu.add_command(label="▶ Win 1 › Player 2",
-                command=lambda: self._context_play_in_dual_player(selection, win_id=1, slot=2))
+                                     command=lambda: self._context_play_in_dual_player(selection, win_id=1, slot=2))
             context_menu.add_command(label="▶ Win 1 › Player 3",
-                command=lambda: self._context_play_in_dual_player(selection, win_id=1, slot=3))
+                                     command=lambda: self._context_play_in_dual_player(selection, win_id=1, slot=3))
 
             if (getattr(self, 'settings_manager', None) and
                     self.settings_manager.get_settings().dual_window_enabled):
                 context_menu.add_separator()
                 context_menu.add_command(label="▶ Win 2 › Player 1",
-                    command=lambda: self._context_play_in_dual_player(selection, win_id=2, slot=1))
+                                         command=lambda: self._context_play_in_dual_player(selection, win_id=2, slot=1))
                 context_menu.add_command(label="▶ Win 2 › Player 2",
-                    command=lambda: self._context_play_in_dual_player(selection, win_id=2, slot=2))
+                                         command=lambda: self._context_play_in_dual_player(selection, win_id=2, slot=2))
                 context_menu.add_command(label="▶ Win 2 › Player 3",
-                    command=lambda: self._context_play_in_dual_player(selection, win_id=2, slot=3))
+                                         command=lambda: self._context_play_in_dual_player(selection, win_id=2, slot=3))
 
             context_menu.add_separator()
             context_menu.add_command(
@@ -1237,11 +1245,11 @@ def select_multiple_folders_and_play():
 
             if len(selection) == 1 and first_path and os.path.isfile(first_path):
                 context_menu.add_command(label="Copy Path",
-                    command=lambda: self._context_copy_path(first_path))
+                                         command=lambda: self._context_copy_path(first_path))
                 context_menu.add_command(label="Open File Location",
-                    command=lambda: self._context_open_location(first_path))
+                                         command=lambda: self._context_open_location(first_path))
                 context_menu.add_command(label="Properties",
-                    command=lambda: self._context_show_properties(first_path))
+                                         command=lambda: self._context_show_properties(first_path))
 
             if len(selection) == 1 and first_path and os.path.isdir(first_path):
                 context_menu.add_command(label="Open Folder Location",
@@ -1253,10 +1261,6 @@ def select_multiple_folders_and_play():
                 context_menu.tk_popup(event.x_root, event.y_root)
             finally:
                 context_menu.grab_release()
-                try:
-                    self.root.after(100, lambda: context_menu.destroy())
-                except:
-                    pass
 
         # ------------------------------------------------------------------
         # Tree population — replaces load_subdirectories
@@ -1947,17 +1951,33 @@ def select_multiple_folders_and_play():
                         collected.append(path)
                     continue
                 if os.path.isdir(path):
-                    try:
-                        for root, dirs, files in os.walk(path):
-                            for f in files:
-                                full = os.path.join(root, f)
-                                if is_video(full):
-                                    if not (selected_dir and self.is_video_excluded(selected_dir, full)):
-                                        collected.append(full)
-                    except Exception as e:
-                        self.update_console(f"Error reading folder {path}: {e}")
+                    norm_path = os.path.normpath(path)
+                    # Use scan_cache first — avoids disk walk on main thread
+                    cache_hit = False
+                    for cache_dir, cache_val in self.scan_cache.items():
+                        if not isinstance(cache_dir, str) or cache_dir.startswith("gdrive://"):
+                            continue
+                        if os.path.normpath(cache_dir) == norm_path or norm_path.startswith(
+                                os.path.normpath(cache_dir) + os.sep):
+                            videos, _, _ = cache_val
+                            for v in videos:
+                                if v.startswith(path) or os.path.normpath(v).startswith(norm_path + os.sep):
+                                    if not (selected_dir and self.is_video_excluded(selected_dir, v)):
+                                        collected.append(v)
+                            cache_hit = True
+                            break
+                    if not cache_hit:
+                        try:
+                            for root, dirs, files in os.walk(path):
+                                for f in files:
+                                    full = os.path.join(root, f)
+                                    if is_video(full):
+                                        if not (selected_dir and self.is_video_excluded(selected_dir, full)):
+                                            collected.append(full)
+                        except Exception as e:
+                            self.update_console(f"Error reading folder {path}: {e}")
 
-            seen  = set()
+            seen = set()
             final = []
             for v in collected:
                 k = v if self._is_stream_url(v) else os.path.normpath(v)
@@ -2332,7 +2352,7 @@ def select_multiple_folders_and_play():
 
         def update_video_count(self):
             total_videos = 0
-            pending      = 0
+            pending = 0
 
             for directory in self.selected_dirs:
                 cache = self.scan_cache.get(directory)
@@ -2346,9 +2366,10 @@ def select_multiple_folders_and_play():
             suffix = f" (scanning {pending}…)" if pending else ""
             self.video_count_label.config(text=f"  —  {self.video_count} videos{suffix}")
 
-            if (not pending and
+            if not pending and (
                     not hasattr(self, '_last_reported_video_count') or
-                    (not pending and getattr(self, '_last_reported_video_count', None) != total_videos)):
+                    self._last_reported_video_count != total_videos
+            ):
                 self._last_reported_video_count = total_videos
                 self.update_console(
                     f"Total: {total_videos} videos from {len(self.selected_dirs)} "
@@ -2366,22 +2387,35 @@ def select_multiple_folders_and_play():
                                        text="  Excluding all… Please wait", tags=("placeholder",))
 
             def worker(dir_path=selected_dir):
-                dir_paths  = []
+                dir_paths = []
                 file_paths = []
-                displayed  = set(self.current_subdirs_mapping.values()) if (
-                    hasattr(self, 'search_query') and self.search_query) else set()
+                displayed = set(self.current_subdirs_mapping.values()) if (
+                        hasattr(self, 'search_query') and self.search_query) else set()
 
                 try:
                     base = os.path.normpath(dir_path)
-                    for root, dirs, files in os.walk(base):
-                        for d in dirs:
-                            sp = os.path.join(root, d)
-                            if not displayed or sp in displayed:
-                                dir_paths.append(sp)
-                        for f in files:
-                            full = os.path.join(root, f)
-                            if is_video(full) and (not displayed or full in displayed):
-                                file_paths.append(full)
+                    cache = self.scan_cache.get(dir_path)
+                    if cache:
+                        videos, _, _ = cache
+                        for v in videos:
+                            if not displayed or v in displayed:
+                                file_paths.append(v)
+                        # Collect subdirectory paths from the tree mapping (already known)
+                        for p in self.current_subdirs_mapping.values():
+                            if isinstance(p, str) and os.path.isdir(p):
+                                np = os.path.normpath(p)
+                                if np.startswith(base + os.sep) and (not displayed or p in displayed):
+                                    dir_paths.append(p)
+                    else:
+                        for root, dirs, files in os.walk(base):
+                            for d in dirs:
+                                sp = os.path.join(root, d)
+                                if not displayed or sp in displayed:
+                                    dir_paths.append(sp)
+                            for f in files:
+                                full = os.path.join(root, f)
+                                if is_video(full) and (not displayed or full in displayed):
+                                    file_paths.append(full)
                 except Exception as e:
                     self.root.after(0, lambda: self.update_console(f"Error during Exclude All: {e}"))
                     return

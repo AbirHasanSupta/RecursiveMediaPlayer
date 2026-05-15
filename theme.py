@@ -197,6 +197,7 @@ class ThemeSelector:
                 restyle_menu(widget)
 
     def toggle_theme(self):
+        self._cached_context_menu = None
         self.dark_mode = not self.dark_mode
         self.save_preferences()
         self.apply_theme()
