@@ -8,9 +8,12 @@ from typing import Optional, Callable, List
 import vlc
 
 
-def _embed(player: vlc.MediaPlayer, canvas: tk.Canvas):
-    """Attach a VLC MediaPlayer to a tk Canvas."""
+def _embed(player: vlc.MediaPlayer, canvas: tk.Canvas, retry_widget=None):
     canvas.update_idletasks()
+    if canvas.winfo_width() <= 1:
+        if retry_widget:
+            retry_widget.after(50, lambda: _embed(player, canvas, retry_widget))
+        return
     wid = canvas.winfo_id()
     if os.name == 'nt':
         player.set_hwnd(wid)
@@ -510,7 +513,7 @@ class DualPlayerSlot:
             return
         try:
             self.player = self.instance.media_player_new()
-            _embed(self.player, self.video_canvas)
+            _embed(self.player, self.video_canvas, self.parent_frame)
             self.player.video_set_aspect_ratio(None)
             self.player.video_set_scale(0)
         except Exception:

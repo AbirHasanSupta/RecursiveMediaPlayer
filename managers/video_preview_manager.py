@@ -717,6 +717,7 @@ class PrefetchQueue:
     def __init__(self, num_workers: int = 2):
         self._q: queue.PriorityQueue = queue.PriorityQueue()
         self._lock = threading.Lock()
+        self._stop_event = threading.Event()
         self._active_token: object = None      # current batch token
         self._thumbnails_ref: Optional[Dict] = None   # set by manager
         self._storage_ref: Optional[ThumbnailStorage] = None
@@ -786,64 +787,57 @@ class PrefetchQueue:
 
     def stop(self):
         self._running = False
-        # Unblock workers
-        for _ in self._workers:
-            self._q.put((-1, None, None))
+        self._stop_event.set()
+        # drain queue so workers unblock immediately
+        try:
+            while True:
+                self._q.get_nowait()
+                self._q.task_done()
+        except queue.Empty:
+            pass
 
+    # Replace _worker_loop():
     def _worker_loop(self):
-        while self._running:
+        while self._running and not self._stop_event.is_set():
             try:
-                item = self._q.get(timeout=1.0)
+                item = self._q.get(timeout=0.2)
             except queue.Empty:
                 continue
 
             priority, video_path, token = item
             try:
-                if video_path is None:          # stop sentinel
+                if video_path is None:
                     break
-
-                # Skip if this batch was cancelled
                 with self._lock:
                     if token is not self._active_token:
                         continue
-
                 if not self._thumbnails_ref or not self._storage_ref or not self._generator_ref:
                     continue
-
                 norm = os.path.normpath(video_path)
                 th = self._thumbnails_ref.get(norm)
                 if th and th.is_valid():
-                    continue                     # already have a fresh blob
-
+                    continue
                 if not os.path.isfile(video_path):
                     continue
-
                 result = self._generator_ref.generate_thumbnail(video_path)
                 if result is None:
                     continue
-
                 raw_bytes, is_vid = result
                 ext = ".mp4" if is_vid else ".jpg"
                 hk = _file_hash_key(video_path)
                 blob_path = self._storage_ref.write_blob(hk, raw_bytes, ext)
                 th_new = VideoThumbnail(video_path, blob_path, is_vid, hk)
                 self._thumbnails_ref[norm] = th_new
-
                 if self._on_done_cb:
                     try:
                         self._on_done_cb(norm, th_new)
                     except Exception:
                         pass
-
-                # Removed: 80 ms sleep — generation is now fast enough (seek-
-                # sampled frames) that throttling is counterproductive.
-
             except Exception as e:
                 print(f"[PrefetchWorker] {e}")
             finally:
                 try:
                     self._q.task_done()
-                    # When queue fully drains, fire the batch-complete callback
                     if self._q.empty() and self._batch_done_cb:
                         try:
                             self._batch_done_cb()

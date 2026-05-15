@@ -1345,7 +1345,6 @@ def select_multiple_folders_and_play():
                 token = object()
                 self._subdir_load_token = token
 
-            # Handle Google Drive pseudo-paths
             try:
                 if isinstance(directory, str) and directory.startswith("gdrive://"):
                     self._load_drive_tree(directory, token, restore_scroll)
@@ -1364,6 +1363,28 @@ def select_multiple_folders_and_play():
             expanded     = set(self.expanded_paths)
             collapsed    = set(self.collapsed_paths)
 
+            def _fmt_size(b):
+                if b >= 1024 ** 3:
+                    return f"{b / 1024 ** 3:.2f} GB"
+                elif b >= 1024 ** 2:
+                    return f"{b / 1024 ** 2:.1f} MB"
+                return f"{b // 1024} KB"
+
+            # ── FIX: compute folder sizes here in the background thread ──────
+            def _dir_size_str(dirpath):
+                """Walk dirpath and return a human-readable total size string."""
+                try:
+                    total = 0
+                    for dp, _, fnames in os.walk(dirpath):
+                        for fn in fnames:
+                            try:
+                                total += os.path.getsize(os.path.join(dp, fn))
+                            except Exception:
+                                pass
+                    return _fmt_size(total)
+                except Exception:
+                    return ""
+
             def build_and_post():
                 try:
                     if self.resource_manager.is_shutting_down():
@@ -1372,11 +1393,10 @@ def select_multiple_folders_and_play():
                         if self._subdir_load_token is not token:
                             return
 
-                    # Each item: (parent_iid, path, is_dir, depth)
-                    # We do a single os.walk and build a flat list that maps
-                    # path -> iid so we can attach children to the right parent.
-                    path_to_iid = {}   # norm_path -> iid assigned in this batch
-                    items       = []   # (parent_iid, path, is_dir)
+                    path_to_iid = {}
+                    # Each item is now a 5-tuple: (parent_iid, path, is_dir, iid, size_str)
+                    # size_str is computed HERE in the background — never on the main thread.
+                    items       = []
                     iid_counter = [0]
 
                     def next_iid():
@@ -1395,7 +1415,6 @@ def select_multiple_folders_and_play():
 
                         norm_root = os.path.normpath(root)
 
-                        # Expand / collapse logic
                         if norm_root == base_norm:
                             can_show_children = True
                         elif expand_all:
@@ -1408,7 +1427,6 @@ def select_multiple_folders_and_play():
                             if not is_exp:
                                 dirs[:] = []
 
-                        # Search filter
                         if search_query:
                             dir_name_matches   = search_query in os.path.basename(root).lower()
                             is_child_of_match  = self.is_child_of_matching_parent(root, base, search_query)
@@ -1416,6 +1434,7 @@ def select_multiple_folders_and_play():
                             show_this_dir      = dir_name_matches or is_child_of_match or has_match_children
                         else:
                             show_this_dir = True
+                            dir_name_matches = False
 
                         is_excl_dir = norm_root in excluded_dir_set
                         include_dir = (not only_excl) or is_excl_dir
@@ -1423,13 +1442,16 @@ def select_multiple_folders_and_play():
                         if norm_root == base_norm:
                             iid = next_iid()
                             path_to_iid[norm_root] = iid
-                            items.append(("", root, True, iid))
+                            # Root node: skip size computation (too expensive for large trees)
+                            items.append(("", root, True, iid, ""))
                         elif include_dir and show_this_dir:
                             parent_norm = os.path.normpath(os.path.dirname(root))
                             parent_iid = path_to_iid.get(parent_norm, "")
                             iid = next_iid()
                             path_to_iid[norm_root] = iid
-                            items.append((parent_iid, root, True, iid))
+                            # ── FIX: compute size in background, not in insert_chunk ──
+                            dir_size = _dir_size_str(root)
+                            items.append((parent_iid, root, True, iid, dir_size))
 
                         if show_videos and can_show_children and show_this_dir:
                             try:
@@ -1446,13 +1468,18 @@ def select_multiple_folders_and_play():
 
                                         vid_name_ok = (not search_query) or (
                                             search_query in entry.name.lower()
-                                            or dir_name_matches if search_query else True
+                                            or (dir_name_matches if search_query else True)
                                         )
                                         if include_v and vid_name_ok:
                                             parent_iid = path_to_iid.get(norm_root, "")
                                             iid        = next_iid()
                                             path_to_iid[norm_full] = iid
-                                            items.append((parent_iid, full_path, False, iid))
+                                            # ── FIX: compute file size here via entry.stat() ──
+                                            try:
+                                                file_size = _fmt_size(entry.stat().st_size)
+                                            except Exception:
+                                                file_size = ""
+                                            items.append((parent_iid, full_path, False, iid, file_size))
                             except PermissionError:
                                 pass
 
@@ -1481,12 +1508,12 @@ def select_multiple_folders_and_play():
                                 return
                             end = min(start + chunk_size, total)
                             for i in range(start, end):
-                                parent_iid, path, is_dir, iid = items[i]
+                                # ── FIX: unpack 5-tuple — size_str already computed ──
+                                parent_iid, path, is_dir, iid, meta_size = items[i]
                                 norm_p = os.path.normpath(path)
                                 tag    = self._tag_for_item(path, base, excluded_dir_set, excluded_vid_set)
                                 label  = self._label_for_item(path, is_dir, excluded_dir_set, excluded_vid_set, base)
 
-                                # Determine initial open state for folders
                                 open_state = False
                                 if is_dir:
                                     if expand_all:
@@ -1494,36 +1521,11 @@ def select_multiple_folders_and_play():
                                     else:
                                         open_state = norm_p in expanded
 
-                                def fmt_size(b):
-                                    if b >= 1024 ** 3:
-                                        return f"{b / 1024 ** 3:.2f} GB"
-                                    elif b >= 1024 ** 2:
-                                        return f"{b / 1024 ** 2:.1f} MB"
-                                    return f"{b // 1024} KB"
-
-                                if is_dir:
-                                    try:
-                                        total_size = 0
-                                        for dp, _, fnames in os.walk(path):
-                                            for fn in fnames:
-                                                try:
-                                                    total_size += os.path.getsize(os.path.join(dp, fn))
-                                                except Exception:
-                                                    pass
-                                        meta_size = fmt_size(total_size)
-                                    except Exception:
-                                        meta_size = ""
-                                    meta_count = ""
-                                else:
-                                    try:
-                                        meta_size = fmt_size(os.path.getsize(path))
-                                    except Exception:
-                                        meta_size = ""
-                                    meta_count = ""
+                                # No os.walk here — meta_size came from the background thread
                                 self.exclusion_tree.insert(
                                     parent_iid, tk.END, iid=iid,
                                     text=label, tags=(tag,), open=open_state,
-                                    values=(meta_size, meta_count)
+                                    values=(meta_size,)
                                 )
                                 mapping[iid] = path
                                 if restore_norm and norm_p == restore_norm:
@@ -1534,7 +1536,6 @@ def select_multiple_folders_and_play():
                             else:
                                 self.current_subdirs_mapping = mapping
 
-                                # Attach preview manager to new tree
                                 if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
                                     self.video_preview_manager.attach_to_listbox(
                                         self.exclusion_tree, self.current_subdirs_mapping

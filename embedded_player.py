@@ -661,9 +661,11 @@ class EmbeddedPlayer:
     # ═══════════════════════════════════════════════════════════════════
 
     def _embed(self):
-        """Bind VLC output to the canvas.  Called before every play()."""
         try:
             self._canvas.update_idletasks()
+            if self._canvas.winfo_width() <= 1:
+                self._win.after(50, self._embed)
+                return
             wid = self._canvas.winfo_id()
             if os.name == "nt":
                 self._player.set_hwnd(wid)
