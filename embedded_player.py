@@ -174,6 +174,8 @@ class EmbeddedPlayer:
         self._global_listener      = None
         self._global_listener_lock = threading.Lock()
         self._global_bindings: dict = {}
+        self._gaming_last_mouse_t = 0.0
+        self._gaming_mouse_pos = (-1, -1)
 
         # VLC
         self._instance = vlc.Instance("--no-video-title-show", "--quiet")
@@ -320,6 +322,8 @@ class EmbeddedPlayer:
                     if not actions:
                         return
                     if not self._mouse_over_player():
+                        return
+                    if time.monotonic() - self._gaming_last_mouse_t > 10.0:
                         return
                     try:
                         if self._win.focus_displayof() is not None:
@@ -2236,6 +2240,9 @@ class EmbeddedPlayer:
                         self._last_mouse  = (mx, my)
                         self._last_move_t = time.monotonic()
                         self._show_bar()
+                        if (mx, my) != self._gaming_mouse_pos:
+                            self._gaming_mouse_pos = (mx, my)
+                            self._gaming_last_mouse_t = time.monotonic()
                     else:
                         idle = time.monotonic() - self._last_move_t
                         if idle >= self.INACTIVITY_S and self._ctrl_visible and not self._hide_job and not self._holding:
