@@ -2019,6 +2019,9 @@ def select_multiple_folders_and_play():
             player.set_hotkeys(self.settings_manager.get_settings().hotkeys)
             if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
                 player.set_seek_preview_manager(self.video_preview_manager)
+            app_settings = self.settings_manager.get_settings()
+            if app_settings.gaming_mode:
+                player.set_gaming_mode(True)
             return player
 
         def _launch_player(self, player):
@@ -3437,6 +3440,11 @@ def select_multiple_folders_and_play():
                     self._active_player.set_hotkeys(new_settings.hotkeys)
                 except Exception as e:
                     self.update_console(f"Hotkey reload error: {e}")
+            if getattr(self, '_active_player', None) is not None:
+                try:
+                    self._active_player.set_gaming_mode(new_settings.gaming_mode)
+                except Exception:
+                    pass
             if hasattr(self, 'dual_player_manager'):
                 if new_settings.dual_window_enabled:
                     self.grid_view_manager.set_play_in_dual_player_win2_1_callback(

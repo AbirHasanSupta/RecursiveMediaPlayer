@@ -41,6 +41,12 @@ try:
 except Exception:
     _get_monitors = None
 
+try:
+    from pynput import keyboard as _pynput_kb
+    _PYNPUT_AVAILABLE = True
+except Exception:
+    _PYNPUT_AVAILABLE = False
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tiny helpers
@@ -133,10 +139,10 @@ class EmbeddedPlayer:
         self.logger      = logger
         self.on_close    = on_close
         self.on_volume_change = on_volume_change
-        self.on_loop_change   = None   # set by caller after construction if needed
-        self.on_close_save    = None   # called with (index, path, loop_mode) on close
-        self.on_video_changed = None  # called with (index, path) on every track change
-        self.on_add_to_playlist = None  # called with (video_path)
+        self.on_loop_change   = None
+        self.on_close_save    = None
+        self.on_video_changed = None
+        self.on_add_to_playlist = None
         self.on_add_to_queue = None
         self.on_add_to_favourites = None
 
@@ -144,24 +150,30 @@ class EmbeddedPlayer:
         self._lock           = threading.Lock()
         self._played_indices = set()
         self._speed_idx      = self.SPEED_STEPS.index(1.0)
-        self._rotation_index = 0          # index into _ROTATION_STEPS: 0/1/2/3
-        self._flip_h         = False      # horizontal flip toggled
+        self._rotation_index = 0
+        self._flip_h         = False
         self._borderless     = False
         self._titlebar = None
         self._titlebar_job = None
         self._titlebar_anim = None
         self._pre_bl_geo     = "1280x720"
-        self._chapters_visible = True     # initially assume chapters exist (packed in UI)
+        self._chapters_visible = True
 
         # A-B loop
         self._ab_point_a     = None
         self._ab_point_b     = None
         self._ab_loop_active = False
-        self._ab_monitor_job = None   # Tk after() job id
+        self._ab_monitor_job = None
 
         # Sleep timer
-        self._sleep_timer_job = None   # Tk after() job id
-        self._sleep_remaining = 0      # seconds remaining
+        self._sleep_timer_job = None
+        self._sleep_remaining = 0
+
+        # Gaming mode — global hotkeys active when mouse hovers player
+        self._gaming_mode          = False
+        self._global_listener      = None
+        self._global_listener_lock = threading.Lock()
+        self._global_bindings: dict = {}
 
         # VLC
         self._instance = vlc.Instance("--no-video-title-show", "--quiet")
@@ -180,12 +192,175 @@ class EmbeddedPlayer:
         self._last_mouse    = (-1, -1)
         self._last_move_t   = 0.0
 
-        # Build UI (synchronous — must be on main thread)
         self._build_ui()
 
-        # Attach end-of-media handler
         em = self._player.event_manager()
         em.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_media_ended)
+
+    # ═══════════════════════════════════════════════════════════════════
+    # GAMING MODE — global hotkeys via pynput
+    # ═══════════════════════════════════════════════════════════════════
+
+    def set_gaming_mode(self, enabled: bool):
+        """Enable/disable global hotkeys that fire when mouse hovers over player."""
+        self._gaming_mode = enabled
+        if enabled:
+            self._start_global_listener()
+        else:
+            self._stop_global_listener()
+
+    def _mouse_over_player(self) -> bool:
+        try:
+            mx = self._win.winfo_pointerx()
+            my = self._win.winfo_pointery()
+            wx = self._win.winfo_rootx()
+            wy = self._win.winfo_rooty()
+            ww = self._win.winfo_width()
+            wh = self._win.winfo_height()
+            return wx <= mx <= wx + ww and wy <= my <= wy + wh
+        except Exception:
+            return False
+
+    def _build_global_bindings(self) -> dict:
+        """
+        Compile self._hotkeys into a dict:
+            str(pynput_key) -> [(required_mod_keys: set, method, args), ...]
+        Called each time hotkeys are reloaded or gaming mode is toggled on.
+        """
+        if not _PYNPUT_AVAILABLE:
+            return {}
+
+        _EXCLUDED_GLOBAL = {"stop_video"}
+
+        _key_map = {
+            'space':      _pynput_kb.Key.space,
+            'esc':        _pynput_kb.Key.esc,
+            'escape':     _pynput_kb.Key.esc,
+            'enter':      _pynput_kb.Key.enter,
+            'left':       _pynput_kb.Key.left,
+            'right':      _pynput_kb.Key.right,
+            'up':         _pynput_kb.Key.up,
+            'down':       _pynput_kb.Key.down,
+            'delete':     _pynput_kb.Key.delete,
+            'backspace':  _pynput_kb.Key.backspace,
+            'tab':        _pynput_kb.Key.tab,
+            'home':       _pynput_kb.Key.home,
+            'end':        _pynput_kb.Key.end,
+            'page_up':    _pynput_kb.Key.page_up,
+            'page_down':  _pynput_kb.Key.page_down,
+            **{f'f{i}': getattr(_pynput_kb.Key, f'f{i}', None) for i in range(1, 13)},
+        }
+        _mod_map = {
+            'ctrl':  {_pynput_kb.Key.ctrl_l,  _pynput_kb.Key.ctrl_r},
+            'shift': {_pynput_kb.Key.shift_l, _pynput_kb.Key.shift_r},
+            'alt':   {_pynput_kb.Key.alt_l,   _pynput_kb.Key.alt_r},
+        }
+
+        def _to_pynput(combo: str):
+            if not combo:
+                return None
+            parts = combo.lower().split('+')
+            key   = parts[-1]
+            mods  = set(parts[:-1])
+            required_mods: set = set()
+            for m in mods:
+                required_mods.update(_mod_map.get(m, set()))
+            if key in _key_map and _key_map[key] is not None:
+                pynput_key = _key_map[key]
+            elif len(key) == 1:
+                try:
+                    pynput_key = _pynput_kb.KeyCode.from_char(key)
+                except Exception:
+                    return None
+            else:
+                return None
+            return pynput_key, required_mods
+
+        bindings: dict = {}
+        for action_id, (method_name, extra_args) in self._ACTION_MAP.items():
+            if action_id in _EXCLUDED_GLOBAL:
+                continue
+            combo  = self._hotkeys.get(action_id) or self._DEFAULT_HOTKEYS.get(action_id)
+            result = _to_pynput(combo) if combo else None
+            if not result:
+                continue
+            pynput_key, required_mods = result
+            method = getattr(self, method_name, None)
+            if not method:
+                continue
+            key_id = str(pynput_key)
+            if key_id not in bindings:
+                bindings[key_id] = []
+            bindings[key_id].append((required_mods, method, extra_args))
+        return bindings
+
+    def _start_global_listener(self):
+        if not _PYNPUT_AVAILABLE:
+            if self.logger:
+                self.logger("Gaming Mode: pynput not installed — run: pip install pynput")
+            return
+
+        with self._global_listener_lock:
+            if self._global_listener is not None:
+                return
+
+            self._global_bindings = self._build_global_bindings()
+
+            pressed_keys: set = set()
+            _last_fired: dict = {}
+            _DEBOUNCE_MS = 80
+
+            def _on_press(key):
+                if not self._running or not self._gaming_mode:
+                    return
+                try:
+                    pressed_keys.add(key)
+                    key_id  = str(key)
+                    actions = self._global_bindings.get(key_id)
+                    if not actions:
+                        return
+                    if not self._mouse_over_player():
+                        return
+                    try:
+                        if self._win.focus_displayof() is not None:
+                            return
+                    except Exception:
+                        pass
+                    now = time.monotonic() * 1000
+                    for required_mods, method, args in actions:
+                        if required_mods and not required_mods.intersection(pressed_keys):
+                            continue
+                        last = _last_fired.get(id(method), 0)
+                        if now - last < _DEBOUNCE_MS:
+                            continue
+                        _last_fired[id(method)] = now
+                        try:
+                            self._win.after(0, lambda m=method, a=args: m(*a))
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            def _on_release(key):
+                pressed_keys.discard(key)
+
+            listener = _pynput_kb.Listener(
+                on_press=_on_press,
+                on_release=_on_release,
+                daemon=True,
+            )
+            listener.start()
+            self._global_listener = listener
+
+    def _stop_global_listener(self):
+        with self._global_listener_lock:
+            if self._global_listener is not None:
+                try:
+                    self._global_listener.stop()
+                except Exception:
+                    pass
+                self._global_listener = None
+            self._global_bindings = {}
 
     # ═══════════════════════════════════════════════════════════════════
     # UI BUILD
@@ -234,7 +409,6 @@ class EmbeddedPlayer:
         F_XS  = tkfont.Font(family="Segoe UI", size=7)
         F_AB  = tkfont.Font(family="Segoe UI", size=8, weight="bold")
 
-        # ── helper: styled button ──────────────────────────────────────
         def _btn(parent, text, cmd, font=None, fg=_TXT, padx=8, pady=4):
             b = tk.Button(parent, text=text, command=cmd,
                           font=font or F_MD,
@@ -249,9 +423,6 @@ class EmbeddedPlayer:
             b.bind("<Leave>", lambda e: self._schedule_hide(), add="+")
             return b
 
-        # ═══════════════════════════════════════════════════════════════
-        # ROW 1 — info strip: title · status badges · time
-        # ═══════════════════════════════════════════════════════════════
         info = tk.Frame(bar, bg=_CTRL_BG)
         info.pack(fill=tk.X, padx=12, pady=(4, 1))
 
@@ -262,7 +433,6 @@ class EmbeddedPlayer:
         self._lbl_title.bind("<Enter>", lambda e: self._lbl_title.config(fg=_ACCENT))
         self._lbl_title.bind("<Leave>", lambda e: self._lbl_title.config(fg=_TXT))
 
-        # right-side status badges (packed right-to-left)
         self._lbl_time = tk.Label(info, text="0:00 / 0:00",
                                   font=F_SM, bg=_CTRL_BG, fg=_TXT_MED)
         self._lbl_time.pack(side=tk.RIGHT, padx=(8, 0))
@@ -271,25 +441,27 @@ class EmbeddedPlayer:
                                  font=F_SM, bg=_CTRL_BG, fg=_TXT_DIM)
         self._lbl_idx.pack(side=tk.RIGHT, padx=(0, 4))
 
-        # chapter badge — only visible when chapters exist
         self._lbl_chapter = tk.Label(info, text="",
                                      font=F_XS, bg="#1e2a1e", fg="#66cc66",
                                      padx=4, pady=1, relief=tk.FLAT)
         self._lbl_chapter.pack(side=tk.RIGHT, padx=(0, 4))
 
-        # A-B loop badge — only visible when A or A+B are set
         self._lbl_ab = tk.Label(info, text="",
                                 font=F_AB, bg="#0d1f2d", fg="#00BFFF",
                                 padx=4, pady=1, relief=tk.FLAT)
         self._lbl_ab.pack(side=tk.RIGHT, padx=(0, 4))
 
-        # sleep timer countdown badge
         self._lbl_sleep = tk.Label(info, text="",
                                    font=F_XS, bg="#2a1e0d", fg="#FFA500",
                                    padx=4, pady=1, relief=tk.FLAT)
         self._lbl_sleep.pack(side=tk.RIGHT, padx=(0, 4))
 
-        # directory name (dim, right of title)
+        # Gaming mode indicator badge
+        self._lbl_gaming = tk.Label(info, text="",
+                                    font=F_XS, bg="#1a1a2e", fg="#00FF88",
+                                    padx=4, pady=1, relief=tk.FLAT)
+        self._lbl_gaming.pack(side=tk.RIGHT, padx=(0, 4))
+
         self._lbl_dir = tk.Label(info, text="",
                                  font=F_XS, bg=_CTRL_BG, fg=_TXT_DIM, cursor="hand2")
         self._lbl_dir.pack(side=tk.RIGHT, padx=(0, 6))
@@ -297,9 +469,6 @@ class EmbeddedPlayer:
         self._lbl_dir.bind("<Enter>", lambda e: self._lbl_dir.config(fg=_ACCENT))
         self._lbl_dir.bind("<Leave>", lambda e: self._lbl_dir.config(fg=_TXT_DIM))
 
-        # ═══════════════════════════════════════════════════════════════
-        # ROW 2 — seek bar
-        # ═══════════════════════════════════════════════════════════════
         seek_row = tk.Frame(bar, bg=_CTRL_BG)
         seek_row.pack(fill=tk.X, padx=12, pady=(2, 2))
 
@@ -320,18 +489,12 @@ class EmbeddedPlayer:
         self._seek_preview_time = None
         self._seek_preview_mgr = None
 
-        # ═══════════════════════════════════════════════════════════════
-        # ROW 3 — control buttons
-        # Three zones: LEFT (transport + nav), CENTRE (loop), RIGHT (vol/speed/tools)
-        # ═══════════════════════════════════════════════════════════════
         btn_row = tk.Frame(bar, bg=_CTRL_BG2)
         btn_row.pack(fill=tk.X)
 
-        # ── LEFT: core transport ──────────────────────────────────────
         lg = tk.Frame(btn_row, bg=_CTRL_BG2)
         lg.pack(side=tk.LEFT, padx=(8, 0), pady=2)
 
-        # ⏮ / ⏭ — single click = prev/next video; hold = rewind/fast-forward
         btn_prev = _btn(lg, "⏮", None, font=F_ICO)
         btn_prev.pack(side=tk.LEFT, padx=1)
         self._btn_play = _btn(lg, "⏸", self._toggle_pause, font=F_ICO)
@@ -343,70 +506,52 @@ class EmbeddedPlayer:
         self._setup_hold_button(btn_prev, on_click=self._prev, on_hold=self._rewind)
         self._setup_hold_button(btn_next, on_click=self._next, on_hold=self._fast_forward)
 
-        # thin divider
         tk.Frame(lg, width=1, bg="#333333").pack(side=tk.LEFT, fill=tk.Y, pady=3)
 
-        # Directory skip — text-only, compact
         _btn(lg, "◀ Dir", self._prev_dir, font=F_SM, padx=6).pack(side=tk.LEFT, padx=(6, 1))
         _btn(lg, "Dir ▶", self._next_dir, font=F_SM, padx=6).pack(side=tk.LEFT, padx=(1, 8))
 
         tk.Frame(lg, width=1, bg="#333333").pack(side=tk.LEFT, fill=tk.Y, pady=3)
 
-        # Zoom menu (includes rotate)
         _btn(lg, "🔍", self._show_zoom_menu, font=F_MD, padx=6).pack(side=tk.LEFT, padx=(6, 8))
 
         tk.Frame(lg, width=1, bg="#333333").pack(side=tk.LEFT, fill=tk.Y, pady=3)
 
-        # Chapter buttons — compact symbols only, tooltip via logger
         self._btn_prev_chapter = _btn(lg, "❮Ch", self._prev_chapter, font=F_SM, padx=5)
         self._btn_prev_chapter.pack(side=tk.LEFT, padx=(6, 1))
         self._btn_next_chapter = _btn(lg, "Ch❯", self._next_chapter, font=F_SM, padx=5)
         self._btn_next_chapter.pack(side=tk.LEFT, padx=(1, 8))
 
-        # This divider sits between chapter buttons and A-B loop buttons.
-        # We keep a reference so we can re-pack chapter buttons correctly.
         self._divider_before_ab = tk.Frame(lg, width=1, bg="#333333")
         self._divider_before_ab.pack(side=tk.LEFT, fill=tk.Y, pady=3)
 
-        # A-B loop — three compact tagged buttons
-        self._btn_ab_a = _btn(lg, "A", self._set_ab_a, font=F_ACC,
-                              fg="#00BFFF", padx=6)
+        self._btn_ab_a = _btn(lg, "A", self._set_ab_a, font=F_ACC, fg="#00BFFF", padx=6)
         self._btn_ab_a.pack(side=tk.LEFT, padx=(6, 1))
 
-        self._btn_ab_b = _btn(lg, "B", self._set_ab_b, font=F_ACC,
-                              fg="#00BFFF", padx=6)
+        self._btn_ab_b = _btn(lg, "B", self._set_ab_b, font=F_ACC, fg="#00BFFF", padx=6)
         self._btn_ab_b.pack(side=tk.LEFT, padx=1)
 
-        self._btn_ab_clr = _btn(lg, "✕", self._clear_ab, font=F_XS,
-                                fg=_TXT_DIM, padx=5)
+        self._btn_ab_clr = _btn(lg, "✕", self._clear_ab, font=F_XS, fg=_TXT_DIM, padx=5)
         self._btn_ab_clr.pack(side=tk.LEFT, padx=(1, 6))
 
-        # ── CENTRE: loop mode ─────────────────────────────────────────
         mg = tk.Frame(btn_row, bg=_CTRL_BG2)
-        mg.pack(side=tk.LEFT, expand=True, pady=2)   # expand to push left/right apart
+        mg.pack(side=tk.LEFT, expand=True, pady=2)
 
-        self._btn_loop = _btn(mg, "↺  Loop", self._cycle_loop,
-                              font=F_ACC, fg=_ACCENT, padx=10)
+        self._btn_loop = _btn(mg, "↺  Loop", self._cycle_loop, font=F_ACC, fg=_ACCENT, padx=10)
         self._btn_loop.pack()
 
-        # ── RIGHT: volume · speed · sleep · fullscreen · overflow ─────
         rg = tk.Frame(btn_row, bg=_CTRL_BG2)
         rg.pack(side=tk.RIGHT, padx=(0, 8), pady=2)
 
-        # Fullscreen (rightmost, most-used secondary action)
         _btn(rg, "⛶", self._toggle_borderless, font=F_ICO, padx=7).pack(side=tk.RIGHT, padx=(4, 0))
 
-        # Overflow menu (context / playlist / add-to)
         _btn(rg, "⋮", self._show_context_menu_from_btn, font=F_ICO, padx=6).pack(side=tk.RIGHT, padx=1)
 
-        # Sleep timer — badge-style: shows icon only; countdown appears in info strip
-        self._btn_sleep = _btn(rg, "⏻", self._show_sleep_menu,
-                               font=F_MD, fg="#FFA500", padx=6)
+        self._btn_sleep = _btn(rg, "⏻", self._show_sleep_menu, font=F_MD, fg="#FFA500", padx=6)
         self._btn_sleep.pack(side=tk.RIGHT, padx=(1, 4))
 
         tk.Frame(rg, width=1, bg="#333333").pack(side=tk.RIGHT, fill=tk.Y, pady=3, padx=4)
 
-        # Speed label (interactive)
         self._lbl_speed = tk.Label(rg, text="1.00×", cursor="hand2",
                                    font=F_ACC, bg=_CTRL_BG2, fg=_ACCENT)
         self._lbl_speed.pack(side=tk.RIGHT, padx=(0, 2))
@@ -419,7 +564,6 @@ class EmbeddedPlayer:
 
         tk.Frame(rg, width=1, bg="#333333").pack(side=tk.RIGHT, fill=tk.Y, pady=3, padx=4)
 
-        # Volume
         self._lbl_vol = tk.Label(rg, text=f"{self.volume}%", width=4,
                                  font=F_SM, bg=_CTRL_BG2, fg=_TXT_MED)
         self._lbl_vol.pack(side=tk.RIGHT)
@@ -435,10 +579,9 @@ class EmbeddedPlayer:
         self._lbl_mute.bind("<Enter>", lambda e: self._cancel_hide())
         self._lbl_mute.bind("<Leave>", lambda e: self._schedule_hide())
 
-        # ── keep bar alive while mouse is over any widget ─────────────
         _all = [bar, info, seek_row, btn_row, lg, mg, rg,
                 self._lbl_title, self._lbl_dir, self._lbl_idx, self._lbl_time,
-                self._lbl_ab, self._lbl_sleep, self._lbl_chapter]
+                self._lbl_ab, self._lbl_sleep, self._lbl_chapter, self._lbl_gaming]
         for w in _all:
             w.bind("<Enter>", lambda e: self._cancel_hide(), add="+")
             w.bind("<Leave>", lambda e: self._schedule_hide(), add="+")
@@ -447,7 +590,6 @@ class EmbeddedPlayer:
     # KEY BINDINGS — hotkey-driven, live-reloadable
     # ═══════════════════════════════════════════════════════════════════
 
-    # Default hotkeys — kept in sync with DEFAULT_HOTKEYS in settings_manager.py
     _DEFAULT_HOTKEYS: Dict[str, str] = {
         "toggle_pause":      "space",
         "stop_video":        "esc",
@@ -480,10 +622,8 @@ class EmbeddedPlayer:
         "ab_clear":          "\\",
     }
 
-    # Maps action_id -> (method_name, extra_args)
     _ACTION_MAP: Dict[str, tuple] = {
         "toggle_pause":      ("_toggle_pause",      ()),
-        # stop_video handled by static <Escape> bind — excluded from _rebind_keys
         "fast_forward":      ("_fast_forward",     ()),
         "rewind":            ("_rewind",           ()),
         "next_video":        ("_next",              ()),
@@ -517,18 +657,17 @@ class EmbeddedPlayer:
         """Live-reload key bindings from a new hotkeys dict (called on settings save)."""
         self._hotkeys = dict(hotkeys) if hotkeys else dict(self._DEFAULT_HOTKEYS)
         self._rebind_keys()
+        # Restart global listener so it picks up the new bindings
+        if self._gaming_mode:
+            self._stop_global_listener()
+            self._start_global_listener()
 
     def _bind_keys(self):
-        """Initial key setup — called once from _build_ui."""
         self._hotkeys = dict(self._DEFAULT_HOTKEYS)
-        self._registered_cbids: list = []   # [(seq, cbid), …] for safe per-cbid unbind
+        self._registered_cbids: list = []
 
-        # Register hotkey-driven bindings
         self._rebind_keys()
 
-        # ── Static convenience binds (not in hotkey map, always active) ──────
-        # All use add=True so they stack beside _rebind_keys bindings without
-        # overwriting them.
         w = self._win
         w.bind("<Shift-Left>",    lambda e: self._seek_rel(-60_000),        add=True)
         w.bind("<Shift-Right>",   lambda e: self._seek_rel(+60_000),        add=True)
@@ -540,7 +679,6 @@ class EmbeddedPlayer:
         w.bind("<KP_0>",          lambda e: self._speed_reset(),            add=True)
         w.bind("<plus>",          lambda e: self._speed_up(),               add=True)
         w.bind("<underscore>",    lambda e: self._speed_down(),             add=True)
-        # Loop / zoom / rotate extras that are not in the hotkey table
         w.bind("<o>",             lambda e: self._cycle_loop(),             add=True)
         w.bind("<O>",             lambda e: self._cycle_loop(),             add=True)
         w.bind("<z>",             lambda e: self._zoom(+0.1),               add=True)
@@ -549,15 +687,11 @@ class EmbeddedPlayer:
         w.bind("<X>",             lambda e: self._zoom(0),                  add=True)
         w.bind("<Up>",            lambda e: self._vol_change(+self.VOL_STEP), add=True)
         w.bind("<Down>",          lambda e: self._vol_change(-self.VOL_STEP), add=True)
-        # Escape always calls _escape (exit borderless or close) — NOT overrideable
-        # via hotkeys so it is registered once here without add=True, taking priority.
         w.bind("<Escape>",        lambda e: self._escape())
 
     def _rebind_keys(self):
-        """Remove previously registered hotkey cbids and re-register from self._hotkeys."""
         w = self._win
 
-        # Safely unbind only the specific callbacks we registered before
         for seq, cbid in getattr(self, '_registered_cbids', []):
             try:
                 w.unbind(seq, cbid)
@@ -567,11 +701,9 @@ class EmbeddedPlayer:
 
         hk = self._hotkeys
 
-        # Keys that must not be overridden via hotkey map (handled by static binds)
         _EXCLUDED = {"stop_video"}
 
         def _to_tk_seq(combo: str) -> Optional[str]:
-            """Convert a keyboard-library combo string to a Tk bind sequence."""
             if not combo:
                 return None
             parts = combo.lower().split('+')
@@ -621,7 +753,6 @@ class EmbeddedPlayer:
             try:
                 cbid = w.bind(seq, _make_cb(method, extra_args), add=True)
                 self._registered_cbids.append((seq, cbid))
-                # Also bind the uppercase variant for bare single-letter keys
                 if len(seq) == 3 and seq[1].isalpha() and seq[1].islower():
                     upper_seq = f'<{seq[1].upper()}>'
                     cbid2 = w.bind(upper_seq, _make_cb(method, extra_args), add=True)
@@ -632,11 +763,9 @@ class EmbeddedPlayer:
     # ── Extra action methods referenced by _ACTION_MAP ────────────────────────
 
     def _copy_video_path(self):
-        """Copy the current video path to clipboard."""
         try:
             import struct
             path = self.videos[self.index]
-            # Try Windows CF_HDROP first (copies as a file, not just text)
             try:
                 import win32clipboard as wcb
                 import win32con
@@ -657,11 +786,10 @@ class EmbeddedPlayer:
                 self.logger(f"Copy error: {e}")
 
     # ═══════════════════════════════════════════════════════════════════
-    # CORE EMBED — dual_player_manager pattern exactly
+    # CORE EMBED
     # ═══════════════════════════════════════════════════════════════════
 
     def _embed(self):
-        """Bind VLC output to the canvas.  Called before every play()."""
         try:
             self._canvas.update_idletasks()
             wid = self._canvas.winfo_id()
@@ -678,7 +806,6 @@ class EmbeddedPlayer:
     # ═══════════════════════════════════════════════════════════════════
 
     def play(self):
-        """Start playback at self.index — deferred so the window is fully painted before VLC embeds."""
         self._win.update()
         self._win.after(150, lambda: self._play_index(self.index))
 
@@ -703,7 +830,6 @@ class EmbeddedPlayer:
             except Exception:
                 pass
 
-        # Audio
         threading.Thread(target=self._post_play_audio, daemon=True).start()
 
         if self.logger:
@@ -715,7 +841,6 @@ class EmbeddedPlayer:
             )
 
     def _post_play_audio(self):
-        """Wait for Playing state then set volume/mute/rate."""
         for _ in range(50):
             if not self._running:
                 return
@@ -738,7 +863,6 @@ class EmbeddedPlayer:
     def _on_media_ended(self, event):
         if not self._running:
             return
-        # Schedule next video on the Tk main thread
         try:
             self._win.after(0, self._advance)
         except Exception:
@@ -747,7 +871,6 @@ class EmbeddedPlayer:
     def _advance(self):
         if not self._running:
             return
-        # If sleep-at-end-of-video was requested, close the player now.
         if self._sleep_remaining == -1:
             self._sleep_remaining = 0
             if self.logger:
@@ -769,7 +892,6 @@ class EmbeddedPlayer:
             self._play_index((self.index + 1) % len(self.videos))
 
     def set_seek_preview_manager(self, manager):
-        """Called by build_app.py after construction to wire up seek scrubbing."""
         self._seek_preview_mgr = manager
         if self.videos:
             manager.seek_preview.ensure_generated(self.videos[self.index])
@@ -872,15 +994,6 @@ class EmbeddedPlayer:
                            on_hold:  Callable,
                            hold_delay_ms: int = 500,
                            repeat_ms:     int = 100):
-        """
-        Wire a button so that:
-          • a short press  (<hold_delay_ms) fires on_click  (prev / next video)
-          • holding down   (≥hold_delay_ms) fires on_hold repeatedly every
-            repeat_ms ms   (rewind / fast-forward)
-
-        The distinction is made entirely on the client side using Tk after() jobs,
-        so no threading is needed.
-        """
         state = {"hold_job": None, "fired": False}
 
         def _start_hold():
@@ -908,7 +1021,6 @@ class EmbeddedPlayer:
         btn.bind("<ButtonRelease-1>", _on_release, add=True)
 
     def _fast_forward(self):
-        """Seek +200 ms — mirrors vlc_player_controller.fast_forward."""
         try:
             current_time = self._player.get_time()
             new_time = current_time + 200
@@ -922,7 +1034,6 @@ class EmbeddedPlayer:
             pass
 
     def _rewind(self):
-        """Seek -200 ms — mirrors vlc_player_controller.rewind."""
         try:
             current_time = self._player.get_time()
             new_time = max(0, current_time - 200)
@@ -1090,7 +1201,6 @@ class EmbeddedPlayer:
             self._player.set_media(media)
             self._player.play()
 
-            # Reattach end-of-media event on new player.
             em = self._player.event_manager()
             em.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_media_ended)
 
@@ -1250,7 +1360,7 @@ class EmbeddedPlayer:
                 self.logger(f"Clip error: {e}")
 
     # ═══════════════════════════════════════════════════════════════════
-    # CHAPTER NAVIGATION  (mirrors vlc_player_controller.py)
+    # CHAPTER NAVIGATION
     # ═══════════════════════════════════════════════════════════════════
 
     def _next_chapter(self):
@@ -1263,7 +1373,7 @@ class EmbeddedPlayer:
                     if self.logger:
                         self.logger(f"Chapter {cur + 2} of {ch_count}")
                 else:
-                    self._next()          # last chapter → advance to next video
+                    self._next()
             else:
                 if self.logger:
                     self.logger("No chapters in this file")
@@ -1281,7 +1391,7 @@ class EmbeddedPlayer:
                     if self.logger:
                         self.logger(f"Chapter {cur} of {ch_count}")
                 else:
-                    self._prev()          # first chapter → go to previous video
+                    self._prev()
             else:
                 if self.logger:
                     self.logger("No chapters in this file")
@@ -1290,18 +1400,16 @@ class EmbeddedPlayer:
                 self.logger(f"Chapter prev error: {e}")
 
     # ═══════════════════════════════════════════════════════════════════
-    # SUBTITLES  (mirrors vlc_player_controller.py)
+    # SUBTITLES
     # ═══════════════════════════════════════════════════════════════════
 
     def _toggle_subtitle(self):
-        """If subtitles are currently off, enable the first (or next) track.
-        If a track is already active, disable subtitles."""
         try:
             current = self._player.video_get_spu()
             if current == -1:
-                self._cycle_subtitle()   # off → turn on (first/next track)
+                self._cycle_subtitle()
             else:
-                self._disable_subtitle() # on  → turn off
+                self._disable_subtitle()
         except Exception as e:
             if self.logger:
                 self.logger(f"Subtitle toggle error: {e}")
@@ -1344,7 +1452,6 @@ class EmbeddedPlayer:
                 self.logger(f"Subtitle disable error: {e}")
 
     def load_subtitle_file(self, path: str):
-        """External API: load an external subtitle file."""
         try:
             result = self._player.add_slave(vlc.MediaSlaveType.subtitle, path, True)
             if self.logger:
@@ -1355,7 +1462,7 @@ class EmbeddedPlayer:
                 self.logger(f"Subtitle load error: {e}")
 
     # ═══════════════════════════════════════════════════════════════════
-    # A-B LOOP  (mirrors vlc_player_controller.py, Tk-based monitor)
+    # A-B LOOP
     # ═══════════════════════════════════════════════════════════════════
 
     def _set_ab_a(self):
@@ -1426,7 +1533,6 @@ class EmbeddedPlayer:
     # ═══════════════════════════════════════════════════════════════════
 
     def _show_sleep_menu(self):
-        """Pop a small menu to choose a sleep duration."""
         menu = tk.Menu(self._win, tearoff=0, bg=_BTN, fg=_TXT,
                        activebackground=_BTN_HVR, activeforeground=_TXT,
                        bd=0, relief=tk.FLAT)
@@ -1457,7 +1563,6 @@ class EmbeddedPlayer:
     def _start_sleep_timer(self, seconds: int):
         self._cancel_sleep_timer()
         if seconds == -1:
-            # sleep at end of current video — handled by _on_media_ended override
             self._sleep_remaining = -1
             try:
                 self._lbl_sleep.config(text="⏻ end")
@@ -1567,11 +1672,6 @@ class EmbeddedPlayer:
 
     def _show_scrollable_picker(self, anchor_widget, items, current_idx, on_select,
                                 on_reorder=None):
-        """Generic scrollable picker popup anchored below a widget.
-
-        on_reorder(new_order): called with list of original indices in new order
-                               when user drag-reorders rows.  If None, drag is disabled.
-        """
         if not items:
             return
 
@@ -1595,7 +1695,6 @@ class EmbeddedPlayer:
         inner = tk.Frame(canvas, bg="#1e1e1e")
         canvas_window = canvas.create_window(0, 0, anchor="nw", window=inner)
 
-        # order[i] = original index of the item currently at position i
         order = list(range(len(items)))
 
         row_widgets = []
@@ -1646,7 +1745,6 @@ class EmbeddedPlayer:
                 drag_handle.bind("<Enter>", _enter)
                 drag_handle.bind("<Leave>", _leave)
 
-        # ── drag-to-reorder logic ─────────────────────────────────────
         if on_reorder:
             _drag = {"src": None, "ghost": None, "last_y": 0}
 
@@ -1684,7 +1782,6 @@ class EmbeddedPlayer:
                     ghost.geometry(f"+{e.x_root}+{e.y_root - ITEM_H // 2}")
                 except Exception:
                     pass
-                # determine target row from canvas-relative y
                 try:
                     cy = canvas.canvasy(e.y_root - canvas.winfo_rooty())
                     target = max(0, min(len(row_widgets) - 1, int(cy // ITEM_H)))
@@ -1693,13 +1790,11 @@ class EmbeddedPlayer:
                 src = _drag["src"]
                 if target == src:
                     return
-                # reorder row_widgets and order lists
                 rw_item = row_widgets.pop(src)
                 row_widgets.insert(target, rw_item)
                 ord_item = order.pop(src)
                 order.insert(target, ord_item)
                 _drag["src"] = target
-                # re-pack all rows in new order
                 for rw, _, _, _, _ in row_widgets:
                     rw.pack_forget()
                 for rw, _, _, _, _ in row_widgets:
@@ -1741,17 +1836,14 @@ class EmbeddedPlayer:
         popup.bind_all("<MouseWheel>", _scroll)
         popup.bind("<Destroy>", lambda e: popup.unbind_all("<MouseWheel>"))
 
-        # Scroll current item into view
         if len(items) > MAX_VISIBLE and current_idx >= 0:
             frac = current_idx / len(items)
             canvas.yview_moveto(max(0.0, frac - (MAX_VISIBLE / 2) / len(items)))
 
-        # Position anchored to widget
         ax = anchor_widget.winfo_rootx()
         ay = anchor_widget.winfo_rooty()
         ph = visible * ITEM_H + 4
 
-        # Detect which monitor the player window is on
         mx, my, mw, mh = 0, 0, popup.winfo_screenwidth(), popup.winfo_screenheight()
         if _get_monitors:
             try:
@@ -1912,7 +2004,7 @@ class EmbeddedPlayer:
         TB_H = 32
         self._tb_h = TB_H
         self._tb_shown = False
-        self._tb_y = -TB_H  # starts hidden above screen
+        self._tb_y = -TB_H
 
         self._titlebar = tk.Frame(self._win, bg="#1a1a1a",
                                   highlightthickness=0, height=TB_H)
@@ -1920,7 +2012,6 @@ class EmbeddedPlayer:
                              width=self._win.winfo_width(), height=TB_H)
         self._titlebar.lift()
 
-        # — close button
         btn_close = tk.Button(self._titlebar, text="✕", command=self._close,
                               bg="#1a1a1a", fg=_TXT, bd=0, padx=10, pady=0,
                               relief=tk.FLAT, cursor="hand2",
@@ -1928,7 +2019,6 @@ class EmbeddedPlayer:
                               font=("Segoe UI", 10))
         btn_close.pack(side=tk.RIGHT)
 
-        # — maximise / restore (cosmetic — toggles borderless off)
         btn_max = tk.Button(self._titlebar, text="🗖", command=self._toggle_borderless,
                             bg="#1a1a1a", fg=_TXT, bd=0, padx=10, pady=0,
                             relief=tk.FLAT, cursor="hand2",
@@ -1936,7 +2026,6 @@ class EmbeddedPlayer:
                             font=("Segoe UI", 10))
         btn_max.pack(side=tk.RIGHT)
 
-        # — minimise
         btn_min = tk.Button(self._titlebar, text="—",
                             command=self._borderless_minimize,
                             bg="#1a1a1a", fg=_TXT, bd=0, padx=10, pady=0,
@@ -1945,12 +2034,10 @@ class EmbeddedPlayer:
                             font=("Segoe UI", 10))
         btn_min.pack(side=tk.RIGHT)
 
-        # title label
         tk.Label(self._titlebar, text="Recursive Video Player",
                  bg="#1a1a1a", fg=_TXT_DIM,
                  font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=12)
 
-        # hover zone: invisible 4px strip at top of screen
         self._tb_zone = tk.Frame(self._win, bg="black", height=8,
                                  highlightthickness=0)
         self._tb_zone.place(x=0, y=0, width=self._win.winfo_width(), height=8)
@@ -2126,7 +2213,7 @@ class EmbeddedPlayer:
             pass
 
     # ═══════════════════════════════════════════════════════════════════
-    # MOUSE POLL — show bar on any mouse movement
+    # MOUSE POLL
     # ═══════════════════════════════════════════════════════════════════
 
     def _start_poll(self):
@@ -2135,7 +2222,7 @@ class EmbeddedPlayer:
     def _do_poll(self):
         if not self._running or not self._win.winfo_exists():
             return
-        if self._player is not None:      # skip mouse-tracking during monitor switch
+        if self._player is not None:
             try:
                 mx = self._win.winfo_pointerx()
                 my = self._win.winfo_pointery()
@@ -2185,7 +2272,6 @@ class EmbeddedPlayer:
             dur = max(1, self._player.get_length() or 1)
             px  = int((cur / dur) * w)
             sc.create_rectangle(0, cy - 2, px, cy + 2, fill=_ACCENT, outline="")
-            # A-B loop region
             try:
                 pt_a = self._ab_point_a
                 pt_b = self._ab_point_b
@@ -2243,7 +2329,7 @@ class EmbeddedPlayer:
     def _refresh_tick(self):
         if not self._running or not self._win.winfo_exists():
             return
-        if self._player is None:          # mid-monitor-switch — skip this tick
+        if self._player is None:
             try:
                 self._update_job = self._win.after(500, self._refresh_tick)
             except Exception:
@@ -2286,6 +2372,16 @@ class EmbeddedPlayer:
         except Exception:
             pass
         self._draw_seek()
+
+        # Gaming mode badge
+        try:
+            if self._gaming_mode:
+                self._lbl_gaming.config(text="🎮 Gaming")
+            else:
+                self._lbl_gaming.config(text="")
+        except Exception:
+            pass
+
         # Chapter info badge
         try:
             ch_count = self._player.get_chapter_count()
@@ -2293,7 +2389,6 @@ class EmbeddedPlayer:
                 ch_cur = self._player.get_chapter()
                 self._lbl_chapter.config(text=f"Ch {ch_cur + 1}/{ch_count}")
                 if not self._chapters_visible:
-                    # Show chapter navigation buttons
                     self._btn_prev_chapter.pack(side=tk.LEFT, padx=(6, 1),
                                                 before=self._divider_before_ab)
                     self._btn_next_chapter.pack(side=tk.LEFT, padx=(1, 8),
@@ -2302,12 +2397,12 @@ class EmbeddedPlayer:
             else:
                 self._lbl_chapter.config(text="")
                 if self._chapters_visible:
-                    # Hide chapter navigation buttons
                     self._btn_prev_chapter.pack_forget()
                     self._btn_next_chapter.pack_forget()
                     self._chapters_visible = False
         except Exception:
             self._lbl_chapter.config(text="")
+
         # A-B loop badge + button highlight states
         try:
             if self._ab_loop_active and self._ab_point_a is not None and self._ab_point_b is not None:
@@ -2333,8 +2428,10 @@ class EmbeddedPlayer:
     # ═══════════════════════════════════════════════════════════════════
 
     def _close(self):
-        # Snapshot current playback state before any teardown so the host can
-        # persist it (last-played index, path, loop mode, volume, mute).
+        # Stop global listener first — before _running = False so the check
+        # inside the listener callback doesn't race.
+        self._stop_global_listener()
+
         if self.on_close_save:
             try:
                 cur_path = self.videos[self.index] if self.videos else ""
@@ -2344,7 +2441,6 @@ class EmbeddedPlayer:
                 pass
 
         self._running = False
-        # Stop A-B loop monitor
         self._ab_loop_active = False
 
         self._hide_seek_preview()
@@ -2355,7 +2451,6 @@ class EmbeddedPlayer:
                 pass
             self._seek_preview_win = None
 
-        # Unbind hotkey cbids we registered so nothing fires after destroy
         for seq, cbid in getattr(self, '_registered_cbids', []):
             try:
                 self._win.unbind(seq, cbid)
@@ -2363,7 +2458,6 @@ class EmbeddedPlayer:
                 pass
         self._registered_cbids = []
 
-        # cancel pending jobs
         for attr in ("_hide_job", "_poll_job", "_update_job",
                      "_ab_monitor_job", "_sleep_timer_job",
                      "_titlebar_job", "_titlebar_anim"):
@@ -2375,13 +2469,11 @@ class EmbeddedPlayer:
                     pass
             setattr(self, attr, None)
 
-        # Snapshot the VLC objects so the teardown thread owns them.
         player   = self._player
         instance = self._instance
         self._player   = None
         self._instance = None
 
-        # Destroy the Tk window immediately — keeps the UI responsive.
         try:
             self._win.destroy()
         except Exception:
@@ -2393,7 +2485,6 @@ class EmbeddedPlayer:
             except Exception:
                 pass
 
-        # Release VLC off the main thread; stop() can block for several seconds.
         def _vlc_teardown():
             try:
                 if player:

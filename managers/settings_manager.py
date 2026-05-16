@@ -140,6 +140,7 @@ class SettingsData:
         self.use_video_preview = True
         self.enable_watch_history = True
         self.dual_window_enabled = False
+        self.gaming_mode = False
         # Mutable copy of default hotkeys — users can override individual bindings
         self.hotkeys: Dict[str, str] = dict(DEFAULT_HOTKEYS)
 
@@ -158,6 +159,7 @@ class SettingsData:
             'enable_watch_history': self.enable_watch_history,
             'dual_window_enabled': self.dual_window_enabled,
             'hotkeys': dict(self.hotkeys),
+            'gaming_mode': self.gaming_mode,
         }
 
     @classmethod
@@ -175,6 +177,7 @@ class SettingsData:
         settings.use_video_preview = data.get('use_video_preview', settings.use_video_preview)
         settings.enable_watch_history = data.get('enable_watch_history', settings.enable_watch_history)
         settings.dual_window_enabled = data.get('dual_window_enabled', settings.dual_window_enabled)
+        settings.gaming_mode = data.get('gaming_mode', False)
         # Merge saved hotkeys on top of defaults so new actions always have a binding
         saved_hotkeys = data.get('hotkeys', {})
         if isinstance(saved_hotkeys, dict):
@@ -708,16 +711,14 @@ class SettingsUI:
         )
         dual_window_check.pack(anchor='w', pady=2)
 
-        tk.Label(
+        self.gaming_mode_var = tk.BooleanVar(value=self.settings.gaming_mode)
+        gaming_mode_check = ttk.Checkbutton(
             player_window_section,
-            text="By default one player window is active with 3 players.\n"
-                 "Enabling the second window adds an independent Player Window 2\n"
-                 "with its own 3 players — ideal for a second monitor.",
-            font=self.theme_provider.small_font,
-            bg=self.theme_provider.bg_color,
-            fg="#666666",
-            justify=tk.LEFT
-        ).pack(anchor='w', pady=(4, 2))
+            text="Gaming Mode — hotkeys work when mouse hovers over player (no click-to-focus needed)",
+            variable=self.gaming_mode_var,
+            style="Modern.TCheckbutton"
+        )
+        gaming_mode_check.pack(anchor='w', pady=2)
 
         thumbnail_btn_frame = tk.Frame(preview_section, bg=self.theme_provider.bg_color)
         thumbnail_btn_frame.pack(fill=tk.X, pady=10)
@@ -1415,6 +1416,8 @@ class SettingsUI:
         self.enable_watch_history_var.set(settings.enable_watch_history)
         if hasattr(self, 'dual_window_enabled_var'):
             self.dual_window_enabled_var.set(settings.dual_window_enabled)
+        if hasattr(self, 'gaming_mode_var'):
+            self.gaming_mode_var.set(settings.gaming_mode)
         if hasattr(self, 'show_console_var'):
             self.show_console_var.set(getattr(settings, 'show_console', True))
         # Refresh the shortcuts tab draft + button labels if the tab exists
@@ -1448,6 +1451,8 @@ class SettingsUI:
         self.settings.enable_watch_history = self.enable_watch_history_var.get()
         if hasattr(self, 'dual_window_enabled_var'):
             self.settings.dual_window_enabled = self.dual_window_enabled_var.get()
+        if hasattr(self, 'gaming_mode_var'):
+            self.settings.gaming_mode = self.gaming_mode_var.get()
 
         if hasattr(self, 'show_console_var'):
             if hasattr(self.theme_provider, 'toggle_console'):
