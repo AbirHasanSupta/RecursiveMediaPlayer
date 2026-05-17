@@ -657,6 +657,7 @@ class AnnotationBrowserManager:
         dlg.resizable(False, False)
         dlg.transient(self._win)
         dlg.grab_set()
+        apply_icon(dlg)
 
         tk.Label(dlg, text=f'Rename  "{old_tag}"  to:',
                  font=("Segoe UI", 10), bg=tp.bg_color, fg=tp.text_color
@@ -985,7 +986,7 @@ class AnnotationBrowserManager:
 
         n = len(sel)
         menu.add_command(
-            label=f"▶  Play selected ({n} video{'s' if n > 1 else ''})",
+            label=f"Play selected ({n} video{'s' if n > 1 else ''})",
             command=self._play_selected)
         menu.add_separator()
 

@@ -917,6 +917,7 @@ class EmbeddedPlayer:
         dlg.transient(self._win)
         dlg.grab_set()
         dlg.overrideredirect(False)
+        apply_icon(dlg)
 
         pos_str = _fmt(pos)
         tk.Label(dlg, text=f"Bookmark at {pos_str}",
@@ -954,6 +955,7 @@ class EmbeddedPlayer:
         dlg.geometry("320x320")
         dlg.configure(bg="#111111")
         dlg.transient(self._win)
+        apply_icon(dlg)
 
         tk.Label(dlg, text=os.path.basename(path)[:44],
                  font=("Segoe UI", 9, "bold"), bg="#111111", fg="#e0e0e0",
@@ -1064,6 +1066,7 @@ class EmbeddedPlayer:
         dlg.configure(bg="#111111")
         dlg.transient(self._win)
         dlg.grab_set()
+        apply_icon(dlg)
 
         tk.Label(dlg, text="Tag name:",
                  font=("Segoe UI", 10), bg="#111111", fg="#e0e0e0").pack(pady=(14, 4))
