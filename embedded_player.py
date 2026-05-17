@@ -369,12 +369,26 @@ class EmbeddedPlayer:
     # ═══════════════════════════════════════════════════════════════════
     # UI BUILD
     # ═══════════════════════════════════════════════════════════════════
+    def _initial_geometry(self) -> str:
+        try:
+            if _get_monitors:
+                monitors = _get_monitors()
+                if monitors:
+                    m = monitors[0]
+                    w = int(m.width * 0.75)
+                    h = int(m.height * 0.75)
+                    x = m.x + (m.width - w) // 2
+                    y = m.y + (m.height - h) // 2
+                    return f"{w}x{h}+{x}+{y}"
+        except Exception:
+            pass
+        return "1280x720+80+50"
 
     def _build_ui(self):
         self._win = tk.Toplevel()
         self._win.withdraw()
         self._win.title("Recursive Video Player")
-        self._win.geometry("1280x720+80+50")
+        self._win.geometry(self._initial_geometry())
         self._win.configure(bg=_BG)
         self._win.minsize(640, 400)
         self._win.protocol("WM_DELETE_WINDOW", self._close)
@@ -1968,20 +1982,24 @@ class EmbeddedPlayer:
         if self._borderless:
             self._pre_bl_geo = self._win.geometry()
             self._win.overrideredirect(True)
+            self._win.update_idletasks()
             wx = self._win.winfo_x()
             wy = self._win.winfo_y()
             sw = self._win.winfo_screenwidth()
             sh = self._win.winfo_screenheight()
+            fx, fy = 0, 0
             if _get_monitors:
                 try:
                     for m in _get_monitors():
                         if m.x <= wx < m.x + m.width and m.y <= wy < m.y + m.height:
                             sw, sh = m.width, m.height
-                            wx, wy = m.x, m.y
+                            fx, fy = m.x, m.y
                             break
                 except Exception:
                     pass
-            self._win.geometry(f"{sw}x{sh}+{wx}+{wy}")
+            else:
+                fx, fy = wx, wy
+            self._win.geometry(f"{sw}x{sh}+{fx}+{fy}")
             self._force_hide_bar()
             self._build_titlebar()
         else:

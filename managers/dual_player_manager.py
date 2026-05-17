@@ -899,13 +899,27 @@ class DualPlayerWindow:
         return bool(self.window and self.window.winfo_exists())
 
     # ── window build ──────────────────────────────────────────────────────────
+    def _initial_geometry(self) -> str:
+        try:
+            from screeninfo import get_monitors
+            monitors = get_monitors()
+            if monitors:
+                m = monitors[0]
+                w = int(m.width * 0.75)
+                h = int(m.height * 0.75)
+                x = m.x + (m.width - w) // 2
+                y = m.y + (m.height - h) // 2
+                return f"{w}x{h}+{x}+{y}"
+        except Exception:
+            pass
+        return "1200x700"
 
     def _build_window(self):
         bg = self.theme.bg_color
         self.window = tk.Toplevel(self.parent)
         self.window.withdraw()
         self.window.title(f"Video Player — Window {self.win_id}")
-        self.window.geometry("1200x700")
+        self.window.geometry(self._initial_geometry())
         self.window.configure(bg=bg)
         self.window.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -936,10 +950,23 @@ class DualPlayerWindow:
             return
         if self._borderless:
             self._pre_borderless_geo = self.window.geometry()
-            self.window.overrideredirect(True)
+            self.window.update_idletasks()
+            wx = self.window.winfo_x()
+            wy = self.window.winfo_y()
             sw = self.window.winfo_screenwidth()
             sh = self.window.winfo_screenheight()
-            self.window.geometry(f"{sw}x{sh}+0+0")
+            fx, fy = 0, 0
+            try:
+                from screeninfo import get_monitors
+                for m in get_monitors():
+                    if m.x <= wx < m.x + m.width and m.y <= wy < m.y + m.height:
+                        sw, sh = m.width, m.height
+                        fx, fy = m.x, m.y
+                        break
+            except Exception:
+                pass
+            self.window.overrideredirect(True)
+            self.window.geometry(f"{sw}x{sh}+{fx}+{fy}")
         else:
             self.window.overrideredirect(False)
             geo = getattr(self, '_pre_borderless_geo', "1200x700")

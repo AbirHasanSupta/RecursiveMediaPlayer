@@ -29,6 +29,7 @@ hidden_imports = [
     # System
     'screeninfo',
     'keyboard',
+    'pynput',
     'win32clipboard',
     'win32con',
     'win32api',
