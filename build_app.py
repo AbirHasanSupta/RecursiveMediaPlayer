@@ -274,6 +274,8 @@ def select_multiple_folders_and_play():
                 play_callback=self._play_annotated_videos,
                 logger=self.update_console,
             )
+            self.annotation_browser.set_video_preview_manager(self.video_preview_manager)
+            self.annotation_browser.set_grid_view_manager(self.grid_view_manager)
 
             self.dual_player_manager = DualPlayerManager(
                 self.root,

@@ -1028,17 +1028,12 @@ class EmbeddedPlayer:
             for tag in all_tags:
                 is_set = tag in cur_tags
                 menu.add_command(
-                    label=("✓  " if is_set else "    ") + tag,
+                    label=("✓  " if is_set else "      ") + tag,
                     command=lambda t=tag, s=is_set: (
                         self.annotation_service.remove_tag(path, t) if s
                         else self.annotation_service.add_tag(path, t)
                     )
                 )
-        if cur_tags:
-            menu.add_separator()
-            for tag in cur_tags:
-                menu.add_command(label=f"✕  remove '{tag}'",
-                                 command=lambda t=tag: self.annotation_service.remove_tag(path, t))
         try:
             x = self._win.winfo_pointerx()
             y = self._win.winfo_pointery()
