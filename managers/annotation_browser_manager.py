@@ -123,6 +123,7 @@ class AnnotationBrowserManager:
         self._dragging_index = None
         self.video_preview_manager = None
         self.grid_view_manager = None
+        self._annotation_listener = None
 
         theme_provider.register_manager_ui(self)
 
@@ -161,6 +162,9 @@ class AnnotationBrowserManager:
         win.protocol("WM_DELETE_WINDOW", win.destroy)
         apply_icon(win)
         self._win = win
+        self._annotation_listener = self._on_annotation_changed
+        self.svc.subscribe(self._annotation_listener)
+        win.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # ── Header ────────────────────────────────────────────────────────────
         header = tk.Frame(win, bg=P["header_bg"], height=58)
@@ -443,6 +447,20 @@ class AnnotationBrowserManager:
         self._rebuild_tags()
         self._apply_filter()
         win.deiconify()
+
+    def _on_close(self):
+        if self._annotation_listener:
+            self.svc.unsubscribe(self._annotation_listener)
+            self._annotation_listener = None
+        if self._win:
+            self._win.destroy()
+
+    def _on_annotation_changed(self):
+        if self._win and self._win.winfo_exists():
+            try:
+                self._win.after(0, self.refresh)
+            except Exception:
+                pass
 
     # ── Helper widget builders ─────────────────────────────────────────────────
 

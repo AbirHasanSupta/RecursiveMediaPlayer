@@ -81,6 +81,23 @@ class VideoAnnotationService:
         self._dirty = False
         self._save_timer: Optional[threading.Timer] = None
         self._data = self.storage.load()
+        self._change_listeners: list = []
+
+    def subscribe(self, callback):
+        """callback() called on any data mutation."""
+        if callback not in self._change_listeners:
+            self._change_listeners.append(callback)
+
+    def unsubscribe(self, callback):
+        if callback in self._change_listeners:
+            self._change_listeners.remove(callback)
+
+    def _notify(self):
+        for cb in list(self._change_listeners):
+            try:
+                cb()
+            except Exception:
+                pass
 
     def _key(self, path: str) -> str:
         return os.path.normpath(path)
@@ -109,6 +126,7 @@ class VideoAnnotationService:
             ann = self._get_or_create(path)
             ann.rating = max(0, min(5, rating))
             self._schedule_save()
+        self._notify()
 
     def get_rating(self, path: str) -> int:
         with self._lock:
@@ -125,6 +143,7 @@ class VideoAnnotationService:
             if tag not in ann.tags:
                 ann.tags.append(tag)
                 self._schedule_save()
+        self._notify()
 
     def remove_tag(self, path: str, tag: str):
         with self._lock:
@@ -132,6 +151,7 @@ class VideoAnnotationService:
             if ann and tag in ann.tags:
                 ann.tags.remove(tag)
                 self._schedule_save()
+        self._notify()
 
     def get_tags(self, path: str) -> List[str]:
         with self._lock:
@@ -162,7 +182,8 @@ class VideoAnnotationService:
             ann.bookmarks.append(bm)
             ann.bookmarks.sort(key=lambda b: b["ms"])
             self._schedule_save()
-            return bm
+        self._notify()
+        return bm
 
     def remove_bookmark(self, path: str, position_ms: int):
         with self._lock:
@@ -170,6 +191,7 @@ class VideoAnnotationService:
             if ann:
                 ann.bookmarks = [b for b in ann.bookmarks if b["ms"] != position_ms]
                 self._schedule_save()
+        self._notify()
 
     def get_bookmarks(self, path: str) -> List[dict]:
         with self._lock:

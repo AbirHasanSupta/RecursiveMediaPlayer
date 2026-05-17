@@ -149,6 +149,7 @@ class EmbeddedPlayer:
         self.on_add_to_favourites = None
         self.resume_manager = resume_manager
         self.annotation_service = annotation_service
+        self._annotation_listener = None
 
         self._running        = True
         self._lock           = threading.Lock()
@@ -199,9 +200,24 @@ class EmbeddedPlayer:
         self._last_move_t   = 0.0
 
         self._build_ui()
+        if self.annotation_service:
+            self._annotation_listener = self._on_annotation_changed
+            self.annotation_service.subscribe(self._annotation_listener)
 
         em = self._player.event_manager()
         em.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_media_ended)
+
+    def _on_annotation_changed(self):
+        if self._running and self._win:
+            try:
+                self._win.after(0, self._on_annotation_update)
+            except Exception:
+                pass
+
+    def _on_annotation_update(self):
+        if not self._running:
+            return
+        self._refresh_rating_display()
 
     # ═══════════════════════════════════════════════════════════════════
     # GAMING MODE — global hotkeys via pynput
@@ -2866,6 +2882,10 @@ class EmbeddedPlayer:
                                    self.volume, self.is_muted)
             except Exception:
                 pass
+
+        if self.annotation_service and self._annotation_listener:
+            self.annotation_service.unsubscribe(self._annotation_listener)
+            self._annotation_listener = None
 
         self._running = False
         self._ab_loop_active = False
