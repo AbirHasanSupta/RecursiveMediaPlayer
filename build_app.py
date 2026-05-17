@@ -3623,7 +3623,7 @@ def select_multiple_folders_and_play():
                 "⬛ Queue":      self._show_queue_manager,
                 "♥ Favourites": self._show_favorites_manager,
                 "🕐 History":   self._show_watch_history,
-                "🏷 Tags & ★": self._show_annotation_browser,
+                "🏷 Tags & Ratings": self._show_annotation_browser,
             }
             self._media_pill_btns = {}
 
@@ -3654,7 +3654,7 @@ def select_multiple_folders_and_play():
                 btn.bind("<ButtonPress-1>",   on_press)
                 btn.bind("<ButtonRelease-1>", on_release)
 
-            for _pill_label in ["🎵 Playlist", "⬛ Queue", "♥ Favourites", "🕐 History", "🏷 Tags & ★"]:
+            for _pill_label in ["🎵 Playlist", "⬛ Queue", "♥ Favourites", "🕐 History", "🏷 Tags & Ratings"]:
                 _make_media_pill(_pill_label)
 
             self.theme_toolbar_btn = tk.Label(
