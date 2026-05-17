@@ -124,6 +124,8 @@ class EmbeddedPlayer:
         volume:        int  = 50,
         is_muted:      bool = False,
         loop_mode:     str  = "loop_on",
+        resume_manager=None,
+        annotation_service=None,
         logger:          Optional[Callable] = None,
         on_close:        Optional[Callable] = None,
         on_volume_change: Optional[Callable] = None,
@@ -145,6 +147,8 @@ class EmbeddedPlayer:
         self.on_add_to_playlist = None
         self.on_add_to_queue = None
         self.on_add_to_favourites = None
+        self.resume_manager = resume_manager
+        self.annotation_service = annotation_service
 
         self._running        = True
         self._lock           = threading.Lock()
@@ -561,6 +565,28 @@ class EmbeddedPlayer:
         rg = tk.Frame(btn_row, bg=_CTRL_BG2)
         rg.pack(side=tk.RIGHT, padx=(0, 8), pady=2)
 
+        self._rating_frame = tk.Frame(rg, bg=_CTRL_BG2)
+        self._rating_frame.pack(side=tk.RIGHT, padx=(0, 4))
+        self._rating_btns = []
+        for star_i in range(1, 6):
+            s = tk.Label(self._rating_frame, text="☆", font=F_MD,
+                         bg=_CTRL_BG2, fg="#888888", cursor="hand2")
+            s.pack(side=tk.LEFT)
+            s.bind("<Button-1>", lambda e, n=star_i: self._set_rating(n))
+            s.bind("<Enter>", lambda e, n=star_i: self._hover_rating(n))
+            s.bind("<Leave>", lambda e: self._refresh_rating_display())
+            self._rating_btns.append(s)
+
+        tk.Frame(rg, width=1, bg="#333333").pack(side=tk.RIGHT, fill=tk.Y, pady=3, padx=4)
+
+        self._btn_bookmark = _btn(lg, "🔖", self._add_bookmark, font=F_MD, padx=6)
+        self._btn_bookmark.pack(side=tk.LEFT, padx=(6, 1))
+        self._btn_bookmarks_list = _btn(lg, "📋", self._show_bookmarks_menu, font=F_MD, padx=5)
+        self._btn_bookmarks_list.pack(side=tk.LEFT, padx=(1, 6))
+
+        self._btn_tag = _btn(rg, "🏷", self._show_tag_menu, font=F_MD, padx=6)
+        self._btn_tag.pack(side=tk.RIGHT, padx=1)
+
         _btn(rg, "⛶", self._toggle_borderless, font=F_ICO, padx=7).pack(side=tk.RIGHT, padx=(4, 0))
 
         _btn(rg, "⋮", self._show_context_menu_from_btn, font=F_ICO, padx=6).pack(side=tk.RIGHT, padx=1)
@@ -706,6 +732,347 @@ class EmbeddedPlayer:
         w.bind("<Up>",            lambda e: self._vol_change(+self.VOL_STEP), add=True)
         w.bind("<Down>",          lambda e: self._vol_change(-self.VOL_STEP), add=True)
         w.bind("<Escape>",        lambda e: self._escape())
+        w.bind("<question>", lambda e: self._show_shortcut_overlay(), add=True)
+        w.bind("<Shift-question>", lambda e: self._show_shortcut_overlay(), add=True)
+
+    def _show_shortcut_overlay(self):
+        if hasattr(self, '_overlay_win') and self._overlay_win and self._overlay_win.winfo_exists():
+            self._overlay_win.destroy()
+            self._overlay_win = None
+            return
+
+        ov = tk.Toplevel(self._win)
+        ov.overrideredirect(True)
+        ov.attributes('-topmost', True)
+        ov.attributes('-alpha', 0.92)
+        ov.configure(bg="#0d0d0d")
+        self._overlay_win = ov
+
+        self._win.update_idletasks()
+        pw = self._win.winfo_width()
+        ph = self._win.winfo_height()
+        px = self._win.winfo_rootx()
+        py = self._win.winfo_rooty()
+        ow, oh = 620, 520
+        ov.geometry(f"{ow}x{oh}+{px + (pw - ow) // 2}+{py + (ph - oh) // 2}")
+
+        outer = tk.Frame(ov, bg="#0d0d0d", padx=2, pady=2)
+        outer.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(outer, text="⌨  Keyboard Shortcuts",
+                 font=("Segoe UI", 14, "bold"),
+                 bg="#0d0d0d", fg="#e0e0e0").pack(pady=(14, 2))
+        tk.Label(outer, text="Press  ?  or click anywhere to close",
+                 font=("Segoe UI", 8), bg="#0d0d0d", fg="#555555").pack(pady=(0, 10))
+
+        tk.Frame(outer, bg="#2a2a2a", height=1).pack(fill=tk.X, padx=20)
+
+        scroll_frame = tk.Frame(outer, bg="#0d0d0d")
+        scroll_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        canvas = tk.Canvas(scroll_frame, bg="#0d0d0d", highlightthickness=0)
+        sb = tk.Scrollbar(scroll_frame, orient=tk.VERTICAL, command=canvas.yview)
+        canvas.configure(yscrollcommand=sb.set)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        inner = tk.Frame(canvas, bg="#0d0d0d")
+        canvas.create_window((0, 0), window=inner, anchor='nw')
+        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<MouseWheel>", lambda e: canvas.yview_scroll(-1 if e.delta > 0 else 1, "units"))
+
+        from managers.settings_manager import HOTKEY_GROUPS, HOTKEY_LABELS
+        hk = self._hotkeys
+
+        col_left = tk.Frame(inner, bg="#0d0d0d")
+        col_right = tk.Frame(inner, bg="#0d0d0d")
+        col_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+        col_right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        groups = list(HOTKEY_GROUPS)
+        mid = (len(groups) + 1) // 2
+
+        for gi, (group_title, action_ids) in enumerate(groups):
+            col = col_left if gi < mid else col_right
+            grp = tk.Frame(col, bg="#0d0d0d")
+            grp.pack(fill=tk.X, pady=(0, 10))
+
+            tk.Label(grp, text=group_title,
+                     font=("Segoe UI", 9, "bold"),
+                     bg="#0d0d0d", fg="#e50914").pack(anchor='w', pady=(0, 3))
+
+            for aid in action_ids:
+                key = hk.get(aid) or "—"
+                label = HOTKEY_LABELS.get(aid, aid)
+                row = tk.Frame(grp, bg="#0d0d0d")
+                row.pack(fill=tk.X, pady=1)
+
+                tk.Label(row, text=key, width=14, anchor='w',
+                         font=("Consolas", 8),
+                         bg="#1e1e1e", fg="#00cfff",
+                         padx=6, pady=2).pack(side=tk.LEFT)
+                tk.Label(row, text=label, anchor='w',
+                         font=("Segoe UI", 8),
+                         bg="#0d0d0d", fg="#aaaaaa").pack(side=tk.LEFT, padx=(6, 0))
+
+        extras = [
+            ("Fixed shortcuts", [
+                ("?", "Show/hide this overlay"),
+                ("Shift+←", "Seek −60 seconds"),
+                ("Shift+→", "Seek +60 seconds"),
+                ("Ctrl+←", "Seek −5 seconds"),
+                ("Ctrl+→", "Seek +5 seconds"),
+                ("Double-click", "Toggle fullscreen"),
+                ("Scroll", "Volume up/down"),
+            ])
+        ]
+        for group_title, rows in extras:
+            col = col_right
+            grp = tk.Frame(col, bg="#0d0d0d")
+            grp.pack(fill=tk.X, pady=(0, 10))
+            tk.Label(grp, text=group_title,
+                     font=("Segoe UI", 9, "bold"),
+                     bg="#0d0d0d", fg="#e50914").pack(anchor='w', pady=(0, 3))
+            for key, label in rows:
+                row = tk.Frame(grp, bg="#0d0d0d")
+                row.pack(fill=tk.X, pady=1)
+                tk.Label(row, text=key, width=14, anchor='w',
+                         font=("Consolas", 8),
+                         bg="#1e1e1e", fg="#00cfff",
+                         padx=6, pady=2).pack(side=tk.LEFT)
+                tk.Label(row, text=label, anchor='w',
+                         font=("Segoe UI", 8),
+                         bg="#0d0d0d", fg="#aaaaaa").pack(side=tk.LEFT, padx=(6, 0))
+
+        def _close_overlay(e=None):
+            try:
+                ov.destroy()
+            except Exception:
+                pass
+            self._overlay_win = None
+
+        ov.bind("<Button-1>", _close_overlay)
+        ov.bind("<question>", _close_overlay)
+        ov.bind("<Escape>", _close_overlay)
+        self._win.bind("<question>", lambda e: self._show_shortcut_overlay(), add=True)
+
+    # ADD these methods to EmbeddedPlayer:
+
+    def _set_rating(self, rating: int):
+        if not self.annotation_service or not self.videos:
+            return
+        path = self.videos[self.index]
+        cur = self.annotation_service.get_rating(path)
+        # clicking same star again clears rating
+        new_rating = 0 if cur == rating else rating
+        self.annotation_service.set_rating(path, new_rating)
+        self._refresh_rating_display()
+        if self.logger:
+            stars = "★" * new_rating + "☆" * (5 - new_rating)
+            self.logger(f"Rating: {stars}")
+
+    def _hover_rating(self, n: int):
+        for i, btn in enumerate(self._rating_btns):
+            btn.config(text="★" if i < n else "☆",
+                       fg="#f5c518" if i < n else "#888888")
+
+    def _refresh_rating_display(self):
+        if not self.annotation_service or not self.videos:
+            for btn in self._rating_btns:
+                btn.config(text="☆", fg="#888888")
+            return
+        path = self.videos[self.index]
+        rating = self.annotation_service.get_rating(path)
+        for i, btn in enumerate(self._rating_btns):
+            btn.config(text="★" if i < rating else "☆",
+                       fg="#f5c518" if i < rating else "#555555")
+
+    def _add_bookmark(self):
+        if not self.annotation_service or not self.videos:
+            return
+        pos = self._player.get_time() or 0
+        path = self.videos[self.index]
+
+        # Ask for optional label via simple dialog
+        dlg = tk.Toplevel(self._win)
+        dlg.title("Add Bookmark")
+        dlg.geometry("340x120")
+        dlg.configure(bg="#111111")
+        dlg.transient(self._win)
+        dlg.grab_set()
+        dlg.overrideredirect(False)
+
+        pos_str = _fmt(pos)
+        tk.Label(dlg, text=f"Bookmark at {pos_str}",
+                 font=("Segoe UI", 10), bg="#111111", fg="#e0e0e0").pack(pady=(14, 4))
+
+        entry_var = tk.StringVar(value=pos_str)
+        entry = tk.Entry(dlg, textvariable=entry_var,
+                         font=("Segoe UI", 10), bg="#1e1e1e", fg="#e0e0e0",
+                         insertbackground="#e0e0e0", relief=tk.FLAT,
+                         highlightthickness=1, highlightbackground="#444")
+        entry.pack(fill=tk.X, padx=20)
+        entry.select_range(0, tk.END)
+        entry.focus_set()
+
+        def _save(e=None):
+            label = entry_var.get().strip()
+            self.annotation_service.add_bookmark(path, pos, label)
+            if self.logger:
+                self.logger(f"Bookmark added: {label} @ {pos_str}")
+            dlg.destroy()
+            self._refresh_rating_display()
+
+        entry.bind("<Return>", _save)
+        tk.Button(dlg, text="Save", command=_save,
+                  bg="#e50914", fg="white", relief=tk.FLAT,
+                  font=("Segoe UI", 9), padx=10, pady=4).pack(pady=8)
+
+    def _show_bookmarks_menu(self):
+        if not self.annotation_service or not self.videos:
+            return
+        path = self.videos[self.index]
+
+        dlg = tk.Toplevel(self._win)
+        dlg.title("Bookmarks")
+        dlg.geometry("320x320")
+        dlg.configure(bg="#111111")
+        dlg.transient(self._win)
+
+        tk.Label(dlg, text=os.path.basename(path)[:44],
+                 font=("Segoe UI", 9, "bold"), bg="#111111", fg="#e0e0e0",
+                 wraplength=290, anchor="w").pack(fill=tk.X, padx=12, pady=(10, 4))
+
+        if not self.annotation_service.get_bookmarks(path):
+            tk.Label(dlg, text="No bookmarks.\nPress 🔖 while playing to add one.",
+                     font=("Segoe UI", 9), bg="#111111", fg="#666666",
+                     justify=tk.LEFT).pack(padx=12, pady=10)
+        else:
+            list_frame = tk.Frame(dlg, bg="#111111")
+            list_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+
+            canvas = tk.Canvas(list_frame, bg="#111111", highlightthickness=0)
+            sb = tk.Scrollbar(list_frame, orient=tk.VERTICAL, command=canvas.yview)
+            canvas.configure(yscrollcommand=sb.set)
+            sb.pack(side=tk.RIGHT, fill=tk.Y)
+            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            inner = tk.Frame(canvas, bg="#111111")
+            cwin = canvas.create_window((0, 0), window=inner, anchor="nw")
+            inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+            canvas.bind("<Configure>", lambda e: canvas.itemconfig(cwin, width=e.width))
+            canvas.bind("<MouseWheel>", lambda e: canvas.yview_scroll(-1 if e.delta > 0 else 1, "units"))
+
+            def _render():
+                for w in inner.winfo_children():
+                    w.destroy()
+                for bm in self.annotation_service.get_bookmarks(path):
+                    ms = bm["ms"]
+                    lbl_text = bm.get("label", _fmt(ms))
+                    row = tk.Frame(inner, bg="#1a1a1a")
+                    row.pack(fill=tk.X, pady=1)
+
+                    def _jump(t=ms):
+                        self._player.set_time(t)
+                        dlg.destroy()
+
+                    lbl_w = tk.Label(row, text=f"🔖 {lbl_text}",
+                                     font=("Segoe UI", 9), bg="#1a1a1a",
+                                     fg="#00BFFF", anchor="w", cursor="hand2")
+                    lbl_w.pack(side=tk.LEFT, padx=(8, 4), pady=3, fill=tk.X, expand=True)
+                    lbl_w.bind("<Button-1>", lambda e, t=ms: _jump(t))
+                    row.bind("<Button-1>", lambda e, t=ms: _jump(t))
+
+                    def _del(t=ms):
+                        self.annotation_service.remove_bookmark(path, t)
+                        _render()
+
+                    tk.Button(row, text="✕", command=lambda t=ms: _del(t),
+                              font=("Segoe UI", 7), bg="#1a1a1a", fg="#555",
+                              relief=tk.FLAT, bd=0, padx=6, pady=2, cursor="hand2",
+                              activebackground="#2a2a2a", activeforeground="#e50914"
+                              ).pack(side=tk.RIGHT, padx=4)
+
+            _render()
+
+            tk.Button(dlg, text="✕ Clear all",
+                      command=lambda: (self._clear_bookmarks(path), dlg.destroy()),
+                      font=("Segoe UI", 8), bg="#1e1e1e", fg="#666",
+                      relief=tk.FLAT, bd=0, padx=10, pady=4, cursor="hand2",
+                      activebackground="#2a2a2a", activeforeground="#e50914"
+                      ).pack(side=tk.BOTTOM, pady=6)
+
+        dlg.bind("<Escape>", lambda e: dlg.destroy())
+
+    def _clear_bookmarks(self, path: str):
+        if not self.annotation_service:
+            return
+        for bm in self.annotation_service.get_bookmarks(path):
+            self.annotation_service.remove_bookmark(path, bm["ms"])
+        if self.logger:
+            self.logger("Bookmarks cleared")
+
+    def _show_tag_menu(self):
+        if not self.annotation_service or not self.videos:
+            return
+        path = self.videos[self.index]
+        cur_tags = self.annotation_service.get_tags(path)
+        all_tags = self.annotation_service.get_all_tags()
+
+        menu = tk.Menu(self._win, tearoff=0, bg="#1e1e1e", fg="#e0e0e0",
+                       activebackground="#333333", activeforeground="#ffffff",
+                       bd=0, relief=tk.FLAT, font=("Segoe UI", 9))
+
+        menu.add_command(label="➕  Add new tag…", command=lambda: self._prompt_add_tag(path))
+        if all_tags:
+            menu.add_separator()
+            for tag in all_tags:
+                is_set = tag in cur_tags
+                menu.add_command(
+                    label=("✓  " if is_set else "    ") + tag,
+                    command=lambda t=tag, s=is_set: (
+                        self.annotation_service.remove_tag(path, t) if s
+                        else self.annotation_service.add_tag(path, t)
+                    )
+                )
+        if cur_tags:
+            menu.add_separator()
+            for tag in cur_tags:
+                menu.add_command(label=f"✕  remove '{tag}'",
+                                 command=lambda t=tag: self.annotation_service.remove_tag(path, t))
+        try:
+            x = self._win.winfo_pointerx()
+            y = self._win.winfo_pointery()
+            menu.tk_popup(x, y)
+        finally:
+            menu.grab_release()
+
+    def _prompt_add_tag(self, path: str):
+        dlg = tk.Toplevel(self._win)
+        dlg.title("Add Tag")
+        dlg.geometry("300x100")
+        dlg.configure(bg="#111111")
+        dlg.transient(self._win)
+        dlg.grab_set()
+
+        tk.Label(dlg, text="Tag name:",
+                 font=("Segoe UI", 10), bg="#111111", fg="#e0e0e0").pack(pady=(14, 4))
+        var = tk.StringVar()
+        entry = tk.Entry(dlg, textvariable=var, font=("Segoe UI", 10),
+                         bg="#1e1e1e", fg="#e0e0e0", insertbackground="#e0e0e0",
+                         relief=tk.FLAT, highlightthickness=1, highlightbackground="#444")
+        entry.pack(fill=tk.X, padx=20)
+        entry.focus_set()
+
+        def _save(e=None):
+            tag = var.get().strip().lower()
+            if tag:
+                self.annotation_service.add_tag(path, tag)
+                if self.logger:
+                    self.logger(f"Tag added: '{tag}'")
+            dlg.destroy()
+
+        entry.bind("<Return>", _save)
+        entry.bind("<Escape>", lambda e: dlg.destroy())
 
     def _rebind_keys(self):
         w = self._win
@@ -842,6 +1209,8 @@ class EmbeddedPlayer:
         media = self._instance.media_new(path)
         self._player.set_media(media)
         self._player.play()
+        if self.resume_manager:
+            self.resume_manager.stop_tracking_video()
         if self.on_video_changed:
             try:
                 self._win.after(0, lambda p=path, i=idx: self.on_video_changed(i, p))
@@ -849,6 +1218,9 @@ class EmbeddedPlayer:
                 pass
 
         threading.Thread(target=self._post_play_audio, daemon=True).start()
+        if self.resume_manager:
+            self._apply_resume_position(path)
+            self.resume_manager.start_tracking_video(self._player, path)
 
         if self.logger:
             d = self.video_to_dir.get(path, "")
@@ -857,6 +1229,28 @@ class EmbeddedPlayer:
                 f"{os.path.basename(path)}"
                 + (f"  •  {os.path.basename(d)}" if d else "")
             )
+        self._win.after(200, self._refresh_rating_display)
+
+    def _apply_resume_position(self, path: str):
+        pos = self.resume_manager.should_resume_video(path)
+        if not pos:
+            return
+
+        def _seek_after_ready():
+            for _ in range(40):
+                if not self._running:
+                    return
+                if self._player.get_state() == vlc.State.Playing:
+                    break
+                time.sleep(0.1)
+            try:
+                self._player.set_time(pos.position)
+                if self.logger:
+                    self.logger(f"Resumed at {pos.get_position_formatted()} ({pos.percentage:.0f}%)")
+            except Exception:
+                pass
+
+        threading.Thread(target=_seek_after_ready, daemon=True).start()
 
     def _post_play_audio(self):
         for _ in range(50):
@@ -2448,6 +2842,8 @@ class EmbeddedPlayer:
         except Exception:
             pass
 
+        self._refresh_rating_display()
+
     # ═══════════════════════════════════════════════════════════════════
     # CLOSE
     # ═══════════════════════════════════════════════════════════════════
@@ -2455,6 +2851,17 @@ class EmbeddedPlayer:
     def _close(self):
         # Stop global listener first — before _running = False so the check
         # inside the listener callback doesn't race.
+        if self.resume_manager and self.videos and self._player:
+            try:
+                pos = self._player.get_time() or 0
+                dur = self._player.get_length() or 0
+                path = self.videos[self.index]
+                if pos > 0 and dur > 0:
+                    self.resume_manager.service.update_position(path, pos, dur)
+                self.resume_manager.stop_tracking_video()
+            except Exception:
+                pass
+
         self._stop_global_listener()
 
         if self.on_close_save:

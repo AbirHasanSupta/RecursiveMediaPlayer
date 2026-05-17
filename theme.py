@@ -592,12 +592,14 @@ class ThemeSelector:
         "⬛ Queue":      ("#2ecc71", "#1a8a4a", "#FFFFFF", "#156e3a"),
         "♥ Favourites": ("#e67e22", "#b35a00", "#FFFFFF", "#8a4400"),
         "🕐 History":   ("#9b59b6", "#6c2f8f", "#FFFFFF", "#521f6e"),
+        "🏷 Tags & ★": ("#c8a000", "#8a6d0a", "#FFFFFF", "#5a4600"),
     }
     PILL_ACCENTS_DARK = {
         "🎵 Playlist":   ("#4A9EFF", "#1a5fa8", "#FFFFFF", "#144d8a"),
         "⬛ Queue":      ("#2ecc71", "#1a8a4a", "#FFFFFF", "#156e3a"),
         "♥ Favourites": ("#FF9F43", "#b35a00", "#FFFFFF", "#8a4400"),
         "🕐 History":   ("#C39BD3", "#6c2f8f", "#FFFFFF", "#521f6e"),
+        "🏷 Tags & ★": ("#f5c518", "#b8920f", "#FFFFFF", "#8a6d0a"),
     }
 
     def pill_accents(self, lbl):

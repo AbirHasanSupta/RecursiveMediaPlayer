@@ -1,5 +1,7 @@
 from embedded_player import EmbeddedPlayer
 from icon_helper import apply_icon
+from managers.annotation_browser_manager import AnnotationBrowserManager
+from managers.video_metadata_manager import VideoAnnotationService
 from splash import show_splash
 
 try:
@@ -262,6 +264,16 @@ def select_multiple_folders_and_play():
             self.favorites_manager.set_video_preview_manager(self.video_preview_manager)
             self.favorites_manager.set_grid_view_manager(self.grid_view_manager)
             self.favorites_manager.set_on_removed_callback(self._refresh_tree_after_fav_change)
+
+            self.annotation_service = VideoAnnotationService()
+
+            self.annotation_browser = AnnotationBrowserManager(
+                root=self.root,
+                theme_provider=self,
+                annotation_service=self.annotation_service,
+                play_callback=self._play_annotated_videos,
+                logger=self.update_console,
+            )
 
             self.dual_player_manager = DualPlayerManager(
                 self.root,
@@ -2008,6 +2020,8 @@ def select_multiple_folders_and_play():
                 logger=self.update_console,
                 on_close=self._on_player_closed,
                 on_volume_change=self._save_volume_callback,
+                resume_manager=self.resume_manager,
+                annotation_service=self.annotation_service,
             )
             player.on_loop_change        = self._save_loop_callback
             player.on_close_save         = self._on_player_close_save
@@ -2033,6 +2047,26 @@ def select_multiple_folders_and_play():
                 self._active_player = None
             player.play()
             self._active_player = player
+
+        def _show_annotation_browser(self):
+            self.annotation_browser.show()
+
+        def _play_annotated_videos(self, video_paths: list):
+            if not video_paths:
+                return
+            all_video_to_dir = {}
+            all_directories = []
+            for vp in video_paths:
+                vdir = os.path.dirname(vp) if os.path.isfile(vp) else None
+                if vdir:
+                    all_video_to_dir[vp] = vdir
+                    if vdir not in all_directories:
+                        all_directories.append(vdir)
+            all_directories.sort()
+            valid_videos = list(all_video_to_dir.keys())
+            if not valid_videos:
+                return
+            self._launch_player(self._make_player(valid_videos, all_video_to_dir, all_directories, 0))
 
         def play_videos(self):
             videos, video_to_dir, directories = self._build_video_list()
@@ -3587,6 +3621,7 @@ def select_multiple_folders_and_play():
                 "⬛ Queue":      self._show_queue_manager,
                 "♥ Favourites": self._show_favorites_manager,
                 "🕐 History":   self._show_watch_history,
+                "🏷 Tags & ★": self._show_annotation_browser,
             }
             self._media_pill_btns = {}
 
@@ -3617,7 +3652,7 @@ def select_multiple_folders_and_play():
                 btn.bind("<ButtonPress-1>",   on_press)
                 btn.bind("<ButtonRelease-1>", on_release)
 
-            for _pill_label in ["🎵 Playlist", "⬛ Queue", "♥ Favourites", "🕐 History"]:
+            for _pill_label in ["🎵 Playlist", "⬛ Queue", "♥ Favourites", "🕐 History", "🏷 Tags & ★"]:
                 _make_media_pill(_pill_label)
 
             self.theme_toolbar_btn = tk.Label(
