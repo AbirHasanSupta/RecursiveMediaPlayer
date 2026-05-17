@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
 
 from managers.resource_manager import ManagedExecutor, get_resource_manager, ManagedThread
-
+from utils import _responsive_geometry
 
 # ── Design tokens (override per-theme in _get_design_tokens) ─────────────────
 _CARD_RADIUS   = 10   # visual only – used via Canvas for rounded rects
@@ -215,7 +215,7 @@ class GridViewManager:
         self.grid_window = tk.Toplevel(self.root)
         self.grid_window.withdraw()
         self.grid_window.title("Video Gallery")
-        self.grid_window.geometry("1600x900")
+        self.grid_window.geometry(_responsive_geometry(self.root, 1600, 900))
         self.grid_window.configure(bg=t['bg'])
 
 

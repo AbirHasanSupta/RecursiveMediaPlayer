@@ -7,6 +7,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
 
+from utils import _responsive_geometry
+
 
 class FilterSortUI:
     """UI components for filter and sort functionality"""
@@ -29,9 +31,8 @@ class FilterSortUI:
         self.filter_window = tk.Toplevel(self.parent)
         self.filter_window.withdraw()
         self.filter_window.title("Advanced Filters & Sorting")
-        self.filter_window.geometry("1600x900")
+        self.filter_window.geometry(_responsive_geometry(self.parent, 1600, 900))
         self.filter_window.configure(bg=self.theme_provider.bg_color)
-        self.filter_window.minsize(700, 450)
 
         self._setup_filter_ui()
 

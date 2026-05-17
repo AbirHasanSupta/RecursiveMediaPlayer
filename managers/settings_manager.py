@@ -9,6 +9,9 @@ import subprocess
 import sys
 import queue
 
+from utils import _responsive_geometry
+
+
 def _get_app_dirs():
     """Return (appdata_dir, localappdata_dir) for Recursive Media Player."""
     import os, sys
@@ -352,7 +355,7 @@ class SettingsUI:
         self.settings_window = tk.Toplevel(self.parent)
         self.settings_window.withdraw()
         self.settings_window.title("Application Settings")
-        self.settings_window.geometry("700x880")
+        self.settings_window.geometry(_responsive_geometry(self.parent, 700, 880))
         self.settings_window.configure(bg=self.theme_provider.bg_color)
         self.settings_window.resizable(True, True)
 

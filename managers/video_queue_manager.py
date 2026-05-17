@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import List, Optional, Callable
 import uuid
 
+from utils import _responsive_geometry
+
+
 def _get_app_dirs():
     """Return (appdata_dir, localappdata_dir) for Recursive Media Player."""
     import os, sys
@@ -343,14 +346,8 @@ class QueueUI:
         self.queue_window = tk.Toplevel(self.parent)
         self.queue_window.withdraw()
         self.queue_window.title("Playback Queue")
-        self.queue_window.geometry("820x620")
-        self.queue_window.minsize(640, 480)
+        self.queue_window.geometry(_responsive_geometry(self.parent, 820, 620))
         self.queue_window.configure(bg=self.theme_provider.bg_color)
-
-        self.queue_window.update_idletasks()
-        px = self.parent.winfo_rootx() + (self.parent.winfo_width() - 820) // 2
-        py = self.parent.winfo_rooty() + (self.parent.winfo_height() - 620) // 2
-        self.queue_window.geometry(f"820x620+{max(0, px)}+{max(0, py)}")
 
         self._setup_queue_ui()
         self._refresh_queue()

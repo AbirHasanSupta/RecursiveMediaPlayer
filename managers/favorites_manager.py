@@ -9,6 +9,7 @@ from typing import List, Callable
 import uuid
 
 from managers.resource_manager import get_resource_manager
+from utils import _responsive_geometry
 
 
 class FavoriteEntry:
@@ -245,14 +246,8 @@ class FavoritesUI:
         self.favorites_window = tk.Toplevel(self.parent)
         self.favorites_window.withdraw()
         self.favorites_window.title("Favourites")
-        self.favorites_window.geometry("820x620")
-        self.favorites_window.minsize(640, 480)
+        self.favorites_window.geometry(_responsive_geometry(self.parent, 820, 620))
         self.favorites_window.configure(bg=self.theme_provider.bg_color)
-
-        self.favorites_window.update_idletasks()
-        px = self.parent.winfo_rootx() + (self.parent.winfo_width() - 820) // 2
-        py = self.parent.winfo_rooty() + (self.parent.winfo_height() - 620) // 2
-        self.favorites_window.geometry(f"820x620+{max(0, px)}+{max(0, py)}")
 
         self.current_directory = selected_directory
         self._setup_favorites_ui()

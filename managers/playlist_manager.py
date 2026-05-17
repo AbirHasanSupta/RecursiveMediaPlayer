@@ -9,6 +9,7 @@ from typing import List, Optional, Callable
 import uuid
 
 from managers.resource_manager import get_resource_manager
+from utils import _responsive_geometry
 
 
 class PlaylistData:
@@ -179,14 +180,8 @@ class PlaylistUI:
         self.playlist_window = tk.Toplevel(self.parent)
         self.playlist_window.withdraw()
         self.playlist_window.title("Playlists")
-        self.playlist_window.geometry("1020x640")
-        self.playlist_window.minsize(760, 500)
+        self.playlist_window.geometry(_responsive_geometry(self.parent, 1020, 640))
         self.playlist_window.configure(bg=self.theme_provider.bg_color)
-
-        self.playlist_window.update_idletasks()
-        px = self.parent.winfo_rootx() + (self.parent.winfo_width() - 1020) // 2
-        py = self.parent.winfo_rooty() + (self.parent.winfo_height() - 640) // 2
-        self.playlist_window.geometry(f"1020x640+{max(0, px)}+{max(0, py)}")
 
         self._setup_playlist_manager_ui()
         self._refresh_playlist_list()

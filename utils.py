@@ -51,3 +51,27 @@ def gather_videos_with_directories(directory):
 def gather_videos(directory):
     videos, _, _ = gather_videos_with_directories(directory)
     return videos
+
+
+def _responsive_geometry(parent, desired_w, desired_h):
+    """Return 'WxH+X+Y' centered on the same monitor as parent, capped at 90% of monitor size."""
+    try:
+        from screeninfo import get_monitors
+        wx = parent.winfo_rootx()
+        wy = parent.winfo_rooty()
+        for m in get_monitors():
+            if m.x <= wx < m.x + m.width and m.y <= wy < m.y + m.height:
+                w = min(desired_w, int(m.width  * 0.90))
+                h = min(desired_h, int(m.height * 0.90))
+                x = m.x + (m.width  - w) // 2
+                y = m.y + (m.height - h) // 2
+                return f"{w}x{h}+{x}+{y}"
+    except Exception:
+        pass
+    sw = parent.winfo_screenwidth()
+    sh = parent.winfo_screenheight()
+    w = min(desired_w, int(sw * 0.90))
+    h = min(desired_h, int(sh * 0.90))
+    x = (sw - w) // 2
+    y = (sh - h) // 2
+    return f"{w}x{h}+{x}+{y}"

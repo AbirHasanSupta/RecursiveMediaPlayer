@@ -9,6 +9,7 @@ from typing import List, Dict
 import uuid
 
 from managers.resource_manager import get_resource_manager
+from utils import _responsive_geometry
 
 
 def _get_app_dirs():
@@ -353,14 +354,8 @@ class WatchHistoryUI:
         self.history_window = tk.Toplevel(self.parent)
         self.history_window.withdraw()
         self.history_window.title("Watch History")
-        self.history_window.geometry("960x640")
-        self.history_window.minsize(720, 500)
+        self.history_window.geometry(_responsive_geometry(self.parent, 960, 640))
         self.history_window.configure(bg=self.theme_provider.bg_color)
-
-        self.history_window.update_idletasks()
-        px = self.parent.winfo_rootx() + (self.parent.winfo_width() - 960) // 2
-        py = self.parent.winfo_rooty() + (self.parent.winfo_height() - 640) // 2
-        self.history_window.geometry(f"960x640+{max(0, px)}+{max(0, py)}")
 
         self._setup_history_ui()
         self._refresh_history_list()
