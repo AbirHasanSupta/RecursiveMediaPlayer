@@ -642,8 +642,8 @@ class EmbeddedPlayer:
         self._lbl_vol.bind("<Enter>", lambda e: self._cancel_hide())
         self._lbl_vol.bind("<Leave>", lambda e: self._schedule_hide())
 
-        _btn(zone_e, "⛶", self._toggle_borderless, font=F_ICO, padx=7).pack(side=tk.LEFT, padx=(2, 2))
-        _btn(zone_e, "⋮", self._show_more_menu, font=F_ICO, padx=6).pack(side=tk.LEFT, padx=(2, 0))
+        _btn(zone_e, "⋮", self._show_more_menu, font=F_ICO, padx=7).pack(side=tk.LEFT, padx=(2, 2))
+        _btn(zone_e, "⛶", self._toggle_borderless, font=F_ICO, padx=6).pack(side=tk.LEFT, padx=(2, 0))
 
         _all = [bar, info, seek_row, btn_row,
                 zone_a, zone_b, zone_c, zone_d, zone_e,
