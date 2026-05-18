@@ -109,6 +109,10 @@ class AnnotationBrowserManager:
         self._search_var: Optional[tk.StringVar] = None
         self._rating_var: Optional[tk.IntVar] = None
         self._video_listbox: Optional[tk.Listbox] = None
+        self._vid_canvas: Optional[tk.Canvas] = None
+        self._vid_rows: list = []
+        self._vid_selection: set = set()
+        self._row_height: int = 28
         self._tag_frame_inner: Optional[tk.Frame] = None
         self._tag_canvas: Optional[tk.Canvas] = None
         self._tag_canvas_win = None
@@ -368,11 +372,25 @@ class AnnotationBrowserManager:
                               highlightbackground=P["sep"], highlightthickness=1)
         list_outer.pack(fill=tk.BOTH, expand=True, padx=18, pady=(0, 12))
 
-        vid_hdr = tk.Frame(list_outer, bg=P["sidebar"])
-        vid_hdr.pack(fill=tk.X)
-        tk.Label(vid_hdr, text="  VIDEOS", font=("Segoe UI", 7, "bold"),
-                 bg=P["sidebar"], fg=tp.muted_fg, pady=7, anchor="w"
-                 ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 0))
+        col_hdr = tk.Frame(list_outer, bg=P["sidebar"], height=26)
+        col_hdr.pack(fill=tk.X)
+        col_hdr.pack_propagate(False)
+        self._col_weights = [0.55, 0.13, 0.12, 0.20]
+        self._col_labels_text = ["Name", "Rating", "Bookmarks", "Tags"]
+        self._col_header_frame = col_hdr
+
+        def _place_headers(event=None):
+            w = col_hdr.winfo_width()
+            if w < 2:
+                return
+            for j, lbl in enumerate(col_hdr.winfo_children()):
+                x = int(sum(self._col_weights[:j]) * w)
+                lbl.place(x=x, y=0, width=int(self._col_weights[j] * w), height=26)
+
+        for txt in self._col_labels_text:
+            tk.Label(col_hdr, text=txt.upper(), font=("Segoe UI", 7, "bold"),
+                     bg=P["sidebar"], fg=tp.muted_fg, padx=8, anchor="w")
+        col_hdr.bind("<Configure>", _place_headers)
         tk.Frame(list_outer, bg=P["sep"], height=1).pack(fill=tk.X)
 
         vid_body = tk.Frame(list_outer, bg=P["panel"])
@@ -382,28 +400,30 @@ class AnnotationBrowserManager:
                               troughcolor=P["panel"], bg=P["sep"])
         vid_sb.pack(side=tk.RIGHT, fill=tk.Y, pady=4)
 
-        list_font = ("Segoe UI", 10) if tk.font.Font(font=tp.normal_font).actual()["size"] < 11 \
-            else tp.normal_font
+        self._vid_canvas = tk.Canvas(vid_body, bg=P["panel"],
+                                     highlightthickness=0,
+                                     yscrollcommand=vid_sb.set)
+        self._vid_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vid_sb.config(command=self._vid_canvas.yview)
 
-        self._video_listbox = tk.Listbox(
-            vid_body, yscrollcommand=vid_sb.set,
-            font=list_font,
-            bg=P["panel"], fg=tp.listbox_fg,
-            selectbackground=P["accent"], selectforeground="white",
-            selectmode=tk.EXTENDED,
-            activestyle="none", relief=tk.FLAT, bd=0, highlightthickness=0,
-            selectborderwidth=0,
-        )
-        self._video_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2, pady=2)
-        vid_sb.config(command=self._video_listbox.yview)
-        self._video_listbox.bind("<<ListboxSelect>>", self._on_video_select)
-        self._video_listbox.bind("<Double-Button-1>", lambda e: self._play_selected())
-        self._video_listbox.bind("<Button-1>", self._on_mouse_down)
-        self._video_listbox.bind("<Button-3>", self._on_video_right_click)
-        self._video_listbox.bind("<B1-Motion>", self._on_mouse_drag)
-        self._video_listbox.bind("<ButtonRelease-1>", self._on_mouse_release)
-        self._video_listbox.bind("<Motion>", self._on_list_hover)
+        self._vid_inner = tk.Frame(self._vid_canvas, bg=P["panel"])
+        self._vid_canvas_win = self._vid_canvas.create_window(
+            (0, 0), window=self._vid_inner, anchor="nw")
+        self._vid_inner.bind(
+            "<Configure>",
+            lambda e: self._vid_canvas.configure(scrollregion=self._vid_canvas.bbox("all")))
+        self._vid_canvas.bind(
+            "<Configure>",
+            lambda e: self._vid_canvas.itemconfig(self._vid_canvas_win, width=e.width))
+        self._vid_canvas.bind(
+            "<MouseWheel>",
+            lambda e: self._vid_canvas.yview_scroll(-1 if e.delta > 0 else 1, "units"))
+
+        self._video_listbox = None
+        self._vid_selection: set = set()
         self._hovered_idx = -1
+        self._vid_rows = []
+        self._vid_P = P
 
         # ── Detail panel ──────────────────────────────────────────────────────
         tk.Frame(win, bg=P["sep"], height=1).pack(fill=tk.X, side=tk.BOTTOM)
@@ -746,7 +766,7 @@ class AnnotationBrowserManager:
     # ── Hover highlight for listbox ───────────────────────────────────────────
 
     def _on_list_hover(self, event):
-        idx = self._video_listbox.nearest(event.y)
+        idx = self._row_at_y(event.y)
         if idx == self._hovered_idx:
             return
         self._hovered_idx = idx
@@ -754,7 +774,7 @@ class AnnotationBrowserManager:
     # ── Filter ────────────────────────────────────────────────────────────────
 
     def _apply_filter(self):
-        if not self._video_listbox:
+        if not hasattr(self, '_vid_canvas') or not self._vid_canvas:
             return
         tp = self.tp
         P = _p(tp.dark_mode)
@@ -775,17 +795,8 @@ class AnnotationBrowserManager:
             candidates = [p for p in candidates if self.svc.get_rating(p) >= min_rating]
 
         self._filtered_videos = candidates
-        self._video_listbox.delete(0, tk.END)
-
-        for path in candidates:
-            rating  = self.svc.get_rating(path)
-            tags    = self.svc.get_tags(path)
-            bm_cnt  = len(self.svc.get_bookmarks(path))
-            stars   = "★" * rating if rating else "☆"
-            bm_str  = f"  🔖 {bm_cnt}" if bm_cnt else ""
-            tag_str = ("  · " + "  ".join(tags[:3]) + (" +…" if len(tags) > 3 else "")) if tags else ""
-            name    = os.path.basename(path)
-            self._video_listbox.insert(tk.END, f"  {stars}{bm_str}    {name}{tag_str}")
+        self._vid_selection.clear()
+        self._rebuild_vid_rows()
 
         count_text = f"{len(candidates)} video{'s' if len(candidates) != 1 else ''}"
         self._count_lbl.config(text=count_text)
@@ -802,10 +813,163 @@ class AnnotationBrowserManager:
 
         if self.video_preview_manager:
             video_mapping = {i: path for i, path in enumerate(candidates)}
-            self.video_preview_manager.attach_to_listbox(self._video_listbox, video_mapping)
+            self.video_preview_manager.attach_to_listbox(self._vid_canvas, video_mapping)
 
         self._update_play_btn()
         self._clear_detail()
+
+    def _row_at_y(self, y: int) -> int:
+        canvas_y = self._vid_canvas.canvasy(y)
+        rh = self._row_height
+        return max(0, int(canvas_y // rh))
+
+    def _rebuild_vid_rows(self):
+        if not hasattr(self, '_vid_inner') or not self._vid_inner:
+            return
+        tp   = self.tp
+        P    = _p(tp.dark_mode)
+
+        for w in self._vid_inner.winfo_children():
+            w.destroy()
+        self._vid_rows = []
+
+        col_w = self._col_weights
+        total = 1.0
+
+        for i, path in enumerate(self._filtered_videos):
+            rating  = self.svc.get_rating(path)
+            tags    = self.svc.get_tags(path)
+            bm_cnt  = len(self.svc.get_bookmarks(path))
+            name    = os.path.basename(path)
+            stars   = "★" * rating if rating else ""
+            bm_text = f"🔖 {bm_cnt}" if bm_cnt else "—"
+            tag_text = "  ".join(tags[:3]) + (" +…" if len(tags) > 3 else "") if tags else "—"
+            is_sel  = i in self._vid_selection
+            row_bg  = P["accent"] if is_sel else (P["item_alt"] if i % 2 else P["panel"])
+            fg      = "white" if is_sel else tp.text_color
+            muted   = "white" if is_sel else tp.muted_fg
+            gold    = "white" if is_sel else P["star_on"]
+
+            row = tk.Frame(self._vid_inner, bg=row_bg, height=self._row_height)
+            row.pack(fill=tk.X)
+            row.pack_propagate(False)
+
+            cells = [
+                tk.Label(row, text=f"  {name}", font=("Segoe UI", 10), bg=row_bg, fg=fg,
+                         anchor="w"),
+                tk.Label(row, text=stars or "—", font=("Segoe UI", 10), bg=row_bg, fg=gold,
+                         anchor="w"),
+                tk.Label(row, text=bm_text, font=("Segoe UI", 10), bg=row_bg, fg=muted,
+                         anchor="w"),
+                tk.Label(row, text=tag_text, font=("Segoe UI", 9), bg=row_bg, fg=muted,
+                         anchor="w"),
+            ]
+            for j, cell in enumerate(cells):
+                cell.place(relx=sum(col_w[:j]), rely=0, relwidth=col_w[j], relheight=1.0)
+
+            def _bind_row(r, idx_, cells_):
+                def on_click(e):
+                    if self.video_preview_manager and hasattr(self.video_preview_manager, 'tooltip'):
+                        try: self.video_preview_manager.tooltip.hide_preview()
+                        except Exception: pass
+                    ctrl  = bool(e.state & 0x4)
+                    shift = bool(e.state & 0x1)
+                    if shift and self._vid_selection:
+                        anchor = max(self._vid_selection)
+                        self._vid_selection = set(range(min(anchor, idx_), max(anchor, idx_) + 1))
+                    elif ctrl:
+                        if idx_ in self._vid_selection:
+                            self._vid_selection.discard(idx_)
+                        else:
+                            self._vid_selection.add(idx_)
+                    else:
+                        self._vid_selection = {idx_}
+                        self._dragging_index = idx_
+                    self._refresh_row_colors()
+                    self._on_video_select()
+                    return "break"
+
+                def on_dbl(e):
+                    self._vid_selection = {idx_}
+                    self._refresh_row_colors()
+                    self._play_selected()
+                    return "break"
+
+                def on_right(e):
+                    if idx_ in self._vid_selection:
+                        # selected → context menu
+                        self._on_video_right_click(e)
+                    else:
+                        # unselected → thumbnail preview
+                        if self.video_preview_manager:
+                            path_ = self._filtered_videos[idx_]
+                            if os.path.isfile(path_):
+                                self.video_preview_manager.right_clicked_item = idx_
+                                self.video_preview_manager._show_video_preview(
+                                    path_, e.x_root, e.y_root)
+
+                def on_enter(e):
+                    if idx_ not in self._vid_selection:
+                        r.config(bg=P["item_hover"])
+                        for c in cells_: c.config(bg=P["item_hover"])
+
+                def on_leave(e):
+                    if idx_ not in self._vid_selection:
+                        bg_ = P["item_alt"] if idx_ % 2 else P["panel"]
+                        r.config(bg=bg_)
+                        for c in cells_: c.config(bg=bg_)
+
+                def on_drag(e):
+                    if self._dragging_index is None:
+                        return
+                    # r.winfo_y() is position inside _vid_inner (canvas coords)
+                    canvas_y = r.winfo_y() + e.y
+                    ci = max(0, int(canvas_y // self._row_height))
+                    ci = min(ci, len(self._filtered_videos) - 1)
+                    if ci != self._dragging_index:
+                        self._filtered_videos[self._dragging_index], self._filtered_videos[ci] = \
+                            self._filtered_videos[ci], self._filtered_videos[self._dragging_index]
+                        self._dragging_index = ci
+                        self._vid_selection = {ci}
+                        self._rebuild_vid_rows()
+
+                def on_release(e):
+                    self._dragging_index = None
+
+                for w in [r] + cells_:
+                    w.bind("<Button-1>",        on_click)
+                    w.bind("<Double-Button-1>", on_dbl)
+                    w.bind("<Button-3>",        on_right)
+                    w.bind("<Enter>",           on_enter)
+                    w.bind("<Leave>",           on_leave)
+                    w.bind("<B1-Motion>",       on_drag)
+                    w.bind("<ButtonRelease-1>", on_release)
+                    w.bind("<MouseWheel>",
+                           lambda e: self._vid_canvas.yview_scroll(-1 if e.delta > 0 else 1, "units"))
+
+            _bind_row(row, i, cells)
+            self._vid_rows.append(row)
+
+        self._vid_inner.update_idletasks()
+        self._vid_canvas.configure(scrollregion=self._vid_canvas.bbox("all"))
+
+    def _refresh_row_colors(self):
+        tp = self.tp
+        P  = _p(tp.dark_mode)
+        for i, row in enumerate(self._vid_rows):
+            is_sel = i in self._vid_selection
+            bg_    = P["accent"] if is_sel else (P["item_alt"] if i % 2 else P["panel"])
+            fg_    = "white" if is_sel else tp.text_color
+            muted_ = "white" if is_sel else tp.muted_fg
+            gold_  = "white" if is_sel else P["star_on"]
+            row.config(bg=bg_)
+            for j, cell in enumerate(row.winfo_children()):
+                if j == 1:
+                    cell.config(bg=bg_, fg=gold_)
+                elif j in (2, 3):
+                    cell.config(bg=bg_, fg=muted_)
+                else:
+                    cell.config(bg=bg_, fg=fg_)
 
     def _on_search_change(self):
         self._rebuild_tags()
@@ -823,11 +987,10 @@ class AnnotationBrowserManager:
     # ── Detail panel ──────────────────────────────────────────────────────────
 
     def _on_video_select(self, event=None):
-        sel = self._video_listbox.curselection()
         self._update_play_btn()
-        if not sel:
+        if not self._vid_selection:
             return
-        idx = sel[0]
+        idx = min(self._vid_selection)
         if idx < len(self._filtered_videos):
             self._show_detail(self._filtered_videos[idx])
 
@@ -893,59 +1056,49 @@ class AnnotationBrowserManager:
         if self.video_preview_manager:
             self.video_preview_manager.tooltip.hide_preview()
 
-        index = self._video_listbox.nearest(event.y)
+        index = self._row_at_y(event.y)
 
         if index < 0 or index >= len(self._filtered_videos):
             return
 
-        ctrl_held = bool(event.state & 0x4)
+        ctrl_held  = bool(event.state & 0x4)
         shift_held = bool(event.state & 0x1)
-        current_selection = list(self._video_listbox.curselection())
+        current_selection = sorted(self._vid_selection)
 
         if shift_held and current_selection:
-            self._video_listbox.selection_clear(0, tk.END)
-            anchor = current_selection[-1] if current_selection else 0
-            start = min(anchor, index)
-            end = max(anchor, index)
-            for i in range(start, end + 1):
-                self._video_listbox.selection_set(i)
+            anchor = current_selection[-1]
+            start  = min(anchor, index)
+            end    = max(anchor, index)
+            self._vid_selection = set(range(start, end + 1))
+            self._refresh_row_colors()
+            self._on_video_select()
             return "break"
-
         elif ctrl_held:
-            if index in current_selection:
-                self._video_listbox.selection_clear(index)
+            if index in self._vid_selection:
+                self._vid_selection.discard(index)
             else:
-                self._video_listbox.selection_set(index)
+                self._vid_selection.add(index)
+            self._refresh_row_colors()
+            self._on_video_select()
             return "break"
-
         else:
-            self._video_listbox.selection_clear(0, tk.END)
-            self._video_listbox.selection_set(index)
+            self._vid_selection = {index}
             self._dragging_index = index
+            self._refresh_row_colors()
+            self._on_video_select()
             return "break"
 
     def _on_mouse_drag(self, event):
         if self._dragging_index is None or not self._filtered_videos:
             return
 
-        current_index = self._video_listbox.nearest(event.y)
+        current_index = self._row_at_y(event.y)
         if current_index != self._dragging_index and 0 <= current_index < len(self._filtered_videos):
             self._filtered_videos[self._dragging_index], self._filtered_videos[current_index] = \
                 self._filtered_videos[current_index], self._filtered_videos[self._dragging_index]
-
-            self._video_listbox.delete(0, tk.END)
-            for path in self._filtered_videos:
-                rating  = self.svc.get_rating(path)
-                tags    = self.svc.get_tags(path)
-                bm_cnt  = len(self.svc.get_bookmarks(path))
-                stars   = "★" * rating if rating else "☆"
-                bm_str  = f"  🔖 {bm_cnt}" if bm_cnt else ""
-                tag_str = ("  · " + "  ".join(tags[:3]) + (" +…" if len(tags) > 3 else "")) if tags else ""
-                name    = os.path.basename(path)
-                self._video_listbox.insert(tk.END, f"  {stars}{bm_str}    {name}{tag_str}")
-
             self._dragging_index = current_index
-            self._video_listbox.selection_set(current_index)
+            self._vid_selection = {current_index}
+            self._rebuild_vid_rows()
 
     def _on_mouse_release(self, event):
         self._dragging_index = None
@@ -956,26 +1109,9 @@ class AnnotationBrowserManager:
         tp = self.tp
         P = _p(tp.dark_mode)
 
-        listbox = self._video_listbox
-        index = listbox.nearest(event.y)
-        sel = list(listbox.curselection())
-
-        if not sel and 0 <= index < len(self._filtered_videos):
-            if self.video_preview_manager:
-                path = self._filtered_videos[index]
-                if os.path.isfile(path):
-                    self.video_preview_manager.right_clicked_item = index
-                    self.video_preview_manager._show_video_preview(
-                        path, event.x_root, event.y_root
-                    )
-            return
-
+        sel = sorted(self._vid_selection)
         if not sel:
-            if 0 <= index < len(self._filtered_videos):
-                listbox.selection_set(index)
-                sel = [index]
-            else:
-                return
+            return
 
         menu = tk.Menu(self._win, tearoff=0,
                        bg="#27282c" if tp.dark_mode else "#f4f5f7",
@@ -1044,14 +1180,13 @@ class AnnotationBrowserManager:
         if not hasattr(self, '_play_btn') or not self._play_btn:
             return
         P = self._play_btn_P
-        sel = self._video_listbox.curselection() if self._video_listbox else []
-        if sel:
+        if self._vid_selection:
             self._play_btn.config(text="▶  Play Selected", bg=P["accent"], fg="white")
         else:
             self._play_btn.config(text="▶  Play Filtered", bg=P["gold"], fg="#1a1a1a")
 
     def _play_smart(self):
-        if self._video_listbox and self._video_listbox.curselection():
+        if self._vid_selection:
             self._play_selected()
         else:
             self._play_all()
@@ -1059,7 +1194,7 @@ class AnnotationBrowserManager:
     def _play_selected(self):
         if not self.play_callback:
             return
-        sel = self._video_listbox.curselection()
+        sel = sorted(self._vid_selection)
         if not sel:
             return
         videos = [self._filtered_videos[i] for i in sel if i < len(self._filtered_videos)]
