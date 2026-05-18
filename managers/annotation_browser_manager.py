@@ -1240,7 +1240,37 @@ class AnnotationBrowserManager:
             menu.add_command(label="📂  Open file location",
                              command=lambda: self._open_location(path))
 
+        paths = [self._filtered_videos[i] for i in sel if i < len(self._filtered_videos)]
+        has_rating = any(self.svc.get_rating(p) > 0 for p in paths)
+        has_tags = any(self.svc.get_tags(p) for p in paths)
+        has_bookmarks = any(self.svc.get_bookmarks(p) for p in paths)
+
+        if has_rating or has_tags or has_bookmarks:
+            menu.add_separator()
+            if has_rating:
+                menu.add_command(label="☆  Remove rating",
+                                 command=lambda ps=paths: self._remove_annotation(ps, rating=True))
+            if has_tags:
+                menu.add_command(label="🏷  Remove tags",
+                                 command=lambda ps=paths: self._remove_annotation(ps, tags=True))
+            if has_bookmarks:
+                menu.add_command(label="🔖  Remove bookmarks",
+                                 command=lambda ps=paths: self._remove_annotation(ps, bookmarks=True))
+
         self._win.after(10, lambda: _show_menu(menu, event.x_root, event.y_root))
+
+    def _remove_annotation(self, paths, rating=False, tags=False, bookmarks=False):
+        for path in paths:
+            if rating:
+                self.svc.set_rating(path, 0)
+            if tags:
+                for tag in list(self.svc.get_tags(path)):
+                    self.svc.remove_tag(path, tag)
+            if bookmarks:
+                for bm in list(self.svc.get_bookmarks(path)):
+                    self.svc.remove_bookmark(path, bm["ms"])
+        self._rebuild_tags()
+        self._apply_filter()
 
     def _open_grid_view_from_selection(self, selection):
         if not self.grid_view_manager:
