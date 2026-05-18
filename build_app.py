@@ -706,6 +706,16 @@ def select_multiple_folders_and_play():
 
             self._reapply_tree_columns()
 
+            style = ttk.Style()
+            style.configure("ExclusionTree.Treeview.Heading",
+                            background=self.bg_color,
+                            foreground=self.text_color,
+                            relief="flat")
+            style.map("ExclusionTree.Treeview.Heading",
+                      background=[('active', self.bg_color), ('pressed', self.bg_color), ('focus', self.bg_color)],
+                      foreground=[('active', self.text_color), ('pressed', self.text_color),
+                                  ('focus', self.text_color)])
+
             if dir_w > 10 and exc_w > 10:
                 self.dir_section.config(width=dir_w)
                 self.exclusion_section.config(width=exc_w)
@@ -740,7 +750,7 @@ def select_multiple_folders_and_play():
         def setup_directory_section(self):
             self.dir_section = tk.Frame(self.content_frame, bg=self.bg_color)
             self.dir_section.pack(side=tk.LEFT, fill=tk.Y, expand=False, padx=(0, 10))
-            self.dir_section.config(width=450)
+            self.dir_section.config(width=550)
             self.dir_section.pack_propagate(False)
 
             dir_header = tk.Label(self.dir_section, text="Selected Directories",
@@ -919,9 +929,6 @@ def select_multiple_folders_and_play():
             self.exclusion_scrollbar = ttk.Scrollbar(exclusion_container, orient=tk.VERTICAL)
             self.exclusion_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-            self._tree_xscroll = ttk.Scrollbar(exclusion_container, orient=tk.HORIZONTAL)
-            self._tree_xscroll.pack(side=tk.BOTTOM, fill=tk.X)
-
             # Treeview
             self.exclusion_tree = ttk.Treeview(
                 exclusion_container,
@@ -930,11 +937,9 @@ def select_multiple_folders_and_play():
                 show="tree headings",
                 columns=("size", "rating", "tags", "bookmarks"),
                 yscrollcommand=self.exclusion_scrollbar.set,
-                xscrollcommand=self._tree_xscroll.set
             )
 
             self.exclusion_scrollbar.config(command=self.exclusion_tree.yview)
-            self._tree_xscroll.config(command=self.exclusion_tree.xview)
 
             show_ann = self.settings_manager.get_settings().show_video_annotations_in_tree
 
