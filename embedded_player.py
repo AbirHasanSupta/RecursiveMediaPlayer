@@ -783,10 +783,6 @@ class EmbeddedPlayer:
 
         menu.add_separator()
 
-        # Annotations
-        menu.add_command(label="🏷  Tags", command=self._show_tag_menu)
-        menu.add_separator()
-
         # Sleep timer
         menu.add_command(label="⏻  Sleep Timer", command=self._show_sleep_menu)
 
