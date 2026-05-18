@@ -217,7 +217,7 @@ class EmbeddedPlayer:
     def _on_annotation_update(self):
         if not self._running:
             return
-        self._refresh_rating_display()
+        self._refresh_display()
 
     # ═══════════════════════════════════════════════════════════════════
     # GAMING MODE — global hotkeys via pynput
@@ -503,6 +503,14 @@ class EmbeddedPlayer:
         self._lbl_dir = tk.Label(info, text="",
                                  font=F_XS, bg=_CTRL_BG, fg=_TXT_DIM, cursor="hand2")
         self._lbl_dir.pack(side=tk.RIGHT, padx=(0, 6))
+        self._lbl_bm_count = tk.Label(info, text="",
+                                      font=F_XS, bg="#1e2a1e", fg="#FFD700",
+                                      padx=4, pady=1, cursor="hand2")
+        self._lbl_bm_count.pack(side=tk.RIGHT, padx=(0, 3))
+        self._lbl_bm_count.bind("<Button-1>", lambda e: self._show_bookmarks_menu())
+
+        self._tag_frame = tk.Frame(info, bg=_CTRL_BG)
+        self._tag_frame.pack(side=tk.RIGHT, padx=(0, 4))
         self._lbl_dir.bind("<Button-1>", lambda e: self._show_dir_picker(e))
         self._lbl_dir.bind("<Enter>", lambda e: self._lbl_dir.config(fg=_ACCENT))
         self._lbl_dir.bind("<Leave>", lambda e: self._lbl_dir.config(fg=_TXT_DIM))
@@ -567,8 +575,6 @@ class EmbeddedPlayer:
 
         self._btn_bookmark = _btn(mg, "🔖", self._add_bookmark, font=F_MD, padx=6)
         self._btn_bookmark.pack(side=tk.LEFT)
-        self._btn_bookmarks_list = _btn(mg, "📋", self._show_bookmarks_menu, font=F_MD, padx=5)
-        self._btn_bookmarks_list.pack(side=tk.LEFT)
 
         # keep hidden chapter buttons (shown dynamically)
         self._btn_prev_chapter = _btn(mg, "❮Ch", self._prev_chapter, font=F_SM, padx=5)
@@ -2826,6 +2832,14 @@ class EmbeddedPlayer:
                                    font=("Segoe UI", 7, "bold"), fill="#00BFFF")
             except Exception:
                 pass
+            try:
+                if self.annotation_service and self.videos:
+                    for bm in self.annotation_service.get_bookmarks(self.videos[self.index]):
+                        bx = int((bm["ms"] / dur) * w)
+                        sc.create_rectangle(bx - 1, cy - 5, bx + 1, cy + 5,
+                                            fill="#FFD700", outline="")
+            except Exception:
+                pass
             r = 7 if self._seek_hover else 5
             sc.create_oval(px - r, cy - r, px + r, cy + r,
                            fill="white", outline="")
@@ -2955,6 +2969,27 @@ class EmbeddedPlayer:
                 self._btn_ab_a.config(bg=_BTN, fg="#00BFFF")
                 self._btn_ab_b.config(bg=_BTN, fg="#00BFFF")
                 self._btn_ab_clr.config(fg=_TXT_DIM)
+        except Exception:
+            pass
+
+        try:
+            if self.annotation_service and self.videos:
+                bms = self.annotation_service.get_bookmarks(self.videos[self.index])
+                self._lbl_bm_count.config(text=f"🔖 {len(bms)}" if bms else "")
+            else:
+                self._lbl_bm_count.config(text="")
+        except Exception:
+            pass
+
+            # Tag chips
+        try:
+            for w in self._tag_frame.winfo_children():
+                w.destroy()
+            if self.annotation_service and self.videos:
+                for tag in self.annotation_service.get_tags(self.videos[self.index]):
+                    tk.Label(self._tag_frame, text=f"#{tag}",
+                             font=("Segoe UI", 7), bg="#1e1e2e", fg="#9988cc",
+                             padx=3, pady=1).pack(side=tk.LEFT, padx=1)
         except Exception:
             pass
 
