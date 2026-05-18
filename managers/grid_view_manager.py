@@ -59,6 +59,7 @@ class GridViewManager:
         self._last_anchor_path = None
         self._search_timer = None
         self._hovered_card_path = None
+        self.annotation_service = None
 
         # callbacks
         self.play_callback = None
@@ -125,6 +126,7 @@ class GridViewManager:
     def set_get_player_count_callback(self, cb):                 self.get_player_count_callback = cb
     def set_open_file_location_callback(self, cb):               self.open_file_location_callback = cb
     def set_show_properties_callback(self, cb):                  self.show_properties_callback = cb
+    def set_annotation_service(self, svc):                       self.annotation_service = svc
 
     # ─────────────────────────────────────────────────────────────────────────
     # Design tokens (new UI)
@@ -885,6 +887,27 @@ class GridViewManager:
             anchor='w', cursor="fleur"
         )
         drag_label.pack(fill=tk.X, pady=(2, 0))
+        if self.annotation_service:
+            svc = self.annotation_service
+            tags = svc.get_tags(vp)
+            rating = svc.get_rating(vp)
+            is_fav = (self.is_favourite_callback and self.is_favourite_callback(vp))
+
+            meta_frame = tk.Frame(info_frame, bg=info_bg)
+            meta_frame.pack(fill=tk.X, pady=(3, 0))
+
+            if is_fav:
+                tk.Label(meta_frame, text="★", bg=info_bg, fg=t['warn'],
+                         font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=(0, 4))
+
+            if rating > 0:
+                tk.Label(meta_frame, text="★" * rating, bg=info_bg, fg=t['warn'],
+                         font=("Segoe UI", 7)).pack(side=tk.LEFT, padx=(0, 4))
+
+            for tag in tags[:3]:  # cap at 3 to avoid overflow
+                tk.Label(meta_frame, text=tag,
+                         bg=t['accent_dim'], fg=t['accent'],
+                         font=("Segoe UI", 7), padx=4, pady=1).pack(side=tk.LEFT, padx=(0, 2))
 
         # ── Event bindings (original, but using new card) ─────────────────────
         for w in (card, thumb_container, thumb_label, name_label, info_frame):

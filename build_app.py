@@ -338,6 +338,7 @@ def select_multiple_folders_and_play():
 
             self.grid_view_manager.set_open_file_location_callback(self._context_open_location)
             self.grid_view_manager.set_show_properties_callback(self._context_show_properties)
+            self.grid_view_manager.set_annotation_service(self.annotation_service)
 
             self.settings_manager.ui.cleanup_resume_callback = lambda: self.resume_manager.service.cleanup_old_positions(
                 self.settings_manager.get_settings().auto_cleanup_days)

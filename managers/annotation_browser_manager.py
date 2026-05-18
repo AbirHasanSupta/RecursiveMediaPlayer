@@ -569,7 +569,6 @@ class AnnotationBrowserManager:
 
         self._video_listbox = None
         self._vid_selection: set = set()
-        self._hovered_idx = -1
         self._vid_rows = []
         self._vid_P = P
 
@@ -914,14 +913,6 @@ class AnnotationBrowserManager:
                 highlightbackground=P["search_hl"] if sel else P["sep"]
             )
 
-    # ── Hover highlight for listbox ───────────────────────────────────────────
-
-    def _on_list_hover(self, event):
-        idx = self._row_at_y(event.y)
-        if idx == self._hovered_idx:
-            return
-        self._hovered_idx = idx
-
     # ── Filter ────────────────────────────────────────────────────────────────
 
     def _apply_filter(self):
@@ -946,6 +937,11 @@ class AnnotationBrowserManager:
             candidates = [p for p in candidates if self.svc.get_rating(p) >= min_rating]
 
         self._filtered_videos = candidates
+        saved_order = self.svc.get_browser_order()
+
+        if saved_order and not self._selected_tags and not self._search_var.get().strip():
+            order_map = {p: i for i, p in enumerate(saved_order)}
+            self._filtered_videos.sort(key=lambda p: order_map.get(p, len(saved_order)))
         self._vid_selection.clear()
         self._rebuild_vid_rows()
 
@@ -1114,6 +1110,8 @@ class AnnotationBrowserManager:
                         self._rebuild_vid_rows()
 
                 def on_release(e):
+                    if self._dragging_index is not None:
+                        self.svc.set_browser_order(list(self._filtered_videos))
                     self._dragging_index = None
 
                 bindable = [r] + [c for c in cells_ if not isinstance(c, tk.Frame)]
@@ -1294,8 +1292,6 @@ class AnnotationBrowserManager:
             self._vid_selection = {current_index}
             self._rebuild_vid_rows()
 
-    def _on_mouse_release(self, event):
-        self._dragging_index = None
 
     def _on_video_right_click(self, event):
         if not self._win:

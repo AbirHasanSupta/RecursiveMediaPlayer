@@ -4,6 +4,7 @@ import threading
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
+import atexit
 
 def _get_app_dirs():
     import sys
@@ -54,22 +55,24 @@ class VideoAnnotationStorage:
     def load(self) -> dict:
         try:
             if not self.file.exists():
-                return {}, set()
+                return {}, set(), []
             with open(self.file, "r", encoding="utf-8") as f:
                 raw = json.load(f)
             annotations = {k: VideoAnnotations.from_dict(v) for k, v in raw.get("annotations", raw).items()}
             empty_tags = set(raw.get("empty_tags", []))
-            return annotations, empty_tags
+            browser_order = raw.get("browser_order", [])
+            return annotations, empty_tags, browser_order
         except Exception as e:
             print(f"[Annotations] load error: {e}")
-            return {}, set()
+            return {}, set(), []
 
-    def save(self, data: Dict[str, VideoAnnotations], empty_tags: set) -> bool:
+    def save(self, data, empty_tags, browser_order=None) -> bool:
         try:
             with open(self.file, "w", encoding="utf-8") as f:
                 json.dump({
                     "annotations": {k: v.to_dict() for k, v in data.items()},
                     "empty_tags": sorted(empty_tags),
+                    "browser_order": browser_order or [],
                 }, f, indent=2, ensure_ascii=False)
             return True
         except Exception as e:
@@ -82,11 +85,10 @@ class VideoAnnotationService:
         self.storage = VideoAnnotationStorage()
         self._data: Dict[str, VideoAnnotations] = {}
         self._lock = threading.RLock()
-        self._dirty = False
         self._save_timer: Optional[threading.Timer] = None
-        self._data, self._empty_tags = self.storage.load()
-        self._empty_tags: set = set()
+        self._data, self._empty_tags, self._browser_order = self.storage.load()
         self._change_listeners: list = []
+        atexit.register(self._flush)
 
     def subscribe(self, callback):
         """callback() called on any data mutation."""
@@ -122,7 +124,7 @@ class VideoAnnotationService:
 
     def _flush(self):
         with self._lock:
-            self.storage.save(self._data, self._empty_tags)
+            self.storage.save(self._data, self._empty_tags, self._browser_order)
 
     # ── Ratings ─────────────────────────────────────────────────────────────
 
@@ -233,3 +235,12 @@ class VideoAnnotationService:
     def filter_by_tag(self, paths: List[str], tag: str) -> List[str]:
         with self._lock:
             return [p for p in paths if tag in self._data.get(self._key(p), VideoAnnotations(p)).tags]
+
+    def set_browser_order(self, ordered_paths: list):
+        with self._lock:
+            self._browser_order = list(ordered_paths)
+            self._flush()
+
+    def get_browser_order(self) -> list:
+        with self._lock:
+            return list(self._browser_order)
