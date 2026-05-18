@@ -180,7 +180,7 @@ class PlaylistUI:
         self.playlist_window = tk.Toplevel(self.parent)
         self.playlist_window.withdraw()
         self.playlist_window.title("Playlists")
-        self.playlist_window.geometry(_responsive_geometry(self.parent, 1020, 640))
+        self.playlist_window.geometry(_responsive_geometry(self.parent, 1600, 900))
         self.playlist_window.configure(bg=self.theme_provider.bg_color)
 
         self._setup_playlist_manager_ui()

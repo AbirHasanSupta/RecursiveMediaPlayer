@@ -252,7 +252,7 @@ class AnnotationBrowserManager:
         win = tk.Toplevel(self.root)
         win.withdraw()
         win.title("Tags & Ratings")
-        win.geometry(_responsive_geometry(self.root, 1100, 700))
+        win.geometry(_responsive_geometry(self.root, 1600, 900))
         win.configure(bg=P["panel"])
         win.minsize(820, 520)
         win.protocol("WM_DELETE_WINDOW", win.destroy)

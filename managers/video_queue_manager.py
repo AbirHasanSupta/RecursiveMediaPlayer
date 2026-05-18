@@ -346,7 +346,7 @@ class QueueUI:
         self.queue_window = tk.Toplevel(self.parent)
         self.queue_window.withdraw()
         self.queue_window.title("Playback Queue")
-        self.queue_window.geometry(_responsive_geometry(self.parent, 820, 620))
+        self.queue_window.geometry(_responsive_geometry(self.parent, 1600, 900))
         self.queue_window.configure(bg=self.theme_provider.bg_color)
 
         self._setup_queue_ui()

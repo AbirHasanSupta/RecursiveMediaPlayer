@@ -246,7 +246,7 @@ class FavoritesUI:
         self.favorites_window = tk.Toplevel(self.parent)
         self.favorites_window.withdraw()
         self.favorites_window.title("Favourites")
-        self.favorites_window.geometry(_responsive_geometry(self.parent, 820, 620))
+        self.favorites_window.geometry(_responsive_geometry(self.parent, 1600, 900))
         self.favorites_window.configure(bg=self.theme_provider.bg_color)
 
         self.current_directory = selected_directory
