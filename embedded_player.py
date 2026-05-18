@@ -1152,9 +1152,9 @@ class EmbeddedPlayer:
                 is_set = tag in cur_tags
                 menu.add_command(
                     label=("✓  " if is_set else "      ") + tag,
-                    command=lambda t=tag, s=is_set: (
-                        self.annotation_service.remove_tag(path, t) if s
-                        else self.annotation_service.add_tag(path, t)
+                    command=lambda t=tag, s=is_set, p=path: (
+                        self.annotation_service.remove_tag(p, t) if s
+                        else self.annotation_service.add_tag(p, t)
                     )
                 )
         try:
@@ -1167,7 +1167,7 @@ class EmbeddedPlayer:
     def _prompt_add_tag(self, path: str):
         dlg = tk.Toplevel(self._win)
         dlg.title("Add Tag")
-        dlg.geometry("300x100")
+        dlg.geometry("340x120")
         dlg.configure(bg="#111111")
         dlg.transient(self._win)
         dlg.grab_set()
@@ -1189,6 +1189,12 @@ class EmbeddedPlayer:
                 if self.logger:
                     self.logger(f"Tag added: '{tag}'")
             dlg.destroy()
+
+        btn_frame = tk.Frame(dlg, bg="#111111")
+        btn_frame.pack(pady=(10, 0))
+        tk.Button(dlg, text="Save", command=_save,
+                  bg="#e50914", fg="white", relief=tk.FLAT,
+                  font=("Segoe UI", 9), padx=10, pady=4).pack(pady=8)
 
         entry.bind("<Return>", _save)
         entry.bind("<Escape>", lambda e: dlg.destroy())

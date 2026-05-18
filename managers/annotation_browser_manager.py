@@ -159,6 +159,7 @@ class AnnotationBrowserManager:
         self.grid_view_manager = grid_view_manager
 
     # ── Window ────────────────────────────────────────────────────────────────
+
     def _show_add_tag_menu(self, event):
         tp = self.tp
         P = _p(tp.dark_mode)
@@ -168,8 +169,12 @@ class AnnotationBrowserManager:
                        activebackground=P["tag_sel_bg"],
                        activeforeground=P["tag_sel_fg"],
                        relief="flat", bd=0, font=("Segoe UI", 9))
-        menu.add_command(label="✏  Add new tag to selected videos",
-                         command=self._prompt_add_tag_to_selection)
+        if self._vid_selection:
+            menu.add_command(label="✏  Add new tag to selected videos",
+                             command=self._prompt_add_tag_to_selection)
+        else:
+            menu.add_command(label="✏  Add new tag",
+                             command=self._prompt_create_empty_tag)
         try:
             menu.tk_popup(event.widget.winfo_rootx(),
                           event.widget.winfo_rooty() + event.widget.winfo_height())
@@ -179,7 +184,7 @@ class AnnotationBrowserManager:
     def _prompt_add_tag_to_selection(self):
         tp = self.tp
         P = _p(tp.dark_mode)
-        if not self._vid_selection and not self._filtered_videos:
+        if not self._vid_selection:
             return
         dlg = tk.Toplevel(self._win)
         dlg.withdraw()
@@ -190,9 +195,8 @@ class AnnotationBrowserManager:
         dlg.grab_set()
         apply_icon(dlg)
 
-        targets = ([self._filtered_videos[i] for i in sorted(self._vid_selection)
-                    if i < len(self._filtered_videos)]
-                   if self._vid_selection else list(self._filtered_videos))
+        targets = [self._filtered_videos[i] for i in sorted(self._vid_selection)
+                   if i < len(self._filtered_videos)]
 
         tk.Label(dlg, text=f"Add tag to {len(targets)} video{'s' if len(targets) != 1 else ''}:",
                  font=("Segoe UI", 10), bg=tp.bg_color, fg=tp.text_color
@@ -245,6 +249,62 @@ class AnnotationBrowserManager:
         dlg.geometry(f"+{x}+{y}")
         dlg.deiconify()
 
+    def _prompt_create_empty_tag(self):
+        tp = self.tp
+        P = _p(tp.dark_mode)
+        dlg = tk.Toplevel(self._win)
+        dlg.withdraw()
+        dlg.title("New Tag")
+        dlg.configure(bg=tp.bg_color)
+        dlg.resizable(False, False)
+        dlg.transient(self._win)
+        dlg.grab_set()
+        apply_icon(dlg)
+
+        tk.Label(dlg, text="Create a new tag (no videos assigned):",
+                 font=("Segoe UI", 10), bg=tp.bg_color, fg=tp.text_color
+                 ).pack(padx=20, pady=(18, 6), anchor="w")
+
+        var = tk.StringVar()
+        entry_frame = tk.Frame(dlg, bg=P["search_bg"],
+                               highlightbackground=P["sep"], highlightthickness=1)
+        entry_frame.pack(fill=tk.X, padx=20, pady=(0, 4))
+        entry = tk.Entry(entry_frame, textvariable=var, font=("Segoe UI", 10),
+                         bg=P["search_bg"], fg=tp.entry_fg,
+                         insertbackground=tp.entry_fg, relief=tk.FLAT, bd=0)
+        entry.pack(fill=tk.X, ipady=6, padx=8)
+        entry.focus_set()
+
+        err_lbl = tk.Label(dlg, text="", font=("Segoe UI", 8),
+                           bg=tp.bg_color, fg="#e17055")
+        err_lbl.pack(anchor="w", padx=20)
+
+        btns = tk.Frame(dlg, bg=tp.bg_color)
+        btns.pack(anchor="e", padx=20, pady=(4, 16))
+
+        def do_save():
+            tag = var.get().strip().lower()
+            if not tag:
+                err_lbl.config(text="Tag name cannot be empty.")
+                return
+            if tag in self.svc.get_all_tags():
+                err_lbl.config(text=f'"{tag}" already exists.')
+                return
+            self.svc.create_empty_tag(tag)
+            dlg.destroy()
+            self._rebuild_tags()
+
+        tp.create_button(btns, "Create", do_save, "primary", "md").pack(side=tk.RIGHT, padx=(8, 0))
+        tp.create_button(btns, "Cancel", dlg.destroy, "secondary", "md").pack(side=tk.RIGHT)
+        entry.bind("<Return>", lambda e: do_save())
+        entry.bind("<Escape>", lambda e: dlg.destroy())
+
+        dlg.update_idletasks()
+        x = self._win.winfo_x() + (self._win.winfo_width() - dlg.winfo_reqwidth()) // 2
+        y = self._win.winfo_y() + (self._win.winfo_height() - dlg.winfo_reqheight()) // 2
+        dlg.geometry(f"+{x}+{y}")
+        dlg.deiconify()
+
     def _build_window(self):
         tp = self.tp
         P = _p(tp.dark_mode)
@@ -270,7 +330,6 @@ class AnnotationBrowserManager:
         h_inner = tk.Frame(header, bg=P["header_bg"])
         h_inner.pack(fill=tk.BOTH, expand=True, padx=20, pady=0)
 
-        # Icon + title
         title_box = tk.Frame(h_inner, bg=P["header_bg"])
         title_box.pack(side=tk.LEFT, fill=tk.Y)
 
@@ -282,7 +341,6 @@ class AnnotationBrowserManager:
                  font=("Segoe UI Semibold", 15) if tp.dark_mode else ("Segoe UI", 15, "bold"),
                  bg=P["header_bg"], fg=tp.text_color).pack(side=tk.LEFT, pady=14)
 
-        # Header actions
         if self.play_callback:
             btn_frame = tk.Frame(h_inner, bg=P["header_bg"])
             btn_frame.pack(side=tk.RIGHT, fill=tk.Y, pady=10)
@@ -291,7 +349,6 @@ class AnnotationBrowserManager:
             self._play_btn.pack(side=tk.RIGHT)
             self._play_btn_P = P
 
-        # Header bottom border
         tk.Frame(win, bg=P["sep"], height=1).pack(fill=tk.X)
 
         # ── Filter bar ────────────────────────────────────────────────────────
@@ -301,7 +358,6 @@ class AnnotationBrowserManager:
         fb = tk.Frame(fbar, bg=P["sidebar"])
         fb.pack(fill=tk.X, padx=18, pady=10)
 
-        # Search box
         search_wrap = tk.Frame(fb, bg=P["sidebar"])
         search_wrap.pack(side=tk.LEFT, padx=(0, 20))
 
@@ -328,7 +384,6 @@ class AnnotationBrowserManager:
         search_e.bind("<FocusOut>",
                       lambda e: search_entry_frame.config(highlightbackground=P["sep"]))
 
-        # Min rating
         rating_wrap = tk.Frame(fb, bg=P["sidebar"])
         rating_wrap.pack(side=tk.LEFT, padx=(0, 20))
 
@@ -360,10 +415,8 @@ class AnnotationBrowserManager:
 
         self._update_rb_visuals(P)
 
-        # Divider
         tk.Frame(fb, bg=P["sep"], width=1).pack(side=tk.LEFT, fill=tk.Y, padx=14, pady=2)
 
-        # Action buttons
         action_wrap = tk.Frame(fb, bg=P["sidebar"])
         action_wrap.pack(side=tk.LEFT)
         tk.Label(action_wrap, text=" ", font=("Segoe UI", 7),
@@ -373,7 +426,6 @@ class AnnotationBrowserManager:
         self._make_flat_btn(btn_wrap, "✕  Clear", self._clear_filters, P).pack(side=tk.LEFT, padx=(0, 6))
         self._make_flat_btn(btn_wrap, "⟳  Refresh", self.refresh, P).pack(side=tk.LEFT)
 
-        # Active filter label
         filter_lbl_wrap = tk.Frame(fb, bg=P["sidebar"])
         filter_lbl_wrap.pack(side=tk.RIGHT, fill=tk.Y)
         tk.Label(filter_lbl_wrap, text=" ", font=("Segoe UI", 7),
@@ -438,14 +490,12 @@ class AnnotationBrowserManager:
             "<MouseWheel>",
             lambda e: self._tag_canvas.yview_scroll(-1 if e.delta > 0 else 1, "units"))
 
-        # sidebar separator
         tk.Frame(body, bg=P["sep"], width=1).pack(side=tk.LEFT, fill=tk.Y)
 
         # ── RIGHT content ──────────────────────────────────────────────────────
         right = tk.Frame(body, bg=P["panel"])
         right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Count + filter info row
         info_bar = tk.Frame(right, bg=P["panel"])
         info_bar.pack(fill=tk.X, padx=18, pady=(12, 6))
 
@@ -463,11 +513,9 @@ class AnnotationBrowserManager:
                                             bg=P["panel"], fg=P["gold"])
         self._active_filter_lbl2.pack(side=tk.LEFT, padx=10)
 
-        # Double-click hint
         tk.Label(info_bar, text="drag to reorder  •  double-click to play",
                  font=("Segoe UI", 8), bg=P["panel"], fg=tp.muted_fg).pack(side=tk.RIGHT)
 
-        # Video list
         list_outer = tk.Frame(right, bg=P["panel"],
                               highlightbackground=P["sep"], highlightthickness=1)
         list_outer.pack(fill=tk.BOTH, expand=True, padx=18, pady=(0, 12))
@@ -637,7 +685,6 @@ class AnnotationBrowserManager:
         if hasattr(self, '_tag_count_lbl') and self._tag_count_lbl:
             self._tag_count_lbl.config(text=f"{len(visible_tags)}")
 
-        # "All" entry
         is_all = not self._selected_tags
         all_row = tk.Frame(self._tag_frame_inner,
                            bg=P["tag_sel_bg"] if is_all else P["sidebar"],
@@ -762,6 +809,7 @@ class AnnotationBrowserManager:
             for ann in self.svc._data.values():
                 if tag in ann.tags:
                     ann.tags.remove(tag)
+            self.svc._empty_tags.discard(tag)
             self.svc._schedule_save()
         self._selected_tags.discard(tag)
         self._rebuild_tags()
@@ -816,6 +864,9 @@ class AnnotationBrowserManager:
                 for ann in self.svc._data.values():
                     if old_tag in ann.tags:
                         ann.tags = [new_tag if t == old_tag else t for t in ann.tags]
+                if old_tag in self.svc._empty_tags:
+                    self.svc._empty_tags.discard(old_tag)
+                    self.svc._empty_tags.add(new_tag)
                 self.svc._schedule_save()
             if old_tag in self._selected_tags:
                 self._selected_tags.discard(old_tag)
@@ -927,15 +978,14 @@ class AnnotationBrowserManager:
     def _rebuild_vid_rows(self):
         if not hasattr(self, '_vid_inner') or not self._vid_inner:
             return
-        tp   = self.tp
-        P    = _p(tp.dark_mode)
+        tp = self.tp
+        P = _p(tp.dark_mode)
 
         for w in self._vid_inner.winfo_children():
             w.destroy()
         self._vid_rows = []
 
         col_w = self._col_weights
-        total = 1.0
 
         for i, path in enumerate(self._filtered_videos):
             rating  = self.svc.get_rating(path)
@@ -944,7 +994,6 @@ class AnnotationBrowserManager:
             name    = os.path.basename(path)
             stars   = "★" * rating if rating else ""
             bm_text = f"🔖 {bm_cnt}" if bm_cnt else "—"
-            tag_text = "  ".join(tags[:3]) + (" +…" if len(tags) > 3 else "") if tags else "—"
             is_sel  = i in self._vid_selection
             row_bg  = P["accent"] if is_sel else (P["item_alt"] if i % 2 else P["panel"])
             fg      = "white" if is_sel else tp.text_color
@@ -955,6 +1004,33 @@ class AnnotationBrowserManager:
             row.pack(fill=tk.X)
             row.pack_propagate(False)
 
+            tag_cell = tk.Frame(row, bg=row_bg)
+
+            def _build_tag_cell(tc, path_, tags_, row_bg_, muted_, P_):
+                if not tags_:
+                    tk.Label(tc, text="—", font=("Segoe UI", 9),
+                             bg=row_bg_, fg=muted_, anchor="w").pack(side=tk.LEFT, padx=4)
+                    return
+                for t in tags_[:4]:
+                    pill = tk.Frame(tc, bg=P_["pill_bg"], padx=2, pady=1)
+                    pill.pack(side=tk.LEFT, padx=2, pady=4)
+                    tk.Label(pill, text=t, font=("Segoe UI", 8),
+                             bg=P_["pill_bg"], fg=P_["pill_fg"]).pack(side=tk.LEFT, padx=(4, 1))
+                    x_btn = tk.Label(pill, text="×", font=("Segoe UI", 9, "bold"),
+                                     bg=P_["pill_bg"], fg=P_["pill_fg"],
+                                     cursor="hand2", padx=3)
+                    x_btn.pack(side=tk.LEFT)
+                    x_btn.bind("<Button-1>", lambda e, p=path_, tg=t: (
+                        e.widget.winfo_toplevel().after(0, lambda: self._remove_tag_from_video(p, tg))
+                    ) or "break")
+                    x_btn.bind("<Enter>", lambda e, b=x_btn: b.config(fg="#e17055"))
+                    x_btn.bind("<Leave>", lambda e, b=x_btn, P_=P_: b.config(fg=P_["pill_fg"]))
+                if len(tags_) > 4:
+                    tk.Label(tc, text=f"+{len(tags_)-4}", font=("Segoe UI", 8),
+                             bg=row_bg_, fg=muted_).pack(side=tk.LEFT, padx=2)
+
+            _build_tag_cell(tag_cell, path, tags, row_bg, muted, P)
+
             cells = [
                 tk.Label(row, text=f"  {name}", font=("Segoe UI", 10), bg=row_bg, fg=fg,
                          anchor="w"),
@@ -962,8 +1038,7 @@ class AnnotationBrowserManager:
                          anchor="w"),
                 tk.Label(row, text=bm_text, font=("Segoe UI", 10), bg=row_bg, fg=muted,
                          anchor="w"),
-                tk.Label(row, text=tag_text, font=("Segoe UI", 9), bg=row_bg, fg=muted,
-                         anchor="w"),
+                tag_cell,
             ]
             for j, cell in enumerate(cells):
                 cell.place(relx=sum(col_w[:j]), rely=0, relwidth=col_w[j], relheight=1.0)
@@ -998,10 +1073,8 @@ class AnnotationBrowserManager:
 
                 def on_right(e):
                     if idx_ in self._vid_selection:
-                        # selected → context menu
                         self._on_video_right_click(e)
                     else:
-                        # unselected → thumbnail preview
                         if self.video_preview_manager:
                             path_ = self._filtered_videos[idx_]
                             if os.path.isfile(path_):
@@ -1013,18 +1086,22 @@ class AnnotationBrowserManager:
                 def on_enter(e):
                     if idx_ not in self._vid_selection:
                         r.config(bg=P["item_hover"])
-                        for c in cells_: c.config(bg=P["item_hover"])
+                        for c in cells_:
+                            if isinstance(c, tk.Label):
+                                c.config(bg=P["item_hover"])
+                            else:
+                                c.config(bg=P["item_hover"])
 
                 def on_leave(e):
                     if idx_ not in self._vid_selection:
                         bg_ = P["item_alt"] if idx_ % 2 else P["panel"]
                         r.config(bg=bg_)
-                        for c in cells_: c.config(bg=bg_)
+                        for c in cells_:
+                            c.config(bg=bg_)
 
                 def on_drag(e):
                     if self._dragging_index is None:
                         return
-                    # r.winfo_y() is position inside _vid_inner (canvas coords)
                     canvas_y = r.winfo_y() + e.y
                     ci = max(0, int(canvas_y // self._row_height))
                     ci = min(ci, len(self._filtered_videos) - 1)
@@ -1038,7 +1115,8 @@ class AnnotationBrowserManager:
                 def on_release(e):
                     self._dragging_index = None
 
-                for w in [r] + cells_:
+                bindable = [r] + [c for c in cells_ if not isinstance(c, tk.Frame)]
+                for w in bindable:
                     w.bind("<Button-1>",        on_click)
                     w.bind("<Double-Button-1>", on_dbl)
                     w.bind("<Button-3>",        on_right)
@@ -1055,23 +1133,41 @@ class AnnotationBrowserManager:
         self._vid_inner.update_idletasks()
         self._vid_canvas.configure(scrollregion=self._vid_canvas.bbox("all"))
 
+    def _remove_tag_from_video(self, path, tag):
+        self.svc.remove_tag(path, tag)
+        self._rebuild_tags()
+        self._apply_filter()
+
     def _refresh_row_colors(self):
         tp = self.tp
-        P  = _p(tp.dark_mode)
+        P = _p(tp.dark_mode)
         for i, row in enumerate(self._vid_rows):
             is_sel = i in self._vid_selection
-            bg_    = P["accent"] if is_sel else (P["item_alt"] if i % 2 else P["panel"])
-            fg_    = "white" if is_sel else tp.text_color
+            bg_ = P["accent"] if is_sel else (P["item_alt"] if i % 2 else P["panel"])
+            fg_ = "white" if is_sel else tp.text_color
             muted_ = "white" if is_sel else tp.muted_fg
-            gold_  = "white" if is_sel else P["star_on"]
+            gold_ = "white" if is_sel else P["star_on"]
             row.config(bg=bg_)
-            for j, cell in enumerate(row.winfo_children()):
-                if j == 1:
-                    cell.config(bg=bg_, fg=gold_)
-                elif j in (2, 3):
-                    cell.config(bg=bg_, fg=muted_)
+            children = row.winfo_children()
+            for j, cell in enumerate(children):
+                if isinstance(cell, tk.Frame):
+                    cell.config(bg=bg_)
+                    for sub in cell.winfo_children():
+                        try:
+                            sub.config(bg=bg_)
+                        except Exception:
+                            pass
                 else:
-                    cell.config(bg=bg_, fg=fg_)
+                    place_info = cell.place_info()
+                    relx = float(place_info.get("relx", 0))
+                    if relx < 0.05:  # col 0 — filename
+                        cell.config(bg=bg_, fg=fg_)
+                    elif relx < 0.55:  # col 1 — stars
+                        cell.config(bg=bg_, fg=gold_)
+                    elif relx < 0.70:  # col 2 — muted path
+                        cell.config(bg=bg_, fg=muted_)
+                    else:  # col 3+
+                        cell.config(bg=bg_, fg=fg_)
 
     def _on_search_change(self):
         self._rebuild_tags()
@@ -1099,47 +1195,47 @@ class AnnotationBrowserManager:
     def _show_detail(self, path: str):
         tp = self.tp
         P = _p(tp.dark_mode)
-
-        for w in self._bookmark_frame.winfo_children():
-            w.destroy()
-
-        rating    = self.svc.get_rating(path)
-        tags      = self.svc.get_tags(path)
+        rating = self.svc.get_rating(path)
+        tags = self.svc.get_tags(path)
         bookmarks = self.svc.get_bookmarks(path)
-        stars     = ("★" * rating) if rating else ""
-        tag_str   = "  ·  " + ",  ".join(tags) if tags else ""
-
-        self._detail_stars_lbl.config(
-            text=stars if stars else "☆",
-            fg=P["gold"] if stars else tp.muted_fg)
-
         name = os.path.basename(path)
-        self._detail_lbl.config(
-            text=f"  {name}{tag_str}",
-            fg=tp.text_color)
 
-        self._detail_path_lbl.config(
-            text=path,
-            fg=tp.muted_fg)
+        stars_text = "★" * rating if rating else ""
+        if self._detail_stars_lbl:
+            self._detail_stars_lbl.config(text=stars_text)
 
-        if bookmarks:
-            tk.Label(self._bookmark_frame, text="BOOKMARKS",
-                     font=("Segoe UI", 7, "bold"),
-                     bg=P["detail_bg"], fg=tp.muted_fg
-                     ).pack(side=tk.LEFT, padx=(2, 10), pady=2)
-            for bm in bookmarks[:14]:
-                lbl = bm.get("label", _fmt_ms(bm["ms"]))
-                pill_outer = tk.Frame(self._bookmark_frame,
-                                      bg=P["bm_border"],
-                                      padx=1, pady=1)
-                pill_outer.pack(side=tk.LEFT, padx=3, pady=2)
-                pill = tk.Label(pill_outer, text=f"🔖 {lbl}",
-                                font=("Segoe UI", 8),
-                                bg=P["bm_bg"], fg=P["bm_fg"],
-                                padx=8, pady=3, cursor="hand2")
-                pill.pack()
-                pill.bind("<Enter>", lambda e, p=pill: p.config(bg=P["tag_sel_bg"]))
-                pill.bind("<Leave>", lambda e, p=pill: p.config(bg=P["bm_bg"]))
+        tag_str = "  ".join(f"#{t}" for t in tags) if tags else ""
+        detail_text = f"  {name}"
+        if tag_str:
+            detail_text += f"    {tag_str}"
+        if self._detail_lbl:
+            self._detail_lbl.config(text=detail_text, fg=tp.text_color)
+
+        if self._detail_path_lbl:
+            self._detail_path_lbl.config(text=path)
+
+        if self._bookmark_frame:
+            for w in self._bookmark_frame.winfo_children():
+                w.destroy()
+
+            if bookmarks:
+                tk.Label(self._bookmark_frame, text="BOOKMARKS",
+                         font=("Segoe UI", 7, "bold"),
+                         bg=P["detail_bg"], fg=tp.muted_fg
+                         ).pack(side=tk.LEFT, padx=(2, 10), pady=2)
+                for bm in bookmarks[:14]:
+                    lbl = bm.get("label", _fmt_ms(bm["ms"]))
+                    pill_outer = tk.Frame(self._bookmark_frame,
+                                          bg=P["bm_border"],
+                                          padx=1, pady=1)
+                    pill_outer.pack(side=tk.LEFT, padx=3, pady=2)
+                    pill = tk.Label(pill_outer, text=f"🔖 {lbl}",
+                                    font=("Segoe UI", 8),
+                                    bg=P["bm_bg"], fg=P["bm_fg"],
+                                    padx=8, pady=3, cursor="hand2")
+                    pill.pack()
+                    pill.bind("<Enter>", lambda e, p=pill: p.config(bg=P["tag_sel_bg"]))
+                    pill.bind("<Leave>", lambda e, p=pill: p.config(bg=P["bm_bg"]))
 
     def _clear_detail(self):
         tp = self.tp
@@ -1310,7 +1406,7 @@ class AnnotationBrowserManager:
             return
         P = self._play_btn_P
         if self._vid_selection:
-            self._play_btn.config(text="▶  Play Selected", bg=P["accent"], fg="white")
+            self._play_btn.config(text="▶  Play Selected", bg=P["gold"], fg="#1a1a1a")
         else:
             self._play_btn.config(text="▶  Play Filtered", bg=P["gold"], fg="#1a1a1a")
 

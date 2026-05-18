@@ -51,22 +51,26 @@ class VideoAnnotationStorage:
         settings_dir.mkdir(parents=True, exist_ok=True)
         self.file = settings_dir / "video_annotations.json"
 
-    def load(self) -> Dict[str, VideoAnnotations]:
+    def load(self) -> dict:
         try:
             if not self.file.exists():
-                return {}
+                return {}, set()
             with open(self.file, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-            return {k: VideoAnnotations.from_dict(v) for k, v in raw.items()}
+            annotations = {k: VideoAnnotations.from_dict(v) for k, v in raw.get("annotations", raw).items()}
+            empty_tags = set(raw.get("empty_tags", []))
+            return annotations, empty_tags
         except Exception as e:
             print(f"[Annotations] load error: {e}")
-            return {}
+            return {}, set()
 
-    def save(self, data: Dict[str, VideoAnnotations]) -> bool:
+    def save(self, data: Dict[str, VideoAnnotations], empty_tags: set) -> bool:
         try:
             with open(self.file, "w", encoding="utf-8") as f:
-                json.dump({k: v.to_dict() for k, v in data.items()},
-                          f, indent=2, ensure_ascii=False)
+                json.dump({
+                    "annotations": {k: v.to_dict() for k, v in data.items()},
+                    "empty_tags": sorted(empty_tags),
+                }, f, indent=2, ensure_ascii=False)
             return True
         except Exception as e:
             print(f"[Annotations] save error: {e}")
@@ -80,7 +84,8 @@ class VideoAnnotationService:
         self._lock = threading.RLock()
         self._dirty = False
         self._save_timer: Optional[threading.Timer] = None
-        self._data = self.storage.load()
+        self._data, self._empty_tags = self.storage.load()
+        self._empty_tags: set = set()
         self._change_listeners: list = []
 
     def subscribe(self, callback):
@@ -117,7 +122,7 @@ class VideoAnnotationService:
 
     def _flush(self):
         with self._lock:
-            self.storage.save(self._data)
+            self.storage.save(self._data, self._empty_tags)
 
     # ── Ratings ─────────────────────────────────────────────────────────────
 
@@ -142,6 +147,7 @@ class VideoAnnotationService:
             ann = self._get_or_create(path)
             if tag not in ann.tags:
                 ann.tags.append(tag)
+                self._empty_tags.discard(tag)
                 self._schedule_save()
         self._notify()
 
@@ -150,6 +156,9 @@ class VideoAnnotationService:
             ann = self._data.get(self._key(path))
             if ann and tag in ann.tags:
                 ann.tags.remove(tag)
+                still_used = any(tag in v.tags for v in self._data.values())
+                if not still_used:
+                    self._empty_tags.add(tag)
                 self._schedule_save()
         self._notify()
 
@@ -160,10 +169,20 @@ class VideoAnnotationService:
 
     def get_all_tags(self) -> List[str]:
         with self._lock:
-            tags = set()
+            tags = set(self._empty_tags)
             for ann in self._data.values():
                 tags.update(ann.tags)
             return sorted(tags)
+
+    def create_empty_tag(self, tag: str):
+        tag = tag.strip().lower()
+        if not tag:
+            return
+        with self._lock:
+            if tag not in self._empty_tags:
+                self._empty_tags.add(tag)
+                self._schedule_save()
+        self._notify()
 
     def get_videos_with_tag(self, tag: str) -> List[str]:
         with self._lock:
