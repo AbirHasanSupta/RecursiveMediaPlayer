@@ -266,6 +266,7 @@ def select_multiple_folders_and_play():
             self.favorites_manager.set_on_removed_callback(self._refresh_tree_after_fav_change)
 
             self.annotation_service = VideoAnnotationService()
+            self.annotation_service.subscribe(self._on_any_annotation_changed)
 
             self.annotation_browser = AnnotationBrowserManager(
                 root=self.root,
@@ -771,7 +772,7 @@ def select_multiple_folders_and_play():
                 background=tree_bg,
                 foreground=tree_fg,
                 fieldbackground=tree_bg,
-                rowheight=22,
+                rowheight=26,
                 font=self.tree_font,
                 borderwidth=0,
                 relief="flat",
@@ -801,8 +802,10 @@ def select_multiple_folders_and_play():
             play_green  = "#1a7a3a" if not is_dark else "#4CAF50"
             play_bg     = "#d4edda" if not is_dark else "#1b3a24"
             folder_blue = "#1a5fa8" if not is_dark else "#4A9EFF"
-            vid_purple  = "#6c3f9e" if not is_dark else "#C39BD3"
             muted       = "#999999" if not is_dark else "#666666"
+            rating_gold = "#c8a000" if not is_dark else "#f5c518"
+            tag_blue = "#1a6dc8" if not is_dark else "#4A9EFF"
+            bm_teal = "#1a7a6e" if not is_dark else "#4fd1c5"
 
             self.exclusion_tree.tag_configure("folder",          foreground=folder_blue, font=self.tree_font_bold)
             self.exclusion_tree.tag_configure("folder_excl",     foreground=excl_red,   font=self.tree_font_bold)
@@ -813,11 +816,9 @@ def select_multiple_folders_and_play():
             self.exclusion_tree.tag_configure("now_playing",     foreground=play_green, font=self.tree_font_bold,
                                               background=play_bg)
             self.exclusion_tree.tag_configure("placeholder",     foreground=muted,      font=self.tree_font_italic)
-            if hasattr(self, '_tree_header_frame'):
-                self._tree_header_frame.configure(bg=heading_bg)
-                self._tree_header_name_lbl.configure(bg=heading_bg, fg=heading_fg)
-                self._tree_header_size_lbl.configure(bg=heading_bg, fg=heading_fg)
-
+            self.exclusion_tree.tag_configure("ann_rating", foreground=rating_gold)
+            self.exclusion_tree.tag_configure("ann_tag", foreground=tag_blue)
+            self.exclusion_tree.tag_configure("ann_bookmark", foreground=bm_teal)
 
         def setup_exclusion_section(self):
             self.exclusion_section = tk.Frame(self.content_frame, bg=self.bg_color)
@@ -873,47 +874,52 @@ def select_multiple_folders_and_play():
             )
             exclusion_container.pack(fill=tk.BOTH, expand=True)
 
+            # Scrollbars
             self.exclusion_scrollbar = ttk.Scrollbar(exclusion_container, orient=tk.VERTICAL)
             self.exclusion_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
+            self._tree_xscroll = ttk.Scrollbar(exclusion_container, orient=tk.HORIZONTAL)
+            self._tree_xscroll.pack(side=tk.BOTTOM, fill=tk.X)
+
+            # Treeview
             self.exclusion_tree = ttk.Treeview(
                 exclusion_container,
                 style="ExclusionTree.Treeview",
                 selectmode="extended",
                 show="tree headings",
-                columns=("size",),
+                columns=("size", "rating", "tags", "bookmarks"),
                 yscrollcommand=self.exclusion_scrollbar.set,
+                xscrollcommand=self._tree_xscroll.set
             )
 
             self.exclusion_scrollbar.config(command=self.exclusion_tree.yview)
+            self._tree_xscroll.config(command=self.exclusion_tree.xview)
 
-            self.exclusion_tree.column("#0", width=420, minwidth=200, stretch=True, anchor="w")
-            self.exclusion_tree.column("size", width=90, minwidth=70, stretch=False, anchor="e")
-            self.exclusion_tree["show"] = "tree"
+            # Column configuration
+            self.exclusion_tree.column("#0", width=400, minwidth=200, stretch=True, anchor="w")
+            self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
+            self.exclusion_tree.column("rating", width=100, minwidth=100, stretch=False, anchor="center")
+            self.exclusion_tree.column("tags", width=180, minwidth=120, stretch=False, anchor="w")
+            self.exclusion_tree.column("bookmarks", width=80, minwidth=80, stretch=False, anchor="center")
 
-            self._tree_header_frame = tk.Frame(exclusion_container, bg=self.bg_color)
-            self._tree_header_frame.pack(side=tk.TOP, fill=tk.X)
-            self._tree_header_name_lbl = tk.Label(
-                self._tree_header_frame, text="Name", anchor="w",
-                font=self.small_font, bg=self.bg_color, fg=self.text_color, padx=4, pady=2
-            )
-            self._tree_header_name_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
-            self._tree_header_size_lbl = tk.Label(
-                self._tree_header_frame, text="Size", anchor="w", width=10,
-                font=self.small_font, bg=self.bg_color, fg=self.text_color, padx=4, pady=2
-            )
-            self._tree_header_size_lbl.pack(side=tk.RIGHT)
+            # Headings
+            self.exclusion_tree.heading("#0", text="Name", anchor="w")
+            self.exclusion_tree.heading("size", text="Size", anchor="e")
+            self.exclusion_tree.heading("rating", text="Rating", anchor="center")
+            self.exclusion_tree.heading("tags", text="Tags", anchor="w")
+            self.exclusion_tree.heading("bookmarks", text="Bookmarks", anchor="center")
+
+            # Tag for rating stars (yellow)
+            self.exclusion_tree.tag_configure("rating_star", foreground="#f5c518")
+
             self.exclusion_tree.pack(fill=tk.BOTH, expand=True)
-
-            # Configure tag colours for current theme
-            self._configure_tree_style()
 
             # Bind events
             self._selection_anchor = None
-            self.exclusion_tree.bind("<Button-1>",        self._on_left_click)
+            self.exclusion_tree.bind("<Button-1>", self._on_left_click)
             self.exclusion_tree.bind("<Double-Button-1>", self._on_double_click)
-            self.exclusion_tree.bind("<Button-3>",        self._show_context_menu)
-            self.exclusion_tree.bind("<<TreeviewOpen>>",  self._on_tree_open)
+            self.exclusion_tree.bind("<Button-3>", self._show_context_menu)
+            self.exclusion_tree.bind("<<TreeviewOpen>>", self._on_tree_open)
             self.exclusion_tree.bind("<<TreeviewClose>>", self._on_tree_close)
             self.exclusion_tree.bind("<Control-a>",
                                      lambda e: (self.exclusion_tree.selection_set(self._tree_get_all_iids()), "break")[
@@ -931,9 +937,9 @@ def select_multiple_folders_and_play():
             checkboxes_row = tk.Frame(self.exclusion_buttons_frame, bg=self.bg_color)
             checkboxes_row.pack(fill=tk.X, pady=(0, 5))
 
-            self.show_videos_var     = tk.BooleanVar(value=self.show_videos)
-            self.excluded_only_var   = tk.BooleanVar(value=self.show_only_excluded)
-            self.expand_all_var      = tk.BooleanVar(value=self.expand_all_default)
+            self.show_videos_var = tk.BooleanVar(value=self.show_videos)
+            self.excluded_only_var = tk.BooleanVar(value=self.show_only_excluded)
+            self.expand_all_var = tk.BooleanVar(value=self.expand_all_default)
             self.save_directories_var = tk.BooleanVar(value=self.save_directories)
 
             self.toggle_videos_check = ttk.Checkbutton(
@@ -965,11 +971,51 @@ def select_multiple_folders_and_play():
             self.save_directories_check.pack(side=tk.LEFT, padx=(0, 10))
 
             self.smart_resume_var = tk.BooleanVar(value=self.smart_resume_enabled)
-            self.speed_var        = tk.DoubleVar(value=1.0)
+            self.speed_var = tk.DoubleVar(value=1.0)
 
         # ------------------------------------------------------------------
         # Treeview expand/collapse event handlers
         # ------------------------------------------------------------------
+
+        def _get_video_size_str(self, path):
+            try:
+                size = os.path.getsize(path)
+                if size >= 1024 ** 3:
+                    return f"{size / 1024 ** 3:.2f} GB"
+                elif size >= 1024 ** 2:
+                    return f"{size / 1024 ** 2:.1f} MB"
+                else:
+                    return f"{size // 1024} KB"
+            except:
+                return ""
+
+        def _get_rating_stars(self, path):
+            rating = self.annotation_service.get_rating(path)
+            return "★" * rating + "☆" * (5 - rating)
+
+        def _get_tags_str(self, path):
+            tags = self.annotation_service.get_tags(path)
+            return " ".join(f"#{t}" for t in tags[:5]) + (" …" if len(tags) > 5 else "")
+
+        def _get_bookmarks_str(self, path):
+            bm_count = len(self.annotation_service.get_bookmarks(path))
+            return f"🔖 {bm_count}" if bm_count else ""
+
+        def _refresh_video_row(self, path):
+            """Update the tree row for a specific video path without reloading everything."""
+            for iid, p in self.current_subdirs_mapping.items():
+                if os.path.normpath(p) == os.path.normpath(path):
+                    size_str = self._get_video_size_str(path)
+                    rating_str = self._get_rating_stars(path)
+                    tags_str = self._get_tags_str(path)
+                    bm_str = self._get_bookmarks_str(path)
+                    self.exclusion_tree.item(iid, values=(size_str, rating_str, tags_str, bm_str))
+                    # reapply rating tag colour
+                    self.exclusion_tree.tag_configure("rating_star", foreground="#f5c518")
+                    self.exclusion_tree.item(iid, tags=(self._tag_for_item(path, ...),
+                                                        "rating_star"))  # need current base dir
+                    # We'll keep tag colour simple; rating star colour already applied via tag.
+                    break
 
         def _on_tree_open(self, event):
             iid = self.exclusion_tree.focus()
@@ -1137,6 +1183,59 @@ def select_multiple_folders_and_play():
                                activebackground="#3498db", activeforeground="#FFFFFF",
                                relief="flat", bd=1, font=("Segoe UI", 9))
 
+        def _tree_remove_annotation(self, paths, rating=False, tags=False, tag=None, bookmarks=False):
+            for p in paths:
+                if rating:
+                    self.annotation_service.set_rating(p, 0)
+                if tags:
+                    for t in list(self.annotation_service.get_tags(p)):
+                        self.annotation_service.remove_tag(p, t)
+                if tag:
+                    self.annotation_service.remove_tag(p, tag)
+                if bookmarks:
+                    for bm in list(self.annotation_service.get_bookmarks(p)):
+                        self.annotation_service.remove_bookmark(p, bm["ms"])
+            selected_dir = self.get_current_selected_directory()
+            if selected_dir:
+                self.load_subdirectories(selected_dir)
+
+        def _set_rating_for_path(self, path, rating):
+            self.annotation_service.set_rating(path, rating)
+            self._refresh_video_row(path)
+
+        def _remove_tag_from_path(self, path, tag):
+            self.annotation_service.remove_tag(path, tag)
+            self._refresh_video_row(path)
+
+        def _prompt_add_tag_for_path(self, path):
+            # simple dialog to enter tag name
+            from tkinter import simpledialog
+            tag = simpledialog.askstring("Add Tag", "Enter tag name:", parent=self.root)
+            if tag:
+                tag = tag.strip().lower()
+                if tag:
+                    self.annotation_service.add_tag(path, tag)
+                    self._refresh_video_row(path)
+
+        def _remove_bookmark_from_path(self, path, ms):
+            self.annotation_service.remove_bookmark(path, ms)
+            self._refresh_video_row(path)
+
+        def _add_current_bookmark(self, path):
+            if self._active_player and hasattr(self._active_player, 'current_time_ms'):
+                ms = self._active_player.current_time_ms()
+                if ms is not None:
+                    self.annotation_service.add_bookmark(path, ms)
+                    self._refresh_video_row(path)
+                    self.update_console(f"Bookmark added at {self._fmt_ms(ms)}")
+
+        def _on_any_annotation_changed(self):
+            # Refresh only visible rows (performance)
+            if hasattr(self, 'current_subdirs_mapping'):
+                for iid, path in list(self.current_subdirs_mapping.items()):
+                    if os.path.isfile(path):
+                        self._refresh_video_row(path)
+
         def _show_context_menu(self, event):
             iid = self.exclusion_tree.identify_row(event.y)
             selection = list(self.exclusion_tree.selection())
@@ -1262,6 +1361,52 @@ def select_multiple_folders_and_play():
                                          command=lambda: self._context_open_folder_location(first_path))
                 context_menu.add_command(label="Properties",
                                          command=lambda: self._context_show_folder_properties(first_path))
+
+            if first_path and os.path.isfile(first_path):
+                context_menu.add_separator()
+
+                # ---- Rating submenu ----
+                rating_menu = self._make_context_menu()
+                for r in range(5, -1, -1):
+                    label = "Remove Rating" if r == 0 else f"Set Rating {r} ★"
+                    rating_menu.add_command(
+                        label=label,
+                        command=lambda val=r, p=first_path: self._set_rating_for_path(p, val)
+                    )
+                context_menu.add_cascade(label="★ Rating", menu=rating_menu)
+
+                # ---- Tags submenu ----
+                current_tags = self.annotation_service.get_tags(first_path)
+                tags_menu = self._make_context_menu()
+                if current_tags:
+                    for t in current_tags:
+                        tags_menu.add_command(
+                            label=f"✕ Remove tag '{t}'",
+                            command=lambda tag=t, p=first_path: self._remove_tag_from_path(p, tag)
+                        )
+                    tags_menu.add_separator()
+                tags_menu.add_command(
+                    label="➕ Add tag…",
+                    command=lambda p=first_path: self._prompt_add_tag_for_path(p)
+                )
+                context_menu.add_cascade(label="🏷 Tags", menu=tags_menu)
+
+                # ---- Bookmarks submenu ----
+                bm_list = self.annotation_service.get_bookmarks(first_path)
+                bm_menu = self._make_context_menu()
+                if bm_list:
+                    for bm in bm_list[:10]:
+                        label = bm.get("label", self._fmt_ms(bm["ms"]))
+                        bm_menu.add_command(
+                            label=f"🔖 {label}   (remove)",
+                            command=lambda ms=bm["ms"], p=first_path: self._remove_bookmark_from_path(p, ms)
+                        )
+                    bm_menu.add_separator()
+                bm_menu.add_command(
+                    label="➕ Add bookmark at current time",
+                    command=lambda p=first_path: self._add_current_bookmark(p)
+                )
+                context_menu.add_cascade(label="🔖 Bookmarks", menu=bm_menu)
 
             try:
                 context_menu.tk_popup(event.x_root, event.y_root)
@@ -1527,17 +1672,21 @@ def select_multiple_folders_and_play():
                                         meta_size = fmt_size(total_size)
                                     except Exception:
                                         meta_size = ""
-                                    meta_count = ""
                                 else:
                                     try:
                                         meta_size = fmt_size(os.path.getsize(path))
                                     except Exception:
                                         meta_size = ""
-                                    meta_count = ""
+                                size_str = self._get_video_size_str(path) if not is_dir else ""
+                                rating_str = self._get_rating_stars(path) if not is_dir else ""
+                                tags_str = self._get_tags_str(path) if not is_dir else ""
+                                bm_str = self._get_bookmarks_str(path) if not is_dir else ""
+
                                 self.exclusion_tree.insert(
                                     parent_iid, tk.END, iid=iid,
-                                    text=label, tags=(tag,), open=open_state,
-                                    values=(meta_size, meta_count)
+                                    text=label, tags=(tag,),
+                                    open=open_state,
+                                    values=(size_str, rating_str, tags_str, bm_str)
                                 )
                                 mapping[iid] = path
                                 if restore_norm and norm_p == restore_norm:
