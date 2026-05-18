@@ -1001,20 +1001,31 @@ def select_multiple_folders_and_play():
             bm_count = len(self.annotation_service.get_bookmarks(path))
             return f"🔖 {bm_count}" if bm_count else ""
 
+        def _fmt_ms(self, ms: int) -> str:
+            s = ms // 1000
+            h, r = divmod(s, 3600)
+            m, sec = divmod(r, 60)
+            return f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
+
         def _refresh_video_row(self, path):
             """Update the tree row for a specific video path without reloading everything."""
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                return
+            excluded_dir_set = set(os.path.normpath(p) for p in self.excluded_subdirs.get(selected_dir, []))
+            excluded_vid_set = set(os.path.normpath(p) for p in self.excluded_videos.get(selected_dir, []))
             for iid, p in self.current_subdirs_mapping.items():
                 if os.path.normpath(p) == os.path.normpath(path):
                     size_str = self._get_video_size_str(path)
                     rating_str = self._get_rating_stars(path)
                     tags_str = self._get_tags_str(path)
                     bm_str = self._get_bookmarks_str(path)
+                    # Update columns
                     self.exclusion_tree.item(iid, values=(size_str, rating_str, tags_str, bm_str))
-                    # reapply rating tag colour
-                    self.exclusion_tree.tag_configure("rating_star", foreground="#f5c518")
-                    self.exclusion_tree.item(iid, tags=(self._tag_for_item(path, ...),
-                                                        "rating_star"))  # need current base dir
-                    # We'll keep tag colour simple; rating star colour already applied via tag.
+                    # Update tag and label for now‑playing / fav / excl
+                    tag = self._tag_for_item(path, selected_dir, excluded_dir_set, excluded_vid_set)
+                    label = self._label_for_item(path, False, excluded_dir_set, excluded_vid_set, selected_dir)
+                    self.exclusion_tree.item(iid, text=label, tags=(tag,))
                     break
 
         def _on_tree_open(self, event):
@@ -1207,16 +1218,6 @@ def select_multiple_folders_and_play():
             self.annotation_service.remove_tag(path, tag)
             self._refresh_video_row(path)
 
-        def _prompt_add_tag_for_path(self, path):
-            # simple dialog to enter tag name
-            from tkinter import simpledialog
-            tag = simpledialog.askstring("Add Tag", "Enter tag name:", parent=self.root)
-            if tag:
-                tag = tag.strip().lower()
-                if tag:
-                    self.annotation_service.add_tag(path, tag)
-                    self._refresh_video_row(path)
-
         def _remove_bookmark_from_path(self, path, ms):
             self.annotation_service.remove_bookmark(path, ms)
             self._refresh_video_row(path)
@@ -1365,48 +1366,28 @@ def select_multiple_folders_and_play():
             if first_path and os.path.isfile(first_path):
                 context_menu.add_separator()
 
-                # ---- Rating submenu ----
-                rating_menu = self._make_context_menu()
-                for r in range(5, -1, -1):
-                    label = "Remove Rating" if r == 0 else f"Set Rating {r} ★"
-                    rating_menu.add_command(
-                        label=label,
-                        command=lambda val=r, p=first_path: self._set_rating_for_path(p, val)
+                # Get annotation state
+                rating = self.annotation_service.get_rating(first_path)
+                tags = self.annotation_service.get_tags(first_path)
+                bookmarks = self.annotation_service.get_bookmarks(first_path)
+
+                if rating > 0:
+                    context_menu.add_command(
+                        label="☆ Remove Rating",
+                        command=lambda p=first_path: self._set_rating_for_path(p, 0)
                     )
-                context_menu.add_cascade(label="★ Rating", menu=rating_menu)
 
-                # ---- Tags submenu ----
-                current_tags = self.annotation_service.get_tags(first_path)
-                tags_menu = self._make_context_menu()
-                if current_tags:
-                    for t in current_tags:
-                        tags_menu.add_command(
-                            label=f"✕ Remove tag '{t}'",
-                            command=lambda tag=t, p=first_path: self._remove_tag_from_path(p, tag)
-                        )
-                    tags_menu.add_separator()
-                tags_menu.add_command(
-                    label="➕ Add tag…",
-                    command=lambda p=first_path: self._prompt_add_tag_for_path(p)
-                )
-                context_menu.add_cascade(label="🏷 Tags", menu=tags_menu)
+                if tags:
+                    context_menu.add_command(
+                        label="✕ Remove All Tags",
+                        command=lambda p=first_path: self._remove_all_tags_from_path(p)
+                    )
 
-                # ---- Bookmarks submenu ----
-                bm_list = self.annotation_service.get_bookmarks(first_path)
-                bm_menu = self._make_context_menu()
-                if bm_list:
-                    for bm in bm_list[:10]:
-                        label = bm.get("label", self._fmt_ms(bm["ms"]))
-                        bm_menu.add_command(
-                            label=f"🔖 {label}   (remove)",
-                            command=lambda ms=bm["ms"], p=first_path: self._remove_bookmark_from_path(p, ms)
-                        )
-                    bm_menu.add_separator()
-                bm_menu.add_command(
-                    label="➕ Add bookmark at current time",
-                    command=lambda p=first_path: self._add_current_bookmark(p)
-                )
-                context_menu.add_cascade(label="🔖 Bookmarks", menu=bm_menu)
+                if bookmarks:
+                    context_menu.add_command(
+                        label="🔖 Remove All Bookmarks",
+                        command=lambda p=first_path: self._remove_all_bookmarks_from_path(p)
+                    )
 
             try:
                 context_menu.tk_popup(event.x_root, event.y_root)
@@ -1416,6 +1397,16 @@ def select_multiple_folders_and_play():
                     self.root.after(100, lambda: context_menu.destroy())
                 except:
                     pass
+
+        def _remove_all_tags_from_path(self, path):
+            for tag in list(self.annotation_service.get_tags(path)):
+                self.annotation_service.remove_tag(path, tag)
+            self._refresh_video_row(path)
+
+        def _remove_all_bookmarks_from_path(self, path):
+            for bm in list(self.annotation_service.get_bookmarks(path)):
+                self.annotation_service.remove_bookmark(path, bm["ms"])
+            self._refresh_video_row(path)
 
         # ------------------------------------------------------------------
         # Tree population — replaces load_subdirectories
