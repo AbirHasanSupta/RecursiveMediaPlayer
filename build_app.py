@@ -1379,7 +1379,7 @@ def select_multiple_folders_and_play():
 
                 if tags:
                     context_menu.add_command(
-                        label="✕ Remove All Tags",
+                        label="🏷 Remove All Tags",
                         command=lambda p=first_path: self._remove_all_tags_from_path(p)
                     )
 
