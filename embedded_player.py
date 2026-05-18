@@ -461,34 +461,37 @@ class EmbeddedPlayer:
             b.bind("<Leave>", lambda e: self._schedule_hide(), add="+")
             return b
 
-        # ── Row 1: info strip ────────────────────────────────────────────
+        def _sep(parent):
+            tk.Frame(parent, width=1, bg="#333333").pack(side=tk.LEFT, fill=tk.Y, pady=3, padx=(6, 6))
+
         info = tk.Frame(bar, bg=_CTRL_BG)
-        info.pack(fill=tk.X, padx=12, pady=(4, 1))
+        info.pack(fill=tk.X, padx=12, pady=(4, 2))
 
         self._lbl_title = tk.Label(info, text="", anchor="w",
                                    font=F_SM, bg=_CTRL_BG, fg=_TXT, cursor="hand2")
-        self._lbl_title.pack(side=tk.LEFT, padx=(0, 8))
+        self._lbl_title.pack(side=tk.LEFT, padx=(0, 6))
         self._lbl_title.bind("<Button-1>", lambda e: self._show_video_picker(e))
         self._lbl_title.bind("<Enter>", lambda e: self._lbl_title.config(fg=_ACCENT))
         self._lbl_title.bind("<Leave>", lambda e: self._lbl_title.config(fg=_TXT))
 
+        self._tag_frame = tk.Frame(info, bg=_CTRL_BG)
+        self._tag_frame.pack(side=tk.LEFT, padx=(0, 6))
+
         self._lbl_time = tk.Label(info, text="0:00 / 0:00",
                                   font=F_SM, bg=_CTRL_BG, fg=_TXT_MED)
-        self._lbl_time.pack(side=tk.RIGHT, padx=(8, 0))
+        self._lbl_time.pack(side=tk.RIGHT, padx=(4, 0))
 
         self._lbl_idx = tk.Label(info, text="",
                                  font=F_SM, bg=_CTRL_BG, fg=_TXT_DIM)
         self._lbl_idx.pack(side=tk.RIGHT, padx=(0, 4))
 
-        self._lbl_chapter = tk.Label(info, text="",
-                                     font=F_XS, bg="#1e2a1e", fg="#66cc66",
-                                     padx=4, pady=1, relief=tk.FLAT)
-        self._lbl_chapter.pack(side=tk.RIGHT, padx=(0, 4))
-
-        self._lbl_ab = tk.Label(info, text="",
-                                font=F_AB, bg="#0d1f2d", fg="#00BFFF",
-                                padx=4, pady=1, relief=tk.FLAT)
-        self._lbl_ab.pack(side=tk.RIGHT, padx=(0, 4))
+        self._lbl_dir = tk.Label(info, text="",
+                                 font=F_XS, bg="#1a1a1a", fg=_TXT_DIM, cursor="hand2",
+                                 padx=5, pady=1, relief=tk.FLAT)
+        self._lbl_dir.pack(side=tk.RIGHT, padx=(0, 4))
+        self._lbl_dir.bind("<Button-1>", lambda e: self._show_dir_picker(e))
+        self._lbl_dir.bind("<Enter>", lambda e: self._lbl_dir.config(fg=_ACCENT))
+        self._lbl_dir.bind("<Leave>", lambda e: self._lbl_dir.config(fg=_TXT_DIM))
 
         self._lbl_sleep = tk.Label(info, text="",
                                    font=F_XS, bg="#2a1e0d", fg="#FFA500",
@@ -500,26 +503,25 @@ class EmbeddedPlayer:
                                     padx=4, pady=1, relief=tk.FLAT)
         self._lbl_gaming.pack(side=tk.RIGHT, padx=(0, 4))
 
-        self._lbl_dir = tk.Label(info, text="",
-                                 font=F_XS, bg=_CTRL_BG, fg=_TXT_DIM, cursor="hand2")
-        self._lbl_dir.pack(side=tk.RIGHT, padx=(0, 6))
+        self._lbl_ab = tk.Label(info, text="",
+                                font=F_AB, bg="#0d1f2d", fg="#00BFFF",
+                                padx=4, pady=1, relief=tk.FLAT)
+        self._lbl_ab.pack(side=tk.RIGHT, padx=(0, 4))
+
+        self._lbl_chapter = tk.Label(info, text="",
+                                     font=F_XS, bg="#1e2a1e", fg="#66cc66",
+                                     padx=4, pady=1, relief=tk.FLAT)
+        self._lbl_chapter.pack(side=tk.RIGHT, padx=(0, 4))
+
         self._lbl_bm_count = tk.Label(info, text="",
                                       font=F_XS, bg="#1e2a1e", fg="#FFD700",
                                       padx=4, pady=1, cursor="hand2")
-        self._lbl_bm_count.pack(side=tk.RIGHT, padx=(0, 3))
+        self._lbl_bm_count.pack(side=tk.RIGHT, padx=(0, 4))
         self._lbl_bm_count.bind("<Button-1>", lambda e: self._show_bookmarks_menu())
 
-        self._lbl_title.pack(side=tk.LEFT, padx=(0, 4))
-
-        self._tag_frame = tk.Frame(info, bg=_CTRL_BG)
-        self._tag_frame.pack(side=tk.LEFT, padx=(0, 8))
-        self._lbl_dir.bind("<Button-1>", lambda e: self._show_dir_picker(e))
-        self._lbl_dir.bind("<Enter>", lambda e: self._lbl_dir.config(fg=_ACCENT))
-        self._lbl_dir.bind("<Leave>", lambda e: self._lbl_dir.config(fg=_TXT_DIM))
-
-        # ── Row 2: seek bar ──────────────────────────────────────────────
+        # ── ROW 1: seek bar ──────────────────────────────────────────────
         seek_row = tk.Frame(bar, bg=_CTRL_BG)
-        seek_row.pack(fill=tk.X, padx=12, pady=(2, 2))
+        seek_row.pack(fill=tk.X, padx=12, pady=(2, 0))
 
         self._seek = tk.Canvas(seek_row, height=18, bg=_CTRL_BG,
                                highlightthickness=0, cursor="hand2")
@@ -538,38 +540,44 @@ class EmbeddedPlayer:
         self._seek_preview_time = None
         self._seek_preview_mgr = None
 
-        # ── Row 3: button row ────────────────────────────────────────────
+        # ── ROW 2: button row ────────────────────────────────────────────
         btn_row = tk.Frame(bar, bg=_CTRL_BG2)
-        btn_row.pack(fill=tk.X)
+        btn_row.pack(fill=tk.X, pady=(2, 2))
 
-        # LEFT: transport
-        lg = tk.Frame(btn_row, bg=_CTRL_BG2)
-        lg.pack(side=tk.LEFT, padx=(8, 0), pady=2)
+        # ZONE A: Transport (⏮ ⏸ ⏭)
+        zone_a = tk.Frame(btn_row, bg=_CTRL_BG2)
+        zone_a.pack(side=tk.LEFT, padx=(8, 0), pady=2)
 
-        btn_prev = _btn(lg, "⏮", None, font=F_ICO)
+        btn_prev = _btn(zone_a, "⏮", None, font=F_ICO, padx=7)
         btn_prev.pack(side=tk.LEFT, padx=1)
-        self._btn_play = _btn(lg, "⏸", self._toggle_pause, font=F_ICO)
+        self._btn_play = _btn(zone_a, "⏸", self._toggle_pause, font=F_ICO, fg=_ACCENT, padx=7)
         self._btn_play.pack(side=tk.LEFT, padx=1)
-        btn_next = _btn(lg, "⏭", None, font=F_ICO)
+        btn_next = _btn(zone_a, "⏭", None, font=F_ICO, padx=7)
         btn_next.pack(side=tk.LEFT, padx=1)
 
         self._setup_hold_button(btn_prev, on_click=self._prev, on_hold=self._rewind)
         self._setup_hold_button(btn_next, on_click=self._next, on_hold=self._fast_forward)
 
-        tk.Frame(lg, width=1, bg="#333333").pack(side=tk.LEFT, fill=tk.Y, pady=3, padx=(4, 0))
+        _sep(btn_row)
 
-        self._btn_loop = _btn(lg, "↺", self._cycle_loop, font=F_ICO, fg=_ACCENT, padx=7)
-        self._btn_loop.pack(side=tk.LEFT, padx=(4, 0))
+        # ZONE B: Loop
+        zone_b = tk.Frame(btn_row, bg=_CTRL_BG2)
+        zone_b.pack(side=tk.LEFT, pady=2)
 
-        # CENTER: speed label (scrollable) + bookmark shortcut
-        mg = tk.Frame(btn_row, bg=_CTRL_BG2)
-        mg.pack(side=tk.LEFT, expand=True, pady=2)
+        self._btn_loop = _btn(zone_b, "↺", self._cycle_loop, font=F_ICO, fg=_ACCENT, padx=8)
+        self._btn_loop.pack(side=tk.LEFT)
 
-        self._lbl_speed = tk.Label(mg, text="1.00×", cursor="hand2",
+        _sep(btn_row)
+
+        # ZONE C: Speed · Bookmark · Ch Prev/Next · A · B · ✕  (center, expands)
+        zone_c = tk.Frame(btn_row, bg=_CTRL_BG2)
+        zone_c.pack(side=tk.LEFT, expand=True, pady=2)
+
+        self._lbl_speed = tk.Label(zone_c, text="1.00×", cursor="hand2",
                                    font=F_ACC, bg="#1e1e1e", fg=_ACCENT,
                                    padx=6, pady=2,
                                    highlightbackground="#333333", highlightthickness=1)
-        self._lbl_speed.pack(side=tk.LEFT, padx=(0, 6))
+        self._lbl_speed.pack(side=tk.LEFT, padx=(0, 4))
         self._lbl_speed.bind("<Button-1>",        lambda e: self._speed_up())
         self._lbl_speed.bind("<Button-3>",        lambda e: self._speed_down())
         self._lbl_speed.bind("<Double-Button-1>", lambda e: self._speed_reset())
@@ -577,34 +585,32 @@ class EmbeddedPlayer:
         self._lbl_speed.bind("<Enter>", lambda e: self._cancel_hide())
         self._lbl_speed.bind("<Leave>", lambda e: self._schedule_hide())
 
-        self._btn_bookmark = _btn(mg, "🔖", self._add_bookmark, font=F_MD, padx=6)
-        self._btn_bookmark.pack(side=tk.LEFT)
+        self._btn_bookmark = _btn(zone_c, "🔖", self._add_bookmark, font=F_MD, padx=6)
+        self._btn_bookmark.pack(side=tk.LEFT, padx=(0, 2))
 
-        # keep hidden chapter buttons (shown dynamically)
-        self._btn_prev_chapter = _btn(mg, "❮Ch", self._prev_chapter, font=F_SM, padx=5)
-        self._btn_next_chapter = _btn(mg, "Ch❯", self._next_chapter, font=F_SM, padx=5)
-        self._divider_before_ab = tk.Frame(mg, width=0, bg=_CTRL_BG2)
+        # Chapter nav (shown/hidden dynamically in _refresh_display)
+        self._btn_prev_chapter = _btn(zone_c, "❮Ch", self._prev_chapter, font=F_SM, padx=5)
+        self._btn_next_chapter = _btn(zone_c, "Ch❯", self._next_chapter, font=F_SM, padx=5)
+        self._divider_before_ab = tk.Frame(zone_c, width=0, bg=_CTRL_BG2)
         self._divider_before_ab.pack(side=tk.LEFT)
         self._chapters_visible = False
 
-        # A-B indicators (hidden until set)
-        self._btn_ab_a   = _btn(mg, "A", self._set_ab_a,  font=F_ACC, fg="#00BFFF", padx=6)
-        self._btn_ab_b   = _btn(mg, "B", self._set_ab_b,  font=F_ACC, fg="#00BFFF", padx=6)
-        self._btn_ab_clr = _btn(mg, "✕", self._clear_ab,  font=F_XS,  fg=_TXT_DIM,  padx=5)
+        # A-B buttons (always visible per HTML design)
+        self._btn_ab_a   = _btn(zone_c, "A", self._set_ab_a,  font=F_ACC, fg="#00BFFF", padx=6)
+        self._btn_ab_a.pack(side=tk.LEFT, padx=(2, 1))
+        self._btn_ab_b   = _btn(zone_c, "B", self._set_ab_b,  font=F_ACC, fg="#00BFFF", padx=6)
+        self._btn_ab_b.pack(side=tk.LEFT, padx=(1, 1))
+        self._btn_ab_clr = _btn(zone_c, "✕", self._clear_ab,  font=F_XS,  fg=_TXT_DIM,  padx=5)
+        self._btn_ab_clr.pack(side=tk.LEFT, padx=(1, 4))
 
-        # RIGHT: volume · stars · fullscreen · more
-        rg = tk.Frame(btn_row, bg=_CTRL_BG2)
-        rg.pack(side=tk.RIGHT, padx=(0, 8), pady=2)
+        _sep(btn_row)
 
-        # Fullscreen
-        _btn(rg, "⛶", self._toggle_borderless, font=F_ICO, padx=7).pack(side=tk.RIGHT, padx=(4, 0))
+        # ZONE D: Star rating
+        zone_d = tk.Frame(btn_row, bg=_CTRL_BG2)
+        zone_d.pack(side=tk.LEFT, pady=2)
 
-        tk.Frame(rg, width=1, bg="#333333").pack(side=tk.RIGHT, fill=tk.Y, pady=3, padx=4)
-
-        # Stars
-        tk.Frame(mg, width=1, bg="#333333").pack(side=tk.LEFT, fill=tk.Y, pady=3, padx=(8, 4))
-        self._rating_frame = tk.Frame(mg, bg=_CTRL_BG2)
-        self._rating_frame.pack(side=tk.LEFT, padx=(0, 4))
+        self._rating_frame = tk.Frame(zone_d, bg=_CTRL_BG2)
+        self._rating_frame.pack(side=tk.LEFT, padx=(0, 2))
         self._rating_btns = []
         for star_i in range(1, 6):
             s = tk.Label(self._rating_frame, text="☆", font=F_MD,
@@ -615,28 +621,32 @@ class EmbeddedPlayer:
             s.bind("<Leave>",    lambda e: self._refresh_rating_display())
             self._rating_btns.append(s)
 
-        # Volume
-        self._lbl_mute = tk.Label(rg, text="🔊", cursor="hand2",
+        _sep(btn_row)
+
+        # ZONE E: Vol · Fullscreen · More  (right-anchored)
+        zone_e = tk.Frame(btn_row, bg=_CTRL_BG2)
+        zone_e.pack(side=tk.LEFT, padx=(0, 8), pady=2)
+
+        self._lbl_mute = tk.Label(zone_e, text="🔊", cursor="hand2",
                                   font=F_ICO, bg=_CTRL_BG2, fg=_TXT)
-        self._lbl_mute.pack(side=tk.RIGHT, padx=(0, 2))
+        self._lbl_mute.pack(side=tk.LEFT, padx=(0, 1))
         self._lbl_mute.bind("<Button-1>",   lambda e: self._toggle_mute())
         self._lbl_mute.bind("<MouseWheel>", self._vol_scroll)
         self._lbl_mute.bind("<Enter>", lambda e: self._cancel_hide())
         self._lbl_mute.bind("<Leave>", lambda e: self._schedule_hide())
 
-        self._lbl_vol = tk.Label(rg, text=f"{self.volume}%", width=4,
+        self._lbl_vol = tk.Label(zone_e, text=f"{self.volume}%", width=4,
                                  font=F_SM, bg=_CTRL_BG2, fg=_TXT_MED)
-        self._lbl_vol.pack(side=tk.RIGHT)
+        self._lbl_vol.pack(side=tk.LEFT, padx=(0, 4))
         self._lbl_vol.bind("<MouseWheel>", self._vol_scroll)
         self._lbl_vol.bind("<Enter>", lambda e: self._cancel_hide())
         self._lbl_vol.bind("<Leave>", lambda e: self._schedule_hide())
 
-        tk.Frame(rg, width=1, bg="#333333").pack(side=tk.RIGHT, fill=tk.Y, pady=3, padx=4)
+        _btn(zone_e, "⛶", self._toggle_borderless, font=F_ICO, padx=7).pack(side=tk.LEFT, padx=(2, 2))
+        _btn(zone_e, "⋮", self._show_more_menu, font=F_ICO, padx=6).pack(side=tk.LEFT, padx=(2, 0))
 
-        # More (⋮) — replaces old context menu btn, now opens rich panel
-        _btn(rg, "⋮", self._show_more_menu, font=F_ICO, padx=6).pack(side=tk.RIGHT, padx=1)
-
-        _all = [bar, info, seek_row, btn_row, lg, mg, rg,
+        _all = [bar, info, seek_row, btn_row,
+                zone_a, zone_b, zone_c, zone_d, zone_e,
                 self._lbl_title, self._lbl_dir, self._lbl_idx, self._lbl_time,
                 self._lbl_ab, self._lbl_sleep, self._lbl_chapter, self._lbl_gaming]
         for w in _all:
@@ -2941,10 +2951,10 @@ class EmbeddedPlayer:
                 ch_cur = self._player.get_chapter()
                 self._lbl_chapter.config(text=f"Ch {ch_cur + 1}/{ch_count}")
                 if not self._chapters_visible:
-                    self._btn_prev_chapter.pack(side=tk.LEFT, padx=(6, 1),
-                                                before=self._btn_bookmark)
-                    self._btn_next_chapter.pack(side=tk.LEFT, padx=(1, 8),
-                                                before=self._btn_bookmark)
+                    self._btn_prev_chapter.pack(side=tk.LEFT, padx=(4, 1),
+                                                before=self._btn_ab_a)
+                    self._btn_next_chapter.pack(side=tk.LEFT, padx=(1, 4),
+                                                before=self._btn_ab_a)
                     self._chapters_visible = True
             else:
                 self._lbl_chapter.config(text="")
