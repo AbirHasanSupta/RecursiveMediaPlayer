@@ -159,6 +159,91 @@ class AnnotationBrowserManager:
         self.grid_view_manager = grid_view_manager
 
     # ── Window ────────────────────────────────────────────────────────────────
+    def _show_add_tag_menu(self, event):
+        tp = self.tp
+        P = _p(tp.dark_mode)
+        menu = tk.Menu(self._win, tearoff=0,
+                       bg="#27282c" if tp.dark_mode else "#f4f5f7",
+                       fg=tp.text_color,
+                       activebackground=P["tag_sel_bg"],
+                       activeforeground=P["tag_sel_fg"],
+                       relief="flat", bd=0, font=("Segoe UI", 9))
+        menu.add_command(label="✏  Add new tag to selected videos",
+                         command=self._prompt_add_tag_to_selection)
+        try:
+            menu.tk_popup(event.widget.winfo_rootx(),
+                          event.widget.winfo_rooty() + event.widget.winfo_height())
+        finally:
+            menu.grab_release()
+
+    def _prompt_add_tag_to_selection(self):
+        tp = self.tp
+        P = _p(tp.dark_mode)
+        if not self._vid_selection and not self._filtered_videos:
+            return
+        dlg = tk.Toplevel(self._win)
+        dlg.withdraw()
+        dlg.title("Add Tag")
+        dlg.configure(bg=tp.bg_color)
+        dlg.resizable(False, False)
+        dlg.transient(self._win)
+        dlg.grab_set()
+        apply_icon(dlg)
+
+        targets = ([self._filtered_videos[i] for i in sorted(self._vid_selection)
+                    if i < len(self._filtered_videos)]
+                   if self._vid_selection else list(self._filtered_videos))
+
+        tk.Label(dlg, text=f"Add tag to {len(targets)} video{'s' if len(targets) != 1 else ''}:",
+                 font=("Segoe UI", 10), bg=tp.bg_color, fg=tp.text_color
+                 ).pack(padx=20, pady=(18, 6), anchor="w")
+
+        all_tags = self.svc.get_all_tags()
+        var = tk.StringVar()
+
+        entry_frame = tk.Frame(dlg, bg=P["search_bg"],
+                               highlightbackground=P["sep"], highlightthickness=1)
+        entry_frame.pack(fill=tk.X, padx=20, pady=(0, 4))
+        entry = tk.Entry(entry_frame, textvariable=var, font=("Segoe UI", 10),
+                         bg=P["search_bg"], fg=tp.entry_fg,
+                         insertbackground=tp.entry_fg, relief=tk.FLAT, bd=0)
+        entry.pack(fill=tk.X, ipady=6, padx=8)
+        entry.focus_set()
+
+        if all_tags:
+            tk.Label(dlg, text="Existing tags (click to reuse):",
+                     font=("Segoe UI", 8), bg=tp.bg_color, fg=tp.muted_fg
+                     ).pack(anchor="w", padx=20, pady=(4, 2))
+            chips_frame = tk.Frame(dlg, bg=tp.bg_color)
+            chips_frame.pack(fill=tk.X, padx=20, pady=(0, 8))
+            for tag in all_tags[:20]:
+                chip = tk.Label(chips_frame, text=f"#{tag}",
+                                font=("Segoe UI", 8), bg=P["pill_bg"], fg=P["pill_fg"],
+                                padx=6, pady=2, cursor="hand2")
+                chip.pack(side=tk.LEFT, padx=2, pady=2)
+                chip.bind("<Button-1>", lambda e, t=tag: var.set(t))
+
+        btns = tk.Frame(dlg, bg=tp.bg_color)
+        btns.pack(anchor="e", padx=20, pady=(4, 16))
+
+        def do_save():
+            tag = var.get().strip().lower()
+            if not tag:
+                return
+            for path in targets:
+                self.svc.add_tag(path, tag)
+            dlg.destroy()
+
+        tp.create_button(btns, "Add", do_save, "primary", "md").pack(side=tk.RIGHT, padx=(8, 0))
+        tp.create_button(btns, "Cancel", dlg.destroy, "secondary", "md").pack(side=tk.RIGHT)
+        entry.bind("<Return>", lambda e: do_save())
+        entry.bind("<Escape>", lambda e: dlg.destroy())
+
+        dlg.update_idletasks()
+        x = self._win.winfo_x() + (self._win.winfo_width() - dlg.winfo_reqwidth()) // 2
+        y = self._win.winfo_y() + (self._win.winfo_height() - dlg.winfo_reqheight()) // 2
+        dlg.geometry(f"+{x}+{y}")
+        dlg.deiconify()
 
     def _build_window(self):
         tp = self.tp
@@ -316,7 +401,15 @@ class AnnotationBrowserManager:
         self._tag_count_lbl = tk.Label(sid_hdr, text="",
                                        font=("Segoe UI", 7),
                                        bg=P["sidebar"], fg=tp.muted_fg)
-        self._tag_count_lbl.pack(side=tk.RIGHT)
+        self._tag_count_lbl.pack(side=tk.RIGHT, padx=(0, 6))
+        add_tag_btn = tk.Label(sid_hdr, text="＋ Add ▾",
+                               font=("Segoe UI", 7, "bold"),
+                               bg=P["accent"], fg="white",
+                               padx=6, pady=2, cursor="hand2")
+        add_tag_btn.pack(side=tk.RIGHT, padx=(0, 4))
+        add_tag_btn.bind("<Button-1>", lambda e: self._show_add_tag_menu(e))
+        add_tag_btn.bind("<Enter>", lambda e: add_tag_btn.config(bg=self._lighten(P["accent"])))
+        add_tag_btn.bind("<Leave>", lambda e: add_tag_btn.config(bg=P["accent"]))
 
         tk.Frame(sidebar, bg=P["sep"], height=1).pack(fill=tk.X, padx=10)
 

@@ -509,8 +509,10 @@ class EmbeddedPlayer:
         self._lbl_bm_count.pack(side=tk.RIGHT, padx=(0, 3))
         self._lbl_bm_count.bind("<Button-1>", lambda e: self._show_bookmarks_menu())
 
+        self._lbl_title.pack(side=tk.LEFT, padx=(0, 4))
+
         self._tag_frame = tk.Frame(info, bg=_CTRL_BG)
-        self._tag_frame.pack(side=tk.RIGHT, padx=(0, 4))
+        self._tag_frame.pack(side=tk.LEFT, padx=(0, 8))
         self._lbl_dir.bind("<Button-1>", lambda e: self._show_dir_picker(e))
         self._lbl_dir.bind("<Enter>", lambda e: self._lbl_dir.config(fg=_ACCENT))
         self._lbl_dir.bind("<Leave>", lambda e: self._lbl_dir.config(fg=_TXT_DIM))
@@ -564,7 +566,9 @@ class EmbeddedPlayer:
         mg.pack(side=tk.LEFT, expand=True, pady=2)
 
         self._lbl_speed = tk.Label(mg, text="1.00×", cursor="hand2",
-                                   font=F_ACC, bg=_CTRL_BG2, fg=_ACCENT)
+                                   font=F_ACC, bg="#1e1e1e", fg=_ACCENT,
+                                   padx=6, pady=2,
+                                   highlightbackground="#333333", highlightthickness=1)
         self._lbl_speed.pack(side=tk.LEFT, padx=(0, 6))
         self._lbl_speed.bind("<Button-1>",        lambda e: self._speed_up())
         self._lbl_speed.bind("<Button-3>",        lambda e: self._speed_down())
@@ -598,8 +602,9 @@ class EmbeddedPlayer:
         tk.Frame(rg, width=1, bg="#333333").pack(side=tk.RIGHT, fill=tk.Y, pady=3, padx=4)
 
         # Stars
-        self._rating_frame = tk.Frame(rg, bg=_CTRL_BG2)
-        self._rating_frame.pack(side=tk.RIGHT, padx=(0, 2))
+        tk.Frame(mg, width=1, bg="#333333").pack(side=tk.LEFT, fill=tk.Y, pady=3, padx=(8, 4))
+        self._rating_frame = tk.Frame(mg, bg=_CTRL_BG2)
+        self._rating_frame.pack(side=tk.LEFT, padx=(0, 4))
         self._rating_btns = []
         for star_i in range(1, 6):
             s = tk.Label(self._rating_frame, text="☆", font=F_MD,
@@ -609,8 +614,6 @@ class EmbeddedPlayer:
             s.bind("<Enter>",    lambda e, n=star_i: self._hover_rating(n))
             s.bind("<Leave>",    lambda e: self._refresh_rating_display())
             self._rating_btns.append(s)
-
-        tk.Frame(rg, width=1, bg="#333333").pack(side=tk.RIGHT, fill=tk.Y, pady=3, padx=4)
 
         # Volume
         self._lbl_mute = tk.Label(rg, text="🔊", cursor="hand2",
@@ -2981,15 +2984,21 @@ class EmbeddedPlayer:
         except Exception:
             pass
 
-            # Tag chips
         try:
             for w in self._tag_frame.winfo_children():
                 w.destroy()
             if self.annotation_service and self.videos:
-                for tag in self.annotation_service.get_tags(self.videos[self.index]):
+                tags = self.annotation_service.get_tags(self.videos[self.index])
+                for tag in tags:
                     tk.Label(self._tag_frame, text=f"#{tag}",
                              font=("Segoe UI", 7), bg="#1e1e2e", fg="#9988cc",
                              padx=3, pady=1).pack(side=tk.LEFT, padx=1)
+                drop_btn = tk.Label(self._tag_frame,
+                                    text="🏷▾" if not tags else "▾",
+                                    font=("Segoe UI", 7), bg="#2a2a3a", fg="#9988cc",
+                                    padx=4, pady=1, cursor="hand2", relief=tk.FLAT)
+                drop_btn.pack(side=tk.LEFT, padx=(1, 0))
+                drop_btn.bind("<Button-1>", lambda e: self._show_tag_menu())
         except Exception:
             pass
 
