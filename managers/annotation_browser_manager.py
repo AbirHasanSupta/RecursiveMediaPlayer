@@ -93,6 +93,13 @@ def _p(dark_mode):
     }
 
 
+def _show_menu(menu, x, y):
+    try:
+        menu.tk_popup(x, y)
+    finally:
+        menu.grab_release()
+
+
 class AnnotationBrowserManager:
 
     def __init__(self, root, theme_provider, annotation_service,
@@ -813,6 +820,7 @@ class AnnotationBrowserManager:
 
         if self.video_preview_manager:
             video_mapping = {i: path for i, path in enumerate(candidates)}
+            self._vid_canvas._row_height = self._row_height
             self.video_preview_manager.attach_to_listbox(self._vid_canvas, video_mapping)
 
         self._update_play_btn()
@@ -907,6 +915,7 @@ class AnnotationBrowserManager:
                                 self.video_preview_manager.right_clicked_item = idx_
                                 self.video_preview_manager._show_video_preview(
                                     path_, e.x_root, e.y_root)
+                    return "break"
 
                 def on_enter(e):
                     if idx_ not in self._vid_selection:
@@ -1138,10 +1147,7 @@ class AnnotationBrowserManager:
             menu.add_command(label="📂  Open file location",
                              command=lambda: self._open_location(path))
 
-        try:
-            menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            menu.grab_release()
+        self._win.after(10, lambda: _show_menu(menu, event.x_root, event.y_root))
 
     def _open_grid_view_from_selection(self, selection):
         if not self.grid_view_manager:

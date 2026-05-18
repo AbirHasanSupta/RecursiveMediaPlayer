@@ -1141,20 +1141,29 @@ class VideoPreviewManager:
 
     @staticmethod
     def _identify_item(widget, y):
-        """Return the item id under y for both Treeview and Listbox."""
+        """Return the item id under y for Treeview, Listbox, or Canvas-based list."""
         if hasattr(widget, 'identify_row'):
             return widget.identify_row(y)
-        # tk.Listbox
-        index = widget.nearest(y)
-        if index < 0:
-            return None
-        bbox = widget.bbox(index)
-        if not bbox:
-            return None
-        return str(index)
+        if hasattr(widget, 'nearest'):
+            # tk.Listbox
+            index = widget.nearest(y)
+            if index < 0:
+                return None
+            bbox = widget.bbox(index)
+            if not bbox:
+                return None
+            return index
+        if hasattr(widget, 'canvasy'):
+            # tk.Canvas used as a scrollable list container
+            row_height = getattr(widget, '_row_height', 28)
+            canvas_y = widget.canvasy(y)
+            return max(0, int(canvas_y // row_height))
+        return None
 
     @staticmethod
     def _widget_has_selection(widget):
+        if hasattr(widget, 'canvasy'):
+            return False
         try:
             return bool(widget.selection())
         except Exception:
@@ -1177,8 +1186,16 @@ class VideoPreviewManager:
     def _on_mouse_motion(self, event):
         if not self.tooltip.is_visible:
             return
-        lb = event.widget
-        item = self._identify_item(lb, event.y)
+        lb = self.current_listbox
+        if lb is None:
+            return
+        # event.widget may be a child widget; convert y to canvas coords
+        try:
+            widget_root_y = event.widget.winfo_rooty() + event.y
+            canvas_y = widget_root_y - lb.winfo_rooty()
+        except Exception:
+            canvas_y = event.y
+        item = self._identify_item(lb, canvas_y)
         if item != self.right_clicked_item:
             self.tooltip.hide_preview()
             self.right_clicked_item = None
