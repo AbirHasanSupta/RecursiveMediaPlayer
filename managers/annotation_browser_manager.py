@@ -1041,6 +1041,7 @@ class AnnotationBrowserManager:
                 tag_cell,
             ]
             for j, cell in enumerate(cells):
+                cell._col_idx = j
                 cell.place(relx=sum(col_w[:j]), rely=0, relwidth=col_w[j], relheight=1.0)
 
             def _bind_row(r, idx_, cells_):
@@ -1148,8 +1149,8 @@ class AnnotationBrowserManager:
             muted_ = "white" if is_sel else tp.muted_fg
             gold_ = "white" if is_sel else P["star_on"]
             row.config(bg=bg_)
-            children = row.winfo_children()
-            for j, cell in enumerate(children):
+            for cell in row.winfo_children():
+                col = getattr(cell, '_col_idx', -1)
                 if isinstance(cell, tk.Frame):
                     cell.config(bg=bg_)
                     for sub in cell.winfo_children():
@@ -1157,17 +1158,12 @@ class AnnotationBrowserManager:
                             sub.config(bg=bg_)
                         except Exception:
                             pass
+                elif col == 1:
+                    cell.config(bg=bg_, fg=gold_)
+                elif col == 2:
+                    cell.config(bg=bg_, fg=muted_)
                 else:
-                    place_info = cell.place_info()
-                    relx = float(place_info.get("relx", 0))
-                    if relx < 0.05:  # col 0 — filename
-                        cell.config(bg=bg_, fg=fg_)
-                    elif relx < 0.55:  # col 1 — stars
-                        cell.config(bg=bg_, fg=gold_)
-                    elif relx < 0.70:  # col 2 — muted path
-                        cell.config(bg=bg_, fg=muted_)
-                    else:  # col 3+
-                        cell.config(bg=bg_, fg=fg_)
+                    cell.config(bg=bg_, fg=fg_)
 
     def _on_search_change(self):
         self._rebuild_tags()
