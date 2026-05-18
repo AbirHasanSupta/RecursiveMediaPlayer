@@ -1154,10 +1154,14 @@ class VideoPreviewManager:
                 return None
             return index
         if hasattr(widget, 'canvasy'):
-            # tk.Canvas used as a scrollable list container
-            row_height = getattr(widget, '_row_height', 28)
-            canvas_y = widget.canvasy(y)
-            return max(0, int(canvas_y // row_height))
+            try:
+                if not widget.winfo_exists():
+                    return None
+                row_height = getattr(widget, '_row_height', 28)
+                canvas_y = widget.canvasy(y)
+                return max(0, int(canvas_y // row_height))
+            except Exception:
+                return None
         return None
 
     @staticmethod
@@ -1189,13 +1193,21 @@ class VideoPreviewManager:
         lb = self.current_listbox
         if lb is None:
             return
-        # event.widget may be a child widget; convert y to canvas coords
         try:
+            if not lb.winfo_exists():
+                self.tooltip.hide_preview()
+                self.right_clicked_item = None
+                return
             widget_root_y = event.widget.winfo_rooty() + event.y
             canvas_y = widget_root_y - lb.winfo_rooty()
         except Exception:
             canvas_y = event.y
-        item = self._identify_item(lb, canvas_y)
+        try:
+            item = self._identify_item(lb, canvas_y)
+        except Exception:
+            self.tooltip.hide_preview()
+            self.right_clicked_item = None
+            return
         if item != self.right_clicked_item:
             self.tooltip.hide_preview()
             self.right_clicked_item = None
