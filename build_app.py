@@ -147,10 +147,11 @@ def select_multiple_folders_and_play():
 
             self.setup_main_layout()
             self.setup_directory_section()
-            self.setup_exclusion_section()
             self.setup_status_section()
             self.setup_console_section()
             self.setup_action_buttons()
+            self.settings_manager = SettingsManager(self.root, self, self.update_console, enable_ai=False)
+            self.setup_exclusion_section()
 
             def start_ipc_server():
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -225,7 +226,6 @@ def select_multiple_folders_and_play():
             else:
                 self.selected_dirs = []
 
-            self.settings_manager = SettingsManager(self.root, self, self.update_console, enable_ai=False)
             self.settings_manager.add_settings_changed_callback(self._on_settings_changed)
             self.settings_manager.set_hotkey_reload_callback(
                 lambda hk: reload_hotkeys(self.controller, hk)
@@ -698,9 +698,50 @@ def select_multiple_folders_and_play():
 
             future.add_done_callback(on_done)
 
+        def apply_theme(self):
+            dir_w = self.dir_section.winfo_width() if hasattr(self, 'dir_section') else 0
+            exc_w = self.exclusion_section.winfo_width() if hasattr(self, 'exclusion_section') else 0
+
+            super().apply_theme()
+
+            self._reapply_tree_columns()
+
+            if dir_w > 10 and exc_w > 10:
+                self.dir_section.config(width=dir_w)
+                self.exclusion_section.config(width=exc_w)
+                self.dir_section.pack_propagate(False)
+                self.exclusion_section.pack_propagate(False)
+
+        def _reapply_tree_columns(self):
+            """Reconfigure treeview columns (preserves size column, toggles annotation columns)."""
+            if not hasattr(self, 'exclusion_tree'):
+                return
+            show_ann = self.settings_manager.get_settings().show_video_annotations_in_tree
+
+            if show_ann:
+                self.exclusion_tree.configure(columns=("size", "rating", "tags", "bookmarks"))
+                self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
+                self.exclusion_tree.column("rating", width=100, minwidth=100, stretch=False, anchor="center")
+                self.exclusion_tree.column("tags", width=180, minwidth=120, stretch=False, anchor="w")
+                self.exclusion_tree.column("bookmarks", width=80, minwidth=80, stretch=False, anchor="center")
+                self.exclusion_tree.heading("size", text="Size", anchor="e")
+                self.exclusion_tree.heading("rating", text="Rating", anchor="center")
+                self.exclusion_tree.heading("tags", text="Tags", anchor="w")
+                self.exclusion_tree.heading("bookmarks", text="Bookmarks", anchor="center")
+            else:
+                self.exclusion_tree.configure(columns=("size",))
+                self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
+                self.exclusion_tree.heading("size", text="Size", anchor="e")
+
+            # Name column (always present)
+            self.exclusion_tree.column("#0", width=400, minwidth=200, stretch=True, anchor="w")
+            self.exclusion_tree.heading("#0", text="Name", anchor="w")
+
         def setup_directory_section(self):
             self.dir_section = tk.Frame(self.content_frame, bg=self.bg_color)
-            self.dir_section.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+            self.dir_section.pack(side=tk.LEFT, fill=tk.Y, expand=False, padx=(0, 10))
+            self.dir_section.config(width=450)
+            self.dir_section.pack_propagate(False)
 
             dir_header = tk.Label(self.dir_section, text="Selected Directories",
                                   font=self.header_font, bg=self.bg_color, fg=self.text_color)
@@ -895,19 +936,25 @@ def select_multiple_folders_and_play():
             self.exclusion_scrollbar.config(command=self.exclusion_tree.yview)
             self._tree_xscroll.config(command=self.exclusion_tree.xview)
 
-            # Column configuration
-            self.exclusion_tree.column("#0", width=400, minwidth=200, stretch=True, anchor="w")
-            self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
-            self.exclusion_tree.column("rating", width=100, minwidth=100, stretch=False, anchor="center")
-            self.exclusion_tree.column("tags", width=180, minwidth=120, stretch=False, anchor="w")
-            self.exclusion_tree.column("bookmarks", width=80, minwidth=80, stretch=False, anchor="center")
+            show_ann = self.settings_manager.get_settings().show_video_annotations_in_tree
 
-            # Headings
+            if show_ann:
+                self.exclusion_tree.configure(columns=("size", "rating", "tags", "bookmarks"))
+                self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
+                self.exclusion_tree.column("rating", width=100, minwidth=100, stretch=False, anchor="center")
+                self.exclusion_tree.column("tags", width=180, minwidth=120, stretch=False, anchor="w")
+                self.exclusion_tree.column("bookmarks", width=80, minwidth=80, stretch=False, anchor="center")
+                self.exclusion_tree.heading("size", text="Size", anchor="e")
+                self.exclusion_tree.heading("rating", text="Rating", anchor="center")
+                self.exclusion_tree.heading("tags", text="Tags", anchor="w")
+                self.exclusion_tree.heading("bookmarks", text="Bookmarks", anchor="center")
+            else:
+                self.exclusion_tree.configure(columns=("size",))
+                self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
+                self.exclusion_tree.heading("size", text="Size", anchor="e")
+
+            self.exclusion_tree.column("#0", width=400, minwidth=200, stretch=True, anchor="w")
             self.exclusion_tree.heading("#0", text="Name", anchor="w")
-            self.exclusion_tree.heading("size", text="Size", anchor="e")
-            self.exclusion_tree.heading("rating", text="Rating", anchor="center")
-            self.exclusion_tree.heading("tags", text="Tags", anchor="w")
-            self.exclusion_tree.heading("bookmarks", text="Bookmarks", anchor="center")
 
             # Tag for rating stars (yellow)
             self.exclusion_tree.tag_configure("rating_star", foreground="#f5c518")
@@ -1364,30 +1411,27 @@ def select_multiple_folders_and_play():
                                          command=lambda: self._context_show_folder_properties(first_path))
 
             if first_path and os.path.isfile(first_path):
-                context_menu.add_separator()
-
-                # Get annotation state
-                rating = self.annotation_service.get_rating(first_path)
-                tags = self.annotation_service.get_tags(first_path)
-                bookmarks = self.annotation_service.get_bookmarks(first_path)
-
-                if rating > 0:
-                    context_menu.add_command(
-                        label="☆ Remove Rating",
-                        command=lambda p=first_path: self._set_rating_for_path(p, 0)
-                    )
-
-                if tags:
-                    context_menu.add_command(
-                        label="🏷 Remove All Tags",
-                        command=lambda p=first_path: self._remove_all_tags_from_path(p)
-                    )
-
-                if bookmarks:
-                    context_menu.add_command(
-                        label="🔖 Remove All Bookmarks",
-                        command=lambda p=first_path: self._remove_all_bookmarks_from_path(p)
-                    )
+                show_ann = self.settings_manager.get_settings().show_video_annotations_in_tree
+                if show_ann:
+                    context_menu.add_separator()
+                    rating = self.annotation_service.get_rating(first_path)
+                    tags = self.annotation_service.get_tags(first_path)
+                    bookmarks = self.annotation_service.get_bookmarks(first_path)
+                    if rating > 0:
+                        context_menu.add_command(
+                            label="☆ Remove Rating",
+                            command=lambda p=first_path: self._set_rating_for_path(p, 0)
+                        )
+                    if tags:
+                        context_menu.add_command(
+                            label="🏷 Remove All Tags",
+                            command=lambda p=first_path: self._remove_all_tags_from_path(p)
+                        )
+                    if bookmarks:
+                        context_menu.add_command(
+                            label="🔖 Remove All Bookmarks",
+                            command=lambda p=first_path: self._remove_all_bookmarks_from_path(p)
+                        )
 
             try:
                 context_menu.tk_popup(event.x_root, event.y_root)
@@ -1470,6 +1514,7 @@ def select_multiple_folders_and_play():
 
         def load_subdirectories(self, directory, max_depth=20, restore_path=None, restore_scroll=None):
             self.current_max_depth = max_depth
+            show_ann = self.settings_manager.get_settings().show_video_annotations_in_tree
 
             if self.show_only_excluded:
                 self.selected_dir_label.config(text=f"Excluded items in: {os.path.basename(directory)}")
@@ -1668,10 +1713,16 @@ def select_multiple_folders_and_play():
                                         meta_size = fmt_size(os.path.getsize(path))
                                     except Exception:
                                         meta_size = ""
-                                size_str = self._get_video_size_str(path) if not is_dir else ""
-                                rating_str = self._get_rating_stars(path) if not is_dir else ""
-                                tags_str = self._get_tags_str(path) if not is_dir else ""
-                                bm_str = self._get_bookmarks_str(path) if not is_dir else ""
+                                if is_dir:
+                                    size_str = meta_size
+                                else:
+                                    size_str = self._get_video_size_str(path)
+                                if show_ann:
+                                    rating_str = self._get_rating_stars(path) if not is_dir else ""
+                                    tags_str = self._get_tags_str(path) if not is_dir else ""
+                                    bm_str = self._get_bookmarks_str(path) if not is_dir else ""
+                                else:
+                                    rating_str = tags_str = bm_str = ""
 
                                 self.exclusion_tree.insert(
                                     parent_iid, tk.END, iid=iid,
@@ -3633,6 +3684,39 @@ def select_multiple_folders_and_play():
                     self.grid_view_manager.set_play_in_dual_player_win2_1_callback(None)
                     self.grid_view_manager.set_play_in_dual_player_win2_2_callback(None)
                     self.grid_view_manager.set_play_in_dual_player_win2_3_callback(None)
+
+            if hasattr(self, 'exclusion_tree'):
+                old_show = getattr(self, '_last_show_annotations', None)
+                new_show = new_settings.show_video_annotations_in_tree
+                if old_show is None or old_show != new_show:
+                    self._last_show_annotations = new_show
+                    self._toggle_annotation_columns(new_show)
+
+        def _toggle_annotation_columns(self, enabled):
+            left_width = self.dir_section.winfo_width() if hasattr(self, 'dir_section') else 0
+
+            if enabled:
+                self.exclusion_tree.configure(columns=("size", "rating", "tags", "bookmarks"))
+                self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
+                self.exclusion_tree.column("rating", width=100, minwidth=100, stretch=False, anchor="center")
+                self.exclusion_tree.column("tags", width=180, minwidth=120, stretch=False, anchor="w")
+                self.exclusion_tree.column("bookmarks", width=80, minwidth=80, stretch=False, anchor="center")
+                self.exclusion_tree.heading("size", text="Size", anchor="e")
+                self.exclusion_tree.heading("rating", text="Rating", anchor="center")
+                self.exclusion_tree.heading("tags", text="Tags", anchor="w")
+                self.exclusion_tree.heading("bookmarks", text="Bookmarks", anchor="center")
+            else:
+                self.exclusion_tree.configure(columns=("size",))
+                self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
+                self.exclusion_tree.heading("size", text="Size", anchor="e")
+
+            cur = self.get_current_selected_directory()
+            if cur:
+                self.load_subdirectories(cur)
+
+            if left_width > 10:
+                self.dir_section.config(width=left_width)
+                self.dir_section.pack_propagate(False)
 
         def _clear_thumbnail_cache(self):
             try:

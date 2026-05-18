@@ -144,6 +144,7 @@ class SettingsData:
         self.enable_watch_history = True
         self.dual_window_enabled = False
         self.gaming_mode = False
+        self.show_video_annotations_in_tree = True
         # Mutable copy of default hotkeys — users can override individual bindings
         self.hotkeys: Dict[str, str] = dict(DEFAULT_HOTKEYS)
 
@@ -163,6 +164,7 @@ class SettingsData:
             'dual_window_enabled': self.dual_window_enabled,
             'hotkeys': dict(self.hotkeys),
             'gaming_mode': self.gaming_mode,
+            'show_video_annotations_in_tree': self.show_video_annotations_in_tree,
         }
 
     @classmethod
@@ -181,6 +183,7 @@ class SettingsData:
         settings.enable_watch_history = data.get('enable_watch_history', settings.enable_watch_history)
         settings.dual_window_enabled = data.get('dual_window_enabled', settings.dual_window_enabled)
         settings.gaming_mode = data.get('gaming_mode', False)
+        settings.show_video_annotations_in_tree = data.get('show_video_annotations_in_tree', True)
         # Merge saved hotkeys on top of defaults so new actions always have a binding
         saved_hotkeys = data.get('hotkeys', {})
         if isinstance(saved_hotkeys, dict):
@@ -722,6 +725,15 @@ class SettingsUI:
             style="Modern.TCheckbutton"
         )
         gaming_mode_check.pack(anchor='w', pady=2)
+
+        self.show_annotations_var = tk.BooleanVar(value=self.settings.show_video_annotations_in_tree)
+        annot_check = ttk.Checkbutton(
+            player_window_section,
+            text="Show Rating, Tags & Bookmarks columns (and right‑click management)",
+            variable=self.show_annotations_var,
+            style="Modern.TCheckbutton"
+        )
+        annot_check.pack(anchor='w', pady=2)
 
         thumbnail_btn_frame = tk.Frame(preview_section, bg=self.theme_provider.bg_color)
         thumbnail_btn_frame.pack(fill=tk.X, pady=10)
@@ -1423,6 +1435,8 @@ class SettingsUI:
             self.gaming_mode_var.set(settings.gaming_mode)
         if hasattr(self, 'show_console_var'):
             self.show_console_var.set(getattr(settings, 'show_console', True))
+        if hasattr(self, 'show_annotations_var'):
+            self.show_annotations_var.set(settings.show_video_annotations_in_tree)
         # Refresh the shortcuts tab draft + button labels if the tab exists
         if hasattr(self, '_hotkeys_draft'):
             self._hotkeys_draft = dict(settings.hotkeys)
@@ -1456,6 +1470,8 @@ class SettingsUI:
             self.settings.dual_window_enabled = self.dual_window_enabled_var.get()
         if hasattr(self, 'gaming_mode_var'):
             self.settings.gaming_mode = self.gaming_mode_var.get()
+        if hasattr(self, 'show_annotations_var'):
+            self.settings.show_video_annotations_in_tree = self.show_annotations_var.get()
 
         if hasattr(self, 'show_console_var'):
             if hasattr(self.theme_provider, 'toggle_console'):
