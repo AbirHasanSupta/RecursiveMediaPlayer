@@ -730,13 +730,13 @@ def select_multiple_folders_and_play():
             show_ann = self.settings_manager.get_settings().show_video_annotations_in_tree
 
             if show_ann:
-                self.exclusion_tree.configure(columns=("size", "rating", "tags"))
-                self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
+                self.exclusion_tree.configure(columns=("rating", "tags", "size"))
                 self.exclusion_tree.column("rating", width=100, minwidth=100, stretch=False, anchor="center")
                 self.exclusion_tree.column("tags", width=180, minwidth=120, stretch=False, anchor="w")
-                self.exclusion_tree.heading("size", text="Size", anchor="e")
+                self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
                 self.exclusion_tree.heading("rating", text="Rating", anchor="center")
                 self.exclusion_tree.heading("tags", text="Tags", anchor="w")
+                self.exclusion_tree.heading("size", text="Size", anchor="e")
             else:
                 self.exclusion_tree.configure(columns=("size",))
                 self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
@@ -934,7 +934,7 @@ def select_multiple_folders_and_play():
                 style="ExclusionTree.Treeview",
                 selectmode="extended",
                 show="tree headings",
-                columns=("size", "rating", "tags"),
+                columns=("rating", "tags", "size"),
                 yscrollcommand=self.exclusion_scrollbar.set,
             )
 
@@ -943,13 +943,13 @@ def select_multiple_folders_and_play():
             show_ann = self.settings_manager.get_settings().show_video_annotations_in_tree
 
             if show_ann:
-                self.exclusion_tree.configure(columns=("size", "rating", "tags"))
-                self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
+                self.exclusion_tree.configure(columns=("rating", "tags", "size"))
                 self.exclusion_tree.column("rating", width=100, minwidth=100, stretch=False, anchor="center")
                 self.exclusion_tree.column("tags", width=180, minwidth=120, stretch=False, anchor="w")
-                self.exclusion_tree.heading("size", text="Size", anchor="e")
+                self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
                 self.exclusion_tree.heading("rating", text="Rating", anchor="center")
                 self.exclusion_tree.heading("tags", text="Tags", anchor="w")
+                self.exclusion_tree.heading("size", text="Size", anchor="e")
             else:
                 self.exclusion_tree.configure(columns=("size",))
                 self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
@@ -1065,7 +1065,7 @@ def select_multiple_folders_and_play():
                     rating_str = self._get_rating_stars(path)
                     tags_str = self._get_tags_str(path)
                     # Update columns
-                    self.exclusion_tree.item(iid, values=(size_str, rating_str, tags_str))
+                    self.exclusion_tree.item(iid, values=(rating_str, tags_str, size_str))
                     # Update tag and label for now‑playing / fav / excl
                     tag = self._tag_for_item(path, selected_dir, excluded_dir_set, excluded_vid_set)
                     label = self._label_for_item(path, False, excluded_dir_set, excluded_vid_set, selected_dir)
@@ -1724,7 +1724,7 @@ def select_multiple_folders_and_play():
                                     parent_iid, tk.END, iid=iid,
                                     text=label, tags=(tag,),
                                     open=open_state,
-                                    values=(size_str, rating_str, tags_str)
+                                    values=(rating_str, tags_str, size_str) if show_ann else (size_str,)
                                 )
                                 mapping[iid] = path
                                 if restore_norm and norm_p == restore_norm:
@@ -3692,13 +3692,13 @@ def select_multiple_folders_and_play():
             left_width = self.dir_section.winfo_width() if hasattr(self, 'dir_section') else 0
 
             if enabled:
-                self.exclusion_tree.configure(columns=("size", "rating", "tags"))
-                self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
+                self.exclusion_tree.configure(columns=("rating", "tags", "size"))
                 self.exclusion_tree.column("rating", width=100, minwidth=100, stretch=False, anchor="center")
                 self.exclusion_tree.column("tags", width=180, minwidth=120, stretch=False, anchor="w")
-                self.exclusion_tree.heading("size", text="Size", anchor="e")
+                self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
                 self.exclusion_tree.heading("rating", text="Rating", anchor="center")
                 self.exclusion_tree.heading("tags", text="Tags", anchor="w")
+                self.exclusion_tree.heading("size", text="Size", anchor="e")
             else:
                 self.exclusion_tree.configure(columns=("size",))
                 self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
