@@ -60,6 +60,8 @@ class GridViewManager:
         self._search_timer = None
         self._hovered_card_path = None
         self.annotation_service = None
+        self._active_tag_filters = set()
+        self._tag_filter_btn = None
 
         # callbacks
         self.play_callback = None
@@ -227,8 +229,10 @@ class GridViewManager:
         self._photo_cache.clear()
         self._page = 0
         self._pages_cache = None
+        self._active_tag_filters.clear()
 
         self._build_ui(videos, t)
+        self._update_tag_filter_btn()
 
         from icon_helper import apply_icon
         apply_icon(self.grid_window)
@@ -341,7 +345,20 @@ class GridViewManager:
         )
         search_entry.pack(side=tk.LEFT, ipady=5, padx=(0, 8))
 
-        # Separator
+        tk.Frame(inner_tb, bg=t['border'], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=10, padx=4)
+
+        tk.Label(inner_tb, text="Tags", font=("Segoe UI", 9),
+                 bg=toolbar_bg, fg=t['text_sub']).pack(side=tk.LEFT, padx=(14, 6), pady=13)
+
+        self._tag_filter_btn = tk.Label(
+            inner_tb, text="All tags ▾",
+            font=("Segoe UI", 9),
+            bg=t['pill_bg'], fg=t['pill_fg'],
+            padx=14, pady=5, cursor="hand2"
+        )
+        self._tag_filter_btn.pack(side=tk.LEFT, padx=(0, 4), pady=13)
+        self._tag_filter_btn.bind("<Button-1>", lambda e: self._show_tag_filter_menu(e))
+
         tk.Frame(inner_tb, bg=t['border'], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=10, padx=10)
 
         # Selection actions
@@ -438,6 +455,8 @@ class GridViewManager:
             if self._search_timer:
                 self.root.after_cancel(self._search_timer)
                 self._search_timer = None
+            self._active_tag_filters.clear()
+            self._update_tag_filter_btn()
             try:
                 self.grid_window.destroy()
             except Exception:
@@ -451,6 +470,104 @@ class GridViewManager:
     # ─────────────────────────────────────────────────────────────────────────
     # Widget helpers (new UI)
     # ─────────────────────────────────────────────────────────────────────────
+    def _show_tag_filter_menu(self, event):
+        if not self.annotation_service:
+            return
+        # Collect all tags from all video items
+        all_tags = set()
+        for it in getattr(self, 'all_items', self.items):
+            if it['type'] == 'video':
+                for tag in self.annotation_service.get_tags(it['path']):
+                    all_tags.add(tag)
+        if not all_tags:
+            return
+
+        t = self._tok()
+        menu = tk.Menu(self.grid_window, tearoff=0,
+                       bg=t['surface'], fg=t['text'],
+                       activebackground=t['accent_dim'],
+                       activeforeground=t['accent'],
+                       relief="flat", bd=1, font=("Segoe UI", 9))
+
+        # Only add "Clear tag filter" if any filters are active
+        if self._active_tag_filters:
+            menu.add_command(label="Clear tag filter", command=lambda: (
+                self._active_tag_filters.clear(),
+                self._update_tag_filter_btn(),
+                self._apply_tag_filter()
+            ))
+            menu.add_separator()
+
+        def toggle_tag(tag):
+            if tag in self._active_tag_filters:
+                self._active_tag_filters.discard(tag)
+            else:
+                self._active_tag_filters.add(tag)
+            self._update_tag_filter_btn()
+            self._apply_tag_filter()
+
+        for tag in sorted(all_tags):
+            check = "✓ " if tag in self._active_tag_filters else "   "
+            menu.add_command(label=f"{check}{tag}", command=lambda tg=tag: toggle_tag(tg))
+
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _update_tag_filter_btn(self):
+        if not self._tag_filter_btn:
+            return
+        t = self._tok()
+        if self._active_tag_filters:
+            label = f"Tags: {', '.join(sorted(self._active_tag_filters)[:2])}"
+            if len(self._active_tag_filters) > 2:
+                label += f" +{len(self._active_tag_filters) - 2}"
+            label += " ▾"
+            self._tag_filter_btn.config(text=label, fg=t['accent'], bg=t['accent_dim'])
+        else:
+            self._tag_filter_btn.config(text="All tags ▾", fg=t['pill_fg'], bg=t['pill_bg'])
+
+    def _apply_tag_filter(self):
+        self._page = 0
+        self._pages_cache = None
+        if not hasattr(self, 'all_items'):
+            self.all_items = self.items.copy()
+
+        term = self.search_var.get().lower() if hasattr(self, 'search_var') else ""
+        active_tags = self._active_tag_filters
+
+        if not active_tags and not term:
+            self.items = self.all_items.copy()
+            self.root.after(0, self._rebuild_grid)
+            return
+
+        self.items = []
+        current_header = None
+        current_dir_items = []
+        for item_data in self.all_items:
+            if item_data['type'] == 'header':
+                if current_header and current_dir_items:
+                    self.items.append(current_header)
+                    self.items.extend(current_dir_items)
+                current_header = item_data.copy()
+                current_dir_items = []
+                current_header['matches'] = term in item_data['name'].lower() if term else True
+            elif item_data['type'] == 'video':
+                name_ok = not term or term in os.path.basename(item_data['path']).lower() or (
+                            current_header and current_header.get('matches'))
+                if active_tags and self.annotation_service:
+                    video_tags = set(self.annotation_service.get_tags(item_data['path']))
+                    tag_ok = bool(active_tags & video_tags)
+                else:
+                    tag_ok = True
+                if name_ok and tag_ok:
+                    current_dir_items.append(item_data)
+        if current_header and current_dir_items:
+            self.items.append(current_header)
+            self.items.extend(current_dir_items)
+
+        self.root.after(0, self._rebuild_grid)
 
     def _make_btn(self, parent, text, cmd, bg, fg, hover=None):
         """Flat rectangular button with hover colour."""
@@ -1541,7 +1658,10 @@ class GridViewManager:
                 self.items.append(current_header)
                 self.items.extend(current_dir_items)
 
-        self.root.after(0, self._rebuild_grid)
+        if self._active_tag_filters:
+            self._apply_tag_filter()
+        else:
+            self.root.after(0, self._rebuild_grid)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Drag & drop – directory reorder (original)
