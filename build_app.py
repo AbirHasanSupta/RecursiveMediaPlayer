@@ -711,7 +711,8 @@ def select_multiple_folders_and_play():
             style.configure("ExclusionTree.Treeview.Heading",
                             background=self.bg_color,
                             foreground=self.text_color,
-                            relief="flat")
+                            relief="flat",
+                            borderwidth=1)
             style.map("ExclusionTree.Treeview.Heading",
                       background=[('active', self.bg_color), ('pressed', self.bg_color), ('focus', self.bg_color)],
                       foreground=[('active', self.text_color), ('pressed', self.text_color),
@@ -834,11 +835,24 @@ def select_multiple_folders_and_play():
             style.layout("ExclusionTree.Treeview", [
                 ("ExclusionTree.Treeview.treearea", {"sticky": "nswe"})
             ])
+            try:
+                style.element_create("ExclusionTree.Heading.border", "from", "clam", "Heading.border")
+            except Exception:
+                pass
+            style.layout("ExclusionTree.Treeview.Heading", [
+                ("ExclusionTree.Heading.border", {"sticky": "nswe", "children": [
+                    ("Treeview.Heading.padding", {"sticky": "nswe", "children": [
+                        ("Treeview.Heading.image", {"side": "right", "sticky": ""}),
+                        ("Treeview.Heading.label", {"sticky": "we"})
+                    ]})
+                ]})
+            ])
             style.configure(
                 "ExclusionTree.Treeview.Heading",
                 background=heading_bg,
                 foreground=heading_fg,
                 relief="flat",
+                borderwidth=1,
             )
             style.map(
                 "ExclusionTree.Treeview",
