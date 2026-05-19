@@ -729,7 +729,7 @@ class SettingsUI:
         self.show_annotations_var = tk.BooleanVar(value=self.settings.show_video_annotations_in_tree)
         annot_check = ttk.Checkbutton(
             player_window_section,
-            text="Show Rating, Tags & Bookmarks columns (and right‑click management)",
+            text="Show Rating & Tags columns (and right‑click management)",
             variable=self.show_annotations_var,
             style="Modern.TCheckbutton"
         )
