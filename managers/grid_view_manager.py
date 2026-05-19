@@ -89,6 +89,11 @@ class GridViewManager:
 
     def _cleanup(self):
         try:
+            if self.annotation_service and hasattr(self, '_annotation_listener') and self._annotation_listener:
+                try:
+                    self.annotation_service.unsubscribe(self._annotation_listener)
+                except Exception:
+                    pass
             with self.loading_lock:
                 self.is_loading = False
             for task in list(self.pending_tasks):
@@ -128,7 +133,54 @@ class GridViewManager:
     def set_get_player_count_callback(self, cb):                 self.get_player_count_callback = cb
     def set_open_file_location_callback(self, cb):               self.open_file_location_callback = cb
     def set_show_properties_callback(self, cb):                  self.show_properties_callback = cb
-    def set_annotation_service(self, svc):                       self.annotation_service = svc
+    def set_annotation_service(self, svc):
+        self.annotation_service = svc
+        if svc:
+            self._annotation_listener = self._on_annotation_changed
+            svc.subscribe(self._annotation_listener)
+
+    def _on_annotation_changed(self):
+        if self.grid_window and self.grid_window.winfo_exists():
+            self.root.after(0, self._refresh_all_card_tags)
+
+    def _refresh_all_card_tags(self):
+        if not (self.grid_window and self.grid_window.winfo_exists()):
+            return
+        t = self._tok()
+        for vp, card in list(self.card_widgets.items()):
+            if not card.winfo_exists():
+                continue
+            info_frame = None
+            for child in card.winfo_children():
+                if getattr(child, '_is_info', False):
+                    info_frame = child
+                    break
+            if info_frame is None:
+                continue
+            # Remove existing meta_frame
+            for child in list(info_frame.winfo_children()):
+                if getattr(child, '_is_meta', False):
+                    child.destroy()
+            # Rebuild meta_frame
+            svc = self.annotation_service
+            tags = svc.get_tags(vp)
+            rating = svc.get_rating(vp)
+            is_fav = (self.is_favourite_callback and self.is_favourite_callback(vp))
+            is_sel = vp in self.selected_items
+            info_bg = t['accent_dim'] if is_sel else t['surface']
+            meta_frame = tk.Frame(info_frame, bg=info_bg)
+            meta_frame._is_meta = True
+            meta_frame.pack(fill=tk.X, pady=(3, 0))
+            if is_fav:
+                tk.Label(meta_frame, text="★", bg=info_bg, fg=t['warn'],
+                         font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=(0, 4))
+            if rating > 0:
+                tk.Label(meta_frame, text="★" * rating, bg=info_bg, fg=t['warn'],
+                         font=("Segoe UI", 7)).pack(side=tk.LEFT, padx=(0, 4))
+            for tag in tags[:3]:
+                tk.Label(meta_frame, text=tag,
+                         bg=t['accent_dim'], fg=t['accent'],
+                         font=("Segoe UI", 7), padx=4, pady=1).pack(side=tk.LEFT, padx=(0, 2))
 
     # ─────────────────────────────────────────────────────────────────────────
     # Design tokens (new UI)
@@ -1011,6 +1063,7 @@ class GridViewManager:
             is_fav = (self.is_favourite_callback and self.is_favourite_callback(vp))
 
             meta_frame = tk.Frame(info_frame, bg=info_bg)
+            meta_frame._is_meta = True
             meta_frame.pack(fill=tk.X, pady=(3, 0))
 
             if is_fav:
