@@ -2,7 +2,7 @@ import os
 import threading
 import tkinter as tk
 from tkinter import font as tkfont
-from typing import Optional, Callable
+from typing import Optional, Callable, Dict, List, Any
 
 try:
     from icon_helper import apply_icon
@@ -136,6 +136,11 @@ class AnnotationBrowserManager:
         self.grid_view_manager = None
         self._annotation_listener = None
 
+        # Async loading attributes
+        self._load_thread: Optional[threading.Thread] = None
+        self._cancel_load = threading.Event()
+        self._loading = False
+
         theme_provider.register_manager_ui(self)
 
     # ── Public ────────────────────────────────────────────────────────────────
@@ -148,15 +153,125 @@ class AnnotationBrowserManager:
         self._build_window()
 
     def refresh(self):
+        """Refresh the UI – called after any annotation change or manual refresh."""
         if self._win and self._win.winfo_exists():
-            self._rebuild_tags()
-            self._apply_filter()
+            self._start_async_load()
 
     def set_video_preview_manager(self, preview_manager):
         self.video_preview_manager = preview_manager
 
     def set_grid_view_manager(self, grid_view_manager):
         self.grid_view_manager = grid_view_manager
+
+    # ── Async Loading ────────────────────────────────────────────────────────
+
+    def _start_async_load(self):
+        """Cancel any pending load and start a new background thread to fetch data."""
+        if self._loading:
+            self._cancel_load.set()
+            if self._load_thread and self._load_thread.is_alive():
+                self._load_thread.join(0.1)
+        self._cancel_load.clear()
+        self._loading = True
+
+        # Show loading indicators immediately (prevents white flash)
+        self._show_loading_indicators()
+
+        self._load_thread = threading.Thread(target=self._load_data_in_background, daemon=True)
+        self._load_thread.start()
+
+    def _load_data_in_background(self):
+        """Fetch all tags, counts, and annotated videos from the service."""
+        if self._cancel_load.is_set():
+            return
+
+        try:
+            # Acquire service lock for thread-safe reading
+            with self.svc._lock:
+                # Get all tags
+                all_tags = self.svc.get_all_tags()
+                # Prefetch tag counts
+                tag_counts = {}
+                for tag in all_tags:
+                    if self._cancel_load.is_set():
+                        return
+                    tag_counts[tag] = len(self.svc.get_videos_with_tag(tag))
+
+                # Get all annotated videos (with rating/tags/bookmarks)
+                annotated_videos = [
+                    k for k, v in self.svc._data.items()
+                    if v.rating > 0 or v.tags or v.bookmarks
+                ]
+
+            # Package data for UI thread
+            data = {
+                "all_tags": all_tags,
+                "tag_counts": tag_counts,
+                "annotated_videos": annotated_videos,
+            }
+
+            if not self._cancel_load.is_set():
+                self.root.after(0, self._apply_loaded_data, data)
+        except Exception as e:
+            if self.logger:
+                self.logger(f"Async load error: {e}")
+            self.root.after(0, self._clear_loading_state)
+
+    def _apply_loaded_data(self, data: Dict[str, Any]):
+        """Apply fetched data in main thread and rebuild UI."""
+        if self._cancel_load.is_set():
+            self._clear_loading_state()
+            return
+
+        # Store loaded data to use in rebuild methods
+        self._cached_all_tags = data["all_tags"]
+        self._cached_tag_counts = data["tag_counts"]
+        self._cached_annotated_videos = data["annotated_videos"]
+
+        # Rebuild UI with cached data
+        self._rebuild_tags_from_cache()
+        self._apply_filter_from_cache()
+
+        self._clear_loading_state()
+        self._loading = False
+
+    def _clear_loading_state(self):
+        self._loading = False
+        self._cancel_load.clear()
+
+    def _show_loading_indicators(self):
+        """Display dark-themed loading placeholders to prevent white flash."""
+        if not self._tag_frame_inner or not self._vid_inner:
+            return
+
+        P = _p(self.tp.dark_mode)
+
+        # Clear existing content and show loading message in tag panel
+        for w in self._tag_frame_inner.winfo_children():
+            w.destroy()
+        loading_lbl = tk.Label(
+            self._tag_frame_inner,
+            text="⏳ Loading tags...",
+            font=("Segoe UI", 10, "italic"),
+            bg=P["sidebar"],
+            fg=self.tp.muted_fg,
+            pady=20
+        )
+        loading_lbl.pack(expand=True)
+
+        # Show loading message in video list
+        for w in self._vid_inner.winfo_children():
+            w.destroy()
+        vid_loading = tk.Label(
+            self._vid_inner,
+            text="⏳ Loading videos...",
+            font=("Segoe UI", 12, "italic"),
+            bg=P["panel"],
+            fg=self.tp.muted_fg,
+            pady=40
+        )
+        vid_loading.pack(expand=True)
+        self._vid_inner.update_idletasks()
 
     # ── Window ────────────────────────────────────────────────────────────────
 
@@ -237,6 +352,7 @@ class AnnotationBrowserManager:
             for path in targets:
                 self.svc.add_tag(path, tag)
             dlg.destroy()
+            self.refresh()
 
         tp.create_button(btns, "Add", do_save, "primary", "md").pack(side=tk.RIGHT, padx=(8, 0))
         tp.create_button(btns, "Cancel", dlg.destroy, "secondary", "md").pack(side=tk.RIGHT)
@@ -292,7 +408,7 @@ class AnnotationBrowserManager:
                 return
             self.svc.create_empty_tag(tag)
             dlg.destroy()
-            self._rebuild_tags()
+            self.refresh()
 
         tp.create_button(btns, "Create", do_save, "primary", "md").pack(side=tk.RIGHT, padx=(8, 0))
         tp.create_button(btns, "Cancel", dlg.destroy, "secondary", "md").pack(side=tk.RIGHT)
@@ -611,14 +727,17 @@ class AnnotationBrowserManager:
 
         tp.create_button(act_inner, "Close", win.destroy, "secondary", "md").pack(side=tk.RIGHT)
 
-        self._rebuild_tags()
-        self._apply_filter()
+        # Start async loading (shows loading indicators, then populates UI)
+        self._start_async_load()
         win.deiconify()
 
     def _on_close(self):
         if self._annotation_listener:
             self.svc.unsubscribe(self._annotation_listener)
             self._annotation_listener = None
+        if self._load_thread and self._load_thread.is_alive():
+            self._cancel_load.set()
+            self._load_thread.join(0.2)
         if self._win:
             self._win.destroy()
 
@@ -665,11 +784,13 @@ class AnnotationBrowserManager:
         except Exception:
             return hex_color
 
-    # ── Tag panel ─────────────────────────────────────────────────────────────
+    # ── Tag panel (cached version) ──────────────────────────────────────────
 
-    def _rebuild_tags(self):
-        if not self._tag_frame_inner:
+    def _rebuild_tags_from_cache(self):
+        """Rebuild tag panel using pre‑fetched data from _cached_* attributes."""
+        if not self._tag_frame_inner or not hasattr(self, '_cached_all_tags'):
             return
+
         tp = self.tp
         P = _p(tp.dark_mode)
 
@@ -678,8 +799,7 @@ class AnnotationBrowserManager:
         self._tag_btns.clear()
 
         query = (self._search_var.get().strip().lower()) if self._search_var else ""
-        all_tags = self.svc.get_all_tags()
-        visible_tags = [t for t in all_tags if not query or query in t.lower()]
+        visible_tags = [t for t in self._cached_all_tags if not query or query in t.lower()]
 
         if hasattr(self, '_tag_count_lbl') and self._tag_count_lbl:
             self._tag_count_lbl.config(text=f"{len(visible_tags)}")
@@ -720,7 +840,7 @@ class AnnotationBrowserManager:
                  ).pack(fill=tk.X, padx=12, pady=(4, 4))
 
         for tag in visible_tags:
-            count = len(self.svc.get_videos_with_tag(tag))
+            count = self._cached_tag_counts.get(tag, 0)
             is_sel = tag in self._selected_tags
 
             row_bg = P["tag_sel_bg"] if is_sel else P["sidebar"]
@@ -811,8 +931,7 @@ class AnnotationBrowserManager:
             self.svc._empty_tags.discard(tag)
             self.svc._schedule_save()
         self._selected_tags.discard(tag)
-        self._rebuild_tags()
-        self._apply_filter()
+        self.refresh()
 
     def _rename_tag(self, old_tag):
         tp = self.tp
@@ -871,8 +990,7 @@ class AnnotationBrowserManager:
                 self._selected_tags.discard(old_tag)
                 self._selected_tags.add(new_tag)
             dlg.destroy()
-            self._rebuild_tags()
-            self._apply_filter()
+            self.refresh()
 
         tp.create_button(btns, "Rename", do_rename, "primary", "md").pack(side=tk.RIGHT, padx=(8, 0))
         tp.create_button(btns, "Cancel", dlg.destroy, "secondary", "md").pack(side=tk.RIGHT)
@@ -892,8 +1010,7 @@ class AnnotationBrowserManager:
             self._selected_tags.discard(tag)
         else:
             self._selected_tags.add(tag)
-        self._rebuild_tags()
-        self._apply_filter()
+        self.refresh()
 
     # ── Rating clicks ─────────────────────────────────────────────────────────
 
@@ -901,7 +1018,7 @@ class AnnotationBrowserManager:
         self._rating_var.set(val)
         P = _p(self.tp.dark_mode)
         self._update_rb_visuals(P)
-        self._apply_filter()
+        self.refresh()
 
     def _update_rb_visuals(self, P):
         cur = self._rating_var.get()
@@ -913,19 +1030,18 @@ class AnnotationBrowserManager:
                 highlightbackground=P["search_hl"] if sel else P["sep"]
             )
 
-    # ── Filter ────────────────────────────────────────────────────────────────
+    # ── Filter (cached version) ──────────────────────────────────────────────
 
-    def _apply_filter(self):
-        if not hasattr(self, '_vid_canvas') or not self._vid_canvas:
+    def _apply_filter_from_cache(self):
+        """Apply filter using cached annotated videos list."""
+        if not hasattr(self, '_vid_canvas') or not self._vid_canvas or not hasattr(self, '_cached_annotated_videos'):
             return
+
         tp = self.tp
         P = _p(tp.dark_mode)
 
         min_rating = self._rating_var.get() if self._rating_var else 0
-        all_annotated = [
-            k for k, v in self.svc._data.items()
-            if v.rating > 0 or v.tags or v.bookmarks
-        ]
+        all_annotated = self._cached_annotated_videos
 
         if self._selected_tags:
             candidates = [p for p in all_annotated
@@ -1138,8 +1254,7 @@ class AnnotationBrowserManager:
 
     def _remove_tag_from_video(self, path, tag):
         self.svc.remove_tag(path, tag)
-        self._rebuild_tags()
-        self._apply_filter()
+        self.refresh()
 
     def _refresh_row_colors(self):
         tp = self.tp
@@ -1168,7 +1283,7 @@ class AnnotationBrowserManager:
                     cell.config(bg=bg_, fg=fg_)
 
     def _on_search_change(self):
-        self._rebuild_tags()
+        self.refresh()
 
     def _clear_filters(self):
         self._selected_tags.clear()
@@ -1177,8 +1292,7 @@ class AnnotationBrowserManager:
         self._update_rb_visuals(P)
         if self._search_var:
             self._search_var.set("")
-        self._rebuild_tags()
-        self._apply_filter()
+        self.refresh()
 
     # ── Detail panel ──────────────────────────────────────────────────────────
 
@@ -1361,8 +1475,7 @@ class AnnotationBrowserManager:
             if bookmarks:
                 for bm in list(self.svc.get_bookmarks(path)):
                     self.svc.remove_bookmark(path, bm["ms"])
-        self._rebuild_tags()
-        self._apply_filter()
+        self.refresh()
 
     def _open_grid_view_from_selection(self, selection):
         if not self.grid_view_manager:
