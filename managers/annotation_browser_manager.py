@@ -938,8 +938,7 @@ class AnnotationBrowserManager:
 
         self._filtered_videos = candidates
         saved_order = self.svc.get_browser_order()
-
-        if saved_order and not self._selected_tags and not self._search_var.get().strip():
+        if saved_order:
             order_map = {p: i for i, p in enumerate(saved_order)}
             self._filtered_videos.sort(key=lambda p: order_map.get(p, len(saved_order)))
         self._vid_selection.clear()
@@ -1097,6 +1096,8 @@ class AnnotationBrowserManager:
                             c.config(bg=bg_)
 
                 def on_drag(e):
+                    if self._selected_tags or (self._search_var and self._search_var.get().strip()):
+                        return
                     if self._dragging_index is None:
                         return
                     canvas_y = r.winfo_y() + e.y
@@ -1110,6 +1111,9 @@ class AnnotationBrowserManager:
                         self._rebuild_vid_rows()
 
                 def on_release(e):
+                    if self._selected_tags or (self._search_var and self._search_var.get().strip()):
+                        self._dragging_index = None
+                        return
                     if self._dragging_index is not None:
                         self.svc.set_browser_order(list(self._filtered_videos))
                     self._dragging_index = None
