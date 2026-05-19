@@ -1,6 +1,7 @@
 from embedded_player import EmbeddedPlayer
 from icon_helper import apply_icon
 from splash import show_splash
+from unified_panel import UnifiedPanel
 
 try:
     from version import __version__, __commit__, __build__
@@ -333,6 +334,8 @@ def select_multiple_folders_and_play():
             self.settings_manager.ui.clear_metadata_callback = lambda: self._clear_metadata_cache()
             self.settings_manager.ui.get_metadata_info_callback = lambda: self._get_metadata_cache_info()
             self.settings_manager.ui.filter_sort_manager = self.filter_sort_manager
+            self.unified_panel = UnifiedPanel(self)
+            self.unified_panel.build()
             self._setup_periodic_cleanup()
             self.resource_manager.register_cleanup_callback(self._cleanup_managers)
 
