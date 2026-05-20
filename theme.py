@@ -648,6 +648,7 @@ class ThemeSelector:
         self._fix_toolbar_colors()
 
     def _toggle_theme_menu(self):
+        self._show_home_view()
         self.toggle_theme()
         if hasattr(self, 'theme_toolbar_btn') and hasattr(self, '_tb_colors'):
             cc = self._tb_colors()
