@@ -438,32 +438,81 @@ class WatchHistoryUI:
 
         tk.Frame(self.history_window, bg=t['divider'], height=1).pack(fill=tk.X)
 
+        # Filter row - redesigned as obvious clickable buttons
         filter_row = tk.Frame(self.history_window, bg=t['bg'])
-        filter_row.pack(fill=tk.X, padx=20, pady=(14, 0))
-        tk.Label(filter_row, text="Show:", font=tp.small_font,
-                 bg=t['bg'], fg=t['text_muted']).pack(side=tk.LEFT, padx=(0, 10))
-        self.filter_var = tk.StringVar(value="all")
-        self._filter_pills = []
-        for label_text, val in [("All time", "all"), ("Today", "today"),
-                                ("7 days", "week"), ("30 days", "month")]:
-            pill = tk.Label(filter_row, text=f"  {label_text}  ",
-                            font=tp.small_font, bg=t['surface2'], fg=t['text'],
-                            padx=4, pady=4, cursor="hand2", relief=tk.FLAT)
+        filter_row.pack(fill=tk.X, padx=20, pady=(14, 6))
 
-            def _click(v=val):
+        tk.Label(filter_row, text="Filter by:", font=tp.small_font,
+                 bg=t['bg'], fg=t['text_muted']).pack(side=tk.LEFT, padx=(0, 12))
+
+        self.filter_var = tk.StringVar(value="all")
+        self.filter_buttons = []  # store (widget, value)
+
+        # Define filter options: (label, value)
+        filters = [("All time", "all"), ("Today", "today"),
+                   ("7 days", "week"), ("30 days", "month")]
+
+        for label_text, val in filters:
+            # Create a container frame to give a button-like appearance
+            btn_frame = tk.Frame(filter_row, bg=t['bg'])
+            btn_frame.pack(side=tk.LEFT, padx=3)
+
+            # The actual clickable label inside the frame
+            lbl = tk.Label(btn_frame, text=f"  {label_text}  ",
+                           font=tp.small_font,
+                           padx=6, pady=3,
+                           cursor="hand2",
+                           relief=tk.RAISED,
+                           borderwidth=1)
+
+            # Set initial style: active = accent, inactive = surface2
+            is_active = (val == self.filter_var.get())
+            if is_active:
+                lbl.config(bg=t['accent'], fg="white",
+                           highlightbackground=t['accent'], highlightthickness=0)
+            else:
+                lbl.config(bg=t['surface2'], fg=t['text'],
+                           highlightbackground=t['border'], highlightthickness=1)
+
+            lbl.pack(fill=tk.BOTH, expand=True)
+
+            # Store for later updates
+            self.filter_buttons.append((lbl, val))
+
+            # Define click handler
+            def click_handler(v=val, btn=lbl):
+                # Update filter_var
                 self.filter_var.set(v)
-                for p, pv in self._filter_pills:
-                    p.config(bg=t['accent'] if pv == v else t['surface2'],
-                             fg="white" if pv == v else t['text'])
+                # Update visual states
+                for b, bval in self.filter_buttons:
+                    if bval == v:
+                        b.config(bg=t['accent'], fg="white",
+                                 highlightbackground=t['accent'], highlightthickness=0)
+                    else:
+                        b.config(bg=t['surface2'], fg=t['text'],
+                                 highlightbackground=t['border'], highlightthickness=1)
+                # Apply filter and refresh
                 self._apply_filter()
                 self._update_stats_label()
 
-            pill.bind("<Button-1>", lambda e, fn=_click: fn())
-            pill.bind("<Enter>", lambda e, w=pill, v=val: w.config(bg=t['accent'], fg="white"))
-            pill.bind("<Leave>", lambda e, w=pill, v=val: w.config(bg=t['surface2'], fg=t['text']))
-            pill.pack(side=tk.LEFT, padx=(0, 4))
-            self._filter_pills.append((pill, val))
+            # Bind events
+            lbl.bind("<Button-1>", lambda e, h=click_handler: h())
 
+            # Hover effects
+            def on_enter(e, btn=lbl, val=val):
+                if self.filter_var.get() != val:
+                    btn.config(bg=t['accent'], fg="white",
+                               highlightbackground=t['accent'], highlightthickness=0)
+
+            def on_leave(e, btn=lbl, val=val):
+                if self.filter_var.get() != val:
+                    btn.config(bg=t['surface2'], fg=t['text'],
+                               highlightbackground=t['border'], highlightthickness=1)
+
+            lbl.bind("<Enter>", on_enter)
+            lbl.bind("<Leave>", on_leave)
+
+        # Main treeview (unchanged from your existing code)
         body = tk.Frame(self.history_window, bg=t['bg'])
         body.pack(fill=tk.BOTH, expand=True, padx=20, pady=12)
         card = tk.Frame(body, bg=t['surface'],
@@ -509,7 +558,7 @@ class WatchHistoryUI:
         self.history_tree.bind("<Button-3>", self._on_history_right_click)
         self.history_tree.bind("<Button-1>", self._on_history_left_click)
 
-        # ---- Buttons placed directly on body, no extra bar ----
+        # Bottom buttons (unchanged)
         btn_container = tk.Frame(body, bg=t['bg'])
         btn_container.pack(fill=tk.X, pady=(8, 0))
 
