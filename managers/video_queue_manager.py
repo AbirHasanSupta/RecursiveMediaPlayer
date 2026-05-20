@@ -478,8 +478,6 @@ class QueueUI:
         right = tk.Frame(action, bg=t['bg'])
         right.pack(side=tk.RIGHT)
 
-        tp.create_button(left, "↑  Move Up", self._move_up, "secondary", "md").pack(side=tk.LEFT, padx=(0, 8))
-        tp.create_button(left, "↓  Move Down", self._move_down, "secondary", "md").pack(side=tk.LEFT, padx=(0, 8))
         tp.create_button(left, "✓  Clear Played", self._clear_played, "secondary", "md").pack(side=tk.LEFT, padx=(0, 8))
         tp.create_button(left, "Clear All", self._clear_queue, "warning", "md").pack(side=tk.LEFT)
 

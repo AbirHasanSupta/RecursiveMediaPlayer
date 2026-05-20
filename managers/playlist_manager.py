@@ -334,10 +334,13 @@ class PlaylistUI:
             activestyle="none", relief=tk.FLAT, bd=0, highlightthickness=0)
         self.video_listbox.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
         self.video_listbox.bind("<Double-Button-1>", self._on_video_double_click)
+        self._right_click_binding = self.video_listbox.bind_all(
+            "<Button-3>", self._on_video_right_click_wrapper)
         self.video_listbox.bind("<Button-1>", self._on_mouse_down)
         self.video_listbox.bind("<B1-Motion>", self._on_mouse_drag)
         self.video_listbox.bind("<ButtonRelease-1>", self._on_mouse_release)
-        self.video_listbox.bind("<Button-3>", self._on_video_right_click)
+        self.video_listbox.bind("<Motion>", self._on_mouse_motion)
+        self.video_listbox.bind("<Leave>", self._on_mouse_leave)
         vid_sb.config(command=self.video_listbox.yview)
 
         # ── Bottom bar (no Close) ────────────────────────────────────────────
@@ -345,6 +348,26 @@ class PlaylistUI:
         action.pack(fill=tk.X, padx=20, pady=(0, 14))
         # No buttons here – the Playlist has no secondary actions that need a bottom bar.
         # (Delete, New, Play are already in the sidebar.)
+
+    def _on_video_right_click_wrapper(self, event):
+        if not hasattr(self, 'playlist_window') or not self.playlist_window:
+            return
+        if not self.playlist_window.winfo_exists():
+            return
+        if event.widget != self.video_listbox:
+            return
+        self._on_video_right_click(event)
+
+    def _on_close(self):
+        try:
+            if hasattr(self, '_right_click_binding') and self._right_click_binding:
+                self.video_listbox.unbind_all('<Button-3>')
+        except Exception:
+            pass
+
+        if self.playlist_window and self.playlist_window.winfo_exists():
+            self.playlist_window.destroy()
+        self.playlist_window = None
 
     def _on_playlist_right_click(self, event):
         """Show context menu for selected playlists."""
@@ -417,6 +440,12 @@ class PlaylistUI:
             self.on_play_callback(self.current_playlist.videos)
 
     def _on_close(self):
+        try:
+            if hasattr(self, '_right_click_binding') and self._right_click_binding:
+                self.video_listbox.unbind_all('<Button-3>')
+        except Exception:
+            pass
+
         if self.playlist_window and self.playlist_window.winfo_exists():
             self.playlist_window.destroy()
         self.playlist_window = None
