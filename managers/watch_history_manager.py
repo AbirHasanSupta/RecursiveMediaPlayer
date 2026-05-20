@@ -432,14 +432,12 @@ class WatchHistoryUI:
                  font=("Segoe UI", 15, "bold"),
                  bg=t['header_bg'], fg=t['text']).pack(side=tk.LEFT, pady=14)
 
-        # Stats label on the right (no primary action button)
         self.stats_label = tk.Label(h_inner, text="",
                                     font=tp.small_font, bg=t['header_bg'], fg=t['text_muted'])
         self.stats_label.pack(side=tk.RIGHT, padx=(10, 0))
 
         tk.Frame(self.history_window, bg=t['divider'], height=1).pack(fill=tk.X)
 
-        # Filter row
         filter_row = tk.Frame(self.history_window, bg=t['bg'])
         filter_row.pack(fill=tk.X, padx=20, pady=(14, 0))
         tk.Label(filter_row, text="Show:", font=tp.small_font,
@@ -452,7 +450,6 @@ class WatchHistoryUI:
                             font=tp.small_font, bg=t['surface2'], fg=t['text'],
                             padx=4, pady=4, cursor="hand2", relief=tk.FLAT)
 
-            # bindings (unchanged)
             def _click(v=val):
                 self.filter_var.set(v)
                 for p, pv in self._filter_pills:
@@ -467,7 +464,6 @@ class WatchHistoryUI:
             pill.pack(side=tk.LEFT, padx=(0, 4))
             self._filter_pills.append((pill, val))
 
-        # Main treeview
         body = tk.Frame(self.history_window, bg=t['bg'])
         body.pack(fill=tk.BOTH, expand=True, padx=20, pady=12)
         card = tk.Frame(body, bg=t['surface'],
@@ -513,20 +509,14 @@ class WatchHistoryUI:
         self.history_tree.bind("<Button-3>", self._on_history_right_click)
         self.history_tree.bind("<Button-1>", self._on_history_left_click)
 
-        # Bottom action bar (Clear All History + Refresh)
-        action = tk.Frame(self.history_window, bg=t['bg'])
-        action.pack(fill=tk.X, padx=20, pady=14)
+        # ---- Buttons placed directly on body, no extra bar ----
+        btn_container = tk.Frame(body, bg=t['bg'])
+        btn_container.pack(fill=tk.X, pady=(8, 0))
 
-        left = tk.Frame(action, bg=t['bg'])
-        left.pack(side=tk.LEFT)
-        right = tk.Frame(action, bg=t['bg'])
-        right.pack(side=tk.RIGHT)
-
-        tp.create_button(left, "Clear All History", self._clear_all_history,
-                         "warning", "md").pack(side=tk.LEFT)
-        tp.create_button(right, "↺  Refresh", self._refresh_history_list,
+        tp.create_button(btn_container, "Clear All History", self._clear_all_history,
+                         "warning", "md").pack(side=tk.LEFT, padx=(0, 8))
+        tp.create_button(btn_container, "↺  Refresh", self._refresh_history_list,
                          "secondary", "md").pack(side=tk.LEFT)
-        # No Close button
 
     def _update_stats_label(self):
         total = len(self.history_service.get_all_history())

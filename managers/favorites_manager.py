@@ -327,16 +327,13 @@ class FavoritesUI:
                  font=("Segoe UI", 15, "bold"),
                  bg=t['header_bg'], fg=t['text']).pack(side=tk.LEFT, pady=14)
 
-        # Info label (count) on right, then Play All button
         info_lbl = tk.Label(h_inner, text="",
                             font=tp.small_font, bg=t['header_bg'], fg=t['text_muted'])
         info_lbl.pack(side=tk.RIGHT, padx=(0, 10))
         self.info_label = info_lbl
 
-
         tk.Frame(self.favorites_window, bg=t['divider'], height=1).pack(fill=tk.X)
 
-        # Directory chip
         chip_bar = tk.Frame(self.favorites_window, bg=t['bg'])
         chip_bar.pack(fill=tk.X, padx=20, pady=(12, 0))
         self.directory_label = tk.Label(chip_bar, text="", font=tp.small_font,
@@ -344,7 +341,6 @@ class FavoritesUI:
                                         padx=10, pady=4, relief=tk.FLAT)
         self.directory_label.pack(side=tk.LEFT)
 
-        # Main card
         body = tk.Frame(self.favorites_window, bg=t['bg'])
         body.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
 
@@ -381,14 +377,11 @@ class FavoritesUI:
         self.favorites_listbox.bind("<B1-Motion>", self._on_mouse_drag)
         self.favorites_listbox.bind("<ButtonRelease-1>", self._on_mouse_release)
 
-        # Bottom action bar (Clear All only, no Close)
-        action = tk.Frame(self.favorites_window, bg=t['bg'])
-        action.pack(fill=tk.X, padx=20, pady=14)
+        # ---- Buttons placed directly on body, no extra bar ----
+        btn_container = tk.Frame(body, bg=t['bg'])
+        btn_container.pack(fill=tk.X, pady=(8, 0))
 
-        left = tk.Frame(action, bg=t['bg'])
-        left.pack(side=tk.LEFT)
-        # No right-side buttons except Clear All (placed left for consistency)
-        tp.create_button(left, "Clear All", self._clear_all, "warning", "md").pack(side=tk.LEFT)
+        tp.create_button(btn_container, "Clear All", self._clear_all, "warning", "md").pack(side=tk.LEFT)
 
     def play_from_global(self):
         """Play all favorites in the current directory."""

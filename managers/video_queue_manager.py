@@ -424,7 +424,6 @@ class QueueUI:
                  font=("Segoe UI", 15, "bold"),
                  bg=t['header_bg'], fg=t['text']).pack(side=tk.LEFT, pady=14)
 
-        # Queue info label (showing counts) on right, then Play button
         info_lbl = tk.Label(h_inner, text="",
                             font=tp.small_font, bg=t['header_bg'], fg=t['text_muted'])
         info_lbl.pack(side=tk.RIGHT, padx=(0, 10))
@@ -432,7 +431,6 @@ class QueueUI:
 
         tk.Frame(self.queue_window, bg=t['divider'], height=1).pack(fill=tk.X)
 
-        # Main card
         body = tk.Frame(self.queue_window, bg=t['bg'])
         body.pack(fill=tk.BOTH, expand=True, padx=20, pady=12)
 
@@ -469,17 +467,13 @@ class QueueUI:
         self.queue_listbox.bind("<B1-Motion>", self._on_drag_motion)
         self.queue_listbox.bind("<ButtonRelease-1>", self._on_drag_release)
 
-        # Bottom action bar (secondary actions only, no Close)
-        action = tk.Frame(self.queue_window, bg=t['bg'])
-        action.pack(fill=tk.X, padx=20, pady=14)
+        # ---- Buttons placed directly on body, no extra bar ----
+        btn_container = tk.Frame(body, bg=t['bg'])
+        btn_container.pack(fill=tk.X, pady=(8, 0))
 
-        left = tk.Frame(action, bg=t['bg'])
-        left.pack(side=tk.LEFT)
-        right = tk.Frame(action, bg=t['bg'])
-        right.pack(side=tk.RIGHT)
-
-        tp.create_button(left, "✓  Clear Played", self._clear_played, "secondary", "md").pack(side=tk.LEFT, padx=(0, 8))
-        tp.create_button(left, "Clear All", self._clear_queue, "warning", "md").pack(side=tk.LEFT)
+        tp.create_button(btn_container, "✓  Clear Played", self._clear_played, "secondary", "md").pack(side=tk.LEFT,
+                                                                                                       padx=(0, 8))
+        tp.create_button(btn_container, "Clear All", self._clear_queue, "warning", "md").pack(side=tk.LEFT)
 
     def play_from_global(self):
         """Play the queue from the current position."""
