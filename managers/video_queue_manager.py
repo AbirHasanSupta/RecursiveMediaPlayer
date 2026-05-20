@@ -466,6 +466,7 @@ class QueueUI:
         self.queue_listbox.bind("<Button-3>", self._on_right_click)
         self.queue_listbox.bind("<B1-Motion>", self._on_drag_motion)
         self.queue_listbox.bind("<ButtonRelease-1>", self._on_drag_release)
+        self.queue_listbox.bind("<Leave>", self._on_mouse_leave)
 
         # ---- Buttons placed directly on body, no extra bar ----
         btn_container = tk.Frame(body, bg=t['bg'])
@@ -528,25 +529,19 @@ class QueueUI:
         else:
             self.parent.after(0, refresh)
 
-    def _on_right_click(self, event):
-        listbox = event.widget
-        index = listbox.nearest(event.y)
-        selection = listbox.curselection()
+    def _show_queue_context_menu(self, event):
+        """Show context menu for selected queue items."""
+        selection = self.queue_listbox.curselection()
+        if not selection:
+            return
 
         queue = self.queue_service.get_queue()
-
-        if not selection and index >= 0 and index < len(queue):
-            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
-                entry = queue[index]
-                if os.path.isfile(entry.video_path):
-                    self.video_preview_manager.right_clicked_item = index
-                    self.video_preview_manager._show_video_preview(
-                        entry.video_path, event.x_root, event.y_root
-                    )
-            return
-
-        if not selection or not queue:
-            return
+        selected_videos = []
+        for idx in selection:
+            if 0 <= idx < len(queue):
+                entry = queue[idx]
+                if os.path.exists(entry.video_path):
+                    selected_videos.append(entry.video_path)
 
         _tp = self.theme_provider
         context_menu = tk.Menu(self.queue_window, tearoff=0,
@@ -555,13 +550,6 @@ class QueueUI:
                                activebackground="#2D5A8E" if _tp.dark_mode else "#3498db",
                                activeforeground="#FFFFFF",
                                relief="flat", bd=1, font=("Segoe UI", 9))
-
-        selected_videos = []
-        for idx in selection:
-            if 0 <= idx < len(queue):
-                entry = queue[idx]
-                if os.path.exists(entry.video_path):
-                    selected_videos.append(entry.video_path)
 
         context_menu.add_command(
             label=f"Play Selected ({len(selection)} item{'s' if len(selection) > 1 else ''})",
@@ -603,6 +591,32 @@ class QueueUI:
             context_menu.tk_popup(event.x_root, event.y_root)
         finally:
             context_menu.grab_release()
+
+    def _on_mouse_leave(self, event):
+        if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+            self.video_preview_manager.tooltip.hide_preview()
+
+    def _on_right_click(self, event):
+        listbox = event.widget
+        index = listbox.nearest(event.y)
+        selection = listbox.curselection()
+        queue = self.queue_service.get_queue()
+
+        # If clicked index is in selection -> context menu
+        if selection and index in selection:
+            self._show_queue_context_menu(event)  # move existing menu code here
+            return
+
+        # Otherwise -> preview
+        if 0 <= index < len(queue):
+            entry = queue[index]
+            if os.path.isfile(entry.video_path):
+                if self.video_preview_manager:
+                    self.video_preview_manager.tooltip.hide_preview()
+                    self.video_preview_manager.right_clicked_item = index
+                    self.video_preview_manager._show_video_preview(
+                        entry.video_path, event.x_root, event.y_root
+                    )
 
     def _play_from_context(self, videos):
         if videos and self.on_play_callback:

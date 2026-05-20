@@ -546,29 +546,9 @@ class PlaylistUI:
             self.video_preview_manager.tooltip.hide_preview()
             self.video_preview_manager.right_clicked_item = None
 
-    def _on_mouse_leave(self, event):
-        """Handle mouse leaving the listbox"""
-        if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
-            self.video_preview_manager.tooltip.hide_preview()
-            self.video_preview_manager.right_clicked_item = None
-
-    def _on_video_right_click(self, event):
-        if not self.current_playlist:
-            return
-
-        listbox = event.widget
-        index = listbox.nearest(event.y)
-        selection = listbox.curselection()
-
-        if not selection and 0 <= index < len(self.current_playlist.videos):
-            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
-                video_path = self.current_playlist.videos[index]
-                if os.path.isfile(video_path):
-                    self.video_preview_manager.right_clicked_item = index
-                    video_mapping = {i: v for i, v in enumerate(self.current_playlist.videos)}
-                    self.video_preview_manager._show_video_preview(video_path, event.x_root, event.y_root)
-            return
-
+    def _show_video_context_menu(self, event):
+        """Show context menu for selected videos in the playlist."""
+        selection = self.video_listbox.curselection()
         if not selection:
             return
 
@@ -615,6 +595,35 @@ class PlaylistUI:
             context_menu.tk_popup(event.x_root, event.y_root)
         finally:
             context_menu.grab_release()
+
+    def _on_mouse_leave(self, event):
+        if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+            self.video_preview_manager.tooltip.hide_preview()
+
+    # Replace _on_video_right_click with:
+    def _on_video_right_click(self, event):
+        if not self.current_playlist:
+            return
+
+        listbox = event.widget
+        index = listbox.nearest(event.y)
+        selection = listbox.curselection()
+
+        # If clicked index is in selection -> context menu
+        if selection and index in selection:
+            self._show_video_context_menu(event)  # rename existing menu code to this method
+            return
+
+        # Otherwise -> preview
+        if 0 <= index < len(self.current_playlist.videos):
+            video_path = self.current_playlist.videos[index]
+            if os.path.isfile(video_path):
+                if self.video_preview_manager:
+                    self.video_preview_manager.tooltip.hide_preview()
+                    self.video_preview_manager.right_clicked_item = index
+                    self.video_preview_manager._show_video_preview(
+                        video_path, event.x_root, event.y_root
+                    )
 
     def _play_selected_from_context(self, selection):
         """Play selected videos from context menu"""

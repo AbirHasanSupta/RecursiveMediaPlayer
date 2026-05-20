@@ -376,6 +376,7 @@ class FavoritesUI:
         self.favorites_listbox.bind("<Button-3>", self._on_right_click)
         self.favorites_listbox.bind("<B1-Motion>", self._on_mouse_drag)
         self.favorites_listbox.bind("<ButtonRelease-1>", self._on_mouse_release)
+        self.favorites_listbox.bind("<Leave>", self._on_mouse_leave)
 
         # ---- Buttons placed directly on body, no extra bar ----
         btn_container = tk.Frame(body, bg=t['bg'])
@@ -383,33 +384,9 @@ class FavoritesUI:
 
         tp.create_button(btn_container, "Clear All", self._clear_all, "warning", "md").pack(side=tk.LEFT)
 
-    def play_from_global(self):
-        """Play all favorites in the current directory."""
-        if not self.favorite_entries:
-            return
-        video_paths = [fav.video_path for fav in self.favorite_entries if os.path.isfile(fav.video_path)]
-        if video_paths and self.on_play_callback:
-            self.on_play_callback(video_paths)
-
-    def _on_right_click(self, event):
-        """Handle right-click on favorites"""
-        if not self.current_directory or not self.favorite_entries:
-            return
-
-        listbox = event.widget
-        index = listbox.nearest(event.y)
-        selection = listbox.curselection()
-
-        if not selection and index >= 0 and index < len(self.favorite_entries):
-            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
-                favorite = self.favorite_entries[index]
-                if os.path.isfile(favorite.video_path):
-                    self.video_preview_manager.right_clicked_item = index
-                    self.video_preview_manager._show_video_preview(
-                        favorite.video_path, event.x_root, event.y_root
-                    )
-            return
-
+    def _show_context_menu(self, event):
+        """Show context menu for selected favorites."""
+        selection = self.favorites_listbox.curselection()
         if not selection:
             return
 
@@ -456,6 +433,44 @@ class FavoritesUI:
             context_menu.tk_popup(event.x_root, event.y_root)
         finally:
             context_menu.grab_release()
+
+    def _on_mouse_leave(self, event):
+        if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+            self.video_preview_manager.tooltip.hide_preview()
+
+    def play_from_global(self):
+        """Play all favorites in the current directory."""
+        if not self.favorite_entries:
+            return
+        video_paths = [fav.video_path for fav in self.favorite_entries if os.path.isfile(fav.video_path)]
+        if video_paths and self.on_play_callback:
+            self.on_play_callback(video_paths)
+
+    def _on_right_click(self, event):
+        if not self.current_directory or not self.favorite_entries:
+            return
+
+        listbox = event.widget
+        index = listbox.nearest(event.y)
+        selection = listbox.curselection()
+
+        # If there is a selection, check if the clicked index is in it
+        if selection and index in selection:
+            # Show context menu for selected items
+            self._show_context_menu(event)
+            return
+
+        # Otherwise (no selection or clicked on unselected item) show preview
+        if 0 <= index < len(self.favorite_entries):
+            favorite = self.favorite_entries[index]
+            if os.path.isfile(favorite.video_path):
+                # Hide any existing preview first
+                if self.video_preview_manager:
+                    self.video_preview_manager.tooltip.hide_preview()
+                    self.video_preview_manager.right_clicked_item = index
+                    self.video_preview_manager._show_video_preview(
+                        favorite.video_path, event.x_root, event.y_root
+                    )
 
     def _open_grid_view(self):
         """Open grid view with all favorites"""

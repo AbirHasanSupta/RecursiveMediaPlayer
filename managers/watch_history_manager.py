@@ -557,6 +557,7 @@ class WatchHistoryUI:
         self.history_tree.bind("<Double-Button-1>", self._on_history_double_click)
         self.history_tree.bind("<Button-3>", self._on_history_right_click)
         self.history_tree.bind("<Button-1>", self._on_history_left_click)
+        self.history_tree.bind("<Leave>", self._on_tree_leave)
 
         # Bottom buttons (unchanged)
         btn_container = tk.Frame(body, bg=t['bg'])
@@ -628,51 +629,47 @@ class WatchHistoryUI:
         if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
             self.video_preview_manager.tooltip.hide_preview()
 
-    def _on_history_right_click(self, event):
-        """Handle right-click on history items"""
-        # Get item at click position
-        item_id = self.history_tree.identify_row(event.y)
+    def _on_tree_leave(self, event):
+        if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+            self.video_preview_manager.tooltip.hide_preview()
 
+    # Replace _on_history_right_click with:
+    def _on_history_right_click(self, event):
+        item_id = self.history_tree.identify_row(event.y)
         if not item_id:
             return
 
-        # Get current selection
         selection = self.history_tree.selection()
-
-        # Show preview if no selection and hovering over an item
-        if not selection:
-            tags = self.history_tree.item(item_id, 'tags')
-            if tags and hasattr(self, 'video_preview_manager') and self.video_preview_manager:
-                entry_id = tags[0]
-                # Find the entry
-                for entry in self.current_entries:
-                    if entry.id == entry_id:
-                        if os.path.isfile(entry.video_path):
-                            # Get the index for preview manager
-                            try:
-                                index = self.current_entries.index(entry)
-                                self.video_preview_manager.right_clicked_item = index
-                                self.video_preview_manager._show_video_preview(
-                                    entry.video_path, event.x_root, event.y_root
-                                )
-                            except:
-                                pass
-                        break
+        # If the clicked item is selected -> context menu
+        if item_id in selection:
+            self._show_history_context_menu(event)  # move existing menu code here
             return
 
+        # Otherwise -> preview
+        tags = self.history_tree.item(item_id, 'tags')
+        if tags and hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+            entry_id = tags[0]
+            for entry in self.current_entries:
+                if entry.id == entry_id and os.path.isfile(entry.video_path):
+                    self.video_preview_manager.tooltip.hide_preview()
+                    # Use the index for preview manager
+                    try:
+                        idx = self.current_entries.index(entry)
+                        self.video_preview_manager.right_clicked_item = idx
+                        self.video_preview_manager._show_video_preview(
+                            entry.video_path, event.x_root, event.y_root
+                        )
+                    except ValueError:
+                        pass
+                    break
+
+    def _show_history_context_menu(self, event):
+        """Show context menu for selected history entries."""
+        selection = self.history_tree.selection()
         if not selection:
             return
 
-        # Create context menu
-        _tp = self.theme_provider
-        context_menu = tk.Menu(self.history_window, tearoff=0,
-                               bg="#313335" if _tp.dark_mode else "#f5f5f5",
-                               fg="#A9B7C6" if _tp.dark_mode else "#333333",
-                               activebackground="#2D5A8E" if _tp.dark_mode else "#3498db",
-                               activeforeground="#FFFFFF",
-                               relief="flat", bd=1, font=("Segoe UI", 9))
-
-        # Get entries for selected items
+        # Get selected entries
         selected_entries = []
         for item_id in selection:
             tags = self.history_tree.item(item_id, 'tags')
@@ -685,6 +682,14 @@ class WatchHistoryUI:
 
         if not selected_entries:
             return
+
+        _tp = self.theme_provider
+        context_menu = tk.Menu(self.history_window, tearoff=0,
+                               bg="#313335" if _tp.dark_mode else "#f5f5f5",
+                               fg="#A9B7C6" if _tp.dark_mode else "#333333",
+                               activebackground="#2D5A8E" if _tp.dark_mode else "#3498db",
+                               activeforeground="#FFFFFF",
+                               relief="flat", bd=1, font=("Segoe UI", 9))
 
         context_menu.add_command(
             label=f"Play Selected ({len(selected_entries)} video{'s' if len(selected_entries) > 1 else ''})",
