@@ -584,10 +584,54 @@ def select_multiple_folders_and_play():
             return btn
 
         def setup_main_layout(self):
+            self._active_app_view = "home"
+            self.embedded_view_frame = None
             self.main_frame = tk.Frame(self.root, bg=self.bg_color, padx=20, pady=20)
             self.main_frame.pack(fill=tk.BOTH, expand=True)
             self.content_frame = tk.Frame(self.main_frame, bg=self.bg_color)
             self.content_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+
+        def _ensure_embedded_view_frame(self):
+            if self.embedded_view_frame and self.embedded_view_frame.winfo_exists():
+                return self.embedded_view_frame
+            self.embedded_view_frame = tk.Frame(self.root, bg=self.bg_color)
+            return self.embedded_view_frame
+
+        def _show_home_view(self):
+            if self.embedded_view_frame and self.embedded_view_frame.winfo_exists():
+                self.embedded_view_frame.pack_forget()
+                for child in self.embedded_view_frame.winfo_children():
+                    child.destroy()
+            if not self.main_frame.winfo_ismapped():
+                self.main_frame.pack(fill=tk.BOTH, expand=True)
+            self._active_app_view = "home"
+            self._refresh_media_pill_state()
+
+        def _show_embedded_view(self, view_name, builder):
+            self.main_frame.pack_forget()
+            frame = self._ensure_embedded_view_frame()
+            frame.configure(bg=self.bg_color)
+            frame.pack(fill=tk.BOTH, expand=True)
+            for child in frame.winfo_children():
+                child.destroy()
+            self._active_app_view = view_name
+            self._refresh_media_pill_state()
+            builder(frame)
+
+        def _refresh_media_pill_state(self):
+            if not hasattr(self, "_media_pill_btns") or not hasattr(self, "_tb_colors"):
+                return
+            active_label = getattr(self, "_view_tab_labels", {}).get(getattr(self, "_active_app_view", "home"))
+            for label, btn in self._media_pill_btns.items():
+                try:
+                    a = self.pill_accents(label)
+                    if label == active_label:
+                        btn.config(bg=a[1], fg=a[2], highlightbackground=a[1])
+                    else:
+                        cc = self._tb_colors()
+                        btn.config(bg=cc["bg"], fg=a[0], highlightbackground=a[0])
+                except Exception:
+                    pass
 
         def setup_console_section(self):
             self.console_section = tk.Frame(self.main_frame, bg=self.bg_color)
@@ -2252,7 +2296,13 @@ def select_multiple_folders_and_play():
             self._active_player = player
 
         def _show_annotation_browser(self):
-            self.annotation_browser.show()
+            self._show_embedded_view(
+                "tags",
+                lambda frame: self.annotation_browser.show_embedded(
+                    frame,
+                    close_callback=self._show_home_view
+                )
+            )
 
         def _play_annotated_videos(self, video_paths: list):
             if not video_paths:
@@ -3073,7 +3123,14 @@ def select_multiple_folders_and_play():
 
         def _show_favorites_manager(self):
             selected_dir = self.get_current_selected_directory()
-            self.favorites_manager.show_manager(selected_dir)
+            self._show_embedded_view(
+                "favourites",
+                lambda frame: self.favorites_manager.show_embedded(
+                    frame,
+                    selected_dir,
+                    close_callback=self._show_home_view
+                )
+            )
 
         def _context_add_to_favorites(self, selection):
             selected_dir = self.get_current_selected_directory()
@@ -3274,7 +3331,13 @@ def select_multiple_folders_and_play():
             self._launch_player(self._make_player(valid_videos, all_video_to_dir, all_directories, 0))
 
         def _show_queue_manager(self):
-            self.queue_manager.show_manager()
+            self._show_embedded_view(
+                "queue",
+                lambda frame: self.queue_manager.show_embedded(
+                    frame,
+                    close_callback=self._show_home_view
+                )
+            )
 
         def _play_queue_videos(self, videos):
             if not videos:
@@ -3299,7 +3362,13 @@ def select_multiple_folders_and_play():
             self._launch_player(player)
 
         def _show_watch_history(self):
-            self.watch_history_manager.show_manager()
+            self._show_embedded_view(
+                "history",
+                lambda frame: self.watch_history_manager.show_embedded(
+                    frame,
+                    close_callback=self._show_home_view
+                )
+            )
 
         def _play_history_videos(self, videos):
             if not videos:
@@ -3404,7 +3473,15 @@ def select_multiple_folders_and_play():
                 messagebox.showwarning("Warning", "No videos to display")
                 return
             self.grid_view_manager.video_preview_manager = self.video_preview_manager
-            self.grid_view_manager.show_grid_view(videos, self.video_preview_manager)
+            self._show_embedded_view(
+                "gallery",
+                lambda frame: self.grid_view_manager.show_grid_view_embedded(
+                    frame,
+                    videos,
+                    self.video_preview_manager,
+                    close_callback=self._show_home_view
+                )
+            )
 
         def _play_grid_videos(self, videos, start_index=0):
             if not videos:
@@ -3465,7 +3542,13 @@ def select_multiple_folders_and_play():
                 threading.Thread(target=collect_all_videos, daemon=True).start()
 
         def _manage_playlists(self):
-            self.playlist_manager.show_manager()
+            self._show_embedded_view(
+                "playlist",
+                lambda frame: self.playlist_manager.show_embedded(
+                    frame,
+                    close_callback=self._show_home_view
+                )
+            )
 
         # ------------------------------------------------------------------
         # Misc
@@ -3546,7 +3629,13 @@ def select_multiple_folders_and_play():
             self.save_preferences()
 
         def _show_settings(self):
-            self.settings_manager.show_settings()
+            self._show_embedded_view(
+                "settings",
+                lambda frame: self.settings_manager.show_embedded(
+                    frame,
+                    close_callback=self._show_home_view
+                )
+            )
 
         def _open_dual_player(self, win_id=1):
             selected_dir = self.get_current_selected_directory()
@@ -3809,6 +3898,7 @@ def select_multiple_folders_and_play():
                 btn.bind("<Leave>",           on_leave)
                 btn.bind("<ButtonPress-1>",   on_press)
                 btn.bind("<ButtonRelease-1>", on_release)
+
                 return btn
 
             file_menu = make_dropdown_menu([
@@ -3857,6 +3947,30 @@ def select_multiple_folders_and_play():
                 "🕐 History":   self._show_watch_history,
                 "🏷 Tags & Ratings": self._show_annotation_browser,
             }
+            _media_pill_commands.update({
+                "Home": self._show_home_view,
+                "Gallery": self._show_grid_view,
+            })
+            self._view_tab_labels = {
+                "home": "Home",
+                "gallery": "Gallery",
+                "playlist": "ðŸŽµ Playlist",
+                "queue": "â¬› Queue",
+                "favourites": "â™¥ Favourites",
+                "history": "ðŸ• History",
+                "tags": "ðŸ· Tags & Ratings",
+            }
+            for _view_name, _needle in [
+                ("playlist", "Playlist"),
+                ("queue", "Queue"),
+                ("favourites", "Favourites"),
+                ("history", "History"),
+                ("tags", "Tags & Ratings"),
+            ]:
+                self._view_tab_labels[_view_name] = next(
+                    (lbl for lbl in _media_pill_commands if _needle in lbl),
+                    self._view_tab_labels[_view_name]
+                )
             self._media_pill_btns = {}
 
             def _make_media_pill(label):
@@ -3874,6 +3988,8 @@ def select_multiple_folders_and_play():
                 def on_enter(e, b=btn, lbl=label):
                     a = self.pill_accents(lbl); b.config(bg=a[1], fg=a[2], highlightbackground=a[1])
                 def on_leave(e, b=btn, lbl=label):
+                    if getattr(self, "_view_tab_labels", {}).get(getattr(self, "_active_app_view", "home")) == lbl:
+                        return
                     a = self.pill_accents(lbl); cc = _tb_colors()
                     b.config(bg=cc["bg"], fg=a[0], highlightbackground=a[0])
                 def on_press(e, b=btn, lbl=label):
@@ -3888,6 +4004,16 @@ def select_multiple_folders_and_play():
 
             for _pill_label in ["🎵 Playlist", "⬛ Queue", "♥ Favourites", "🕐 History", "🏷 Tags & Ratings"]:
                 _make_media_pill(_pill_label)
+
+            _make_media_pill("Home")
+            _make_media_pill("Gallery")
+            try:
+                first_media = self._media_pill_btns[self._view_tab_labels["playlist"]]
+                self._media_pill_btns["Home"].pack_configure(before=first_media)
+                self._media_pill_btns["Gallery"].pack_configure(before=first_media)
+            except Exception:
+                pass
+            self._refresh_media_pill_state()
 
             self.theme_toolbar_btn = tk.Label(
                 self.toolbar, text="🌙" if not self.dark_mode else "☀",

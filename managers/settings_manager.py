@@ -348,6 +348,8 @@ class SettingsUI:
         self.filter_sort_manager = None
         # Maps action_id -> tk.Button so the shortcuts tab can update button labels
         self._hotkey_btn_map: Dict[str, tk.Button] = {}
+        self._embedded = False
+        self._close_callback = None
 
     def show_settings_window(self):
         """Show the settings window"""
@@ -355,6 +357,8 @@ class SettingsUI:
             self.settings_window.lift()
             return
 
+        self._embedded = False
+        self._close_callback = None
         self.settings_window = tk.Toplevel(self.parent)
         self.settings_window.withdraw()
         self.settings_window.title("Application Settings")
@@ -369,6 +373,28 @@ class SettingsUI:
         from icon_helper import apply_icon
         apply_icon(self.settings_window)
         self.settings_window.deiconify()
+
+    def show_settings_embedded(self, parent, close_callback=None):
+        if self.settings_window and self.settings_window.winfo_exists():
+            self.settings_window.destroy()
+        for child in parent.winfo_children():
+            child.destroy()
+
+        self._embedded = True
+        self._close_callback = close_callback
+        self.settings_window = tk.Frame(parent, bg=self.theme_provider.bg_color)
+        self.settings_window.pack(fill=tk.BOTH, expand=True)
+        self._setup_settings_ui()
+
+    def _close_settings(self):
+        if self._embedded:
+            if self._close_callback:
+                self._close_callback()
+            elif self.settings_window and self.settings_window.winfo_exists():
+                self.settings_window.destroy()
+            return
+        if self.settings_window and self.settings_window.winfo_exists():
+            self.settings_window.destroy()
 
     def _setup_settings_ui(self):
         """Setup the settings UI components"""
@@ -956,12 +982,13 @@ class SettingsUI:
             # Dim the button to show it's "armed"
             btn.config(bg=active_bg, fg='white', relief=tk.SUNKEN)
 
-            overlay = tk.Toplevel(self.settings_window)
+            overlay_parent = self.settings_window.winfo_toplevel()
+            overlay = tk.Toplevel(overlay_parent)
             overlay.withdraw()
             overlay.title("Press new key…")
             overlay.geometry("340x120")
             overlay.configure(bg=self.theme_provider.bg_color)
-            overlay.transient(self.settings_window)
+            overlay.transient(overlay_parent)
             overlay.grab_set()
             overlay.resizable(False, False)
             self._capture_overlay = overlay
@@ -1215,7 +1242,7 @@ class SettingsUI:
         reset_btn.pack(side=tk.LEFT)
 
         cancel_btn = self.theme_provider.create_button(
-            button_frame, "Cancel", self.settings_window.destroy, "secondary", "md"
+            button_frame, "Cancel", self._close_settings, "secondary", "md"
         )
         cancel_btn.pack(side=tk.RIGHT, padx=(5, 0))
 
@@ -1490,7 +1517,7 @@ class SettingsUI:
             self.on_settings_changed(self.settings)
 
         messagebox.showinfo("Success", "Settings saved successfully!")
-        self.settings_window.destroy()
+        self._close_settings()
 
 
 class SettingsManager:
@@ -1519,6 +1546,10 @@ class SettingsManager:
     def show_settings(self):
         """Show settings window"""
         self.ui.show_settings_window()
+
+    def show_embedded(self, parent, close_callback=None):
+        """Show settings inside an existing frame."""
+        self.ui.show_settings_embedded(parent, close_callback)
 
     def get_settings(self) -> SettingsData:
         """Get current settings"""

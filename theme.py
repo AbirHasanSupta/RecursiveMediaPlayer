@@ -588,6 +588,8 @@ class ThemeSelector:
 
     # ── Toolbar / pill colour palette ─────────────────────────────────────────
     PILL_ACCENTS_LIGHT = {
+        "Home":           ("#4a5568", "#d7dde8", "#1a2035", "#c7cfdd"),
+        "Gallery":        ("#2d7ef7", "#1a6de8", "#FFFFFF", "#1557bd"),
         "🎵 Playlist":   ("#5B9BD5", "#1a5fa8", "#FFFFFF", "#144d8a"),
         "⬛ Queue":      ("#2ecc71", "#1a8a4a", "#FFFFFF", "#156e3a"),
         "♥ Favourites": ("#e67e22", "#b35a00", "#FFFFFF", "#8a4400"),
@@ -595,6 +597,8 @@ class ThemeSelector:
         "🏷 Tags & Ratings": ("#c8a000", "#8a6d0a", "#FFFFFF", "#5a4600"),
     }
     PILL_ACCENTS_DARK = {
+        "Home":           ("#A9B7C6", "#343a46", "#FFFFFF", "#2b303a"),
+        "Gallery":        ("#5b9cf6", "#2D5A8E", "#FFFFFF", "#1A4070"),
         "🎵 Playlist":   ("#4A9EFF", "#1a5fa8", "#FFFFFF", "#144d8a"),
         "⬛ Queue":      ("#2ecc71", "#1a8a4a", "#FFFFFF", "#156e3a"),
         "♥ Favourites": ("#FF9F43", "#b35a00", "#FFFFFF", "#8a4400"),

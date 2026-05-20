@@ -170,6 +170,8 @@ class PlaylistUI:
         self.video_mapping = {}
 
         self.dragging_index = None
+        self._embedded = False
+        self._close_callback = None
         self.theme_provider.register_manager_ui(self)
 
     def show_playlist_manager(self):
@@ -177,6 +179,8 @@ class PlaylistUI:
             self.playlist_window.lift()
             return
 
+        self._embedded = False
+        self._close_callback = None
         self.playlist_window = tk.Toplevel(self.parent)
         self.playlist_window.withdraw()
         self.playlist_window.title("Playlists")
@@ -189,6 +193,18 @@ class PlaylistUI:
         from icon_helper import apply_icon
         apply_icon(self.playlist_window)
         self.playlist_window.deiconify()
+
+    def show_playlist_manager_embedded(self, parent, close_callback=None):
+        if self.playlist_window and self.playlist_window.winfo_exists():
+            self._on_close()
+        for child in parent.winfo_children():
+            child.destroy()
+        self._embedded = True
+        self._close_callback = close_callback
+        self.playlist_window = tk.Frame(parent, bg=self.theme_provider.bg_color)
+        self.playlist_window.pack(fill=tk.BOTH, expand=True)
+        self._setup_playlist_manager_ui()
+        self._refresh_playlist_list()
 
     def _setup_playlist_manager_ui(self):
         tp = self.theme_provider
@@ -328,9 +344,10 @@ class PlaylistUI:
         right_btns.pack(side=tk.RIGHT)
 
         tp.create_button(right_btns, "Close",
-                         self.playlist_window.destroy, "secondary", "md").pack(side=tk.LEFT)
+                         self._on_close, "secondary", "md").pack(side=tk.LEFT)
 
-        self.playlist_window.protocol("WM_DELETE_WINDOW", self._on_close)
+        if hasattr(self.playlist_window, "protocol"):
+            self.playlist_window.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _on_video_right_click_wrapper(self, event):
         if not hasattr(self, 'playlist_window') or not self.playlist_window:
@@ -351,6 +368,8 @@ class PlaylistUI:
         if self.playlist_window and self.playlist_window.winfo_exists():
             self.playlist_window.destroy()
         self.playlist_window = None
+        if self._embedded and self._close_callback:
+            self._close_callback()
 
     def _on_mouse_down(self, event):
         if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
@@ -948,6 +967,10 @@ class PlaylistManager:
     def show_manager(self):
         """Show the playlist manager window"""
         self.ui.show_playlist_manager()
+
+    def show_embedded(self, parent, close_callback=None):
+        """Show the playlist manager inside an existing frame."""
+        self.ui.show_playlist_manager_embedded(parent, close_callback)
 
     def add_videos_to_playlist(self, videos: List[str], selected_videos: List[str] = None):
         """Add videos to playlist with selection dialog"""

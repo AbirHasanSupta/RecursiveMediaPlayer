@@ -43,6 +43,8 @@ class GridViewManager:
         max_workers = min(8, (multiprocessing.cpu_count() or 4))
         self.thumbnail_executor = ManagedExecutor(ThreadPoolExecutor, max_workers=max_workers)
         self.grid_window = None
+        self._embedded = False
+        self.close_callback = None
         self.items = []
         self.selected_items = set()
         self.card_widgets = {}
@@ -251,9 +253,16 @@ class GridViewManager:
     # ─────────────────────────────────────────────────────────────────────────
 
     def show_grid_view(self, videos, video_preview_manager=None):
-        if self.grid_window and self.grid_window.winfo_exists():
+        if hasattr(self.theme_provider, "_open_grid_view"):
+            self.theme_provider._open_grid_view(videos)
+            return
+
+        if not self._embedded and self.grid_window and self.grid_window.winfo_exists():
             self.grid_window.lift()
             return
+
+        self._embedded = False
+        self.close_callback = None
 
         with self.loading_lock:
             self.is_loading = True
@@ -289,6 +298,73 @@ class GridViewManager:
         from icon_helper import apply_icon
         apply_icon(self.grid_window)
         self.grid_window.deiconify()
+
+    def show_grid_view_embedded(self, parent, videos, video_preview_manager=None, close_callback=None):
+        if not videos:
+            return
+
+        with self.loading_lock:
+            self.is_loading = True
+
+        try:
+            self.thumbnail_executor.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+        max_workers = min(8, (multiprocessing.cpu_count() or 4))
+        self.thumbnail_executor = ManagedExecutor(ThreadPoolExecutor, max_workers=max_workers)
+
+        for child in parent.winfo_children():
+            child.destroy()
+
+        self.video_preview_manager = video_preview_manager
+        self.grid_window = parent
+        self._embedded = True
+        self.close_callback = close_callback
+        t = self._tok()
+        self.grid_window.configure(bg=t['bg'])
+
+        self.items = []
+        self.selected_items = set()
+        self.excluded_items = set()
+        self._photo_cache.clear()
+        self._page = 0
+        self._pages_cache = None
+        self._active_tag_filters.clear()
+
+        self._build_ui(videos, t)
+        self._update_tag_filter_btn()
+
+    def _close_grid_view(self):
+        self._teardown_grid_view()
+        if self._embedded:
+            if self.close_callback:
+                self.close_callback()
+            return
+        if self.grid_window and self.grid_window.winfo_exists():
+            self.grid_window.destroy()
+
+    def _teardown_grid_view(self):
+        with self.loading_lock:
+            self.is_loading = False
+        for task in list(self.pending_tasks):
+            try:
+                task.cancel()
+            except Exception:
+                pass
+        self._cancel_drag()
+        try:
+            if hasattr(self, "canvas") and self.canvas.winfo_exists():
+                self.canvas.unbind_all("<MouseWheel>")
+        except Exception:
+            pass
+
+        self._photo_cache.clear()
+        self.now_playing_path = None
+        if self._search_timer:
+            self.root.after_cancel(self._search_timer)
+            self._search_timer = None
+        self._active_tag_filters.clear()
+        self._update_tag_filter_btn()
 
     def _build_ui(self, videos, t):
         """Construct the entire window layout."""
@@ -337,7 +413,7 @@ class GridViewManager:
         action_row = tk.Frame(inner_top, bg=t['surface'])
         action_row.pack(side=tk.RIGHT, fill=tk.Y, pady=16)
 
-        self._make_btn(action_row, "✕  Close", lambda: gw.destroy(),
+        self._make_btn(action_row, "✕  Close", self._close_grid_view,
                        bg=t['surface2'], fg=t['text_sub'], hover=t['border']).pack(side=tk.RIGHT, padx=(8, 0))
         self._make_btn(action_row, "▶  Play Selected", self._play_selected,
                        bg=t['accent'], fg="#ffffff", hover=t['accent_hover']
@@ -489,32 +565,14 @@ class GridViewManager:
         gw.bind("<Return>",    lambda e: self._play_selected())
 
         def _on_closing():
-            with self.loading_lock:
-                self.is_loading = False
-            for task in list(self.pending_tasks):
-                try:
-                    task.cancel()
-                except Exception:
-                    pass
-            self._cancel_drag()
-            try:
-                self.canvas.unbind_all("<MouseWheel>")
-            except Exception:
-                pass
-
-            self._photo_cache.clear()
-            self.now_playing_path = None
-            if self._search_timer:
-                self.root.after_cancel(self._search_timer)
-                self._search_timer = None
-            self._active_tag_filters.clear()
-            self._update_tag_filter_btn()
+            self._teardown_grid_view()
             try:
                 self.grid_window.destroy()
             except Exception:
                 pass
 
-        gw.protocol("WM_DELETE_WINDOW", _on_closing)
+        if hasattr(gw, "protocol"):
+            gw.protocol("WM_DELETE_WINDOW", _on_closing)
 
         # ── Populate (original async loading) ─────────────────────────────────
         ManagedThread(target=self._load_videos, args=(videos,), name="LoadGridVideos").start()

@@ -344,6 +344,8 @@ class WatchHistoryUI:
         self.current_entries: List[WatchHistoryEntry] = []
         self.filter_var = None
         self.video_preview_manager = None
+        self._embedded = False
+        self._close_callback = None
         self.theme_provider.register_manager_ui(self)
 
     def show_history_manager(self):
@@ -351,6 +353,8 @@ class WatchHistoryUI:
             self.history_window.lift()
             return
 
+        self._embedded = False
+        self._close_callback = None
         self.history_window = tk.Toplevel(self.parent)
         self.history_window.withdraw()
         self.history_window.title("Watch History")
@@ -363,6 +367,25 @@ class WatchHistoryUI:
         from icon_helper import apply_icon
         apply_icon(self.history_window)
         self.history_window.deiconify()
+
+    def show_history_manager_embedded(self, parent, close_callback=None):
+        if self.history_window and self.history_window.winfo_exists():
+            self.history_window.destroy()
+        for child in parent.winfo_children():
+            child.destroy()
+        self._embedded = True
+        self._close_callback = close_callback
+        self.history_window = tk.Frame(parent, bg=self.theme_provider.bg_color)
+        self.history_window.pack(fill=tk.BOTH, expand=True)
+        self._setup_history_ui()
+        self._refresh_history_list()
+
+    def _close_history(self):
+        if self.history_window and self.history_window.winfo_exists():
+            self.history_window.destroy()
+        self.history_window = None
+        if self._embedded and self._close_callback:
+            self._close_callback()
 
     def _setup_history_ui(self):
         tp = self.theme_provider
@@ -494,7 +517,7 @@ class WatchHistoryUI:
 
         tp.create_button(right, "↺  Refresh", self._refresh_history_list,
                          "secondary", "md").pack(side=tk.LEFT, padx=(0, 8))
-        tp.create_button(right, "Close", self.history_window.destroy,
+        tp.create_button(right, "Close", self._close_history,
                          "secondary", "md").pack(side=tk.LEFT)
 
     def _update_stats_label(self):
@@ -879,6 +902,10 @@ class WatchHistoryManager:
     def show_manager(self):
         """Show the watch history manager window"""
         self.ui.show_history_manager()
+
+    def show_embedded(self, parent, close_callback=None):
+        """Show the watch history manager inside an existing frame."""
+        self.ui.show_history_manager_embedded(parent, close_callback)
 
     def set_play_callback(self, callback):
         """Set callback for playing videos from history"""

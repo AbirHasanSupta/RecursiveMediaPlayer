@@ -233,6 +233,8 @@ class FavoritesUI:
         self.dragging_index = None
         self.video_preview_manager = None
         self.grid_view_manager = None
+        self._embedded = False
+        self._close_callback = None
         self.theme_provider.register_manager_ui(self)
 
     def show_favorites_manager(self, selected_directory: str = None):
@@ -243,6 +245,8 @@ class FavoritesUI:
                 self._refresh_favorites_list()
             return
 
+        self._embedded = False
+        self._close_callback = None
         self.favorites_window = tk.Toplevel(self.parent)
         self.favorites_window.withdraw()
         self.favorites_window.title("Favourites")
@@ -257,6 +261,26 @@ class FavoritesUI:
         from icon_helper import apply_icon
         apply_icon(self.favorites_window)
         self.favorites_window.deiconify()
+
+    def show_favorites_manager_embedded(self, parent, selected_directory: str = None, close_callback=None):
+        if self.favorites_window and self.favorites_window.winfo_exists():
+            self.favorites_window.destroy()
+        for child in parent.winfo_children():
+            child.destroy()
+        self._embedded = True
+        self._close_callback = close_callback
+        self.favorites_window = tk.Frame(parent, bg=self.theme_provider.bg_color)
+        self.favorites_window.pack(fill=tk.BOTH, expand=True)
+        self.current_directory = selected_directory
+        self._setup_favorites_ui()
+        self._refresh_favorites_list()
+
+    def _close_favorites(self):
+        if self.favorites_window and self.favorites_window.winfo_exists():
+            self.favorites_window.destroy()
+        self.favorites_window = None
+        if self._embedded and self._close_callback:
+            self._close_callback()
 
     def _setup_favorites_ui(self):
         tp = self.theme_provider
@@ -336,7 +360,7 @@ class FavoritesUI:
 
         tp.create_button(right, "▶  Play All", self._play_all,
                          "success", "md").pack(side=tk.LEFT, padx=(0, 8))
-        tp.create_button(right, "Close", self.favorites_window.destroy,
+        tp.create_button(right, "Close", self._close_favorites,
                          "secondary", "md").pack(side=tk.LEFT)
 
     def _on_right_click(self, event):
@@ -735,6 +759,9 @@ class FavoritesManager:
 
     def show_manager(self, selected_directory: str = None):
         self.ui.show_favorites_manager(selected_directory)
+
+    def show_embedded(self, parent, selected_directory: str = None, close_callback=None):
+        self.ui.show_favorites_manager_embedded(parent, selected_directory, close_callback)
 
     def add_to_favorites(self, video_paths: List[str], directory_path: str) -> int:
         return self.service.add_multiple_to_favorites(video_paths, directory_path)

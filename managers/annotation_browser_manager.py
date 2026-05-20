@@ -135,6 +135,8 @@ class AnnotationBrowserManager:
         self.video_preview_manager = None
         self.grid_view_manager = None
         self._annotation_listener = None
+        self._embedded = False
+        self._close_callback = None
 
         # Async loading attributes
         self._load_thread: Optional[threading.Thread] = None
@@ -150,7 +152,18 @@ class AnnotationBrowserManager:
             self._win.lift()
             self._win.focus_force()
             return
+        self._embedded = False
+        self._close_callback = None
         self._build_window()
+
+    def show_embedded(self, parent, close_callback=None):
+        if self._win and self._win.winfo_exists():
+            self._on_close()
+        for child in parent.winfo_children():
+            child.destroy()
+        self._embedded = True
+        self._close_callback = close_callback
+        self._build_window(parent)
 
     def refresh(self):
         """Refresh the UI – called after any annotation change or manual refresh."""
@@ -421,22 +434,28 @@ class AnnotationBrowserManager:
         dlg.geometry(f"+{x}+{y}")
         dlg.deiconify()
 
-    def _build_window(self):
+    def _build_window(self, parent=None):
         tp = self.tp
         P = _p(tp.dark_mode)
 
-        win = tk.Toplevel(self.root)
-        win.withdraw()
-        win.title("Tags & Ratings")
-        win.geometry(_responsive_geometry(self.root, 1600, 900))
+        embedded = parent is not None
+        win = tk.Frame(parent, bg=P["panel"]) if embedded else tk.Toplevel(self.root)
+        if not embedded:
+            win.withdraw()
+            win.title("Tags & Ratings")
+            win.geometry(_responsive_geometry(self.root, 1600, 900))
         win.configure(bg=P["panel"])
-        win.minsize(820, 520)
-        win.protocol("WM_DELETE_WINDOW", win.destroy)
-        apply_icon(win)
+        if embedded:
+            win.pack(fill=tk.BOTH, expand=True)
+        else:
+            win.minsize(820, 520)
+            win.protocol("WM_DELETE_WINDOW", win.destroy)
+            apply_icon(win)
         self._win = win
         self._annotation_listener = self._on_annotation_changed
         self.svc.subscribe(self._annotation_listener)
-        win.protocol("WM_DELETE_WINDOW", self._on_close)
+        if hasattr(win, "protocol"):
+            win.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # ── Header ────────────────────────────────────────────────────────────
         header = tk.Frame(win, bg=P["header_bg"], height=58)
@@ -725,11 +744,12 @@ class AnnotationBrowserManager:
         act_inner = tk.Frame(action, bg=P["status_bg"])
         act_inner.pack(fill=tk.X, padx=18, pady=10)
 
-        tp.create_button(act_inner, "Close", win.destroy, "secondary", "md").pack(side=tk.RIGHT)
+        tp.create_button(act_inner, "Close", self._on_close, "secondary", "md").pack(side=tk.RIGHT)
 
         # Start async loading (shows loading indicators, then populates UI)
         self._start_async_load()
-        win.deiconify()
+        if hasattr(win, "deiconify"):
+            win.deiconify()
 
     def _on_close(self):
         if self._annotation_listener:
@@ -740,6 +760,9 @@ class AnnotationBrowserManager:
             self._load_thread.join(0.2)
         if self._win:
             self._win.destroy()
+        self._win = None
+        if self._embedded and self._close_callback:
+            self._close_callback()
 
     def _on_annotation_changed(self):
         if self._win and self._win.winfo_exists():

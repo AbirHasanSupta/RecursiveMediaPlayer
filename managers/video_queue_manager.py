@@ -335,6 +335,8 @@ class QueueUI:
         self.drag_data = None
         self.video_preview_manager = None
         self.grid_view_manager = None
+        self._embedded = False
+        self._close_callback = None
         self.theme_provider.register_manager_ui(self)
 
     def show_queue_manager(self):
@@ -343,6 +345,8 @@ class QueueUI:
             self._refresh_queue()
             return
 
+        self._embedded = False
+        self._close_callback = None
         self.queue_window = tk.Toplevel(self.parent)
         self.queue_window.withdraw()
         self.queue_window.title("Playback Queue")
@@ -355,6 +359,25 @@ class QueueUI:
         from icon_helper import apply_icon
         apply_icon(self.queue_window)
         self.queue_window.deiconify()
+
+    def show_queue_manager_embedded(self, parent, close_callback=None):
+        if self.queue_window and self.queue_window.winfo_exists():
+            self.queue_window.destroy()
+        for child in parent.winfo_children():
+            child.destroy()
+        self._embedded = True
+        self._close_callback = close_callback
+        self.queue_window = tk.Frame(parent, bg=self.theme_provider.bg_color)
+        self.queue_window.pack(fill=tk.BOTH, expand=True)
+        self._setup_queue_ui()
+        self._refresh_queue()
+
+    def _close_queue(self):
+        if self.queue_window and self.queue_window.winfo_exists():
+            self.queue_window.destroy()
+        self.queue_window = None
+        if self._embedded and self._close_callback:
+            self._close_callback()
 
     def _setup_queue_ui(self):
         tp = self.theme_provider
@@ -427,7 +450,7 @@ class QueueUI:
         tp.create_button(left, "Clear All", self._clear_queue, "warning", "md").pack(side=tk.LEFT)
 
         tp.create_button(right, "▶  Play Queue", self._play_queue, "success", "md").pack(side=tk.LEFT, padx=(0, 8))
-        tp.create_button(right, "Close", self.queue_window.destroy, "secondary", "md").pack(side=tk.LEFT)
+        tp.create_button(right, "Close", self._close_queue, "secondary", "md").pack(side=tk.LEFT)
 
     def _refresh_queue(self):
         def refresh():
@@ -804,6 +827,9 @@ class VideoQueueManager:
 
     def show_manager(self):
         self.ui.show_queue_manager()
+
+    def show_embedded(self, parent, close_callback=None):
+        self.ui.show_queue_manager_embedded(parent, close_callback)
 
     def add_to_queue(self, video_paths: List[str], added_from: str = "manual") -> int:
         return self.service.add_to_queue(video_paths, added_from)
