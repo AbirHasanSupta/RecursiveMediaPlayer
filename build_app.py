@@ -373,7 +373,7 @@ def select_multiple_folders_and_play():
                 'video_preview_manager', 'grid_view_manager', 'playlist_manager',
                 'watch_history_manager', 'queue_manager', 'favorites_manager',
                 'filter_sort_manager', 'settings_manager', 'resume_manager',
-                'dual_player_manager',
+                'dual_player_manager', 'annotation_browser_manager'
             ]
             for manager_name in managers:
                 if hasattr(self, manager_name):
@@ -636,7 +636,21 @@ def select_multiple_folders_and_play():
             self.embedded_view_frame = tk.Frame(self.workspace_body, bg=self.bg_color)
             return self.embedded_view_frame
 
+        def _cleanup_active_manager(self):
+            mgr = getattr(self, 'active_embedded_manager', None)
+            if mgr is None:
+                return
+            self.active_embedded_manager = None
+            try:
+                if hasattr(mgr, 'cleanup'):  # AnnotationBrowserManager
+                    mgr.cleanup()
+                elif hasattr(mgr, '_teardown_grid_view'):  # GridViewManager
+                    mgr._teardown_grid_view()
+            except Exception:
+                pass
+
         def _show_home_view(self):
+            self._cleanup_active_manager()
             if self.embedded_view_frame and self.embedded_view_frame.winfo_exists():
                 self.embedded_view_frame.pack_forget()
                 for child in self.embedded_view_frame.winfo_children():
@@ -645,10 +659,10 @@ def select_multiple_folders_and_play():
                 self.exclusion_section.pack(fill=tk.BOTH, expand=True)
             self._set_workspace_title("Library", "Browse the selected directory")
             self._active_app_view = "home"
-            self.active_embedded_manager = None
             self._refresh_media_pill_state()
 
         def _show_embedded_view(self, view_name, builder):
+            self._cleanup_active_manager()
             if hasattr(self, "exclusion_section") and self.exclusion_section.winfo_exists():
                 self.exclusion_section.pack_forget()
             frame = self._ensure_embedded_view_frame()
@@ -657,11 +671,12 @@ def select_multiple_folders_and_play():
             for child in frame.winfo_children():
                 child.destroy()
             self._active_app_view = view_name
-            self._set_workspace_title(getattr(self, "_view_tab_labels", {}).get(view_name, view_name.title()),
-                                      self._selected_directory_summary())
+            self._set_workspace_title(
+                getattr(self, "_view_tab_labels", {}).get(view_name, view_name.title()),
+                self._selected_directory_summary()
+            )
             self._refresh_media_pill_state()
-            ui_instance = builder(frame)
-            self.active_embedded_manager = ui_instance
+            self.active_embedded_manager = builder(frame)
 
         def _set_workspace_title(self, title, subtitle=None):
             if hasattr(self, "workspace_title_label"):

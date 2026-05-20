@@ -294,12 +294,12 @@ class GridViewManager:
         with self.loading_lock:
             self.is_loading = True
 
-        try:
-            self.thumbnail_executor.shutdown(wait=False, cancel_futures=True)
-        except Exception:
-            pass
-        max_workers = min(8, (multiprocessing.cpu_count() or 4))
-        self.thumbnail_executor = ManagedExecutor(ThreadPoolExecutor, max_workers=max_workers)
+        for task in list(self.pending_tasks):
+            try:
+                task.cancel()
+            except Exception:
+                pass
+        self.pending_tasks.clear()
 
         self.video_preview_manager = video_preview_manager
         t = self._tok()
@@ -333,12 +333,12 @@ class GridViewManager:
         with self.loading_lock:
             self.is_loading = True
 
-        try:
-            self.thumbnail_executor.shutdown(wait=False, cancel_futures=True)
-        except Exception:
-            pass
-        max_workers = min(8, (multiprocessing.cpu_count() or 4))
-        self.thumbnail_executor = ManagedExecutor(ThreadPoolExecutor, max_workers=max_workers)
+        for task in list(self.pending_tasks):
+            try:
+                task.cancel()
+            except Exception:
+                pass
+        self.pending_tasks.clear()
 
         for child in parent.winfo_children():
             child.destroy()
@@ -358,6 +358,7 @@ class GridViewManager:
         self._pages_cache = None
         self._active_tag_filters.clear()
 
+        self._closing = False
         self._build_ui(videos, t)
         self._update_tag_filter_btn()
         return self

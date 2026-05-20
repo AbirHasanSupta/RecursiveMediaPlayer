@@ -87,6 +87,13 @@ class ResourceManager:
                 self._executors.append(executor)
                 self.logger.debug(f"Registered executor: {type(executor).__name__}")
 
+    def unregister_executor(self, executor):
+        with self._lock:
+            try:
+                self._executors.remove(executor)
+            except ValueError:
+                pass
+
     def register_cleanup_callback(self, callback: callable):
         """Register a cleanup callback"""
         with self._lock:
@@ -332,6 +339,7 @@ class ManagedExecutor:
         return getattr(self.executor, name)
 
     def shutdown(self, wait=True, cancel_futures=False):
+        ResourceManager().unregister_executor(self.executor)
         self.executor.shutdown(wait=wait, cancel_futures=cancel_futures)
 
 

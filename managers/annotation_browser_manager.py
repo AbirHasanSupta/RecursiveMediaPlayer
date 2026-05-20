@@ -147,6 +147,10 @@ class AnnotationBrowserManager:
         theme_provider.register_manager_ui(self)
 
     # ── Public ────────────────────────────────────────────────────────────────
+    def cleanup(self):
+        self._cancel_load.set()
+        self._loading = False
+        self._win = None
 
     def show(self):
         if self._win and self._win.winfo_exists():
@@ -184,60 +188,52 @@ class AnnotationBrowserManager:
     # ── Async Loading ────────────────────────────────────────────────────────
 
     def _start_async_load(self):
-        """Cancel any pending load and start a new background thread to fetch data."""
-        if self._loading:
-            self._cancel_load.set()
-            if self._load_thread and self._load_thread.is_alive():
-                self._load_thread.join(0.1)
+        self._cancel_load.set()
+        self._loading = False
         self._cancel_load.clear()
         self._loading = True
-
-        # Show loading indicators immediately (prevents white flash)
         self._show_loading_indicators()
-
         self._load_thread = threading.Thread(target=self._load_data_in_background, daemon=True)
         self._load_thread.start()
 
     def _load_data_in_background(self):
-        """Fetch all tags, counts, and annotated videos from the service."""
         if self._cancel_load.is_set():
             return
-
         try:
-            # Acquire service lock for thread-safe reading
             with self.svc._lock:
-                # Get all tags
                 all_tags = self.svc.get_all_tags()
-                # Prefetch tag counts
-                tag_counts = {}
-                for tag in all_tags:
-                    if self._cancel_load.is_set():
-                        return
-                    tag_counts[tag] = len(self.svc.get_videos_with_tag(tag))
+                data_snapshot = {k: (v.rating, list(v.tags), list(v.bookmarks))
+                                 for k, v in self.svc._data.items()}
+                browser_order = list(self.svc._browser_order)
 
-                # Get all annotated videos (with rating/tags/bookmarks)
-                annotated_videos = [
-                    k for k, v in self.svc._data.items()
-                    if v.rating > 0 or v.tags or v.bookmarks
-                ]
+            if self._cancel_load.is_set():
+                return
 
-            # Package data for UI thread
-            data = {
-                "all_tags": all_tags,
-                "tag_counts": tag_counts,
-                "annotated_videos": annotated_videos,
-            }
+            tag_counts = {}
+            for tag in all_tags:
+                if self._cancel_load.is_set():
+                    return
+                tag_counts[tag] = sum(1 for _, (_, tags, _) in data_snapshot.items() if tag in tags)
+
+            annotated_videos = [
+                k for k, (rating, tags, bookmarks) in data_snapshot.items()
+                if rating > 0 or tags or bookmarks
+            ]
 
             if not self._cancel_load.is_set():
-                self.root.after(0, self._apply_loaded_data, data)
+                self.root.after(0, self._apply_loaded_data, {
+                    "all_tags": all_tags,
+                    "tag_counts": tag_counts,
+                    "annotated_videos": annotated_videos,
+                    "browser_order": browser_order,
+                })
         except Exception as e:
             if self.logger:
                 self.logger(f"Async load error: {e}")
             self.root.after(0, self._clear_loading_state)
 
     def _apply_loaded_data(self, data: Dict[str, Any]):
-        """Apply fetched data in main thread and rebuild UI."""
-        if self._cancel_load.is_set():
+        if self._cancel_load.is_set() or not self._win or not self._win.winfo_exists():
             self._clear_loading_state()
             return
 
@@ -759,9 +755,8 @@ class AnnotationBrowserManager:
         if self._annotation_listener:
             self.svc.unsubscribe(self._annotation_listener)
             self._annotation_listener = None
-        if self._load_thread and self._load_thread.is_alive():
-            self._cancel_load.set()
-            self._load_thread.join(0.2)
+        self._cancel_load.set()
+        self._loading = False
         if self._win:
             self._win.destroy()
         self._win = None
