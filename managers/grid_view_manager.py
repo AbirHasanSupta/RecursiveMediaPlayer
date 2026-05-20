@@ -359,6 +359,7 @@ class GridViewManager:
 
         self._build_ui(videos, t)
         self._update_tag_filter_btn()
+        return self
 
     def _close_grid_view(self):
         self._teardown_grid_view()
@@ -411,13 +412,6 @@ class GridViewManager:
         tk.Label(title_box, text="Video Gallery",
                  font=("Segoe UI", 15, "bold"),
                  bg=t['header_bg'], fg=t['text']).pack(side=tk.LEFT, pady=14)
-
-        # right: primary action (Play Selected)
-        btn_frame = tk.Frame(h_inner, bg=t['header_bg'])
-        btn_frame.pack(side=tk.RIGHT, fill=tk.Y, pady=10)
-        self._make_btn(btn_frame, "▶  Play Selected", self._play_selected,
-                       bg=t['accent'], fg="#ffffff", hover=t['accent_hover']
-                       ).pack(side=tk.RIGHT)
 
         # separator line
         tk.Frame(gw, bg=t['divider'], height=1).pack(fill=tk.X)
@@ -662,6 +656,14 @@ class GridViewManager:
             self.items.extend(current_dir_items)
 
         self.root.after(0, self._rebuild_grid)
+
+    def play_from_global(self):
+        """Play selected videos, or all videos if nothing selected."""
+        videos = self._get_selected_videos()
+        if not videos and self.items:
+            videos = [it['path'] for it in self.items if it['type'] == 'video']
+        if videos and self.play_callback:
+            self.play_callback(videos)
 
     def _make_btn(self, parent, text, cmd, bg, fg, hover=None):
         """Flat rectangular button with hover colour."""

@@ -585,6 +585,7 @@ def select_multiple_folders_and_play():
 
         def setup_main_layout(self):
             self._active_app_view = "home"
+            self.active_embedded_manager = None
             self.embedded_view_frame = None
             self.main_frame = tk.Frame(self.root, bg=self.bg_color, padx=20, pady=20)
             self.main_frame.pack(fill=tk.BOTH, expand=True)
@@ -605,6 +606,7 @@ def select_multiple_folders_and_play():
             if not self.main_frame.winfo_ismapped():
                 self.main_frame.pack(fill=tk.BOTH, expand=True)
             self._active_app_view = "home"
+            self.active_embedded_manager = None
             self._refresh_media_pill_state()
 
         def _show_embedded_view(self, view_name, builder):
@@ -616,7 +618,8 @@ def select_multiple_folders_and_play():
                 child.destroy()
             self._active_app_view = view_name
             self._refresh_media_pill_state()
-            builder(frame)
+            ui_instance = builder(frame)
+            self.active_embedded_manager = ui_instance
 
         def _refresh_media_pill_state(self):
             if not hasattr(self, "_media_pill_btns") or not hasattr(self, "_tb_colors"):
@@ -632,6 +635,16 @@ def select_multiple_folders_and_play():
                         btn.config(bg=cc["bg"], fg=a[0], highlightbackground=a[0])
                 except Exception:
                     pass
+
+        def global_play(self):
+            if self.active_embedded_manager is not None:
+                # Attempt to call the manager's play_from_global method
+                if hasattr(self.active_embedded_manager, 'play_from_global'):
+                    self.active_embedded_manager.play_from_global()
+                else:
+                    self.play_videos()  # fallback
+            else:
+                self.play_videos()
 
         def setup_console_section(self):
             self.console_section = tk.Frame(self.main_frame, bg=self.bg_color)
@@ -4046,7 +4059,7 @@ def select_multiple_folders_and_play():
                 cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc.get("play_hover_bg", cc["active_bg"]), fg="#FFFFFF")
             def _play_release(e):
                 cc = _tb_colors(); self.play_toolbar_btn.config(bg=cc["hover_bg"], fg="#FFFFFF")
-                self.play_videos()
+                self.global_play()
             self.play_toolbar_btn.bind("<Enter>",           _play_enter)
             self.play_toolbar_btn.bind("<Leave>",           _play_leave)
             self.play_toolbar_btn.bind("<ButtonPress-1>",   _play_press)

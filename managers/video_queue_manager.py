@@ -430,12 +430,6 @@ class QueueUI:
         info_lbl.pack(side=tk.RIGHT, padx=(0, 10))
         self.queue_info_label = info_lbl
 
-        btn_frame = tk.Frame(h_inner, bg=t['header_bg'])
-        btn_frame.pack(side=tk.RIGHT, fill=tk.Y, pady=10)
-        self.play_queue_top_btn = tp.create_button(
-            btn_frame, "▶  Play Queue", self._play_queue, "success", "md")
-        self.play_queue_top_btn.pack(side=tk.RIGHT)
-
         tk.Frame(self.queue_window, bg=t['divider'], height=1).pack(fill=tk.X)
 
         # Main card
@@ -488,6 +482,16 @@ class QueueUI:
         tp.create_button(left, "↓  Move Down", self._move_down, "secondary", "md").pack(side=tk.LEFT, padx=(0, 8))
         tp.create_button(left, "✓  Clear Played", self._clear_played, "secondary", "md").pack(side=tk.LEFT, padx=(0, 8))
         tp.create_button(left, "Clear All", self._clear_queue, "warning", "md").pack(side=tk.LEFT)
+
+    def play_from_global(self):
+        """Play the queue from the current position."""
+        queue = self.queue_service.get_queue()
+        if not queue:
+            return
+        current_index = self.queue_service.get_current_index()
+        videos = [entry.video_path for entry in queue[current_index:]]
+        if videos and self.on_play_callback:
+            self.on_play_callback(videos)
 
     def _refresh_queue(self):
         def refresh():
@@ -867,6 +871,7 @@ class VideoQueueManager:
 
     def show_embedded(self, parent, close_callback=None):
         self.ui.show_queue_manager_embedded(parent, close_callback)
+        return self.ui
 
     def add_to_queue(self, video_paths: List[str], added_from: str = "manual") -> int:
         return self.service.add_to_queue(video_paths, added_from)

@@ -537,6 +537,28 @@ class WatchHistoryUI:
             text += f"  •  showing {shown}"
         self.stats_label.config(text=text)
 
+    def play_from_global(self):
+        """Play selected history videos, or the most recent if nothing selected."""
+        selection = self.history_tree.selection()
+        if selection:
+            # play selected items
+            videos = []
+            for item in selection:
+                tags = self.history_tree.item(item, 'tags')
+                if tags:
+                    entry_id = tags[0]
+                    for entry in self.current_entries:
+                        if entry.id == entry_id:
+                            if os.path.isfile(entry.video_path):
+                                videos.append(entry.video_path)
+                            break
+            if videos and self.play_callback:
+                self.play_callback(videos)
+        else:
+            # play the most recent video
+            if self.current_entries and self.play_callback:
+                self.play_callback([self.current_entries[0].video_path])
+
     def _refresh_history_list(self):
         def refresh():
             for item in self.history_tree.get_children():
@@ -914,6 +936,7 @@ class WatchHistoryManager:
     def show_embedded(self, parent, close_callback=None):
         """Show the watch history manager inside an existing frame."""
         self.ui.show_history_manager_embedded(parent, close_callback)
+        return self.ui
 
     def set_play_callback(self, callback):
         """Set callback for playing videos from history"""

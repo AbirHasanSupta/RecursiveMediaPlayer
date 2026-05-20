@@ -253,13 +253,6 @@ class PlaylistUI:
                  font=("Segoe UI", 15, "bold"),
                  bg=t['header_bg'], fg=t['text']).pack(side=tk.LEFT, pady=14)
 
-        # right: primary action
-        btn_frame = tk.Frame(h_inner, bg=t['header_bg'])
-        btn_frame.pack(side=tk.RIGHT, fill=tk.Y, pady=10)
-        self.play_playlist_top_btn = tp.create_button(
-            btn_frame, "▶  Play Playlist", self._play_playlist, "success", "md")
-        self.play_playlist_top_btn.pack(side=tk.RIGHT)
-
         tk.Frame(self.playlist_window, bg=t['divider'], height=1).pack(fill=tk.X)
 
         # ── Body (unchanged, but use t colours) ──────────────────────────────
@@ -306,9 +299,6 @@ class PlaylistUI:
         self.new_playlist_btn = tp.create_button(
             pl_right, "+ New", self._create_new_playlist, "primary", "md")
         self.new_playlist_btn.pack(side=tk.LEFT, padx=(0, 8))
-        self.play_playlist_btn = tp.create_button(
-            pl_right, "▶  Play", self._play_playlist, "success", "md")
-        self.play_playlist_btn.pack(side=tk.LEFT)
 
         # RIGHT area
         right_area = tk.Frame(cols, bg=t['bg'])
@@ -364,6 +354,11 @@ class PlaylistUI:
         action.pack(fill=tk.X, padx=20, pady=(0, 14))
         # No buttons here – the Playlist has no secondary actions that need a bottom bar.
         # (Delete, New, Play are already in the sidebar.)
+
+    def play_from_global(self):
+        """Called by the global Play Videos button."""
+        if self.current_playlist and self.current_playlist.videos and self.on_play_callback:
+            self.on_play_callback(self.current_playlist.videos)
 
     def _on_video_right_click_wrapper(self, event):
         if not hasattr(self, 'playlist_window') or not self.playlist_window:
@@ -987,6 +982,7 @@ class PlaylistManager:
     def show_embedded(self, parent, close_callback=None):
         """Show the playlist manager inside an existing frame."""
         self.ui.show_playlist_manager_embedded(parent, close_callback)
+        return self.ui
 
     def add_videos_to_playlist(self, videos: List[str], selected_videos: List[str] = None):
         """Add videos to playlist with selection dialog"""

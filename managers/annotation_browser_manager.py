@@ -164,6 +164,7 @@ class AnnotationBrowserManager:
         self._embedded = True
         self._close_callback = close_callback
         self._build_window(parent)
+        return self
 
     def refresh(self):
         """Refresh the UI – called after any annotation change or manual refresh."""
@@ -476,13 +477,6 @@ class AnnotationBrowserManager:
                  font=("Segoe UI Semibold", 15) if tp.dark_mode else ("Segoe UI", 15, "bold"),
                  bg=P["header_bg"], fg=tp.text_color).pack(side=tk.LEFT, pady=14)
 
-        if self.play_callback:
-            btn_frame = tk.Frame(h_inner, bg=P["header_bg"])
-            btn_frame.pack(side=tk.RIGHT, fill=tk.Y, pady=10)
-            self._play_btn = self._make_header_btn(btn_frame, "▶  Play Filtered", self._play_smart,
-                                                   P["gold"], "#1a1a1a")
-            self._play_btn.pack(side=tk.RIGHT)
-            self._play_btn_P = P
 
         tk.Frame(win, bg=P["sep"], height=1).pack(fill=tk.X)
 
@@ -749,6 +743,13 @@ class AnnotationBrowserManager:
         self._start_async_load()
         if hasattr(win, "deiconify"):
             win.deiconify()
+
+    def play_from_global(self):
+        """Play the filtered videos (or selected if any)."""
+        if self._vid_selection:
+            self._play_selected()
+        elif self._filtered_videos and self.play_callback:
+            self.play_callback(self._filtered_videos)
 
     def _on_close(self):
         if self._annotation_listener:
@@ -1100,7 +1101,6 @@ class AnnotationBrowserManager:
             self._vid_canvas._row_height = self._row_height
             self.video_preview_manager.attach_to_listbox(self._vid_canvas, video_mapping)
 
-        self._update_play_btn()
         self._clear_detail()
 
     def _row_at_y(self, y: int) -> int:
@@ -1319,7 +1319,6 @@ class AnnotationBrowserManager:
     # ── Detail panel ──────────────────────────────────────────────────────────
 
     def _on_video_select(self, event=None):
-        self._update_play_btn()
         if not self._vid_selection:
             return
         idx = min(self._vid_selection)
@@ -1531,15 +1530,6 @@ class AnnotationBrowserManager:
             pass
 
     # ── Playback ──────────────────────────────────────────────────────────────
-
-    def _update_play_btn(self):
-        if not hasattr(self, '_play_btn') or not self._play_btn:
-            return
-        P = self._play_btn_P
-        if self._vid_selection:
-            self._play_btn.config(text="▶  Play Selected", bg=P["gold"], fg="#1a1a1a")
-        else:
-            self._play_btn.config(text="▶  Play Filtered", bg=P["gold"], fg="#1a1a1a")
 
     def _play_smart(self):
         if self._vid_selection:

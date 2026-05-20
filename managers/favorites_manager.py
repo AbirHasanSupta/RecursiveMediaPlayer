@@ -333,11 +333,6 @@ class FavoritesUI:
         info_lbl.pack(side=tk.RIGHT, padx=(0, 10))
         self.info_label = info_lbl
 
-        btn_frame = tk.Frame(h_inner, bg=t['header_bg'])
-        btn_frame.pack(side=tk.RIGHT, fill=tk.Y, pady=10)
-        self.play_all_top_btn = tp.create_button(
-            btn_frame, "▶  Play All", self._play_all, "success", "md")
-        self.play_all_top_btn.pack(side=tk.RIGHT)
 
         tk.Frame(self.favorites_window, bg=t['divider'], height=1).pack(fill=tk.X)
 
@@ -394,6 +389,14 @@ class FavoritesUI:
         left.pack(side=tk.LEFT)
         # No right-side buttons except Clear All (placed left for consistency)
         tp.create_button(left, "Clear All", self._clear_all, "warning", "md").pack(side=tk.LEFT)
+
+    def play_from_global(self):
+        """Play all favorites in the current directory."""
+        if not self.favorite_entries:
+            return
+        video_paths = [fav.video_path for fav in self.favorite_entries if os.path.isfile(fav.video_path)]
+        if video_paths and self.on_play_callback:
+            self.on_play_callback(video_paths)
 
     def _on_right_click(self, event):
         """Handle right-click on favorites"""
@@ -794,6 +797,7 @@ class FavoritesManager:
 
     def show_embedded(self, parent, selected_directory: str = None, close_callback=None):
         self.ui.show_favorites_manager_embedded(parent, selected_directory, close_callback)
+        return self.ui
 
     def add_to_favorites(self, video_paths: List[str], directory_path: str) -> int:
         return self.service.add_multiple_to_favorites(video_paths, directory_path)
