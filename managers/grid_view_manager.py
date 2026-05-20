@@ -64,6 +64,7 @@ class GridViewManager:
         self.annotation_service = None
         self._active_tag_filters = set()
         self._tag_filter_btn = None
+        self._closing = False
 
         # callbacks
         self.play_callback = None
@@ -371,6 +372,7 @@ class GridViewManager:
             self.grid_window.destroy()
 
     def _teardown_grid_view(self):
+        self._closing = True
         with self.loading_lock:
             self.is_loading = False
         for task in list(self.pending_tasks):
@@ -874,6 +876,14 @@ class GridViewManager:
     # ─────────────────────────────────────────────────────────────────────────
 
     def _rebuild_grid(self):
+        if getattr(self, '_closing', False):
+            return
+        try:
+            if not self.grid_frame or not self.grid_frame.winfo_exists():
+                return
+        except Exception:
+            return
+
         for w in self.grid_frame.winfo_children():
             w.destroy()
         self.card_widgets.clear()
@@ -2248,6 +2258,13 @@ class GridViewManager:
             pass
 
     def _relayout_grid(self):
+        if getattr(self, '_closing', False):
+            return
+        try:
+            if not self.grid_frame or not self.grid_frame.winfo_exists():
+                return
+        except Exception:
+            return
         t = self._tok()
         cols = self.grid_size_var.get()
 

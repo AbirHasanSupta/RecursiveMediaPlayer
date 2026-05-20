@@ -282,6 +282,7 @@ class PlaylistUI:
             relief=tk.FLAT, bd=0, highlightthickness=0)
         self.playlist_listbox.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
         self.playlist_listbox.bind("<<ListboxSelect>>", self._on_playlist_select)
+        self.playlist_listbox.bind("<Button-3>", self._on_playlist_right_click)
         pl_sb.config(command=self.playlist_listbox.yview)
 
         tk.Frame(left_card, bg=t['divider'], height=1).pack(fill=tk.X)
@@ -311,17 +312,6 @@ class PlaylistUI:
             font=tp.small_font, bg=t['bg'], fg=t['text_muted'])
         self.playlist_info_label.pack(side=tk.LEFT, anchor="w")
 
-        info_btns = tk.Frame(info_row, bg=t['bg'])
-        info_btns.pack(side=tk.RIGHT)
-        self.edit_info_btn = tp.create_button(
-            info_btns, "✎  Edit Info", self._edit_playlist_info, "secondary", "md")
-        self.edit_info_btn.pack(side=tk.LEFT, padx=(0, 8))
-        self.edit_info_btn.pack_forget()
-        self.grid_view_btn = tp.create_button(
-            info_btns, "⊞  Grid View", self._open_grid_view, "secondary", "md")
-        self.grid_view_btn.pack(side=tk.LEFT)
-        self.grid_view_btn.pack_forget()
-
         # Video list card
         right_card = tk.Frame(right_area, bg=t['surface'],
                               highlightbackground=t['border'], highlightthickness=1)
@@ -347,6 +337,7 @@ class PlaylistUI:
         self.video_listbox.bind("<Button-1>", self._on_mouse_down)
         self.video_listbox.bind("<B1-Motion>", self._on_mouse_drag)
         self.video_listbox.bind("<ButtonRelease-1>", self._on_mouse_release)
+        self.video_listbox.bind("<Button-3>", self._on_video_right_click)
         vid_sb.config(command=self.video_listbox.yview)
 
         # ── Bottom bar (no Close) ────────────────────────────────────────────
@@ -355,27 +346,77 @@ class PlaylistUI:
         # No buttons here – the Playlist has no secondary actions that need a bottom bar.
         # (Delete, New, Play are already in the sidebar.)
 
+    def _on_playlist_right_click(self, event):
+        """Show context menu for selected playlists."""
+        selection = self.playlist_listbox.curselection()
+        if not selection:
+            return
+
+        # Ensure the clicked item is selected
+        index = self.playlist_listbox.nearest(event.y)
+        if index not in selection:
+            self.playlist_listbox.selection_clear(0, tk.END)
+            self.playlist_listbox.selection_set(index)
+            selection = (index,)
+
+        playlists = self.playlist_service.get_all_playlists()
+        selected_playlists = [playlists[i] for i in selection if i < len(playlists)]
+
+        if not selected_playlists:
+            return
+
+        tp = self.theme_provider
+        menu = tk.Menu(self.playlist_window, tearoff=0,
+                       bg="#313335" if tp.dark_mode else "#f5f5f5",
+                       fg="#A9B7C6" if tp.dark_mode else "#333333",
+                       activebackground="#2D5A8E" if tp.dark_mode else "#3498db",
+                       activeforeground="#FFFFFF",
+                       relief="flat", bd=1, font=("Segoe UI", 9))
+
+        # Grid View – works for any number of playlists
+        menu.add_command(label="⊞  Open in Grid View",
+                         command=lambda: self._open_grid_view_for_playlists(selected_playlists))
+
+        # Edit Info – only for single selection
+        if len(selected_playlists) == 1:
+            menu.add_separator()
+            menu.add_command(label="✎  Edit Info", command=self._edit_playlist_info)
+
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _open_grid_view_for_playlists(self, playlists):
+        """Collect videos from one or more playlists, deduplicate, and open in grid view."""
+        if not self.grid_view_manager:
+            messagebox.showwarning("Warning", "Grid view not available", parent=self.playlist_window)
+            return
+
+        all_videos = []
+        for pl in playlists:
+            all_videos.extend(pl.videos)
+
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_videos = []
+        for v in all_videos:
+            if v not in seen:
+                seen.add(v)
+                unique_videos.append(v)
+
+        if not unique_videos:
+            messagebox.showwarning("Warning", "No videos found in selected playlists", parent=self.playlist_window)
+            return
+
+        self.grid_view_manager.show_grid_view(unique_videos, self.video_preview_manager)
+
     def play_from_global(self):
         """Called by the global Play Videos button."""
         if self.current_playlist and self.current_playlist.videos and self.on_play_callback:
             self.on_play_callback(self.current_playlist.videos)
 
-    def _on_video_right_click_wrapper(self, event):
-        if not hasattr(self, 'playlist_window') or not self.playlist_window:
-            return
-        if not self.playlist_window.winfo_exists():
-            return
-        if event.widget != self.video_listbox:
-            return
-        self._on_video_right_click(event)
-
     def _on_close(self):
-        try:
-            if hasattr(self, '_right_click_binding') and self._right_click_binding:
-                self.video_listbox.unbind_all('<Button-3>')
-        except Exception:
-            pass
-
         if self.playlist_window and self.playlist_window.winfo_exists():
             self.playlist_window.destroy()
         self.playlist_window = None
@@ -636,8 +677,6 @@ class PlaylistUI:
                 self.playlist_listbox.insert(tk.END, "No playlists created yet")
                 self.current_playlist = None
                 self.playlist_info_label.config(text="Select a playlist to view videos")
-                self.edit_info_btn.pack_forget()
-                self.grid_view_btn.pack_forget()
             elif selection_to_restore is not None:
                 self.playlist_listbox.selection_set(selection_to_restore)
                 self.playlist_listbox.activate(selection_to_restore)
@@ -736,8 +775,6 @@ class PlaylistUI:
             info_text += f" ({len(self.current_playlist.videos)} videos)"
 
             self.playlist_info_label.config(text=info_text)
-            self.edit_info_btn.pack(side=tk.RIGHT)
-            self.grid_view_btn.pack(side=tk.RIGHT, padx=(0, 5))
         finally:
             delattr(self, '_selecting_playlist')
 
@@ -796,8 +833,6 @@ class PlaylistUI:
             self._refresh_playlist_list()
             self._refresh_video_list()
             self.playlist_info_label.config(text="Select a playlist to view videos")
-            self.edit_info_btn.pack_forget()
-            self.grid_view_btn.pack_forget()
 
     def _remove_selected_videos(self):
         if not self.current_playlist:
