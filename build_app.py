@@ -681,7 +681,15 @@ def select_multiple_folders_and_play():
                     names.append(os.path.basename(self.selected_dirs[idx]) or self.selected_dirs[idx])
             if len(selection) > 2:
                 names.append(f"+{len(selection) - 2} more")
-            return "Directory: " + ", ".join(names)
+            total = 0
+            for idx in selection:
+                if idx < len(self.selected_dirs):
+                    d = self.selected_dirs[idx]
+                    cache = self.scan_cache.get(d)
+                    if cache:
+                        videos, _, _ = cache
+                        total += sum(1 for v in videos if not self.is_video_excluded(d, v))
+            return "Directory: " + ", ".join(names) + f"({total} videos)"
 
         def _refresh_media_pill_state(self):
             if not hasattr(self, "_media_pill_btns") or not hasattr(self, "_tb_colors"):
@@ -1047,25 +1055,25 @@ def select_multiple_folders_and_play():
             self.exclusion_section.pack(fill=tk.BOTH, expand=True)
             self._set_workspace_title("Library", self._selected_directory_summary())
 
-            exclusion_header_frame = tk.Frame(self.exclusion_section, bg=self.bg_color)
-            exclusion_header_frame.pack(fill=tk.X, pady=(0, 10))
+            # exclusion_header_frame = tk.Frame(self.exclusion_section, bg=self.bg_color)
+            # exclusion_header_frame.pack(fill=tk.X, pady=(0, 10))
+            #
+            # exclusion_header = tk.Label(exclusion_header_frame, text="Subdirectories and Videos",
+            #                             font=self.header_font, bg=self.bg_color, fg=self.text_color)
+            # exclusion_header.pack(side=tk.LEFT, anchor='w')
+            #
+            # self.video_count_label = tk.Label(
+            #     exclusion_header_frame, text="  —  0 videos",
+            #     font=self.normal_font, bg=self.bg_color, fg="#888888"
+            # )
+            # self.video_count_label.pack(side=tk.LEFT, anchor='w')
 
-            exclusion_header = tk.Label(exclusion_header_frame, text="Subdirectories and Videos",
-                                        font=self.header_font, bg=self.bg_color, fg=self.text_color)
-            exclusion_header.pack(side=tk.LEFT, anchor='w')
-
-            self.video_count_label = tk.Label(
-                exclusion_header_frame, text="  —  0 videos",
-                font=self.normal_font, bg=self.bg_color, fg="#888888"
-            )
-            self.video_count_label.pack(side=tk.LEFT, anchor='w')
-
-            self.selected_dir_label = tk.Label(
-                self.exclusion_section,
-                text="Select a directory to see its folders and videos",
-                font=self.small_font, bg=self.bg_color, fg="#666666"
-            )
-            self.selected_dir_label.pack(anchor='w', pady=(0, 10))
+            # self.selected_dir_label = tk.Label(
+            #     self.exclusion_section,
+            #     text="Select a directory to see its folders and videos",
+            #     font=self.small_font, bg=self.bg_color, fg="#666666"
+            # )
+            # self.selected_dir_label.pack(anchor='w', pady=(0, 10))
 
             self.search_frame = tk.Frame(self.exclusion_section, bg=self.bg_color)
             self.search_frame.pack(fill=tk.X, pady=(0, 10))
@@ -1686,18 +1694,6 @@ def select_multiple_folders_and_play():
             self.current_max_depth = max_depth
             show_ann = self.settings_manager.get_settings().show_video_annotations_in_tree
 
-            if self.show_only_excluded:
-                self.selected_dir_label.config(text=f"Excluded items in: {os.path.basename(directory)}")
-            else:
-                _cache = self.scan_cache.get(directory)
-                if _cache:
-                    _videos, _, _ = _cache
-                    _count = sum(1 for v in _videos if not self.is_video_excluded(directory, v))
-                    self.selected_dir_label.config(
-                        text=f"All items in: {os.path.basename(directory)} ({_count} videos)")
-                else:
-                    self.selected_dir_label.config(text=f"All items in: {os.path.basename(directory)}")
-
             self._clear_tree()
             self.exclusion_tree.insert("", tk.END, iid="__loading__",
                                        text="  Loading…", tags=("placeholder",))
@@ -2208,9 +2204,9 @@ def select_multiple_folders_and_play():
                                                        text=label, tags=(tag,))
                             self.current_subdirs_mapping[iid] = video_path
 
-                        self.selected_dir_label.config(
-                            text=f"Filtered: {len(filtered_sorted)} videos in '{os.path.basename(selected_dir)}'"
-                        )
+                        # self.selected_dir_label.config(
+                        #     text=f"Filtered: {len(filtered_sorted)} videos in '{os.path.basename(selected_dir)}'"
+                        # )
                         self.update_console(
                             f"Applied filters: {len(filtered_sorted)} videos shown from {len(videos)} total")
 
@@ -2268,9 +2264,9 @@ def select_multiple_folders_and_play():
                 self.exclusion_tree.insert("", tk.END, iid=iid, text=label, tags=(tag,))
                 self.current_subdirs_mapping[iid] = video_path
 
-            self.selected_dir_label.config(
-                text=f"Filtered: {len(filtered_sorted)} videos in '{os.path.basename(selected_dir)}'"
-            )
+            # self.selected_dir_label.config(
+            #     text=f"Filtered: {len(filtered_sorted)} videos in '{os.path.basename(selected_dir)}'"
+            # )
 
             if hasattr(self, 'video_preview_manager'):
                 self.video_preview_manager.attach_to_listbox(
@@ -2679,7 +2675,7 @@ def select_multiple_folders_and_play():
             ]
 
         def clear_exclusion_list(self):
-            self.selected_dir_label.config(text="Select a directory to see its folders and videos")
+            # self.selected_dir_label.config(text="Select a directory to see its folders and videos")
             self._clear_tree()
 
         def on_search_changed(self, event=None):
@@ -2810,8 +2806,8 @@ def select_multiple_folders_and_play():
                 total_videos += sum(1 for v in videos if not self.is_video_excluded(directory, v))
 
             self.video_count = total_videos
-            suffix = f" (scanning {pending}…)" if pending else ""
-            self.video_count_label.config(text=f"  —  {self.video_count} videos{suffix}")
+            # suffix = f" (scanning {pending}…)" if pending else ""
+            # self.video_count_label.config(text=f"  —  {self.video_count} videos{suffix}")
 
             if (not pending and
                     not hasattr(self, '_last_reported_video_count') or
