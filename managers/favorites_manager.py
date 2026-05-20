@@ -229,6 +229,7 @@ class FavoritesUI:
 
         self.favorites_window = None
         self.current_directory = None
+        self.current_directories = []
         self.favorite_entries = []
         self.dragging_index = None
         self.video_preview_manager = None
@@ -241,7 +242,7 @@ class FavoritesUI:
         if self.favorites_window and self.favorites_window.winfo_exists():
             self.favorites_window.lift()
             if selected_directory:
-                self.current_directory = selected_directory
+                self._set_directory_scope(selected_directory)
                 self._refresh_favorites_list()
             return
 
@@ -253,7 +254,7 @@ class FavoritesUI:
         self.favorites_window.geometry(_responsive_geometry(self.parent, 1600, 900))
         self.favorites_window.configure(bg=self.theme_provider.bg_color)
 
-        self.current_directory = selected_directory
+        self._set_directory_scope(selected_directory)
         self._setup_favorites_ui()
         if selected_directory:
             self._refresh_favorites_list()
@@ -271,9 +272,21 @@ class FavoritesUI:
         self._close_callback = close_callback
         self.favorites_window = tk.Frame(parent, bg=self.theme_provider.bg_color)
         self.favorites_window.pack(fill=tk.BOTH, expand=True)
-        self.current_directory = selected_directory
+        self._set_directory_scope(selected_directory)
         self._setup_favorites_ui()
         self._refresh_favorites_list()
+
+    def _set_directory_scope(self, selected_directory=None):
+        if isinstance(selected_directory, (list, tuple, set)):
+            self.current_directories = [os.path.normpath(d) for d in selected_directory if d]
+        elif selected_directory:
+            self.current_directories = [os.path.normpath(selected_directory)]
+        else:
+            self.current_directories = []
+        self.current_directory = self.current_directories[0] if self.current_directories else None
+
+    def _is_multi_directory_scope(self):
+        return len(self.current_directories) > 1
 
     def _close_favorites(self):
         if self.favorites_window and self.favorites_window.winfo_exists():
@@ -541,22 +554,29 @@ class FavoritesUI:
             print(f"Error opening location: {e}")
 
     def _refresh_favorites_list(self):
-        if not self.current_directory:
+        if not self.current_directories:
             return
 
         def refresh():
             tp = self.theme_provider
             self.favorites_listbox.delete(0, tk.END)
-            self.favorite_entries = self.favorite_service.get_favorites_by_directory(
-                self.current_directory)
+            self.favorite_entries = []
+            for directory in self.current_directories:
+                self.favorite_entries.extend(
+                    self.favorite_service.get_favorites_by_directory(directory)
+                )
 
-            dir_name = os.path.basename(self.current_directory)
+            if self._is_multi_directory_scope():
+                dir_name = f"{len(self.current_directories)} directories"
+            else:
+                dir_name = os.path.basename(self.current_directory)
             self.directory_label.config(text=f"  📁  {dir_name}  ")
 
             if not self.favorite_entries:
                 self.favorites_listbox.configure(fg=tp.muted_fg)
                 self.favorites_listbox.insert(tk.END, "")
-                self.favorites_listbox.insert(tk.END, "   No favourites in this directory.")
+                empty_scope = "these directories" if self._is_multi_directory_scope() else "this directory"
+                self.favorites_listbox.insert(tk.END, f"   No favourites in {empty_scope}.")
                 self.favorites_listbox.insert(tk.END, "   Right-click a video to add one.")
                 self.info_label.config(text="0 videos")
                 return
@@ -564,11 +584,15 @@ class FavoritesUI:
             self.favorites_listbox.configure(fg=tp.listbox_fg)
             video_mapping = {}
             for i, fav in enumerate(self.favorite_entries):
-                self.favorites_listbox.insert(tk.END, f"   {i + 1}.   {fav.video_name}")
+                prefix = ""
+                if self._is_multi_directory_scope():
+                    prefix = f"{os.path.basename(fav.directory_path)} / "
+                self.favorites_listbox.insert(tk.END, f"   {i + 1}.   {prefix}{fav.video_name}")
                 video_mapping[i] = fav.video_path
 
             count = len(self.favorite_entries)
-            self.info_label.config(text=f"{count} video{'s' if count != 1 else ''}")
+            scope_suffix = f" across {len(self.current_directories)} directories" if self._is_multi_directory_scope() else ""
+            self.info_label.config(text=f"{count} video{'s' if count != 1 else ''}{scope_suffix}")
 
             if hasattr(self, "video_preview_manager") and self.video_preview_manager:
                 self.video_preview_manager.attach_to_listbox(
@@ -578,7 +602,6 @@ class FavoritesUI:
             refresh()
         else:
             self.parent.after(0, refresh)
-
     def _on_double_click(self, event):
         selection = self.favorites_listbox.curselection()
         if not selection or not self.favorite_entries:
@@ -642,6 +665,8 @@ class FavoritesUI:
             return "break"
 
     def _on_mouse_drag(self, event):
+        if self._is_multi_directory_scope():
+            return
         if self.dragging_index is None or not self.favorite_entries:
             return
 
@@ -660,8 +685,9 @@ class FavoritesUI:
 
     def _on_mouse_release(self, event):
         if self.dragging_index is not None and self.favorite_entries:
-            new_order = [fav.video_path for fav in self.favorite_entries]
-            self.favorite_service.reorder_favorites(self.current_directory, new_order)
+            if not self._is_multi_directory_scope():
+                new_order = [fav.video_path for fav in self.favorite_entries]
+                self.favorite_service.reorder_favorites(self.current_directory, new_order)
             self.dragging_index = None
 
     def _play_selected(self):
@@ -752,14 +778,17 @@ class FavoritesUI:
         )
 
         if result:
-            video_paths = []
+            by_directory = {}
             for index in selection:
                 if 0 <= index < len(self.favorite_entries):
-                    video_paths.append(self.favorite_entries[index].video_path)
+                    favorite = self.favorite_entries[index]
+                    by_directory.setdefault(favorite.directory_path, []).append(favorite.video_path)
 
-            removed = self.favorite_service.remove_multiple_from_favorites(
-                video_paths, self.current_directory
-            )
+            removed = 0
+            for directory, video_paths in by_directory.items():
+                removed += self.favorite_service.remove_multiple_from_favorites(
+                    video_paths, directory
+                )
 
             if removed > 0:
                 self._refresh_favorites_list()
@@ -772,12 +801,13 @@ class FavoritesUI:
 
         result = messagebox.askyesno(
             "Confirm Clear",
-            f"Clear all {len(self.favorite_entries)} favorite(s) for this directory?",
+            f"Clear all {len(self.favorite_entries)} favorite(s) for the selected director{'ies' if self._is_multi_directory_scope() else 'y'}?",
             parent=self.favorites_window
         )
 
         if result:
-            self.favorite_service.clear_favorites_for_directory(self.current_directory)
+            for directory in self.current_directories:
+                self.favorite_service.clear_favorites_for_directory(directory)
             self._refresh_favorites_list()
             if self._on_removed_callback:
                 self._on_removed_callback()

@@ -343,6 +343,7 @@ class WatchHistoryUI:
         self.history_listbox = None
         self.current_entries: List[WatchHistoryEntry] = []
         self.filter_var = None
+        self.directory_filter: List[str] = []
         self.video_preview_manager = None
         self._embedded = False
         self._close_callback = None
@@ -394,6 +395,13 @@ class WatchHistoryUI:
         from icon_helper import apply_icon
         apply_icon(self.history_window)
         self.history_window.deiconify()
+
+    def set_directory_filter(self, directories: List[str] = None):
+        self.directory_filter = [os.path.normpath(d) for d in (directories or [])]
+
+    def refresh(self):
+        if self.history_window and self.history_window.winfo_exists():
+            self._refresh_history_list()
 
     def show_history_manager_embedded(self, parent, close_callback=None):
         if self.history_window and self.history_window.winfo_exists():
@@ -828,6 +836,14 @@ class WatchHistoryUI:
             self.current_entries = self.history_service.get_history_by_date_range(7)
         elif filter_value == "month":
             self.current_entries = self.history_service.get_history_by_date_range(30)
+
+        if self.directory_filter:
+            self.current_entries = [
+                entry for entry in self.current_entries
+                if any(os.path.normpath(entry.directory_path) == directory or
+                       os.path.normpath(entry.directory_path).startswith(directory + os.sep)
+                       for directory in self.directory_filter)
+            ]
 
         for item in self.history_tree.get_children():
             self.history_tree.delete(item)

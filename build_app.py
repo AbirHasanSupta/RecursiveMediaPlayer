@@ -499,6 +499,18 @@ def select_multiple_folders_and_play():
             self.bg_color = "#f5f5f5"
             self.accent_color = "#3498db"
             self.text_color = "#333333"
+            self.listbox_bg = "white"
+            self.listbox_fg = self.text_color
+            self.listbox_select_bg = self.accent_color
+            self.console_bg = "#2c3e50"
+            self.console_fg = "#ecf0f1"
+            self.frame_border = "#cccccc"
+            self.header_color = self.text_color
+            self.entry_bg = "white"
+            self.entry_fg = self.text_color
+            self.entry_border = "#e0e0e0"
+            self.muted_fg = "#666666"
+            self.alt_row_color = "#ebebeb"
 
             style = ttk.Style()
             style.configure("TFrame", background=self.bg_color)
@@ -587,15 +599,41 @@ def select_multiple_folders_and_play():
             self._active_app_view = "home"
             self.active_embedded_manager = None
             self.embedded_view_frame = None
-            self.main_frame = tk.Frame(self.root, bg=self.bg_color, padx=20, pady=20)
+            self._directory_panel_mode = "expanded"
+            self.main_frame = tk.Frame(self.root, bg=self.bg_color, padx=16, pady=14)
             self.main_frame.pack(fill=tk.BOTH, expand=True)
             self.content_frame = tk.Frame(self.main_frame, bg=self.bg_color)
-            self.content_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+            self.content_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
+
+            self.workspace_frame = tk.Frame(self.content_frame, bg=self.bg_color)
+            self.workspace_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+            self.workspace_header = tk.Frame(self.workspace_frame, bg=self.bg_color)
+            self.workspace_header.pack(fill=tk.X, pady=(0, 10))
+
+            title_block = tk.Frame(self.workspace_header, bg=self.bg_color)
+            title_block.pack(side=tk.LEFT, fill=tk.Y)
+            self.workspace_title_label = tk.Label(
+                title_block, text="Library", font=self.header_font,
+                bg=self.bg_color, fg=self.text_color
+            )
+            self.workspace_title_label.pack(anchor="w")
+            self.workspace_context_label = tk.Label(
+                title_block, text="Select a directory to browse videos",
+                font=self.small_font, bg=self.bg_color, fg=self.muted_fg
+            )
+            self.workspace_context_label.pack(anchor="w", pady=(2, 0))
+
+            self.workspace_nav = tk.Frame(self.workspace_header, bg=self.bg_color)
+            self.workspace_nav.pack(side=tk.RIGHT, anchor="e")
+
+            self.workspace_body = tk.Frame(self.workspace_frame, bg=self.bg_color)
+            self.workspace_body.pack(fill=tk.BOTH, expand=True)
 
         def _ensure_embedded_view_frame(self):
             if self.embedded_view_frame and self.embedded_view_frame.winfo_exists():
                 return self.embedded_view_frame
-            self.embedded_view_frame = tk.Frame(self.root, bg=self.bg_color)
+            self.embedded_view_frame = tk.Frame(self.workspace_body, bg=self.bg_color)
             return self.embedded_view_frame
 
         def _show_home_view(self):
@@ -603,23 +641,47 @@ def select_multiple_folders_and_play():
                 self.embedded_view_frame.pack_forget()
                 for child in self.embedded_view_frame.winfo_children():
                     child.destroy()
-            if not self.main_frame.winfo_ismapped():
-                self.main_frame.pack(fill=tk.BOTH, expand=True)
+            if hasattr(self, "exclusion_section") and self.exclusion_section.winfo_exists():
+                self.exclusion_section.pack(fill=tk.BOTH, expand=True)
+            self._set_workspace_title("Library", "Browse the selected directory")
             self._active_app_view = "home"
             self.active_embedded_manager = None
             self._refresh_media_pill_state()
 
         def _show_embedded_view(self, view_name, builder):
-            self.main_frame.pack_forget()
+            if hasattr(self, "exclusion_section") and self.exclusion_section.winfo_exists():
+                self.exclusion_section.pack_forget()
             frame = self._ensure_embedded_view_frame()
             frame.configure(bg=self.bg_color)
             frame.pack(fill=tk.BOTH, expand=True)
             for child in frame.winfo_children():
                 child.destroy()
             self._active_app_view = view_name
+            self._set_workspace_title(getattr(self, "_view_tab_labels", {}).get(view_name, view_name.title()),
+                                      self._selected_directory_summary())
             self._refresh_media_pill_state()
             ui_instance = builder(frame)
             self.active_embedded_manager = ui_instance
+
+        def _set_workspace_title(self, title, subtitle=None):
+            if hasattr(self, "workspace_title_label"):
+                self.workspace_title_label.config(text=title)
+            if hasattr(self, "workspace_context_label"):
+                self.workspace_context_label.config(text=subtitle or self._selected_directory_summary())
+
+        def _selected_directory_summary(self):
+            if not hasattr(self, "dir_listbox"):
+                return "No directory selected"
+            selection = self.dir_listbox.curselection()
+            if not selection:
+                return "No directory selected"
+            names = []
+            for idx in selection[:2]:
+                if idx < len(self.selected_dirs):
+                    names.append(os.path.basename(self.selected_dirs[idx]) or self.selected_dirs[idx])
+            if len(selection) > 2:
+                names.append(f"+{len(selection) - 2} more")
+            return "Directory: " + ", ".join(names)
 
         def _refresh_media_pill_state(self):
             if not hasattr(self, "_media_pill_btns") or not hasattr(self, "_tb_colors"):
@@ -627,12 +689,11 @@ def select_multiple_folders_and_play():
             active_label = getattr(self, "_view_tab_labels", {}).get(getattr(self, "_active_app_view", "home"))
             for label, btn in self._media_pill_btns.items():
                 try:
-                    a = self.pill_accents(label)
+                    a = self._view_pill_accents(label)
                     if label == active_label:
                         btn.config(bg=a[1], fg=a[2], highlightbackground=a[1])
                     else:
-                        cc = self._tb_colors()
-                        btn.config(bg=cc["bg"], fg=a[0], highlightbackground=a[0])
+                        btn.config(bg=a[4], fg=a[0], highlightbackground=a[5])
                 except Exception:
                     pass
 
@@ -806,13 +867,31 @@ def select_multiple_folders_and_play():
 
         def setup_directory_section(self):
             self.dir_section = tk.Frame(self.content_frame, bg=self.bg_color)
-            self.dir_section.pack(side=tk.LEFT, fill=tk.Y, expand=False, padx=(0, 10))
-            self.dir_section.config(width=550)
+            self.dir_section.pack(side=tk.LEFT, fill=tk.Y, expand=False, padx=(0, 14), before=self.workspace_frame)
+            self.dir_section.config(width=360)
             self.dir_section.pack_propagate(False)
 
-            dir_header = tk.Label(self.dir_section, text="Selected Directories",
-                                  font=self.header_font, bg=self.bg_color, fg=self.text_color)
-            dir_header.pack(anchor='w', pady=(0, 10))
+            self.dir_compact_rail = tk.Frame(self.content_frame, bg=self.bg_color, width=56)
+            self.dir_compact_rail.pack_propagate(False)
+
+            compact_open = self.create_button(
+                self.dir_compact_rail, text="📁", command=self.expand_directory_panel,
+                variant="secondary", size="sm"
+            )
+            compact_open.pack(fill=tk.X, pady=(0, 8))
+
+            dir_header_frame = tk.Frame(self.dir_section, bg=self.bg_color)
+            dir_header_frame.pack(fill=tk.X, pady=(0, 10))
+
+            self.dir_header_label = tk.Label(dir_header_frame, text="Directories",
+                                             font=self.header_font, bg=self.bg_color, fg=self.text_color)
+            self.dir_header_label.pack(side=tk.LEFT, anchor='w')
+
+            self.dir_shrink_btn = self.create_button(
+                dir_header_frame, text="◀", command=self.shrink_directory_panel,
+                variant="secondary", size="sm"
+            )
+            self.dir_shrink_btn.pack(side=tk.RIGHT)
 
             self.dir_frame = tk.Frame(self.dir_section, bg=self.bg_color)
             self.dir_frame.pack(fill=tk.BOTH, expand=True)
@@ -843,6 +922,28 @@ def select_multiple_folders_and_play():
             self.dir_listbox.bind('<B1-Motion>', self._on_drag)
             self.dir_listbox.bind('<ButtonRelease-1>', self._on_drop)
             self.scrollbar.config(command=self.dir_listbox.yview)
+
+        def shrink_directory_panel(self):
+            self._set_directory_panel_mode("compact")
+
+        def expand_directory_panel(self):
+            self._set_directory_panel_mode("expanded")
+
+        def _set_directory_panel_mode(self, mode):
+            self._directory_panel_mode = mode
+            if not hasattr(self, "dir_section"):
+                return
+
+            if mode == "compact":
+                self.dir_section.pack_forget()
+                self.dir_compact_rail.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10), before=self.workspace_frame)
+                return
+
+            if hasattr(self, "dir_compact_rail"):
+                self.dir_compact_rail.pack_forget()
+            if not self.dir_section.winfo_ismapped():
+                self.dir_section.pack(side=tk.LEFT, fill=tk.Y, expand=False, padx=(0, 14), before=self.workspace_frame)
+            self.dir_section.config(width=360)
 
         def on_directory_focus_out(self, event):
             selection = self.dir_listbox.curselection()
@@ -942,8 +1043,9 @@ def select_multiple_folders_and_play():
             self.exclusion_tree.tag_configure("ann_bookmark", foreground=bm_teal)
 
         def setup_exclusion_section(self):
-            self.exclusion_section = tk.Frame(self.content_frame, bg=self.bg_color)
-            self.exclusion_section.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(10, 0))
+            self.exclusion_section = tk.Frame(self.workspace_body, bg=self.bg_color)
+            self.exclusion_section.pack(fill=tk.BOTH, expand=True)
+            self._set_workspace_title("Library", self._selected_directory_summary())
 
             exclusion_header_frame = tk.Frame(self.exclusion_section, bg=self.bg_color)
             exclusion_header_frame.pack(fill=tk.X, pady=(0, 10))
@@ -2309,13 +2411,21 @@ def select_multiple_folders_and_play():
             self._active_player = player
 
         def _show_annotation_browser(self):
+            selected_dirs = self.get_selected_directories()
             self._show_embedded_view(
                 "tags",
-                lambda frame: self.annotation_browser.show_embedded(
-                    frame,
-                    close_callback=self._show_home_view
-                )
+                lambda frame: self._show_annotation_browser_embedded(frame, selected_dirs)
             )
+
+        def _show_annotation_browser_embedded(self, frame, selected_dirs):
+            ui = self.annotation_browser.show_embedded(
+                frame,
+                close_callback=self._show_home_view
+            )
+            if hasattr(ui, "set_directory_filter"):
+                ui.set_directory_filter(selected_dirs)
+                ui.refresh()
+            return ui
 
         def _play_annotated_videos(self, video_paths: list):
             if not video_paths:
@@ -2500,9 +2610,73 @@ def select_multiple_folders_and_play():
 
             self.current_selected_dir_index = selected_index
             selected_dir = self.selected_dirs[selected_index]
+            self._set_workspace_title(
+                getattr(self, "_view_tab_labels", {}).get(getattr(self, "_active_app_view", "home"), "Library"),
+                self._selected_directory_summary()
+            )
+            self._refresh_active_manager_for_directory_context()
             self.expanded_paths.clear()
             self.collapsed_paths.clear()
             self.load_subdirectories(selected_dir, max_depth=20)
+
+        def _refresh_active_manager_for_directory_context(self):
+            active = getattr(self, "_active_app_view", "home")
+            if active == "favourites":
+                self._show_favorites_manager()
+            elif active == "gallery":
+                self._show_grid_view_for_current_directory()
+            elif active == "history" and getattr(self, "active_embedded_manager", None):
+                try:
+                    self.active_embedded_manager.set_directory_filter(self.get_selected_directories())
+                    self.active_embedded_manager.refresh()
+                except Exception:
+                    pass
+            elif active == "tags" and getattr(self, "active_embedded_manager", None):
+                try:
+                    self.active_embedded_manager.set_directory_filter(self.get_selected_directories())
+                    self.active_embedded_manager.refresh()
+                except Exception:
+                    pass
+
+        def _show_grid_view_for_current_directory(self):
+            selected_dirs = self.get_selected_directories()
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dirs and selected_dir:
+                selected_dirs = [selected_dir]
+            if not selected_dirs:
+                return
+
+            def collect_all():
+                all_videos = []
+                seen = set()
+                for directory in selected_dirs:
+                    cache = self.scan_cache.get(directory)
+                    if not cache:
+                        continue
+                    videos, _, _ = cache
+                    for video in videos:
+                        if self.is_video_excluded(directory, video):
+                            continue
+                        norm = os.path.normpath(video)
+                        if norm not in seen:
+                            seen.add(norm)
+                            all_videos.append(video)
+                if all_videos:
+                    self.root.after(0, lambda: self._open_grid_view(all_videos))
+
+            self._wait_for_scans_then(
+                selected_dirs,
+                lambda: threading.Thread(target=collect_all, daemon=True).start()
+            )
+
+        def get_selected_directories(self):
+            if not hasattr(self, "dir_listbox"):
+                return []
+            return [
+                self.selected_dirs[i]
+                for i in self.dir_listbox.curselection()
+                if i < len(self.selected_dirs)
+            ]
 
         def clear_exclusion_list(self):
             self.selected_dir_label.config(text="Select a directory to see its folders and videos")
@@ -2712,7 +2886,6 @@ def select_multiple_folders_and_play():
                 self.root.after(0, apply_and_refresh)
 
             ManagedThread(target=worker, name="ExcludeAllWorker").start()
-
         def exclude_subdirectories(self):
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
@@ -3135,12 +3308,13 @@ def select_multiple_folders_and_play():
             self.update_console(f"Sent {len(final_videos)} video(s) to Window {win_id} · Player {slot}")
 
         def _show_favorites_manager(self):
-            selected_dir = self.get_current_selected_directory()
+            selected_dirs = self.get_selected_directories()
+            selected_scope = selected_dirs if len(selected_dirs) > 1 else self.get_current_selected_directory()
             self._show_embedded_view(
                 "favourites",
                 lambda frame: self.favorites_manager.show_embedded(
                     frame,
-                    selected_dir,
+                    selected_scope,
                     close_callback=self._show_home_view
                 )
             )
@@ -3375,13 +3549,21 @@ def select_multiple_folders_and_play():
             self._launch_player(player)
 
         def _show_watch_history(self):
+            selected_dirs = self.get_selected_directories()
             self._show_embedded_view(
                 "history",
-                lambda frame: self.watch_history_manager.show_embedded(
-                    frame,
-                    close_callback=self._show_home_view
-                )
+                lambda frame: self._show_history_embedded(frame, selected_dirs)
             )
+
+        def _show_history_embedded(self, frame, selected_dirs):
+            ui = self.watch_history_manager.show_embedded(
+                frame,
+                close_callback=self._show_home_view
+            )
+            if hasattr(ui, "set_directory_filter"):
+                ui.set_directory_filter(selected_dirs)
+                ui.refresh()
+            return ui
 
         def _play_history_videos(self, videos):
             if not videos:
@@ -3412,10 +3594,14 @@ def select_multiple_folders_and_play():
         # ------------------------------------------------------------------
 
         def _show_grid_view(self):
+            selected_dirs = self.get_selected_directories()
             selected_dir = self.get_current_selected_directory()
-            if not selected_dir:
+            if not selected_dirs and selected_dir:
+                selected_dirs = [selected_dir]
+            if not selected_dirs:
                 messagebox.showwarning("Warning", "Please select a directory first")
                 return
+            selected_dir = selected_dirs[0]
 
             selection = self._tree_selection_indices()
 
@@ -3467,20 +3653,31 @@ def select_multiple_folders_and_play():
                 self._wait_for_scans_then(relevant_dirs,
                                           lambda: threading.Thread(target=collect_selected, daemon=True).start())
             else:
-                self.update_console("Loading grid view for entire directory…")
+                scope_text = "selected directories" if len(selected_dirs) > 1 else "entire directory"
+                self.update_console(f"Loading grid view for {scope_text}...")
 
                 def collect_all():
-                    cache = self.scan_cache.get(selected_dir)
-                    if cache:
+                    all_videos = []
+                    seen = set()
+                    for directory in selected_dirs:
+                        cache = self.scan_cache.get(directory)
+                        if not cache:
+                            continue
                         videos, _, _ = cache
-                        filtered = [v for v in videos if not self.is_video_excluded(selected_dir, v)]
-                        self.root.after(0, lambda: self._open_grid_view(filtered))
+                        for video in videos:
+                            if self.is_video_excluded(directory, video):
+                                continue
+                            norm = os.path.normpath(video)
+                            if norm not in seen:
+                                seen.add(norm)
+                                all_videos.append(video)
+                    if all_videos:
+                        self.root.after(0, lambda: self._open_grid_view(all_videos))
                     else:
                         self.root.after(0, lambda: messagebox.showwarning("Warning", "No videos found"))
 
-                self._wait_for_scans_then([selected_dir],
+                self._wait_for_scans_then(selected_dirs,
                                           lambda: threading.Thread(target=collect_all, daemon=True).start())
-
         def _open_grid_view(self, videos):
             if not videos:
                 messagebox.showwarning("Warning", "No videos to display")
@@ -3954,78 +4151,87 @@ def select_multiple_folders_and_play():
             make_toolbar_btn("Settings", command=self._show_settings)
 
             _media_pill_commands = {
-                "🎵 Playlist":   self._manage_playlists,
-                "⬛ Queue":      self._show_queue_manager,
-                "♥ Favourites": self._show_favorites_manager,
-                "🕐 History":   self._show_watch_history,
-                "🏷 Tags & Ratings": self._show_annotation_browser,
-            }
-            _media_pill_commands.update({
                 "Home": self._show_home_view,
                 "Gallery": self._show_grid_view,
-            })
+                "Playlist": self._manage_playlists,
+                "Queue": self._show_queue_manager,
+                "Favourites": self._show_favorites_manager,
+                "Tags & Ratings": self._show_annotation_browser,
+                "History": self._show_watch_history,
+            }
             self._view_tab_labels = {
                 "home": "Home",
                 "gallery": "Gallery",
-                "playlist": "ðŸŽµ Playlist",
-                "queue": "â¬› Queue",
-                "favourites": "â™¥ Favourites",
-                "history": "ðŸ• History",
-                "tags": "ðŸ· Tags & Ratings",
+                "playlist": "Playlist",
+                "queue": "Queue",
+                "favourites": "Favourites",
+                "history": "History",
+                "tags": "Tags & Ratings",
             }
-            for _view_name, _needle in [
-                ("playlist", "Playlist"),
-                ("queue", "Queue"),
-                ("favourites", "Favourites"),
-                ("history", "History"),
-                ("tags", "Tags & Ratings"),
-            ]:
-                self._view_tab_labels[_view_name] = next(
-                    (lbl for lbl in _media_pill_commands if _needle in lbl),
-                    self._view_tab_labels[_view_name]
-                )
             self._media_pill_btns = {}
 
+            def _view_pill_accents(label):
+                if self.dark_mode:
+                    palette = {
+                        "Home": ("#c7ccd6", "#343a46", "#ffffff", "#2b303a", "#202228", "#373b45"),
+                        "Gallery": ("#83b7ff", "#2d5a8e", "#ffffff", "#1a4070", "#202228", "#2d5a8e"),
+                        "Playlist": ("#8ec7ff", "#1f5d9d", "#ffffff", "#174a7f", "#202228", "#35506c"),
+                        "Queue": ("#7bd99b", "#1f7f4b", "#ffffff", "#176139", "#202228", "#315c42"),
+                        "Favourites": ("#ffbd7a", "#a85f1c", "#ffffff", "#854812", "#202228", "#684425"),
+                        "Tags & Ratings": ("#f2d66b", "#866f13", "#ffffff", "#66540d", "#202228", "#655a2a"),
+                        "History": ("#9299a8", "#2a2d34", "#d6dae2", "#24272d", "#202228", "#343841"),
+                    }
+                else:
+                    palette = {
+                        "Home": ("#4a5568", "#d7dde8", "#1a2035", "#c7cfdd", "#f6f7fb", "#d9dee8"),
+                        "Gallery": ("#2d7ef7", "#1a6de8", "#ffffff", "#1557bd", "#f6f7fb", "#b9d4ff"),
+                        "Playlist": ("#246aa7", "#1a5fa8", "#ffffff", "#144d8a", "#f6f7fb", "#c6dff4"),
+                        "Queue": ("#23834a", "#1a8a4a", "#ffffff", "#156e3a", "#f6f7fb", "#c7e8d2"),
+                        "Favourites": ("#b86010", "#b35a00", "#ffffff", "#8a4400", "#f6f7fb", "#f0d2b6"),
+                        "Tags & Ratings": ("#8a6d0a", "#8a6d0a", "#ffffff", "#5a4600", "#f6f7fb", "#eadf9e"),
+                        "History": ("#6b7280", "#eceff4", "#374151", "#e3e7ee", "#f6f7fb", "#d9dee8"),
+                    }
+                return palette[label]
+
+            self._view_pill_accents = _view_pill_accents
+
             def _make_media_pill(label):
-                a   = self.pill_accents(label)
-                c   = _tb_colors()
-                btn = tk.Label(self.toolbar, text=label,
-                               bg=c["bg"], fg=a[0],
-                               font=("Segoe UI", 9, "bold"),
-                               padx=9, pady=3, cursor="hand2",
+                a = self._view_pill_accents(label)
+                is_history = label == "History"
+                btn = tk.Label(self.workspace_nav, text=label,
+                               bg=a[4], fg=a[0],
+                               font=("Segoe UI", 9, "normal" if is_history else "bold"),
+                               padx=10 if not is_history else 8,
+                               pady=5 if not is_history else 4,
+                               cursor="hand2",
                                relief="flat", highlightthickness=1,
-                               highlightbackground=a[0], highlightcolor=a[0])
-                btn.pack(side=tk.LEFT, padx=(0, 3), pady=2)
+                               highlightbackground=a[5], highlightcolor=a[5])
+                btn.pack(side=tk.LEFT, padx=(0, 6), pady=2)
                 self._media_pill_btns[label] = btn
 
                 def on_enter(e, b=btn, lbl=label):
-                    a = self.pill_accents(lbl); b.config(bg=a[1], fg=a[2], highlightbackground=a[1])
+                    a = self._view_pill_accents(lbl)
+                    b.config(bg=a[1], fg=a[2], highlightbackground=a[1])
                 def on_leave(e, b=btn, lbl=label):
                     if getattr(self, "_view_tab_labels", {}).get(getattr(self, "_active_app_view", "home")) == lbl:
                         return
-                    a = self.pill_accents(lbl); cc = _tb_colors()
-                    b.config(bg=cc["bg"], fg=a[0], highlightbackground=a[0])
+                    a = self._view_pill_accents(lbl)
+                    b.config(bg=a[4], fg=a[0], highlightbackground=a[5])
                 def on_press(e, b=btn, lbl=label):
-                    a = self.pill_accents(lbl); b.config(bg=a[3], fg=a[2], highlightbackground=a[3])
+                    a = self._view_pill_accents(lbl)
+                    b.config(bg=a[3], fg=a[2], highlightbackground=a[3])
                 def on_release(e, b=btn, lbl=label, cmd=_media_pill_commands[label]):
-                    a = self.pill_accents(lbl); b.config(bg=a[1], fg=a[2], highlightbackground=a[1]); cmd()
+                    a = self._view_pill_accents(lbl)
+                    b.config(bg=a[1], fg=a[2], highlightbackground=a[1])
+                    cmd()
 
-                btn.bind("<Enter>",           on_enter)
-                btn.bind("<Leave>",           on_leave)
-                btn.bind("<ButtonPress-1>",   on_press)
+                btn.bind("<Enter>", on_enter)
+                btn.bind("<Leave>", on_leave)
+                btn.bind("<ButtonPress-1>", on_press)
                 btn.bind("<ButtonRelease-1>", on_release)
 
-            for _pill_label in ["🎵 Playlist", "⬛ Queue", "♥ Favourites", "🕐 History", "🏷 Tags & Ratings"]:
+            for _pill_label in ["Home", "Gallery", "Playlist", "Queue", "Favourites", "Tags & Ratings", "History"]:
                 _make_media_pill(_pill_label)
-
-            _make_media_pill("Home")
-            _make_media_pill("Gallery")
-            try:
-                first_media = self._media_pill_btns[self._view_tab_labels["playlist"]]
-                self._media_pill_btns["Home"].pack_configure(before=first_media)
-                self._media_pill_btns["Gallery"].pack_configure(before=first_media)
-            except Exception:
-                pass
             self._refresh_media_pill_state()
 
             self.theme_toolbar_btn = tk.Label(

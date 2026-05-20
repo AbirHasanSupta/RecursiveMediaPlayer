@@ -638,11 +638,18 @@ class ThemeSelector:
         cc = self._tb_colors()
         for lbl, btn in self._media_pill_btns.items():
             try:
-                normal_fg = self.pill_accents(lbl)[0]
-                btn.config(bg=cc["bg"], fg=normal_fg,
-                           highlightbackground=normal_fg, highlightcolor=normal_fg)
+                if hasattr(self, '_view_pill_accents'):
+                    a = self._view_pill_accents(lbl)
+                    btn.config(bg=a[4], fg=a[0],
+                               highlightbackground=a[5], highlightcolor=a[5])
+                else:
+                    normal_fg = self.pill_accents(lbl)[0]
+                    btn.config(bg=cc["bg"], fg=normal_fg,
+                               highlightbackground=normal_fg, highlightcolor=normal_fg)
             except KeyError:
                 pass
+        if hasattr(self, '_refresh_media_pill_state'):
+            self._refresh_media_pill_state()
 
     def _fix_pill_colors_initial(self):
         self._fix_toolbar_colors()

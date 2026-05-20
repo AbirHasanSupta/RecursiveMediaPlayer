@@ -125,6 +125,7 @@ class AnnotationBrowserManager:
         self._tag_canvas_win = None
         self._tag_btns: dict = {}
         self._filtered_videos: list = []
+        self.directory_filter: list = []
         self._detail_lbl: Optional[tk.Label] = None
         self._detail_path_lbl: Optional[tk.Label] = None
         self._bookmark_frame: Optional[tk.Frame] = None
@@ -170,6 +171,9 @@ class AnnotationBrowserManager:
         """Refresh the UI – called after any annotation change or manual refresh."""
         if self._win and self._win.winfo_exists():
             self._start_async_load()
+
+    def set_directory_filter(self, directories: list = None):
+        self.directory_filter = [os.path.normpath(d) for d in (directories or [])]
 
     def set_video_preview_manager(self, preview_manager):
         self.video_preview_manager = preview_manager
@@ -1071,6 +1075,14 @@ class AnnotationBrowserManager:
                           if self._selected_tags.issubset(set(self.svc.get_tags(p)))]
         else:
             candidates = all_annotated
+
+        if self.directory_filter:
+            candidates = [
+                p for p in candidates
+                if any(os.path.normpath(p) == directory or
+                       os.path.normpath(p).startswith(directory + os.sep)
+                       for directory in self.directory_filter)
+            ]
 
         if min_rating > 0:
             candidates = [p for p in candidates if self.svc.get_rating(p) >= min_rating]
