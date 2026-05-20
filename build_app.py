@@ -2795,7 +2795,7 @@ def select_multiple_folders_and_play():
 
         def update_video_count(self):
             total_videos = 0
-            pending      = 0
+            pending = 0
 
             for directory in self.selected_dirs:
                 cache = self.scan_cache.get(directory)
@@ -2806,8 +2806,13 @@ def select_multiple_folders_and_play():
                 total_videos += sum(1 for v in videos if not self.is_video_excluded(directory, v))
 
             self.video_count = total_videos
-            # suffix = f" (scanning {pending}…)" if pending else ""
-            # self.video_count_label.config(text=f"  —  {self.video_count} videos{suffix}")
+
+            if hasattr(self, 'workspace_context_label'):
+                suffix = f" (scanning {pending}…)" if pending else ""
+                self.workspace_context_label.config(
+                    text=self._selected_directory_summary() if not pending else
+                    f"{total_videos} videos{suffix}"
+                )
 
             if (not pending and
                     not hasattr(self, '_last_reported_video_count') or
