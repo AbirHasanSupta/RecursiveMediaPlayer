@@ -348,6 +348,33 @@ class WatchHistoryUI:
         self._close_callback = None
         self.theme_provider.register_manager_ui(self)
 
+    def _get_design_tokens(self):
+        dark = self.theme_provider.dark_mode
+        if dark:
+            return {
+                "bg": "#16181c",  # main window background
+                "surface": "#1f2127",  # card background
+                "surface2": "#282b32",  # alternate card background / sidebar
+                "header_bg": "#1a1b1e",  # header background (distinct)
+                "text": "#e4e7ee",
+                "text_muted": "#52596a",
+                "accent": "#5b9cf6",
+                "border": "#35383f",
+                "divider": "#2a2d34",
+            }
+        else:
+            return {
+                "bg": "#eef0f5",
+                "surface": "#ffffff",
+                "surface2": "#f4f6fa",
+                "header_bg": "#ebedf0",
+                "text": "#1a2035",
+                "text_muted": "#96a0b5",
+                "accent": "#2d7ef7",
+                "border": "#dce0ea",
+                "divider": "#e4e8f0",
+            }
+
     def show_history_manager(self):
         if self.history_window and self.history_window.winfo_exists():
             self.history_window.lift()
@@ -389,94 +416,80 @@ class WatchHistoryUI:
 
     def _setup_history_ui(self):
         tp = self.theme_provider
-        ACCENT = "#C39BD3" if tp.dark_mode else "#9b59b6"
-        PANEL = tp.listbox_bg
+        t = self._get_design_tokens()
 
-        # ── Header band ───────────────────────────────────────────────────────
-        band = tk.Frame(self.history_window, bg=ACCENT)
-        band.pack(fill=tk.X)
-        hrow = tk.Frame(band, bg=ACCENT)
-        hrow.pack(fill=tk.X, padx=20, pady=14)
-        tk.Label(hrow, text="🕐  Watch History",
-                 font=tp.header_font, bg=ACCENT, fg="white").pack(side=tk.LEFT)
-        self.stats_label = tk.Label(hrow, text="",
-                                    font=tp.small_font, bg=ACCENT, fg="white")
-        self.stats_label.pack(side=tk.RIGHT)
+        header = tk.Frame(self.history_window, bg=t['header_bg'], height=58)
+        header.pack(fill=tk.X)
+        header.pack_propagate(False)
+        h_inner = tk.Frame(header, bg=t['header_bg'])
+        h_inner.pack(fill=tk.BOTH, expand=True, padx=20, pady=0)
 
-        # ── Filter pill bar ───────────────────────────────────────────────────
-        filter_row = tk.Frame(self.history_window, bg=tp.bg_color)
+        title_box = tk.Frame(h_inner, bg=t['header_bg'])
+        title_box.pack(side=tk.LEFT, fill=tk.Y)
+        tk.Label(title_box, text="🕐", font=("Segoe UI Emoji", 18),
+                 bg=t['header_bg'], fg=t['accent']).pack(side=tk.LEFT, padx=(0, 10), pady=14)
+        tk.Label(title_box, text="Watch History",
+                 font=("Segoe UI", 15, "bold"),
+                 bg=t['header_bg'], fg=t['text']).pack(side=tk.LEFT, pady=14)
+
+        # Stats label on the right (no primary action button)
+        self.stats_label = tk.Label(h_inner, text="",
+                                    font=tp.small_font, bg=t['header_bg'], fg=t['text_muted'])
+        self.stats_label.pack(side=tk.RIGHT, padx=(10, 0))
+
+        tk.Frame(self.history_window, bg=t['divider'], height=1).pack(fill=tk.X)
+
+        # Filter row
+        filter_row = tk.Frame(self.history_window, bg=t['bg'])
         filter_row.pack(fill=tk.X, padx=20, pady=(14, 0))
-
         tk.Label(filter_row, text="Show:", font=tp.small_font,
-                 bg=tp.bg_color, fg=tp.muted_fg).pack(side=tk.LEFT, padx=(0, 10))
-
+                 bg=t['bg'], fg=t['text_muted']).pack(side=tk.LEFT, padx=(0, 10))
         self.filter_var = tk.StringVar(value="all")
         self._filter_pills = []
-
         for label_text, val in [("All time", "all"), ("Today", "today"),
                                 ("7 days", "week"), ("30 days", "month")]:
             pill = tk.Label(filter_row, text=f"  {label_text}  ",
-                            font=tp.small_font, bg=tp.badge_bg, fg=tp.badge_fg,
+                            font=tp.small_font, bg=t['surface2'], fg=t['text'],
                             padx=4, pady=4, cursor="hand2", relief=tk.FLAT)
 
+            # bindings (unchanged)
             def _click(v=val):
                 self.filter_var.set(v)
                 for p, pv in self._filter_pills:
-                    p.config(bg=ACCENT if pv == v else tp.badge_bg,
-                             fg="white" if pv == v else tp.badge_fg)
+                    p.config(bg=t['accent'] if pv == v else t['surface2'],
+                             fg="white" if pv == v else t['text'])
                 self._apply_filter()
                 self._update_stats_label()
 
-            def _enter(e, w=pill, v=val):
-                if self.filter_var.get() != v:
-                    w.config(bg=ACCENT, fg="white")
-
-            def _leave(e, w=pill, v=val):
-                if self.filter_var.get() != v:
-                    w.config(bg=tp.badge_bg, fg=tp.badge_fg)
-
             pill.bind("<Button-1>", lambda e, fn=_click: fn())
-            pill.bind("<Enter>", _enter)
-            pill.bind("<Leave>", _leave)
+            pill.bind("<Enter>", lambda e, w=pill, v=val: w.config(bg=t['accent'], fg="white"))
+            pill.bind("<Leave>", lambda e, w=pill, v=val: w.config(bg=t['surface2'], fg=t['text']))
             pill.pack(side=tk.LEFT, padx=(0, 4))
             self._filter_pills.append((pill, val))
 
-        # activate default pill after window is ready
-        self.history_window.after(50, lambda: [
-            p.config(bg=ACCENT if pv == "all" else tp.badge_bg,
-                     fg="white" if pv == "all" else tp.badge_fg)
-            for p, pv in self._filter_pills
-        ])
-
-        # ── Card ──────────────────────────────────────────────────────────────
-        body = tk.Frame(self.history_window, bg=tp.bg_color)
+        # Main treeview
+        body = tk.Frame(self.history_window, bg=t['bg'])
         body.pack(fill=tk.BOTH, expand=True, padx=20, pady=12)
-
-        card = tk.Frame(body, bg=PANEL,
-                        highlightbackground=tp.frame_border, highlightthickness=1)
+        card = tk.Frame(body, bg=t['surface'],
+                        highlightbackground=t['border'], highlightthickness=1)
         card.pack(fill=tk.BOTH, expand=True)
 
-        # Treeview style
         style = ttk.Style()
         style.configure("Hist.Treeview",
-                        background=PANEL, fieldbackground=PANEL,
-                        foreground=tp.listbox_fg, rowheight=28,
+                        background=t['surface'], fieldbackground=t['surface'],
+                        foreground=t['text'], rowheight=28,
                         borderwidth=0, relief="flat")
         style.configure("Hist.Treeview.Heading",
-                        background=tp.badge_bg, foreground=tp.text_color,
+                        background=t['surface2'], foreground=t['text'],
                         font=(tp.small_font.actual()["family"], 9, "bold"),
                         relief="flat", borderwidth=0, padding=(6, 6))
         style.map("Hist.Treeview",
-                  background=[("selected", tp.listbox_select_bg)],
+                  background=[("selected", t['accent'])],
                   foreground=[("selected", "white")])
-        style.map("Hist.Treeview.Heading",
-                  background=[("active", ACCENT)],
-                  foreground=[("active", "white")])
 
         columns = ("video", "directory", "watched_at", "duration", "completion")
         self.history_tree = ttk.Treeview(card, columns=columns,
                                          show="headings", style="Hist.Treeview")
-
         for col, heading, width, anchor in [
             ("video", "Video", 260, "w"),
             ("directory", "Directory", 190, "w"),
@@ -490,7 +503,6 @@ class WatchHistoryUI:
         vsb = ttk.Scrollbar(card, orient=tk.VERTICAL, command=self.history_tree.yview)
         hsb = ttk.Scrollbar(card, orient=tk.HORIZONTAL, command=self.history_tree.xview)
         self.history_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-
         self.history_tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
@@ -501,24 +513,20 @@ class WatchHistoryUI:
         self.history_tree.bind("<Button-3>", self._on_history_right_click)
         self.history_tree.bind("<Button-1>", self._on_history_left_click)
 
-        # ── Action bar ────────────────────────────────────────────────────────
-        # LEFT:  Clear All History (warning)
-        # RIGHT: ↺ Refresh (secondary)  ·  Close (secondary)
-        action = tk.Frame(self.history_window, bg=tp.bg_color)
+        # Bottom action bar (Clear All History + Refresh)
+        action = tk.Frame(self.history_window, bg=t['bg'])
         action.pack(fill=tk.X, padx=20, pady=14)
 
-        left = tk.Frame(action, bg=tp.bg_color)
+        left = tk.Frame(action, bg=t['bg'])
         left.pack(side=tk.LEFT)
-        right = tk.Frame(action, bg=tp.bg_color)
+        right = tk.Frame(action, bg=t['bg'])
         right.pack(side=tk.RIGHT)
 
         tp.create_button(left, "Clear All History", self._clear_all_history,
                          "warning", "md").pack(side=tk.LEFT)
-
         tp.create_button(right, "↺  Refresh", self._refresh_history_list,
-                         "secondary", "md").pack(side=tk.LEFT, padx=(0, 8))
-        tp.create_button(right, "Close", self._close_history,
                          "secondary", "md").pack(side=tk.LEFT)
+        # No Close button
 
     def _update_stats_label(self):
         total = len(self.history_service.get_all_history())

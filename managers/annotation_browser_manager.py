@@ -744,7 +744,6 @@ class AnnotationBrowserManager:
         act_inner = tk.Frame(action, bg=P["status_bg"])
         act_inner.pack(fill=tk.X, padx=18, pady=10)
 
-        tp.create_button(act_inner, "Close", self._on_close, "secondary", "md").pack(side=tk.RIGHT)
 
         # Start async loading (shows loading indicators, then populates UI)
         self._start_async_load()

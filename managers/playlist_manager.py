@@ -174,6 +174,33 @@ class PlaylistUI:
         self._close_callback = None
         self.theme_provider.register_manager_ui(self)
 
+    def _get_design_tokens(self):
+        dark = self.theme_provider.dark_mode
+        if dark:
+            return {
+                "bg": "#16181c",  # main window background
+                "surface": "#1f2127",  # card background
+                "surface2": "#282b32",  # alternate card background / sidebar
+                "header_bg": "#1a1b1e",  # header background (distinct)
+                "text": "#e4e7ee",
+                "text_muted": "#52596a",
+                "accent": "#5b9cf6",
+                "border": "#35383f",
+                "divider": "#2a2d34",
+            }
+        else:
+            return {
+                "bg": "#eef0f5",
+                "surface": "#ffffff",
+                "surface2": "#f4f6fa",
+                "header_bg": "#ebedf0",
+                "text": "#1a2035",
+                "text_muted": "#96a0b5",
+                "accent": "#2d7ef7",
+                "border": "#dce0ea",
+                "divider": "#e4e8f0",
+            }
+
     def show_playlist_manager(self):
         if self.playlist_window and self.playlist_window.winfo_exists():
             self.playlist_window.lift()
@@ -208,57 +235,68 @@ class PlaylistUI:
 
     def _setup_playlist_manager_ui(self):
         tp = self.theme_provider
-        ACCENT = "#4A9EFF" if tp.dark_mode else "#2d89ef"
-        PANEL = tp.listbox_bg
-        SIDE_BG = tp.badge_bg
+        t = self._get_design_tokens()
 
-        # ── Header band ───────────────────────────────────────────────────────
-        band = tk.Frame(self.playlist_window, bg=ACCENT)
-        band.pack(fill=tk.X)
-        hrow = tk.Frame(band, bg=ACCENT)
-        hrow.pack(fill=tk.X, padx=20, pady=14)
-        tk.Label(hrow, text="🎵  Playlist Manager",
-                 font=tp.header_font, bg=ACCENT, fg="white").pack(side=tk.LEFT)
+        # ── Header (icon + title + play button) ──────────────────────────────
+        header = tk.Frame(self.playlist_window, bg=t['header_bg'], height=58)
+        header.pack(fill=tk.X)
+        header.pack_propagate(False)
+        h_inner = tk.Frame(header, bg=t['header_bg'])
+        h_inner.pack(fill=tk.BOTH, expand=True, padx=20, pady=0)
 
-        # ── Two-column body ───────────────────────────────────────────────────
-        cols = tk.Frame(self.playlist_window, bg=tp.bg_color)
+        # left: icon + title
+        title_box = tk.Frame(h_inner, bg=t['header_bg'])
+        title_box.pack(side=tk.LEFT, fill=tk.Y)
+        tk.Label(title_box, text="🎵", font=("Segoe UI Emoji", 18),
+                 bg=t['header_bg'], fg=t['accent']).pack(side=tk.LEFT, padx=(0, 10), pady=14)
+        tk.Label(title_box, text="Playlist Manager",
+                 font=("Segoe UI", 15, "bold"),
+                 bg=t['header_bg'], fg=t['text']).pack(side=tk.LEFT, pady=14)
+
+        # right: primary action
+        btn_frame = tk.Frame(h_inner, bg=t['header_bg'])
+        btn_frame.pack(side=tk.RIGHT, fill=tk.Y, pady=10)
+        self.play_playlist_top_btn = tp.create_button(
+            btn_frame, "▶  Play Playlist", self._play_playlist, "success", "md")
+        self.play_playlist_top_btn.pack(side=tk.RIGHT)
+
+        tk.Frame(self.playlist_window, bg=t['divider'], height=1).pack(fill=tk.X)
+
+        # ── Body (unchanged, but use t colours) ──────────────────────────────
+        cols = tk.Frame(self.playlist_window, bg=t['bg'])
         cols.pack(fill=tk.BOTH, expand=True, padx=20, pady=14)
 
-        # ── LEFT sidebar card ─────────────────────────────────────────────────
-        left_card = tk.Frame(cols, bg=SIDE_BG, width=310,
-                             highlightbackground=tp.frame_border, highlightthickness=1)
+        # LEFT sidebar (width 310)
+        left_card = tk.Frame(cols, bg=t['surface2'], width=310,
+                             highlightbackground=t['border'], highlightthickness=1)
         left_card.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 10))
         left_card.pack_propagate(False)
 
         tk.Label(left_card, text="  PLAYLISTS", font=tp.small_font,
-                 bg=SIDE_BG, fg=tp.muted_fg, pady=8, anchor="w"
+                 bg=t['surface2'], fg=t['text_muted'], pady=8, anchor="w"
                  ).pack(fill=tk.X, padx=(4, 0))
-        tk.Frame(left_card, bg=tp.frame_border, height=1).pack(fill=tk.X)
+        tk.Frame(left_card, bg=t['divider'], height=1).pack(fill=tk.X)
 
-        pl_body = tk.Frame(left_card, bg=PANEL)
+        pl_body = tk.Frame(left_card, bg=t['surface'])
         pl_body.pack(fill=tk.BOTH, expand=True)
-
-        pl_sb = tk.Scrollbar(pl_body, width=10, relief=tk.FLAT, bd=0)
+        pl_sb = tk.Scrollbar(pl_body, width=10, relief=tk.FLAT, bd=0,
+                             troughcolor=t['bg'], bg=t['divider'])
         pl_sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
-
         self.playlist_listbox = tk.Listbox(
             pl_body, yscrollcommand=pl_sb.set, font=tp.normal_font,
-            bg=PANEL, fg=tp.listbox_fg, selectbackground=ACCENT,
+            bg=t['surface'], fg=t['text'], selectbackground=t['accent'],
             selectforeground="white", activestyle="none",
             relief=tk.FLAT, bd=0, highlightthickness=0)
         self.playlist_listbox.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
         self.playlist_listbox.bind("<<ListboxSelect>>", self._on_playlist_select)
         pl_sb.config(command=self.playlist_listbox.yview)
 
-        # Sidebar action strip
-        # LEFT: Delete (danger)   RIGHT: + New (primary)  ·  ▶ Play (success)
-        tk.Frame(left_card, bg=tp.frame_border, height=1).pack(fill=tk.X)
-        pl_act = tk.Frame(left_card, bg=SIDE_BG)
+        tk.Frame(left_card, bg=t['divider'], height=1).pack(fill=tk.X)
+        pl_act = tk.Frame(left_card, bg=t['surface2'])
         pl_act.pack(fill=tk.X, padx=8, pady=8)
-
-        pl_left = tk.Frame(pl_act, bg=SIDE_BG)
+        pl_left = tk.Frame(pl_act, bg=t['surface2'])
         pl_left.pack(side=tk.LEFT)
-        pl_right = tk.Frame(pl_act, bg=SIDE_BG)
+        pl_right = tk.Frame(pl_act, bg=t['surface2'])
         pl_right.pack(side=tk.RIGHT)
 
         self.delete_playlist_btn = tp.create_button(
@@ -268,86 +306,64 @@ class PlaylistUI:
         self.new_playlist_btn = tp.create_button(
             pl_right, "+ New", self._create_new_playlist, "primary", "md")
         self.new_playlist_btn.pack(side=tk.LEFT, padx=(0, 8))
-
         self.play_playlist_btn = tp.create_button(
             pl_right, "▶  Play", self._play_playlist, "success", "md")
         self.play_playlist_btn.pack(side=tk.LEFT)
 
-        # ── RIGHT content card ────────────────────────────────────────────────
-        right_area = tk.Frame(cols, bg=tp.bg_color)
+        # RIGHT area
+        right_area = tk.Frame(cols, bg=t['bg'])
         right_area.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        # info row above card: playlist name left, Edit Info right
-        info_row = tk.Frame(right_area, bg=tp.bg_color)
+        info_row = tk.Frame(right_area, bg=t['bg'])
         info_row.pack(fill=tk.X, pady=(0, 8))
-
         self.playlist_info_label = tk.Label(
             info_row, text="Select a playlist →",
-            font=tp.small_font, bg=tp.bg_color, fg=tp.muted_fg)
+            font=tp.small_font, bg=t['bg'], fg=t['text_muted'])
         self.playlist_info_label.pack(side=tk.LEFT, anchor="w")
 
-        info_btns = tk.Frame(info_row, bg=tp.bg_color)
+        info_btns = tk.Frame(info_row, bg=t['bg'])
         info_btns.pack(side=tk.RIGHT)
-
         self.edit_info_btn = tp.create_button(
             info_btns, "✎  Edit Info", self._edit_playlist_info, "secondary", "md")
         self.edit_info_btn.pack(side=tk.LEFT, padx=(0, 8))
         self.edit_info_btn.pack_forget()
-
         self.grid_view_btn = tp.create_button(
             info_btns, "⊞  Grid View", self._open_grid_view, "secondary", "md")
         self.grid_view_btn.pack(side=tk.LEFT)
         self.grid_view_btn.pack_forget()
 
-        # video list card
-        right_card = tk.Frame(right_area, bg=PANEL,
-                              highlightbackground=tp.frame_border, highlightthickness=1)
+        # Video list card
+        right_card = tk.Frame(right_area, bg=t['surface'],
+                              highlightbackground=t['border'], highlightthickness=1)
         right_card.pack(fill=tk.BOTH, expand=True)
-
-        vid_hdr = tk.Frame(right_card, bg=tp.badge_bg)
+        vid_hdr = tk.Frame(right_card, bg=t['surface2'])
         vid_hdr.pack(fill=tk.X)
-        tk.Label(vid_hdr, text="  VIDEOS  —  drag to reorder  •  double-click to play",
-                 font=tp.small_font, bg=tp.badge_bg, fg=tp.muted_fg,
-                 pady=6, anchor="w"
-                 ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
-        tk.Frame(right_card, bg=tp.frame_border, height=1).pack(fill=tk.X)
-
-        vid_body = tk.Frame(right_card, bg=PANEL)
+        tk.Label(vid_hdr, text="  VIDEOS  —  drag to reorder  •  double‑click to play",
+                 font=tp.small_font, bg=t['surface2'], fg=t['text_muted'],
+                 pady=6, anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
+        tk.Frame(right_card, bg=t['divider'], height=1).pack(fill=tk.X)
+        vid_body = tk.Frame(right_card, bg=t['surface'])
         vid_body.pack(fill=tk.BOTH, expand=True)
-
-        vid_sb = tk.Scrollbar(vid_body, width=10, relief=tk.FLAT, bd=0)
+        vid_sb = tk.Scrollbar(vid_body, width=10, relief=tk.FLAT, bd=0,
+                              troughcolor=t['bg'], bg=t['divider'])
         vid_sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
-
         self.video_listbox = tk.Listbox(
             vid_body, yscrollcommand=vid_sb.set, font=tp.normal_font,
-            bg=PANEL, fg=tp.listbox_fg, selectbackground=ACCENT,
+            bg=t['surface'], fg=t['text'], selectbackground=t['accent'],
             selectforeground="white", selectmode=tk.MULTIPLE,
             activestyle="none", relief=tk.FLAT, bd=0, highlightthickness=0)
         self.video_listbox.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
         self.video_listbox.bind("<Double-Button-1>", self._on_video_double_click)
-        self._right_click_binding = self.video_listbox.bind_all(
-            "<Button-3>", self._on_video_right_click_wrapper)
         self.video_listbox.bind("<Button-1>", self._on_mouse_down)
         self.video_listbox.bind("<B1-Motion>", self._on_mouse_drag)
         self.video_listbox.bind("<ButtonRelease-1>", self._on_mouse_release)
-        self.video_listbox.bind("<Motion>", self._on_mouse_motion)
-        self.video_listbox.bind("<Leave>", self._on_mouse_leave)
         vid_sb.config(command=self.video_listbox.yview)
 
-        # ── Bottom action bar ─────────────────────────────────────────────────
-        # LEFT:  (empty — playlist-level actions are in sidebar)
-        # RIGHT: Close
-        action = tk.Frame(self.playlist_window, bg=tp.bg_color)
+        # ── Bottom bar (no Close) ────────────────────────────────────────────
+        action = tk.Frame(self.playlist_window, bg=t['bg'])
         action.pack(fill=tk.X, padx=20, pady=(0, 14))
-
-        right_btns = tk.Frame(action, bg=tp.bg_color)
-        right_btns.pack(side=tk.RIGHT)
-
-        tp.create_button(right_btns, "Close",
-                         self._on_close, "secondary", "md").pack(side=tk.LEFT)
-
-        if hasattr(self.playlist_window, "protocol"):
-            self.playlist_window.protocol("WM_DELETE_WINDOW", self._on_close)
+        # No buttons here – the Playlist has no secondary actions that need a bottom bar.
+        # (Delete, New, Play are already in the sidebar.)
 
     def _on_video_right_click_wrapper(self, event):
         if not hasattr(self, 'playlist_window') or not self.playlist_window:

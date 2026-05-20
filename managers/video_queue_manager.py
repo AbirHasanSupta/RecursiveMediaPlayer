@@ -379,50 +379,92 @@ class QueueUI:
         if self._embedded and self._close_callback:
             self._close_callback()
 
+    def _get_design_tokens(self):
+        dark = self.theme_provider.dark_mode
+        if dark:
+            return {
+                "bg": "#16181c",  # main window background
+                "surface": "#1f2127",  # card background
+                "surface2": "#282b32",  # alternate card background / sidebar
+                "header_bg": "#1a1b1e",  # header background (distinct)
+                "text": "#e4e7ee",
+                "text_muted": "#52596a",
+                "accent": "#5b9cf6",
+                "border": "#35383f",
+                "divider": "#2a2d34",
+            }
+        else:
+            return {
+                "bg": "#eef0f5",
+                "surface": "#ffffff",
+                "surface2": "#f4f6fa",
+                "header_bg": "#ebedf0",
+                "text": "#1a2035",
+                "text_muted": "#96a0b5",
+                "accent": "#2d7ef7",
+                "border": "#dce0ea",
+                "divider": "#e4e8f0",
+            }
+
     def _setup_queue_ui(self):
         tp = self.theme_provider
-        ACCENT = "#2ecc71"
-        PANEL = tp.listbox_bg
+        t = self._get_design_tokens()
 
-        # ── Header band ───────────────────────────────────────────────────────
-        band = tk.Frame(self.queue_window, bg=ACCENT)
-        band.pack(fill=tk.X)
-        hrow = tk.Frame(band, bg=ACCENT)
-        hrow.pack(fill=tk.X, padx=20, pady=14)
-        tk.Label(hrow, text="⬛  Playback Queue",
-                 font=tp.header_font, bg=ACCENT, fg="white").pack(side=tk.LEFT)
-        self.queue_info_label = tk.Label(hrow, text="",
-                                         font=tp.small_font, bg=ACCENT, fg="white")
-        self.queue_info_label.pack(side=tk.RIGHT)
+        header = tk.Frame(self.queue_window, bg=t['header_bg'], height=58)
+        header.pack(fill=tk.X)
+        header.pack_propagate(False)
+        h_inner = tk.Frame(header, bg=t['header_bg'])
+        h_inner.pack(fill=tk.BOTH, expand=True, padx=20, pady=0)
 
-        # ── Card ──────────────────────────────────────────────────────────────
-        body = tk.Frame(self.queue_window, bg=tp.bg_color)
+        title_box = tk.Frame(h_inner, bg=t['header_bg'])
+        title_box.pack(side=tk.LEFT, fill=tk.Y)
+        tk.Label(title_box, text="⬛", font=("Segoe UI Emoji", 18),
+                 bg=t['header_bg'], fg=t['accent']).pack(side=tk.LEFT, padx=(0, 10), pady=14)
+        tk.Label(title_box, text="Playback Queue",
+                 font=("Segoe UI", 15, "bold"),
+                 bg=t['header_bg'], fg=t['text']).pack(side=tk.LEFT, pady=14)
+
+        # Queue info label (showing counts) on right, then Play button
+        info_lbl = tk.Label(h_inner, text="",
+                            font=tp.small_font, bg=t['header_bg'], fg=t['text_muted'])
+        info_lbl.pack(side=tk.RIGHT, padx=(0, 10))
+        self.queue_info_label = info_lbl
+
+        btn_frame = tk.Frame(h_inner, bg=t['header_bg'])
+        btn_frame.pack(side=tk.RIGHT, fill=tk.Y, pady=10)
+        self.play_queue_top_btn = tp.create_button(
+            btn_frame, "▶  Play Queue", self._play_queue, "success", "md")
+        self.play_queue_top_btn.pack(side=tk.RIGHT)
+
+        tk.Frame(self.queue_window, bg=t['divider'], height=1).pack(fill=tk.X)
+
+        # Main card
+        body = tk.Frame(self.queue_window, bg=t['bg'])
         body.pack(fill=tk.BOTH, expand=True, padx=20, pady=12)
 
-        card = tk.Frame(body, bg=PANEL,
-                        highlightbackground=tp.frame_border, highlightthickness=1)
+        card = tk.Frame(body, bg=t['surface'],
+                        highlightbackground=t['border'], highlightthickness=1)
         card.pack(fill=tk.BOTH, expand=True)
 
-        col_hdr = tk.Frame(card, bg=tp.badge_bg)
+        col_hdr = tk.Frame(card, bg=t['surface2'])
         col_hdr.pack(fill=tk.X)
         tk.Label(col_hdr, text="  #    VIDEO", font=tp.small_font,
-                 bg=tp.badge_bg, fg=tp.muted_fg, pady=6, anchor="w"
+                 bg=t['surface2'], fg=t['text_muted'], pady=6, anchor="w"
                  ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
         tk.Label(col_hdr, text="▶ = now playing   ✓ = played  ",
-                 font=tp.small_font, bg=tp.badge_bg, fg=tp.muted_fg, pady=6
+                 font=tp.small_font, bg=t['surface2'], fg=t['text_muted'], pady=6
                  ).pack(side=tk.RIGHT)
-        tk.Frame(card, bg=tp.frame_border, height=1).pack(fill=tk.X)
+        tk.Frame(card, bg=t['divider'], height=1).pack(fill=tk.X)
 
-        lb_row = tk.Frame(card, bg=PANEL)
+        lb_row = tk.Frame(card, bg=t['surface'])
         lb_row.pack(fill=tk.BOTH, expand=True)
-
-        sb = tk.Scrollbar(lb_row, width=10, relief=tk.FLAT, bd=0)
+        sb = tk.Scrollbar(lb_row, width=10, relief=tk.FLAT, bd=0,
+                          troughcolor=t['bg'], bg=t['divider'])
         sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
-
         self.queue_listbox = tk.Listbox(
             lb_row, selectmode=tk.MULTIPLE, yscrollcommand=sb.set,
-            font=tp.normal_font, bg=PANEL, fg=tp.listbox_fg,
-            selectbackground=ACCENT, selectforeground="white",
+            font=tp.normal_font, bg=t['surface'], fg=t['text'],
+            selectbackground=t['accent'], selectforeground="white",
             activestyle="none", relief=tk.FLAT, bd=0, highlightthickness=0)
         self.queue_listbox.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
         sb.config(command=self.queue_listbox.yview)
@@ -433,24 +475,19 @@ class QueueUI:
         self.queue_listbox.bind("<B1-Motion>", self._on_drag_motion)
         self.queue_listbox.bind("<ButtonRelease-1>", self._on_drag_release)
 
-        # ── Action bar ────────────────────────────────────────────────────────
-        # LEFT:  ↑ Move Up  ·  ↓ Move Down  ·  ✓ Clear Played  ·  Clear All
-        # RIGHT: ▶ Play Queue  ·  Close
-        action = tk.Frame(self.queue_window, bg=tp.bg_color)
+        # Bottom action bar (secondary actions only, no Close)
+        action = tk.Frame(self.queue_window, bg=t['bg'])
         action.pack(fill=tk.X, padx=20, pady=14)
 
-        left = tk.Frame(action, bg=tp.bg_color)
+        left = tk.Frame(action, bg=t['bg'])
         left.pack(side=tk.LEFT)
-        right = tk.Frame(action, bg=tp.bg_color)
+        right = tk.Frame(action, bg=t['bg'])
         right.pack(side=tk.RIGHT)
 
         tp.create_button(left, "↑  Move Up", self._move_up, "secondary", "md").pack(side=tk.LEFT, padx=(0, 8))
         tp.create_button(left, "↓  Move Down", self._move_down, "secondary", "md").pack(side=tk.LEFT, padx=(0, 8))
         tp.create_button(left, "✓  Clear Played", self._clear_played, "secondary", "md").pack(side=tk.LEFT, padx=(0, 8))
         tp.create_button(left, "Clear All", self._clear_queue, "warning", "md").pack(side=tk.LEFT)
-
-        tp.create_button(right, "▶  Play Queue", self._play_queue, "success", "md").pack(side=tk.LEFT, padx=(0, 8))
-        tp.create_button(right, "Close", self._close_queue, "secondary", "md").pack(side=tk.LEFT)
 
     def _refresh_queue(self):
         def refresh():

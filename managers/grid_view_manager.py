@@ -251,6 +251,32 @@ class GridViewManager:
     # ─────────────────────────────────────────────────────────────────────────
     # Main window (new UI structure)
     # ─────────────────────────────────────────────────────────────────────────
+    def _get_design_tokens(self):
+        dark = self.theme_provider.dark_mode
+        if dark:
+            return {
+                "bg": "#16181c",
+                "surface": "#1f2127",
+                "surface2": "#282b32",
+                "header_bg": "#1a1b1e",
+                "text": "#e4e7ee",
+                "text_muted": "#52596a",
+                "accent": "#5b9cf6",
+                "border": "#35383f",
+                "divider": "#2a2d34",
+            }
+        else:
+            return {
+                "bg": "#eef0f5",
+                "surface": "#ffffff",
+                "surface2": "#f4f6fa",
+                "header_bg": "#ebedf0",
+                "text": "#1a2035",
+                "text_muted": "#96a0b5",
+                "accent": "#2d7ef7",
+                "border": "#dce0ea",
+                "divider": "#e4e8f0",
+            }
 
     def show_grid_view(self, videos, video_preview_manager=None):
         if hasattr(self.theme_provider, "_open_grid_view"):
@@ -370,59 +396,33 @@ class GridViewManager:
         """Construct the entire window layout."""
         gw = self.grid_window
 
-        # ── Top bar ──────────────────────────────────────────────────────────
-        topbar = tk.Frame(gw, bg=t['surface'], height=72)
-        topbar.pack(fill=tk.X, padx=0, pady=0)
-        topbar.pack_propagate(False)
+        # ── Header (icon + title + play selected button) ──────────────────────
+        header = tk.Frame(gw, bg=t['header_bg'], height=58)
+        header.pack(fill=tk.X)
+        header.pack_propagate(False)
+        h_inner = tk.Frame(header, bg=t['header_bg'])
+        h_inner.pack(fill=tk.BOTH, expand=True, padx=20, pady=0)
 
-        inner_top = tk.Frame(topbar, bg=t['surface'])
-        inner_top.pack(fill=tk.BOTH, expand=True, padx=28, pady=0)
+        # left: icon + title
+        title_box = tk.Frame(h_inner, bg=t['header_bg'])
+        title_box.pack(side=tk.LEFT, fill=tk.Y)
+        tk.Label(title_box, text="🖼️", font=("Segoe UI Emoji", 18),
+                 bg=t['header_bg'], fg=t['accent']).pack(side=tk.LEFT, padx=(0, 10), pady=14)
+        tk.Label(title_box, text="Video Gallery",
+                 font=("Segoe UI", 15, "bold"),
+                 bg=t['header_bg'], fg=t['text']).pack(side=tk.LEFT, pady=14)
 
-        # Title + count badge
-        title_row = tk.Frame(inner_top, bg=t['surface'])
-        title_row.pack(side=tk.LEFT, fill=tk.Y)
-
-        tk.Label(
-            title_row,
-            text="Video Gallery",
-            font=("Segoe UI", 20, "bold"),
-            bg=t['surface'],
-            fg=t['text']
-        ).pack(side=tk.LEFT, anchor='w', pady=(20, 0))
-
-        self.selection_label = tk.Label(
-            title_row,
-            text="",
-            font=("Segoe UI", 9),
-            bg=t['accent_dim'],
-            fg=t['accent'],
-            padx=10, pady=3,
-        )
-        self.selection_label.pack(side=tk.LEFT, anchor='w', padx=(14, 0), pady=(22, 0))
-
-        self.drag_mode_label = tk.Label(
-            title_row,
-            text="",
-            font=("Segoe UI", 9, "italic"),
-            bg=t['surface'],
-            fg=t['text_muted']
-        )
-        self.drag_mode_label.pack(side=tk.LEFT, padx=(12, 0), pady=(22, 0))
-
-        # Right side: close + play selected
-        action_row = tk.Frame(inner_top, bg=t['surface'])
-        action_row.pack(side=tk.RIGHT, fill=tk.Y, pady=16)
-
-        self._make_btn(action_row, "✕  Close", self._close_grid_view,
-                       bg=t['surface2'], fg=t['text_sub'], hover=t['border']).pack(side=tk.RIGHT, padx=(8, 0))
-        self._make_btn(action_row, "▶  Play Selected", self._play_selected,
+        # right: primary action (Play Selected)
+        btn_frame = tk.Frame(h_inner, bg=t['header_bg'])
+        btn_frame.pack(side=tk.RIGHT, fill=tk.Y, pady=10)
+        self._make_btn(btn_frame, "▶  Play Selected", self._play_selected,
                        bg=t['accent'], fg="#ffffff", hover=t['accent_hover']
-                       ).pack(side=tk.RIGHT, padx=(8, 0))
+                       ).pack(side=tk.RIGHT)
 
-        # Bottom border under topbar
+        # separator line
         tk.Frame(gw, bg=t['divider'], height=1).pack(fill=tk.X)
 
-        # ── Toolbar strip ─────────────────────────────────────────────────────
+        # ── Toolbar strip (unchanged, but use t colours) ───────────────────────
         toolbar_bg = t['surface2']
         toolbar = tk.Frame(gw, bg=toolbar_bg, height=52)
         toolbar.pack(fill=tk.X, padx=0)
@@ -433,8 +433,7 @@ class GridViewManager:
 
         # Grid-size label + spinbox
         tk.Label(inner_tb, text="Columns", font=("Segoe UI", 9),
-                 bg=toolbar_bg, fg=t['text_sub']).pack(side=tk.LEFT, anchor='w', pady=13)
-
+                 bg=toolbar_bg, fg=t['text_muted']).pack(side=tk.LEFT, anchor='w', pady=13)
         self.grid_size_var = tk.IntVar(value=6)
         spin = tk.Spinbox(
             inner_tb, from_=2, to=12, textvariable=self.grid_size_var, width=3,
@@ -443,25 +442,21 @@ class GridViewManager:
             bg=t['surface'], fg=t['text'],
             relief=tk.FLAT, bd=0,
             highlightthickness=1, highlightbackground=t['border'],
-            buttonbackground=t['surface2'],
+            buttonbackground=toolbar_bg,
             insertbackground=t['text']
         )
         spin.pack(side=tk.LEFT, padx=(6, 20), pady=13)
 
-        # Separator
         tk.Frame(inner_tb, bg=t['border'], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=10, padx=4)
 
-        # Filter
+        # Filter label + search
         tk.Label(inner_tb, text="Filter", font=("Segoe UI", 9),
-                 bg=toolbar_bg, fg=t['text_sub']).pack(side=tk.LEFT, padx=(14, 6), pady=13)
-
+                 bg=toolbar_bg, fg=t['text_muted']).pack(side=tk.LEFT, padx=(14, 6), pady=13)
         self.search_var = tk.StringVar()
         self.search_var.trace('w', lambda *_: self._on_search_changed())
-
         search_frame = tk.Frame(inner_tb, bg=t['surface'],
                                 highlightthickness=1, highlightbackground=t['border'])
         search_frame.pack(side=tk.LEFT, pady=13)
-
         tk.Label(search_frame, text="⌕", font=("Segoe UI", 10),
                  bg=t['surface'], fg=t['text_muted']).pack(side=tk.LEFT, padx=(8, 2))
         search_entry = tk.Entry(
@@ -475,13 +470,13 @@ class GridViewManager:
 
         tk.Frame(inner_tb, bg=t['border'], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=10, padx=4)
 
+        # Tags filter button
         tk.Label(inner_tb, text="Tags", font=("Segoe UI", 9),
-                 bg=toolbar_bg, fg=t['text_sub']).pack(side=tk.LEFT, padx=(14, 6), pady=13)
-
+                 bg=toolbar_bg, fg=t['text_muted']).pack(side=tk.LEFT, padx=(14, 6), pady=13)
         self._tag_filter_btn = tk.Label(
             inner_tb, text="All tags ▾",
             font=("Segoe UI", 9),
-            bg=t['pill_bg'], fg=t['pill_fg'],
+            bg=t['surface2'], fg=t['text_muted'],
             padx=14, pady=5, cursor="hand2"
         )
         self._tag_filter_btn.pack(side=tk.LEFT, padx=(0, 4), pady=13)
@@ -489,17 +484,15 @@ class GridViewManager:
 
         tk.Frame(inner_tb, bg=t['border'], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=10, padx=10)
 
-        # Selection actions
+        # Selection actions (pill buttons)
         self._make_pill_btn(inner_tb, "Select All", self._select_all, t).pack(side=tk.LEFT, padx=3, pady=13)
         self._make_pill_btn(inner_tb, "Clear", self._clear_selection, t).pack(side=tk.LEFT, padx=3, pady=13)
 
         # Page size right-aligned
         right_tb = tk.Frame(inner_tb, bg=toolbar_bg)
         right_tb.pack(side=tk.RIGHT)
-
         tk.Label(right_tb, text="Per page", font=("Segoe UI", 9),
-                 bg=toolbar_bg, fg=t['text_sub']).pack(side=tk.LEFT, pady=13)
-
+                 bg=toolbar_bg, fg=t['text_muted']).pack(side=tk.LEFT, pady=13)
         self._page_size_var = tk.StringVar(value=str(self._page_size))
         om = tk.OptionMenu(right_tb, self._page_size_var,
                            "25", "50", "100", "200", "500",
@@ -509,23 +502,21 @@ class GridViewManager:
                      activebackground=t['surface2'])
         om.pack(side=tk.LEFT, padx=(6, 0), pady=13)
 
-        # Bottom border under toolbar
         tk.Frame(gw, bg=t['divider'], height=1).pack(fill=tk.X)
 
-        # ── Pagination row ────────────────────────────────────────────────────
+        # ── Pagination row (unchanged) ─────────────────────────────────────────
         self._pagination_frame = tk.Frame(gw, bg=t['bg'])
         self._pagination_frame.pack(fill=tk.X, padx=28, pady=(12, 4))
         self._build_pagination_bar()
 
-        # ── Canvas / scrollable grid ──────────────────────────────────────────
+        # ── Canvas / scrollable grid (unchanged) ───────────────────────────────
         body = tk.Frame(gw, bg=t['bg'])
         body.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
 
         self.canvas = tk.Canvas(body, bg=t['bg'], highlightthickness=0)
         scrollbar = tk.Scrollbar(body, orient=tk.VERTICAL, command=self.canvas.yview,
                                  bg=t['bg'], troughcolor=t['bg'],
-                                 activebackground=t['scrollbar'],
-                                 width=10)
+                                 activebackground=t['divider'], width=10)
         self.canvas.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 4))
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -547,22 +538,15 @@ class GridViewManager:
             except Exception:
                 pass
 
-        def _rebind_mousewheel(e=None):
-            try:
-                if self.canvas.winfo_exists():
-                    self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
-            except Exception:
-                pass
-
         self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        gw.bind("<FocusIn>", _rebind_mousewheel)
-        gw.bind("<Enter>", _rebind_mousewheel)
+        gw.bind("<FocusIn>", lambda e: self.canvas.bind_all("<MouseWheel>", _on_mousewheel))
+        gw.bind("<Enter>", lambda e: self.canvas.bind_all("<MouseWheel>", _on_mousewheel))
 
         # keyboard shortcuts
         gw.bind("<Control-a>", lambda e: self._select_all())
-        gw.bind("<Escape>",    lambda e: self._clear_selection())
-        gw.bind("<Delete>",    lambda e: self._clear_selection())
-        gw.bind("<Return>",    lambda e: self._play_selected())
+        gw.bind("<Escape>", lambda e: self._clear_selection())
+        gw.bind("<Delete>", lambda e: self._clear_selection())
+        gw.bind("<Return>", lambda e: self._play_selected())
 
         def _on_closing():
             self._teardown_grid_view()
@@ -574,7 +558,7 @@ class GridViewManager:
         if hasattr(gw, "protocol"):
             gw.protocol("WM_DELETE_WINDOW", _on_closing)
 
-        # ── Populate (original async loading) ─────────────────────────────────
+        # Start loading videos (unchanged)
         ManagedThread(target=self._load_videos, args=(videos,), name="LoadGridVideos").start()
 
     # ─────────────────────────────────────────────────────────────────────────
