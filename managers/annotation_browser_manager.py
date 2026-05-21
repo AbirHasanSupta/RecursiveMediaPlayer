@@ -1462,6 +1462,11 @@ class AnnotationBrowserManager:
             command=self._play_selected)
         menu.add_separator()
 
+        menu.add_command(label="Select All", command=self._select_all)
+        menu.add_command(label="Clear Selection", command=self._unselect_all)
+
+        menu.add_separator()
+
         menu.add_command(
             label="Open in Grid View",
             command=lambda: self._open_grid_view_from_selection(sel))
@@ -1535,6 +1540,15 @@ class AnnotationBrowserManager:
                 subprocess.Popen(["xdg-open", os.path.dirname(path)])
         except Exception:
             pass
+
+    def _select_all(self, event=None):
+        self._vid_selection = set(range(len(self._filtered_videos)))
+        self._refresh_row_colors()
+        return "break"
+
+    def _unselect_all(self, event=None):
+        self._vid_selection.clear()
+        self._refresh_row_colors()
 
     # ── Playback ──────────────────────────────────────────────────────────────
 

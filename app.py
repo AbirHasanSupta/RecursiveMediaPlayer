@@ -1279,7 +1279,7 @@ def select_multiple_folders_and_play():
 
             if selected_count > 0:
                 context_menu.add_command(
-                    label="Unselect All",
+                    label="Clear Selection",
                     command=lambda: listbox.selection_clear(0, tk.END)
                 )
 

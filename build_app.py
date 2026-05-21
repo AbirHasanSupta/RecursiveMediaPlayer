@@ -1521,7 +1521,7 @@ def select_multiple_folders_and_play():
                 context_menu.add_command(label="Select All",
                     command=lambda: self.exclusion_tree.selection_set(self._tree_get_all_iids()))
             if selected_count > 0:
-                context_menu.add_command(label="Unselect All",
+                context_menu.add_command(label="Clear Selection",
                     command=lambda: self.exclusion_tree.selection_remove(self._tree_get_all_iids()))
 
             context_menu.add_separator()

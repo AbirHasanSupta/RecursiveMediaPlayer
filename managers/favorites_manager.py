@@ -263,6 +263,13 @@ class FavoritesUI:
         apply_icon(self.favorites_window)
         self.favorites_window.deiconify()
 
+    def _select_all(self, event=None):
+        self.favorites_listbox.selection_set(0, tk.END)
+        return "break"
+
+    def _unselect_all(self, event=None):
+        self.favorites_listbox.selection_clear(0, tk.END)
+
     def show_favorites_manager_embedded(self, parent, selected_directory: str = None, close_callback=None):
         if self.favorites_window and self.favorites_window.winfo_exists():
             self.favorites_window.destroy()
@@ -415,6 +422,10 @@ class FavoritesUI:
             label=f"Play Selected ({len(selection)} favorite{'s' if len(selection) > 1 else ''})",
             command=self._play_selected
         )
+
+        context_menu.add_separator()
+        context_menu.add_command(label="Select All", command=self._select_all)
+        context_menu.add_command(label="Clear Selection", command=self._unselect_all)
 
         context_menu.add_separator()
 

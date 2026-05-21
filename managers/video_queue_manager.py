@@ -562,6 +562,10 @@ class QueueUI:
         )
 
         context_menu.add_separator()
+        context_menu.add_command(label="Select All", command=self._select_all)
+        context_menu.add_command(label="Clear Selection", command=self._unselect_all)
+
+        context_menu.add_separator()
 
         context_menu.add_command(
             label="Open in Grid View",
@@ -591,6 +595,13 @@ class QueueUI:
             context_menu.tk_popup(event.x_root, event.y_root)
         finally:
             context_menu.grab_release()
+
+    def _select_all(self, event=None):
+        self.queue_listbox.selection_set(0, tk.END)
+        return "break"
+
+    def _unselect_all(self, event=None):
+        self.queue_listbox.selection_clear(0, tk.END)
 
     def _on_mouse_leave(self, event):
         if hasattr(self, 'video_preview_manager') and self.video_preview_manager:

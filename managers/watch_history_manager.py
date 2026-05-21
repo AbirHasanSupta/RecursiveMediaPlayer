@@ -671,6 +671,13 @@ class WatchHistoryUI:
                         pass
                     break
 
+    def _select_all(self, event=None):
+        self.history_tree.selection_set(self.history_tree.get_children())
+        return "break"
+
+    def _unselect_all(self, event=None):
+        self.history_tree.selection_remove(self.history_tree.selection())
+
     def _show_history_context_menu(self, event):
         """Show context menu for selected history entries."""
         selection = self.history_tree.selection()
@@ -703,6 +710,10 @@ class WatchHistoryUI:
             label=f"Play Selected ({len(selected_entries)} video{'s' if len(selected_entries) > 1 else ''})",
             command=lambda: self._play_selected_from_context(selected_entries)
         )
+
+        context_menu.add_separator()
+        context_menu.add_command(label="Select All", command=self._select_all)
+        context_menu.add_command(label="Clear Selection", command=self._unselect_all)
 
         context_menu.add_separator()
 

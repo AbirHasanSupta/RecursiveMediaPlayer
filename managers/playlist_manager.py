@@ -349,6 +349,13 @@ class PlaylistUI:
         # No buttons here – the Playlist has no secondary actions that need a bottom bar.
         # (Delete, New, Play are already in the sidebar.)
 
+    def _select_all(self, event=None):
+        self.video_listbox.selection_set(0, tk.END)
+        return "break"
+
+    def _unselect_all(self, event=None):
+        self.video_listbox.selection_clear(0, tk.END)
+
     def _on_video_right_click_wrapper(self, event):
         if not hasattr(self, 'playlist_window') or not self.playlist_window:
             return
@@ -567,6 +574,10 @@ class PlaylistUI:
             label=f"Play Selected ({len(selection)} video{'s' if len(selection) > 1 else ''})",
             command=lambda: self._play_selected_from_context(selection)
         )
+
+        context_menu.add_separator()
+        context_menu.add_command(label="Select All", command=self._select_all)
+        context_menu.add_command(label="Clear Selection", command=self._unselect_all)
 
         context_menu.add_separator()
 
