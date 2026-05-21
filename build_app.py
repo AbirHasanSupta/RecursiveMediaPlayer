@@ -2570,7 +2570,7 @@ def select_multiple_folders_and_play():
                 except Exception: pass
             self.save_preferences()
 
-        def _on_player_close_save(self, index, path, loop_mode, volume, is_muted):
+        def _on_player_close_save(self, index, path, loop_mode, volume, is_muted, duration_watched=0, total_duration=0):
             self.loop_mode               = loop_mode
             self.volume                  = volume
             self.is_muted                = is_muted
@@ -2581,7 +2581,7 @@ def select_multiple_folders_and_play():
                 except Exception: pass
             self.save_preferences()
             if hasattr(self, 'watch_history_manager') and path:
-                self.watch_history_manager.track_video_end(path)
+                self.watch_history_manager.track_video_end(path, duration_watched // 1000, total_duration // 1000)
 
         def on_video_changed(self, video_index, video_path):
             if hasattr(self, 'filter_sort_manager'):
@@ -3546,7 +3546,7 @@ def select_multiple_folders_and_play():
             if not videos:
                 return
             all_video_to_dir = {}
-            all_directories  = []
+            all_directories = []
             for vp in videos:
                 vdir = "STREAMS" if self._is_stream_url(vp) else (
                     os.path.dirname(vp) if os.path.isfile(vp) else None)
@@ -3562,6 +3562,48 @@ def select_multiple_folders_and_play():
             self.update_console(f"Playing queue with {len(valid_videos)} videos")
             player = self._make_player(valid_videos, all_video_to_dir, all_directories, 0)
             player.loop_mode = "loop_off"
+
+            original_on_video_changed = player.on_video_changed
+
+            def on_queue_video_changed(video_index, video_path):
+                if original_on_video_changed:
+                    original_on_video_changed(video_index, video_path)
+                norm_path = os.path.normpath(video_path)
+                with self.queue_manager.service._lock:
+                    for qi, entry in enumerate(self.queue_manager.service._queue):
+                        if os.path.normpath(entry.video_path) == norm_path:
+                            for j in range(qi):
+                                self.queue_manager.service._queue[j].played = True
+                            self.queue_manager.service._current_index = qi
+                            self.queue_manager.service.storage.save_queue(
+                                self.queue_manager.service._queue,
+                                qi
+                            )
+                            break
+                if hasattr(self.queue_manager, 'ui') and self.queue_manager.ui:
+                    self.queue_manager.ui._refresh_queue()
+
+            player.on_video_changed = on_queue_video_changed
+            original_on_close_save = player.on_close_save
+
+            def on_queue_close_save(index, path, loop_mode, volume, is_muted):
+                if original_on_close_save:
+                    original_on_close_save(index, path, loop_mode, volume, is_muted)
+                norm_path = os.path.normpath(path) if path else None
+                if norm_path:
+                    with self.queue_manager.service._lock:
+                        for entry in self.queue_manager.service._queue:
+                            if os.path.normpath(entry.video_path) == norm_path:
+                                entry.played = True
+                                self.queue_manager.service.storage.save_queue(
+                                    self.queue_manager.service._queue,
+                                    self.queue_manager.service._current_index
+                                )
+                                break
+                if hasattr(self.queue_manager, 'ui') and self.queue_manager.ui:
+                    self.queue_manager.ui._refresh_queue()
+
+            player.on_close_save = on_queue_close_save
             self._launch_player(player)
 
         def _show_watch_history(self):

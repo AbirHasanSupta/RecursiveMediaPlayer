@@ -1322,6 +1322,18 @@ class EmbeddedPlayer:
     def _play_index(self, idx: int):
         if not self._running or not self.videos:
             return
+
+        # commented out due to freeze issue when fast switching videos
+        # if self.on_close_save and self._player and 0 <= self.index < len(self.videos):
+        #     try:
+        #         prev_path = self.videos[self.index]
+        #         prev_pos = self._player.get_time() or 0
+        #         prev_dur = self._player.get_length() or 0
+        #         self.on_close_save(self.index, prev_path, self.loop_mode,
+        #                            self.volume, self.is_muted, prev_pos, prev_dur)
+        #     except Exception:
+        #         pass
+
         idx = max(0, min(idx, len(self.videos) - 1))
         self.index = idx
         path = self.videos[idx]
@@ -3039,8 +3051,10 @@ class EmbeddedPlayer:
         if self.on_close_save:
             try:
                 cur_path = self.videos[self.index] if self.videos else ""
+                close_pos = self._player.get_time() or 0
+                close_dur = self._player.get_length() or 0
                 self.on_close_save(self.index, cur_path, self.loop_mode,
-                                   self.volume, self.is_muted)
+                                   self.volume, self.is_muted, close_pos, close_dur)
             except Exception:
                 pass
 
