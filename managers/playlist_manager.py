@@ -293,9 +293,9 @@ class PlaylistUI:
         pl_right = tk.Frame(pl_act, bg=t['surface2'])
         pl_right.pack(side=tk.RIGHT)
 
-        self.delete_playlist_btn = tp.create_button(
-            pl_left, "Delete", self._delete_playlist, "danger", "md")
-        self.delete_playlist_btn.pack(side=tk.LEFT)
+        # self.delete_playlist_btn = tp.create_button(
+        #     pl_left, "Delete", self._delete_playlist, "danger", "md")
+        # self.delete_playlist_btn.pack(side=tk.LEFT)
 
         self.new_playlist_btn = tp.create_button(
             pl_right, "+ New", self._create_new_playlist, "primary", "md")
@@ -404,6 +404,9 @@ class PlaylistUI:
         if len(selected_playlists) == 1:
             menu.add_separator()
             menu.add_command(label="✎  Edit Info", command=self._edit_playlist_info)
+
+        menu.add_separator()
+        menu.add_command(label="✕  Delete", command=self._delete_playlist)
 
         try:
             menu.tk_popup(event.x_root, event.y_root)
