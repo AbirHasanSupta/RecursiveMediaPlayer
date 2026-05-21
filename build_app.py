@@ -1218,6 +1218,13 @@ def select_multiple_folders_and_play():
             self.smart_resume_var = tk.BooleanVar(value=self.smart_resume_enabled)
             self.speed_var = tk.DoubleVar(value=1.0)
 
+            self.smart_resume_check = ttk.Checkbutton(
+                checkboxes_row, text="Smart Resume",
+                style="Modern.TCheckbutton", variable=self.smart_resume_var,
+                command=self.toggle_smart_resume
+            )
+            self.smart_resume_check.pack(side=tk.LEFT, padx=(0, 10))
+
         # ------------------------------------------------------------------
         # Treeview expand/collapse event handlers
         # ------------------------------------------------------------------
