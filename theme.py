@@ -173,7 +173,10 @@ class ThemeSelector:
         for child in self.toolbar.winfo_children():
             if isinstance(child, tk.Label):
                 is_play = hasattr(self, 'play_toolbar_btn') and child is self.play_toolbar_btn
-                child.config(bg=cc["bg"], fg=cc["play_fg"] if is_play else cc["fg"])
+                if is_play:
+                    self._apply_play_toolbar_idle()
+                else:
+                    child.config(bg=cc["bg"], fg=cc["fg"])
 
         def restyle_menu(m):
             try:
@@ -248,8 +251,8 @@ class ThemeSelector:
         self.muted_fg = self.text_muted
         self.frame_border = self.border_color
         self.header_color = self.text_color
-        self.excluded_color = self.accent_secondary
-        self.favorite_color = "#F5C518" if self.dark_mode else "#D4A017"
+        self.excluded_color = "#C24E4E" if self.dark_mode else "#C44A4A"
+        self.favorite_color = "#B8890A" if self.dark_mode else "#8F6B08"
 
         # Apply colours to root and main frames
         self.root.configure(bg=self.bg_color)
@@ -666,15 +669,50 @@ class ThemeSelector:
         except tk.TclError:
             return False
 
-    def _sync_play_toolbar_btn(self):
+    def _play_toolbar_font_idle(self):
+        from tkinter.font import Font
+        return Font(family="Segoe UI", size=10, weight="bold", underline=False)
+
+    def _play_toolbar_font_hover(self):
+        from tkinter.font import Font
+        return Font(family="Segoe UI", size=10, weight="bold", underline=True)
+
+    def _play_toolbar_font_active(self):
+        from tkinter.font import Font
+        return Font(family="Segoe UI", size=10, weight="bold", underline=False)
+
+    def _ensure_play_toolbar_fonts(self):
+        """Legacy helper for initial widget creation in build_app."""
+        if not getattr(self, '_play_toolbar_fonts_ready', False):
+            self._play_toolbar_font = self._play_toolbar_font_idle()
+            self._play_toolbar_fonts_ready = True
+
+    def _apply_play_toolbar_idle(self):
         btn = getattr(self, 'play_toolbar_btn', None)
         if btn is None or not hasattr(self, '_tb_colors'):
             return
         c = self._tb_colors()
+        btn.config(bg=c["bg"], fg=c["play_text"], font=self._play_toolbar_font_idle())
+
+    def _apply_play_toolbar_hover(self):
+        btn = getattr(self, 'play_toolbar_btn', None)
+        if btn is None or not hasattr(self, '_tb_colors'):
+            return
+        c = self._tb_colors()
+        btn.config(bg=c["bg"], fg=c["play_text_hover"], font=self._play_toolbar_font_hover())
+
+    def _restore_play_toolbar_after_click(self):
+        """Re-apply hover or idle after click; run deferred so Leave is processed first."""
+        btn = getattr(self, 'play_toolbar_btn', None)
+        if btn is None:
+            return
         if self._pointer_over_widget(btn):
-            btn.config(bg=c["play_hover_bg"], fg="#FFFFFF")
+            self._apply_play_toolbar_hover()
         else:
-            btn.config(bg=c["play_fg"], fg="#FFFFFF")
+            self._apply_play_toolbar_idle()
+
+    def _sync_play_toolbar_btn(self):
+        self._restore_play_toolbar_after_click()
 
     def _create_dir_rail_icon_btn(self, parent, icon, command, variant="primary"):
         colors = self.get_button_colors(variant)
@@ -1072,27 +1110,35 @@ class ThemeSelector:
         btn = getattr(self, 'play_toolbar_btn', None)
         if btn is None:
             return
+        self._ensure_play_toolbar_fonts()
 
         def on_enter(_e):
-            c = self._tb_colors()
-            btn.config(bg=c["play_hover_bg"], fg="#FFFFFF")
+            self._apply_play_toolbar_hover()
 
         def on_leave(_e):
-            self._sync_play_toolbar_btn()
+            self._apply_play_toolbar_idle()
 
         def on_press(_e):
             c = self._tb_colors()
-            btn.config(bg=c["play_active_bg"], fg="#FFFFFF")
+            btn.config(
+                bg=c["bg"],
+                fg=c.get("play_text_active", c["play_text"]),
+                font=self._play_toolbar_font_active(),
+            )
 
         def on_release(_e):
             self.global_play()
-            self.root.after_idle(self._sync_play_toolbar_btn)
+            btn.after(20, self._restore_play_toolbar_after_click)
 
+        btn.unbind("<Enter>")
+        btn.unbind("<Leave>")
+        btn.unbind("<ButtonPress-1>")
+        btn.unbind("<ButtonRelease-1>")
         btn.bind("<Enter>", on_enter)
         btn.bind("<Leave>", on_leave)
         btn.bind("<ButtonPress-1>", on_press)
         btn.bind("<ButtonRelease-1>", on_release)
-        self._sync_play_toolbar_btn()
+        self._apply_play_toolbar_idle()
 
     def _bind_media_pill_hover(self, btn, label):
         def on_enter(_e):

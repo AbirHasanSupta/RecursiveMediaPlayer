@@ -526,8 +526,8 @@ def select_multiple_folders_and_play():
             self.badge_bg = "#EDF2F7"
             self.badge_fg = self.text_color
             self.divider_color = "#E2E8F0"
-            self.excluded_color = self.accent_secondary
-            self.favorite_color = "#D4A017"
+            self.excluded_color = "#C44A4A"
+            self.favorite_color = "#8F6B08"
 
             style = ttk.Style()
             style.configure("TFrame", background=self.bg_color)
@@ -4781,6 +4781,9 @@ def select_multiple_folders_and_play():
                     "play_fg": self.accent_secondary,
                     "play_hover_bg": "#FF5555",
                     "play_active_bg": "#E04444",
+                    "play_text": self.accent_secondary,
+                    "play_text_hover": "#FF8A8A" if self.dark_mode else "#E85555",
+                    "play_text_active": "#A83C3C" if self.dark_mode else "#9E3333",
                 }
 
             self._tb_colors = _tb_colors
@@ -4878,12 +4881,15 @@ def select_multiple_folders_and_play():
             self.theme_toolbar_btn.pack(side=tk.RIGHT, padx=(0, 6))
             self._bind_theme_toolbar_hover()
 
-            # Play button (prominent)
+            # Play action — text + icon (no filled button)
+            self._ensure_play_toolbar_fonts()
             self.play_toolbar_btn = tk.Label(
                 self.toolbar, text="▶  Play Videos",
-                bg=c["play_fg"], fg="#FFFFFF",
-                font=("Segoe UI", 10, "bold"), padx=16, pady=10, cursor="hand2")
-            self.play_toolbar_btn.pack(side=tk.RIGHT, padx=(0, 8))
+                bg=c["bg"], fg=c["play_text"],
+                font=self._play_toolbar_font,
+                padx=12, pady=10, cursor="hand2",
+            )
+            self.play_toolbar_btn.pack(side=tk.RIGHT, padx=(0, 12))
             self._bind_play_toolbar_hover()
 
             # Original button_frame remains for legacy compatibility
