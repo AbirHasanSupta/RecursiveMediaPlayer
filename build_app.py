@@ -189,7 +189,8 @@ def select_multiple_folders_and_play():
             self.resource_manager.register_cleanup_callback(self._cleanup_scan_cache)
             self.resource_manager.register_cleanup_callback(self._cleanup_player_threads)
             self.apply_theme()
-            self.root.after(0, self._fix_pill_colors_initial)
+            # self.root.after(0, self._fix_pill_colors_initial)
+            # self.root.after(150, self._show_home_view)
             self.root.drop_target_register(DND_FILES)
             self.root.dnd_bind('<<Drop>>', self._on_drop_files)
             command_line_dir = self._get_command_line_directory()
@@ -349,6 +350,8 @@ def select_multiple_folders_and_play():
             self.settings_manager.ui.clear_metadata_callback = lambda: self._clear_metadata_cache()
             self.settings_manager.ui.get_metadata_info_callback = lambda: self._get_metadata_cache_info()
             self.settings_manager.ui.filter_sort_manager = self.filter_sort_manager
+            self.root.after(0, self._fix_pill_colors_initial)
+            self.root.after(100, self._show_home_view)
             self._setup_periodic_cleanup()
             self.resource_manager.register_cleanup_callback(self._cleanup_managers)
 
@@ -596,7 +599,7 @@ def select_multiple_folders_and_play():
             return btn
 
         def setup_main_layout(self):
-            self._active_app_view = "gallery"
+            self._active_app_view = "home"
             self.active_embedded_manager = None
             self.embedded_view_frame = None
             self._directory_panel_mode = "expanded"
@@ -614,7 +617,7 @@ def select_multiple_folders_and_play():
             title_block = tk.Frame(self.workspace_header, bg=self.bg_color)
             title_block.pack(side=tk.LEFT, fill=tk.Y)
             self.workspace_title_label = tk.Label(
-                title_block, text="Gallery", font=self.header_font,
+                title_block, text="Home", font=self.header_font,
                 bg=self.bg_color, fg=self.text_color
             )
             self.workspace_title_label.pack(anchor="w")
@@ -629,6 +632,133 @@ def select_multiple_folders_and_play():
 
             self.workspace_body = tk.Frame(self.workspace_frame, bg=self.bg_color)
             self.workspace_body.pack(fill=tk.BOTH, expand=True)
+
+        def _show_home_view(self):
+            self._cleanup_active_manager()
+            if self.embedded_view_frame and self.embedded_view_frame.winfo_exists():
+                self.embedded_view_frame.destroy()
+            self.embedded_view_frame = None
+            if hasattr(self, 'exclusion_section') and self.exclusion_section.winfo_ismapped():
+                self.exclusion_section.pack_forget()
+            self._set_workspace_title("Home", "Welcome to Recursive Video Player")
+            self._active_app_view = "home"
+            self._refresh_media_pill_state()
+            self._render_home_dashboard()
+
+        def _render_home_dashboard(self):
+            frame = self._ensure_embedded_view_frame()
+            for child in frame.winfo_children():
+                child.destroy()
+            frame.pack(fill=tk.BOTH, expand=True)
+
+            t_bg = self.bg_color
+            t_text = self.text_color
+            t_mute = self.muted_fg
+            t_acc = self.accent_color
+            card_bg = "#ffffff" if not self.dark_mode else "#2a2b2e"
+            card_border = "#e0e0e0" if not self.dark_mode else "#3a3b3f"
+
+            # Outer scroll canvas
+            pad = tk.Frame(frame, bg=t_bg)
+            pad.pack(fill=tk.BOTH, expand=True, padx=32, pady=24)
+
+            # ── Hero greeting ──────────────────────────────────────────────────
+            hero = tk.Frame(pad, bg=t_acc if not self.dark_mode else "#1a4070", pady=24)
+            hero.pack(fill=tk.X, pady=(0, 22))
+            tk.Label(hero, text="🎬  Recursive Video Player",
+                     font=Font(family="Segoe UI", size=20, weight="bold"),
+                     bg=t_acc if not self.dark_mode else "#1a4070",
+                     fg="#ffffff").pack()
+            tk.Label(hero, text="Select a directory from the panel · then explore your library",
+                     font=Font(family="Segoe UI", size=10),
+                     bg=t_acc if not self.dark_mode else "#1a4070",
+                     fg="#d0e8ff" if not self.dark_mode else "#a8c8f0").pack(pady=(4, 0))
+
+            # ── Stats row ──────────────────────────────────────────────────────
+            total_dirs = len(self.selected_dirs)
+            total_vids = sum(
+                sum(1 for v in (self.scan_cache.get(d) or ([],))[0]
+                    if not self.is_video_excluded(d, v))
+                for d in self.selected_dirs
+            ) if hasattr(self, 'scan_cache') else 0
+            has_history = (hasattr(self, 'watch_history_manager') and
+                           bool(getattr(self.watch_history_manager, 'service', None)))
+
+            stats = [
+                ("📁", str(total_dirs), "Directories"),
+                ("🎞️", str(total_vids), "Videos"),
+                ("⭐", "Favourites", "Quick access"),
+                ("🕐", "History", "Recently watched"),
+            ]
+            stats_row = tk.Frame(pad, bg=t_bg)
+            stats_row.pack(fill=tk.X, pady=(0, 22))
+            for i, (icon, val, lbl) in enumerate(stats):
+                stats_row.columnconfigure(i, weight=1)
+                card = tk.Frame(stats_row, bg=card_bg,
+                                highlightbackground=card_border, highlightthickness=1)
+                card.grid(row=0, column=i, padx=(0 if i == 0 else 8, 0), sticky="nsew", ipady=14)
+                tk.Label(card, text=icon, font=Font(family="Segoe UI Emoji", size=20),
+                         bg=card_bg, fg=t_acc).pack(pady=(10, 2))
+                tk.Label(card, text=val, font=Font(family="Segoe UI", size=14, weight="bold"),
+                         bg=card_bg, fg=t_text).pack()
+                tk.Label(card, text=lbl, font=Font(family="Segoe UI", size=9),
+                         bg=card_bg, fg=t_mute).pack(pady=(0, 10))
+
+            # ── Quick actions ──────────────────────────────────────────────────
+            sec_lbl = tk.Label(pad, text="Quick Actions",
+                               font=Font(family="Segoe UI", size=12, weight="bold"),
+                               bg=t_bg, fg=t_text)
+            sec_lbl.pack(anchor="w", pady=(0, 10))
+
+            actions_row = tk.Frame(pad, bg=t_bg)
+            actions_row.pack(fill=tk.X, pady=(0, 22))
+
+            quick_actions = [
+                ("🖼️  Gallery", "#2d7ef7", self._show_grid_view),
+                ("🎵  Playlist", "#246aa7", self._manage_playlists),
+                ("⭐  Favourites", "#b86010", self._show_favorites_manager),
+                ("🕐  History", "#6b7280", self._show_watch_history),
+                ("📋  Queue", "#23834a", self._show_queue_manager),
+                ("🏷️  Tags & Ratings", "#8a6d0a", self._show_annotation_browser),
+            ]
+            num_rows = (len(quick_actions) + 2) // 3
+            action_rows = []
+            for r in range(num_rows):
+                row_frame = tk.Frame(pad, bg=t_bg)
+                row_frame.pack(fill=tk.X, pady=(0, 10))
+                for c in range(3):
+                    row_frame.columnconfigure(c, weight=1, uniform="qa")
+                action_rows.append(row_frame)
+
+            for i, (label, color, cmd) in enumerate(quick_actions):
+                col = i % 3
+                row = i // 3
+                row_frame = action_rows[row]
+                btn_frame = tk.Frame(row_frame, bg=color, cursor="hand2")
+                btn_frame.grid(row=0, column=col, padx=(0 if col == 0 else 8, 0), sticky="nsew", ipady=10)
+                lbl_w = tk.Label(btn_frame, text=label,
+                                 font=Font(family="Segoe UI", size=10, weight="bold"),
+                                 bg=color, fg="#ffffff", cursor="hand2")
+                lbl_w.pack(expand=True, padx=14, pady=14)
+                for w in (btn_frame, lbl_w):
+                    w.bind("<Button-1>", lambda e, c=cmd: c())
+                    w.bind("<Enter>", lambda e, f=btn_frame, c=color: f.config(bg=_hex_blend(c, "#000000", 0.15)))
+                    w.bind("<Leave>", lambda e, f=btn_frame, c=color: f.config(bg=c))
+
+            # ── Getting started tip ────────────────────────────────────────────
+            tip_bg = "#fffbea" if not self.dark_mode else "#2b2a1e"
+            tip_fg = "#7a5c00" if not self.dark_mode else "#f0c060"
+            tip = tk.Frame(pad, bg=tip_bg, highlightbackground="#f0d070" if not self.dark_mode else "#5a4a10",
+                           highlightthickness=1)
+            tip.pack(fill=tk.X, pady=(4, 0))
+            tk.Label(tip, text="💡  Tip: Click + on the panel header to add a folder, then pick a tab above to explore.",
+                     font=Font(family="Segoe UI", size=9), bg=tip_bg, fg=tip_fg,
+                     wraplength=700, justify="left").pack(anchor="w", padx=14, pady=10)
+
+            def _hex_blend(c1, c2, t):
+                r1, g1, b1 = int(c1[1:3], 16), int(c1[3:5], 16), int(c1[5:7], 16)
+                r2, g2, b2 = int(c2[1:3], 16), int(c2[3:5], 16), int(c2[5:7], 16)
+                return f"#{int(r1 + (r2 - r1) * t):02x}{int(g1 + (g2 - g1) * t):02x}{int(b1 + (b2 - b1) * t):02x}"
 
         def _ensure_embedded_view_frame(self):
             if self.embedded_view_frame and self.embedded_view_frame.winfo_exists():
@@ -649,15 +779,6 @@ def select_multiple_folders_and_play():
             except Exception:
                 pass
 
-        def _show_home_view(self):
-            self._cleanup_active_manager()
-            if self.embedded_view_frame and self.embedded_view_frame.winfo_exists():
-                self.embedded_view_frame.pack_forget()
-                for child in self.embedded_view_frame.winfo_children():
-                    child.destroy()
-            self._set_workspace_title("Gallery", "No directory selected")
-            self._active_app_view = "gallery"
-            self._refresh_media_pill_state()
 
         def _show_embedded_view(self, view_name, builder):
             self._cleanup_active_manager()
@@ -862,6 +983,11 @@ def select_multiple_folders_and_play():
                 self.dir_section.config(width=dir_w)
                 self.dir_section.pack_propagate(False)
 
+            if getattr(self, '_active_app_view', None) == 'home':
+                if hasattr(self, 'exclusion_section') and self.exclusion_section.winfo_ismapped():
+                    self.exclusion_section.pack_forget()
+                self._render_home_dashboard()
+
         def _reapply_tree_columns(self):
             if not hasattr(self, 'exclusion_tree'):
                 return
@@ -877,6 +1003,12 @@ def select_multiple_folders_and_play():
             self.dir_compact_rail = tk.Frame(self.content_frame, bg=self.bg_color, width=56)
             self.dir_compact_rail.pack_propagate(False)
 
+            compact_add = self.create_button(
+                self.dir_compact_rail, text="+", command=self.add_directory,
+                variant="primary", size="sm"
+            )
+            compact_add.pack(fill=tk.X, pady=(0, 4))
+
             compact_open = self.create_button(
                 self.dir_compact_rail, text="📁", command=self.expand_directory_panel,
                 variant="secondary", size="sm"
@@ -886,7 +1018,7 @@ def select_multiple_folders_and_play():
             dir_header_frame = tk.Frame(self.dir_section, bg=self.bg_color)
             dir_header_frame.pack(fill=tk.X, pady=(0, 6))
 
-            self.dir_header_label = tk.Label(dir_header_frame, text="Gallery",
+            self.dir_header_label = tk.Label(dir_header_frame, text="Directories",
                                              font=self.header_font, bg=self.bg_color, fg=self.text_color)
             self.dir_header_label.pack(side=tk.LEFT, anchor='w')
 
@@ -1290,8 +1422,8 @@ def select_multiple_folders_and_play():
         def setup_exclusion_section(self):
             # Tree and search bar are now in the left panel (setup_directory_section).
             # This method only wires up the checkboxes into exclusion_buttons_frame.
-            self.exclusion_section = tk.Frame(self.workspace_body, bg=self.bg_color)
-            self.exclusion_section.pack(fill=tk.BOTH, expand=True)
+            # self.exclusion_section = tk.Frame(self.workspace_body, bg=self.bg_color)
+            # self.exclusion_section.pack(fill=tk.BOTH, expand=True)
             self._set_workspace_title("Gallery", self._selected_directory_summary())
 
             # Apply annotation column config now that settings_manager is available
@@ -2885,8 +3017,10 @@ def select_multiple_folders_and_play():
             active = getattr(self, "_active_app_view", "home")
             if active == "favourites":
                 self._show_favorites_manager()
-            elif active == "gallery" or active == "home":
+            elif active == "gallery":
                 self._show_grid_view_for_current_directory(forced_dir=forced_dir)
+            elif active == "home":
+                pass
             elif active == "history" and getattr(self, "active_embedded_manager", None):
                 try:
                     self.active_embedded_manager.set_directory_filter(self.get_selected_directories())
@@ -4111,7 +4245,7 @@ def select_multiple_folders_and_play():
                     frame,
                     videos,
                     self.video_preview_manager,
-                    close_callback=lambda: self._set_workspace_title("Gallery", "No directory selected")
+                    close_callback=self._show_home_view
                 )
             )
 
@@ -4563,6 +4697,7 @@ def select_multiple_folders_and_play():
             make_toolbar_btn("Settings", command=self._show_settings)
 
             _media_pill_commands = {
+                "Home": self._show_home_view,
                 "Gallery": self._show_grid_view,
                 "Playlist": self._manage_playlists,
                 "Queue": self._show_queue_manager,
@@ -4571,6 +4706,7 @@ def select_multiple_folders_and_play():
                 "History": self._show_watch_history,
             }
             self._view_tab_labels = {
+                "home": "Home",
                 "gallery": "Gallery",
                 "playlist": "Playlist",
                 "queue": "Queue",
@@ -4583,6 +4719,7 @@ def select_multiple_folders_and_play():
             def _view_pill_accents(label):
                 if self.dark_mode:
                     palette = {
+                        "Home": ("#7bd99b", "#1f7f4b", "#ffffff", "#176139", "#202228", "#315c42"),
                         "Gallery": ("#83b7ff", "#2d5a8e", "#ffffff", "#1a4070", "#202228", "#2d5a8e"),
                         "Playlist": ("#8ec7ff", "#1f5d9d", "#ffffff", "#174a7f", "#202228", "#35506c"),
                         "Queue": ("#7bd99b", "#1f7f4b", "#ffffff", "#176139", "#202228", "#315c42"),
@@ -4592,6 +4729,7 @@ def select_multiple_folders_and_play():
                     }
                 else:
                     palette = {
+                        "Home": ("#1a7a3a", "#1a7a3a", "#ffffff", "#156e3a", "#f6f7fb", "#c7e8d2"),
                         "Gallery": ("#2d7ef7", "#1a6de8", "#ffffff", "#1557bd", "#f6f7fb", "#b9d4ff"),
                         "Playlist": ("#246aa7", "#1a5fa8", "#ffffff", "#144d8a", "#f6f7fb", "#c6dff4"),
                         "Queue": ("#23834a", "#1a8a4a", "#ffffff", "#156e3a", "#f6f7fb", "#c7e8d2"),
@@ -4638,7 +4776,7 @@ def select_multiple_folders_and_play():
                 btn.bind("<ButtonPress-1>", on_press)
                 btn.bind("<ButtonRelease-1>", on_release)
 
-            for _pill_label in ["Gallery", "Playlist", "Queue", "Favourites", "Tags & Ratings", "History"]:
+            for _pill_label in ["Home", "Gallery", "Playlist", "Queue", "Favourites", "Tags & Ratings", "History"]:
                 _make_media_pill(_pill_label)
             self._refresh_media_pill_state()
 

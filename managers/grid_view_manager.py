@@ -540,15 +540,19 @@ class GridViewManager:
         self.grid_frame.bind("<Button-1>", lambda e: self._clear_selection())
 
         def _on_mousewheel(e):
-            try:
-                if self.canvas.winfo_exists():
-                    self.canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
-            except Exception:
-                pass
+            if self.canvas.winfo_exists():
+                self.canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
 
-        self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        gw.bind("<FocusIn>", lambda e: self.canvas.bind_all("<MouseWheel>", _on_mousewheel))
-        gw.bind("<Enter>", lambda e: self.canvas.bind_all("<MouseWheel>", _on_mousewheel))
+        def _bind_scroll(e=None):
+            self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        def _unbind_scroll(e=None):
+            self.canvas.unbind_all("<MouseWheel>")
+
+        self.canvas.bind("<Enter>", _bind_scroll)
+        self.canvas.bind("<Leave>", _unbind_scroll)
+        gw.bind("<Enter>", _bind_scroll)
+        gw.bind("<Leave>", _unbind_scroll)
 
         # keyboard shortcuts
         gw.bind("<Control-a>", lambda e: self._select_all())
