@@ -380,37 +380,47 @@ class QueueUI:
             self._close_callback()
 
     def _get_design_tokens(self):
-        dark = self.theme_provider.dark_mode
-        if dark:
-            return {
-                "bg": "#16181c",  # main window background
-                "surface": "#1f2127",  # card background
-                "surface2": "#282b32",  # alternate card background / sidebar
-                "header_bg": "#1a1b1e",  # header background (distinct)
-                "text": "#e4e7ee",
-                "text_muted": "#52596a",
-                "accent": "#5b9cf6",
-                "border": "#35383f",
-                "divider": "#2a2d34",
-            }
-        else:
-            return {
-                "bg": "#eef0f5",
-                "surface": "#ffffff",
-                "surface2": "#f4f6fa",
-                "header_bg": "#ebedf0",
-                "text": "#1a2035",
-                "text_muted": "#96a0b5",
-                "accent": "#2d7ef7",
-                "border": "#dce0ea",
-                "divider": "#e4e8f0",
-            }
+        return self.theme_provider.get_manager_design_tokens()
+
+    def apply_theme(self):
+        win = self.queue_window
+        if win is None:
+            return
+        try:
+            if not win.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        t = self._get_design_tokens()
+        tp = self.theme_provider
+        win.configure(bg=t["bg"])
+        for attr in ("_queue_header", "_queue_body", "_queue_card", "_queue_col_hdr", "_queue_lb_row", "_queue_btn_row"):
+            w = getattr(self, attr, None)
+            if w is None:
+                continue
+            role = getattr(w, "_manager_role", "body")
+            bg = t.get({"header": "header_bg", "surface": "surface", "surface2": "surface2", "body": "bg"}.get(role, "bg"), t["bg"])
+            try:
+                w.configure(bg=bg)
+            except tk.TclError:
+                pass
+        if hasattr(self, "queue_info_label"):
+            self.queue_info_label.configure(bg=t["header_bg"], fg=t["text_muted"])
+        if hasattr(self, "queue_listbox"):
+            tp.configure_manager_listbox(self.queue_listbox, t)
+        if hasattr(self, "_queue_scrollbar"):
+            tp.configure_manager_scrollbar(self._queue_scrollbar, t)
+        tp.restyle_manager_buttons(win)
+        tp.restyle_manager_action_links(win)
+        self._refresh_queue()
 
     def _setup_queue_ui(self):
         tp = self.theme_provider
         t = self._get_design_tokens()
 
         header = tk.Frame(self.queue_window, bg=t['header_bg'], height=58)
+        header._manager_role = "header"
+        self._queue_header = header
         header.pack(fill=tk.X)
         header.pack_propagate(False)
         h_inner = tk.Frame(header, bg=t['header_bg'])
@@ -419,7 +429,7 @@ class QueueUI:
         title_box = tk.Frame(h_inner, bg=t['header_bg'])
         title_box.pack(side=tk.LEFT, fill=tk.Y)
         tk.Label(title_box, text="⬛", font=("Segoe UI Emoji", 18),
-                 bg=t['header_bg'], fg=t['accent']).pack(side=tk.LEFT, padx=(0, 10), pady=14)
+                 bg=t['header_bg'], fg=t['queue_accent']).pack(side=tk.LEFT, padx=(0, 10), pady=14)
         tk.Label(title_box, text="Playback Queue",
                  font=("Segoe UI", 15, "bold"),
                  bg=t['header_bg'], fg=t['text']).pack(side=tk.LEFT, pady=14)
@@ -432,13 +442,19 @@ class QueueUI:
         tk.Frame(self.queue_window, bg=t['divider'], height=1).pack(fill=tk.X)
 
         body = tk.Frame(self.queue_window, bg=t['bg'])
+        body._manager_role = "body"
+        self._queue_body = body
         body.pack(fill=tk.BOTH, expand=True, padx=20, pady=12)
 
         card = tk.Frame(body, bg=t['surface'],
                         highlightbackground=t['border'], highlightthickness=1)
+        card._manager_role = "surface"
+        self._queue_card = card
         card.pack(fill=tk.BOTH, expand=True)
 
         col_hdr = tk.Frame(card, bg=t['surface2'])
+        col_hdr._manager_role = "surface2"
+        self._queue_col_hdr = col_hdr
         col_hdr.pack(fill=tk.X)
         tk.Label(col_hdr, text="  #    VIDEO", font=tp.small_font,
                  bg=t['surface2'], fg=t['text_muted'], pady=6, anchor="w"
@@ -449,14 +465,18 @@ class QueueUI:
         tk.Frame(card, bg=t['divider'], height=1).pack(fill=tk.X)
 
         lb_row = tk.Frame(card, bg=t['surface'])
+        lb_row._manager_role = "surface"
+        self._queue_lb_row = lb_row
         lb_row.pack(fill=tk.BOTH, expand=True)
         sb = tk.Scrollbar(lb_row, width=10, relief=tk.FLAT, bd=0,
                           troughcolor=t['bg'], bg=t['divider'])
+        self._queue_scrollbar = sb
+        tp.configure_manager_scrollbar(sb, t)
         sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
         self.queue_listbox = tk.Listbox(
             lb_row, selectmode=tk.MULTIPLE, yscrollcommand=sb.set,
-            font=tp.normal_font, bg=t['surface'], fg=t['text'],
-            selectbackground=t['accent'], selectforeground="white",
+            font=tp.normal_font, bg=t['surface'], fg=t['listbox_fg'],
+            selectbackground=t['listbox_select'], selectforeground="white",
             activestyle="none", relief=tk.FLAT, bd=0, highlightthickness=0)
         self.queue_listbox.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
         sb.config(command=self.queue_listbox.yview)
@@ -470,11 +490,20 @@ class QueueUI:
 
         # ---- Buttons placed directly on body, no extra bar ----
         btn_container = tk.Frame(body, bg=t['bg'])
+        btn_container._manager_role = "body"
+        self._queue_btn_row = btn_container
         btn_container.pack(fill=tk.X, pady=(8, 0))
 
-        tp.create_button(btn_container, "✓  Clear Played", self._clear_played, "secondary", "md").pack(side=tk.LEFT,
-                                                                                                       padx=(0, 8))
-        tp.create_button(btn_container, "Clear All", self._clear_queue, "warning", "md").pack(side=tk.LEFT)
+        queue_actions = tk.Frame(btn_container, bg=t["bg"])
+        queue_actions.pack(side=tk.RIGHT)
+        self._clear_played_btn = tp.create_manager_action_link(
+            queue_actions, "↺  Clear played", self._clear_played, style="queue")
+        self._clear_played_btn.pack(side=tk.LEFT)
+        tk.Label(queue_actions, text="·", bg=t["bg"], fg=t["text_muted"],
+                 font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=10)
+        self._clear_queue_btn = tp.create_manager_action_link(
+            queue_actions, "✕  Clear all", self._clear_queue, style="warning")
+        self._clear_queue_btn.pack(side=tk.LEFT)
 
     def play_from_global(self):
         """Play the queue from the current position."""
@@ -489,7 +518,8 @@ class QueueUI:
     def _refresh_queue(self):
         def refresh():
             tp = self.theme_provider
-            ACCENT = "#2ecc71"
+            t = self._get_design_tokens()
+            ACCENT = t["queue_accent"]
 
             self.queue_listbox.delete(0, tk.END)
             queue = self.queue_service.get_queue()
@@ -543,13 +573,7 @@ class QueueUI:
                 if os.path.exists(entry.video_path):
                     selected_videos.append(entry.video_path)
 
-        _tp = self.theme_provider
-        context_menu = tk.Menu(self.queue_window, tearoff=0,
-                               bg="#313335" if _tp.dark_mode else "#f5f5f5",
-                               fg="#A9B7C6" if _tp.dark_mode else "#333333",
-                               activebackground="#2D5A8E" if _tp.dark_mode else "#3498db",
-                               activeforeground="#FFFFFF",
-                               relief="flat", bd=1, font=("Segoe UI", 9))
+        context_menu = self.theme_provider.create_manager_context_menu(self.queue_window)
 
         context_menu.add_command(
             label=f"Play Selected ({len(selection)} item{'s' if len(selection) > 1 else ''})",

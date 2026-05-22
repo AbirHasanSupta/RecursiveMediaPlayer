@@ -303,37 +303,49 @@ class FavoritesUI:
             self._close_callback()
 
     def _get_design_tokens(self):
-        dark = self.theme_provider.dark_mode
-        if dark:
-            return {
-                "bg": "#16181c",  # main window background
-                "surface": "#1f2127",  # card background
-                "surface2": "#282b32",  # alternate card background / sidebar
-                "header_bg": "#1a1b1e",  # header background (distinct)
-                "text": "#e4e7ee",
-                "text_muted": "#52596a",
-                "accent": "#5b9cf6",
-                "border": "#35383f",
-                "divider": "#2a2d34",
-            }
-        else:
-            return {
-                "bg": "#eef0f5",
-                "surface": "#ffffff",
-                "surface2": "#f4f6fa",
-                "header_bg": "#ebedf0",
-                "text": "#1a2035",
-                "text_muted": "#96a0b5",
-                "accent": "#2d7ef7",
-                "border": "#dce0ea",
-                "divider": "#e4e8f0",
-            }
+        return self.theme_provider.get_manager_design_tokens()
+
+    def apply_theme(self):
+        win = self.favorites_window
+        if win is None:
+            return
+        try:
+            if not win.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        t = self._get_design_tokens()
+        tp = self.theme_provider
+        win.configure(bg=t["bg"])
+        for attr in ("_fav_header", "_fav_body", "_fav_card", "_fav_col_hdr", "_fav_lb_row", "_fav_btn_row", "_fav_chip_bar"):
+            w = getattr(self, attr, None)
+            if w is None:
+                continue
+            role = getattr(w, "_manager_role", "body")
+            bg = t.get({"header": "header_bg", "surface": "surface", "surface2": "surface2", "body": "bg"}.get(role, "bg"), t["bg"])
+            try:
+                w.configure(bg=bg)
+            except tk.TclError:
+                pass
+        if hasattr(self, "info_label"):
+            self.info_label.configure(bg=t["header_bg"], fg=t["text_muted"])
+        if hasattr(self, "directory_label"):
+            self.directory_label.configure(bg=t["surface2"], fg=t["text_muted"])
+        if hasattr(self, "favorites_listbox"):
+            tp.configure_manager_listbox(self.favorites_listbox, t)
+        if hasattr(self, "_fav_scrollbar"):
+            tp.configure_manager_scrollbar(self._fav_scrollbar, t)
+        tp.restyle_manager_buttons(win)
+        tp.restyle_manager_action_links(win)
+        self._refresh_favorites_list()
 
     def _setup_favorites_ui(self):
         tp = self.theme_provider
         t = self._get_design_tokens()
 
         header = tk.Frame(self.favorites_window, bg=t['header_bg'], height=58)
+        header._manager_role = "header"
+        self._fav_header = header
         header.pack(fill=tk.X)
         header.pack_propagate(False)
         h_inner = tk.Frame(header, bg=t['header_bg'])
@@ -342,7 +354,7 @@ class FavoritesUI:
         title_box = tk.Frame(h_inner, bg=t['header_bg'])
         title_box.pack(side=tk.LEFT, fill=tk.Y)
         tk.Label(title_box, text="♥", font=("Segoe UI Emoji", 18),
-                 bg=t['header_bg'], fg="#e67e22").pack(side=tk.LEFT, padx=(0, 10), pady=14)
+                 bg=t['header_bg'], fg=t['favorites_accent']).pack(side=tk.LEFT, padx=(0, 10), pady=14)
         tk.Label(title_box, text="Favourites",
                  font=("Segoe UI", 15, "bold"),
                  bg=t['header_bg'], fg=t['text']).pack(side=tk.LEFT, pady=14)
@@ -355,6 +367,8 @@ class FavoritesUI:
         tk.Frame(self.favorites_window, bg=t['divider'], height=1).pack(fill=tk.X)
 
         chip_bar = tk.Frame(self.favorites_window, bg=t['bg'])
+        chip_bar._manager_role = "body"
+        self._fav_chip_bar = chip_bar
         chip_bar.pack(fill=tk.X, padx=20, pady=(12, 0))
         self.directory_label = tk.Label(chip_bar, text="", font=tp.small_font,
                                         bg=t['surface2'], fg=t['text_muted'],
@@ -362,13 +376,19 @@ class FavoritesUI:
         self.directory_label.pack(side=tk.LEFT)
 
         body = tk.Frame(self.favorites_window, bg=t['bg'])
+        body._manager_role = "body"
+        self._fav_body = body
         body.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
 
         card = tk.Frame(body, bg=t['surface'],
                         highlightbackground=t['border'], highlightthickness=1)
+        card._manager_role = "surface"
+        self._fav_card = card
         card.pack(fill=tk.BOTH, expand=True)
 
         col_hdr = tk.Frame(card, bg=t['surface2'])
+        col_hdr._manager_role = "surface2"
+        self._fav_col_hdr = col_hdr
         col_hdr.pack(fill=tk.X)
         tk.Label(col_hdr, text="  #    VIDEO", font=tp.small_font,
                  bg=t['surface2'], fg=t['text_muted'], pady=6, anchor="w"
@@ -379,14 +399,18 @@ class FavoritesUI:
         tk.Frame(card, bg=t['divider'], height=1).pack(fill=tk.X)
 
         lb_row = tk.Frame(card, bg=t['surface'])
+        lb_row._manager_role = "surface"
+        self._fav_lb_row = lb_row
         lb_row.pack(fill=tk.BOTH, expand=True)
         sb = tk.Scrollbar(lb_row, width=10, relief=tk.FLAT, bd=0,
                           troughcolor=t['bg'], bg=t['divider'])
+        self._fav_scrollbar = sb
+        tp.configure_manager_scrollbar(sb, t)
         sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
         self.favorites_listbox = tk.Listbox(
             lb_row, selectmode=tk.MULTIPLE, yscrollcommand=sb.set,
-            font=tp.normal_font, bg=t['surface'], fg=t['text'],
-            selectbackground=t['accent'], selectforeground="white",
+            font=tp.normal_font, bg=t['surface'], fg=t['listbox_fg'],
+            selectbackground=t['listbox_select'], selectforeground="white",
             activestyle="none", relief=tk.FLAT, bd=0, highlightthickness=0)
         self.favorites_listbox.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
         sb.config(command=self.favorites_listbox.yview)
@@ -400,9 +424,15 @@ class FavoritesUI:
 
         # ---- Buttons placed directly on body, no extra bar ----
         btn_container = tk.Frame(body, bg=t['bg'])
+        btn_container._manager_role = "body"
+        self._fav_btn_row = btn_container
         btn_container.pack(fill=tk.X, pady=(8, 0))
 
-        tp.create_button(btn_container, "Clear All", self._clear_all, "warning", "md").pack(side=tk.LEFT)
+        fav_actions = tk.Frame(btn_container, bg=t["bg"])
+        fav_actions.pack(side=tk.RIGHT)
+        self._clear_all_btn = tp.create_manager_action_link(
+            fav_actions, "✕  Clear all", self._clear_all, style="warning")
+        self._clear_all_btn.pack(side=tk.LEFT)
 
     def _show_context_menu(self, event):
         """Show context menu for selected favorites."""
@@ -410,13 +440,7 @@ class FavoritesUI:
         if not selection:
             return
 
-        _tp = self.theme_provider
-        context_menu = tk.Menu(self.favorites_window, tearoff=0,
-                               bg="#313335" if _tp.dark_mode else "#f5f5f5",
-                               fg="#A9B7C6" if _tp.dark_mode else "#333333",
-                               activebackground="#2D5A8E" if _tp.dark_mode else "#3498db",
-                               activeforeground="#FFFFFF",
-                               relief="flat", bd=1, font=("Segoe UI", 9))
+        context_menu = self.theme_provider.create_manager_context_menu(self.favorites_window)
 
         context_menu.add_command(
             label=f"Play Selected ({len(selection)} favorite{'s' if len(selection) > 1 else ''})",

@@ -175,31 +175,48 @@ class PlaylistUI:
         self.theme_provider.register_manager_ui(self)
 
     def _get_design_tokens(self):
-        dark = self.theme_provider.dark_mode
-        if dark:
-            return {
-                "bg": "#16181c",  # main window background
-                "surface": "#1f2127",  # card background
-                "surface2": "#282b32",  # alternate card background / sidebar
-                "header_bg": "#1a1b1e",  # header background (distinct)
-                "text": "#e4e7ee",
-                "text_muted": "#52596a",
-                "accent": "#5b9cf6",
-                "border": "#35383f",
-                "divider": "#2a2d34",
-            }
-        else:
-            return {
-                "bg": "#eef0f5",
-                "surface": "#ffffff",
-                "surface2": "#f4f6fa",
-                "header_bg": "#ebedf0",
-                "text": "#1a2035",
-                "text_muted": "#96a0b5",
-                "accent": "#2d7ef7",
-                "border": "#dce0ea",
-                "divider": "#e4e8f0",
-            }
+        return self.theme_provider.get_manager_design_tokens()
+
+    def apply_theme(self):
+        win = self.playlist_window
+        if win is None:
+            return
+        try:
+            if not win.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        t = self._get_design_tokens()
+        tp = self.theme_provider
+        win.configure(bg=t["bg"])
+        for attr in (
+            "_pl_header", "_pl_cols", "_pl_left_card", "_pl_right_area",
+            "_pl_right_card", "_pl_vid_hdr", "_pl_vid_body", "_pl_pl_act",
+        ):
+            w = getattr(self, attr, None)
+            if w is None:
+                continue
+            role = getattr(w, "_manager_role", "body")
+            bg = t.get({"header": "header_bg", "surface": "surface", "surface2": "surface2", "body": "bg"}.get(role, "bg"), t["bg"])
+            try:
+                w.configure(bg=bg)
+            except tk.TclError:
+                pass
+        if hasattr(self, "playlist_info_label"):
+            self.playlist_info_label.configure(bg=t["bg"], fg=t["text_muted"])
+        for lb_name in ("playlist_listbox", "video_listbox"):
+            lb = getattr(self, lb_name, None)
+            if lb is not None:
+                tp.configure_manager_listbox(lb, t)
+        for sb_name in ("_pl_list_scrollbar", "_pl_video_scrollbar"):
+            sb = getattr(self, sb_name, None)
+            if sb is not None:
+                tp.configure_manager_scrollbar(sb, t)
+        tp.restyle_manager_buttons(win)
+        tp.restyle_manager_action_links(win)
+        self._refresh_playlist_list()
+        if self.current_playlist:
+            self._refresh_video_list()
 
     def show_playlist_manager(self):
         if self.playlist_window and self.playlist_window.winfo_exists():
@@ -239,6 +256,8 @@ class PlaylistUI:
 
         # ── Header (icon + title + play button) ──────────────────────────────
         header = tk.Frame(self.playlist_window, bg=t['header_bg'], height=58)
+        header._manager_role = "header"
+        self._pl_header = header
         header.pack(fill=tk.X)
         header.pack_propagate(False)
         h_inner = tk.Frame(header, bg=t['header_bg'])
@@ -248,7 +267,7 @@ class PlaylistUI:
         title_box = tk.Frame(h_inner, bg=t['header_bg'])
         title_box.pack(side=tk.LEFT, fill=tk.Y)
         tk.Label(title_box, text="🎵", font=("Segoe UI Emoji", 18),
-                 bg=t['header_bg'], fg=t['accent']).pack(side=tk.LEFT, padx=(0, 10), pady=14)
+                 bg=t['header_bg'], fg=t['playlist_accent']).pack(side=tk.LEFT, padx=(0, 10), pady=14)
         tk.Label(title_box, text="Playlist Manager",
                  font=("Segoe UI", 15, "bold"),
                  bg=t['header_bg'], fg=t['text']).pack(side=tk.LEFT, pady=14)
@@ -257,11 +276,15 @@ class PlaylistUI:
 
         # ── Body (unchanged, but use t colours) ──────────────────────────────
         cols = tk.Frame(self.playlist_window, bg=t['bg'])
+        cols._manager_role = "body"
+        self._pl_cols = cols
         cols.pack(fill=tk.BOTH, expand=True, padx=20, pady=14)
 
         # LEFT sidebar (width 310)
         left_card = tk.Frame(cols, bg=t['surface2'], width=310,
                              highlightbackground=t['border'], highlightthickness=1)
+        left_card._manager_role = "surface2"
+        self._pl_left_card = left_card
         left_card.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 10))
         left_card.pack_propagate(False)
 
@@ -274,10 +297,12 @@ class PlaylistUI:
         pl_body.pack(fill=tk.BOTH, expand=True)
         pl_sb = tk.Scrollbar(pl_body, width=10, relief=tk.FLAT, bd=0,
                              troughcolor=t['bg'], bg=t['divider'])
+        self._pl_list_scrollbar = pl_sb
+        tp.configure_manager_scrollbar(pl_sb, t)
         pl_sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
         self.playlist_listbox = tk.Listbox(
             pl_body, yscrollcommand=pl_sb.set, font=tp.normal_font,
-            bg=t['surface'], fg=t['text'], selectbackground=t['accent'],
+            bg=t['surface'], fg=t['listbox_fg'], selectbackground=t['listbox_select'],
             selectforeground="white", activestyle="none",
             relief=tk.FLAT, bd=0, highlightthickness=0)
         self.playlist_listbox.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
@@ -287,6 +312,8 @@ class PlaylistUI:
 
         tk.Frame(left_card, bg=t['divider'], height=1).pack(fill=tk.X)
         pl_act = tk.Frame(left_card, bg=t['surface2'])
+        pl_act._manager_role = "surface2"
+        self._pl_pl_act = pl_act
         pl_act.pack(fill=tk.X, padx=8, pady=8)
         pl_left = tk.Frame(pl_act, bg=t['surface2'])
         pl_left.pack(side=tk.LEFT)
@@ -297,12 +324,14 @@ class PlaylistUI:
         #     pl_left, "Delete", self._delete_playlist, "danger", "md")
         # self.delete_playlist_btn.pack(side=tk.LEFT)
 
-        self.new_playlist_btn = tp.create_button(
-            pl_right, "+ New", self._create_new_playlist, "primary", "md")
-        self.new_playlist_btn.pack(side=tk.LEFT, padx=(0, 8))
+        self.new_playlist_btn = tp.create_manager_action_link(
+            pl_right, "＋  New playlist", self._create_new_playlist, style="playlist")
+        self.new_playlist_btn.pack(side=tk.LEFT, padx=(0, 4))
 
         # RIGHT area
         right_area = tk.Frame(cols, bg=t['bg'])
+        right_area._manager_role = "body"
+        self._pl_right_area = right_area
         right_area.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
         info_row = tk.Frame(right_area, bg=t['bg'])
@@ -315,21 +344,29 @@ class PlaylistUI:
         # Video list card
         right_card = tk.Frame(right_area, bg=t['surface'],
                               highlightbackground=t['border'], highlightthickness=1)
+        right_card._manager_role = "surface"
+        self._pl_right_card = right_card
         right_card.pack(fill=tk.BOTH, expand=True)
         vid_hdr = tk.Frame(right_card, bg=t['surface2'])
+        vid_hdr._manager_role = "surface2"
+        self._pl_vid_hdr = vid_hdr
         vid_hdr.pack(fill=tk.X)
         tk.Label(vid_hdr, text="  VIDEOS  —  drag to reorder  •  double‑click to play",
                  font=tp.small_font, bg=t['surface2'], fg=t['text_muted'],
                  pady=6, anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
         tk.Frame(right_card, bg=t['divider'], height=1).pack(fill=tk.X)
         vid_body = tk.Frame(right_card, bg=t['surface'])
+        vid_body._manager_role = "surface"
+        self._pl_vid_body = vid_body
         vid_body.pack(fill=tk.BOTH, expand=True)
         vid_sb = tk.Scrollbar(vid_body, width=10, relief=tk.FLAT, bd=0,
                               troughcolor=t['bg'], bg=t['divider'])
+        self._pl_video_scrollbar = vid_sb
+        tp.configure_manager_scrollbar(vid_sb, t)
         vid_sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
         self.video_listbox = tk.Listbox(
             vid_body, yscrollcommand=vid_sb.set, font=tp.normal_font,
-            bg=t['surface'], fg=t['text'], selectbackground=t['accent'],
+            bg=t['surface'], fg=t['listbox_fg'], selectbackground=t['listbox_select'],
             selectforeground="white", selectmode=tk.MULTIPLE,
             activestyle="none", relief=tk.FLAT, bd=0, highlightthickness=0)
         self.video_listbox.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
@@ -395,13 +432,7 @@ class PlaylistUI:
         if not selected_playlists:
             return
 
-        tp = self.theme_provider
-        menu = tk.Menu(self.playlist_window, tearoff=0,
-                       bg="#313335" if tp.dark_mode else "#f5f5f5",
-                       fg="#A9B7C6" if tp.dark_mode else "#333333",
-                       activebackground="#2D5A8E" if tp.dark_mode else "#3498db",
-                       activeforeground="#FFFFFF",
-                       relief="flat", bd=1, font=("Segoe UI", 9))
+        menu = self.theme_provider.create_manager_context_menu(self.playlist_window)
 
         # Grid View – works for any number of playlists
         menu.add_command(label="⊞  Open in Gallery",
@@ -562,13 +593,7 @@ class PlaylistUI:
         if not selection:
             return
 
-        _tp = self.theme_provider
-        context_menu = tk.Menu(self.playlist_window, tearoff=0,
-                               bg="#313335" if _tp.dark_mode else "#f5f5f5",
-                               fg="#A9B7C6" if _tp.dark_mode else "#333333",
-                               activebackground="#2D5A8E" if _tp.dark_mode else "#3498db",
-                               activeforeground="#FFFFFF",
-                               relief="flat", bd=1, font=("Segoe UI", 9))
+        context_menu = self.theme_provider.create_manager_context_menu(self.playlist_window)
 
         context_menu.add_command(
             label=f"Play Selected ({len(selection)} video{'s' if len(selection) > 1 else ''})",
@@ -959,7 +984,8 @@ class PlaylistInfoDialog:
 
     def _setup_dialog(self, name: str, description: str):
         tp = self.theme_provider
-        ACCENT = "#4A9EFF" if tp.dark_mode else "#2d89ef"
+        t = tp.get_manager_design_tokens()
+        ACCENT = t["playlist_accent"]
 
         self.dialog.geometry("420x280")
 
@@ -1094,8 +1120,9 @@ class PlaylistManager:
 
     def _show_add_to_playlist_dialog(self, videos: list, playlists: list):
         tp = self.ui.theme_provider
-        ACCENT = "#4A9EFF" if tp.dark_mode else "#2d89ef"
-        PANEL = tp.listbox_bg
+        t = tp.get_manager_design_tokens()
+        ACCENT = t["playlist_accent"]
+        PANEL = tp.surface_color
 
         dialog = tk.Toplevel(self.ui.parent)
         dialog.withdraw()
@@ -1132,11 +1159,12 @@ class PlaylistManager:
         card.pack(fill=tk.BOTH, expand=True, pady=(0, 14))
 
         sb = tk.Scrollbar(card, width=10, relief=tk.FLAT, bd=0)
+        tp.configure_manager_scrollbar(sb, t)
         sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
 
         playlist_listbox = tk.Listbox(
             card, yscrollcommand=sb.set, font=tp.normal_font,
-            bg=PANEL, fg=tp.listbox_fg, selectbackground=ACCENT,
+            bg=PANEL, fg=t["listbox_fg"], selectbackground=t["listbox_select"],
             selectforeground="white", activestyle="none",
             relief=tk.FLAT, bd=0, highlightthickness=0)
         playlist_listbox.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
