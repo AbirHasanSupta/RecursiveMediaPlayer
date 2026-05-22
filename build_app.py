@@ -105,8 +105,8 @@ def select_multiple_folders_and_play():
             preferences = self.config.load_preferences()
             self.dark_mode = preferences['dark_mode']
             self.show_videos = preferences['show_videos']
-            self.expand_all_default = preferences['expand_all']
-            self.save_directories = preferences['save_directories']
+            self.expand_all_default = False
+            self.save_directories = True
             self.smart_resume_enabled = preferences['smart_resume_enabled']
             self.start_from_last_played = self.smart_resume_enabled
             self.last_played_video_index = preferences['last_played_video_index']
@@ -1083,6 +1083,7 @@ def select_multiple_folders_and_play():
             self._dir_root_iids = []   # ordered list of iids for root dirs
             self._dir_iid_selected = set()
             self._dir_iid_counter = 0
+            self._tree_iid_counter = 0
             self._dir_iid_selected = set()
 
             class _DirListboxShim:
@@ -1539,7 +1540,7 @@ def select_multiple_folders_and_play():
             self.show_videos_var = tk.BooleanVar(value=self.show_videos)
             self.excluded_only_var = tk.BooleanVar(value=self.show_only_excluded)
             self.expand_all_var = tk.BooleanVar(value=self.expand_all_default)
-            self.save_directories_var = tk.BooleanVar(value=self.save_directories)
+            self.save_directories_var = tk.BooleanVar(value=True)
 
             self.toggle_videos_check = ttk.Checkbutton(
                 checkboxes_row, text="Show Videos",
@@ -1562,12 +1563,12 @@ def select_multiple_folders_and_play():
             # )
             # self.toggle_excluded_only_check.pack(side=tk.LEFT, padx=(0, 10))
 
-            self.save_directories_check = ttk.Checkbutton(
-                checkboxes_row, text="Save Directories",
-                style="Modern.TCheckbutton", variable=self.save_directories_var,
-                command=self.toggle_save_directories
-            )
-            self.save_directories_check.pack(side=tk.LEFT, padx=(0, 10))
+            # self.save_directories_check = ttk.Checkbutton(
+            #     checkboxes_row, text="Save Directories",
+            #     style="Modern.TCheckbutton", variable=self.save_directories_var,
+            #     command=self.toggle_save_directories
+            # )
+            # self.save_directories_check.pack(side=tk.LEFT, padx=(0, 10))
 
             self.smart_resume_var = tk.BooleanVar(value=self.smart_resume_enabled)
             self.speed_var = tk.DoubleVar(value=1.0)
@@ -2227,11 +2228,10 @@ def select_multiple_folders_and_play():
                     # path -> iid so we can attach children to the right parent.
                     path_to_iid = {}   # norm_path -> iid assigned in this batch
                     items       = []   # (parent_iid, path, is_dir)
-                    iid_counter = [0]
 
                     def next_iid():
-                        iid_counter[0] += 1
-                        return f"t{iid_counter[0]}"
+                        self._tree_iid_counter += 1
+                        return f"t{self._tree_iid_counter}"
 
                     for root, dirs, files in os.walk(base):
                         if self.resource_manager.is_shutting_down():

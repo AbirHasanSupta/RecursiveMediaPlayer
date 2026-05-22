@@ -84,9 +84,9 @@ class ConfigHandler:
                     return {
                         'dark_mode':               config.get('dark_mode', False),
                         'show_videos':             config.get('show_videos', True),
-                        'expand_all':              config.get('expand_all', True),
+                        'expand_all':              False,
                         'selected_dirs':           decoded_dirs,
-                        'save_directories':        config.get('save_directories', False),
+                        'save_directories':        True,
                         'start_from_last_played':  config.get('start_from_last_played', False),
                         'last_played_video_index': config.get('last_played_video_index', 0),
                         'last_played_video_path':  last_played_path,
@@ -101,8 +101,8 @@ class ConfigHandler:
         except Exception:
             pass
         return {
-            'dark_mode': False, 'show_videos': True, 'expand_all': True,
-            'selected_dirs': [], 'save_directories': False,
+            'dark_mode': False, 'show_videos': True, 'expand_all': False,
+            'selected_dirs': [], 'save_directories': True,
             'start_from_last_played': False, 'last_played_video_index': 0,
             'last_played_video_path': '', 'excluded_subdirs': {}, 'excluded_videos': {},
             'smart_resume_enabled': False, 'volume': 50, 'is_muted': False,
@@ -142,7 +142,7 @@ class ThemeSelector:
         prefs = {
             'dark_mode':               self.dark_mode,
             'show_videos':             self.show_videos,
-            'expand_all':              self.expand_all_var.get() if hasattr(self, 'expand_all_var') else True,
+            'expand_all':              False,
             'selected_dirs': [
                 d for d in getattr(self, 'selected_dirs', [])
                 if isinstance(d, str)
@@ -150,7 +150,7 @@ class ThemeSelector:
                 and not d.startswith('http://')
                 and not d.startswith('https://')
             ],
-            'save_directories':        getattr(self, 'save_directories', False),
+            'save_directories':        True,
             'start_from_last_played':  getattr(self, 'start_from_last_played', False),
             'smart_resume_enabled':    getattr(self, 'smart_resume_enabled', False),
             'last_played_video_index': getattr(self, 'last_played_video_index', 0),
