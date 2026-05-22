@@ -179,8 +179,8 @@ class ThemeSelector:
             try:
                 m.configure(
                     bg=cc["bg"], fg=cc["fg"],
-                    activebackground=cc["hover_bg"],
-                    activeforeground=cc["hover_fg"])
+                    activebackground=cc["hover"],
+                    activeforeground=cc["fg"])
                 end = m.index("end")
                 if end is not None:
                     for i in range(end + 1):
@@ -245,6 +245,12 @@ class ThemeSelector:
             self.badge_fg = "#1E2A3A"
             self.divider_color = "#E2E8F0"
 
+        self.muted_fg = self.text_muted
+        self.frame_border = self.border_color
+        self.header_color = self.text_color
+        self.excluded_color = self.accent_secondary
+        self.favorite_color = "#F5C518" if self.dark_mode else "#D4A017"
+
         # Apply colours to root and main frames
         self.root.configure(bg=self.bg_color)
         self.main_frame.configure(bg=self.bg_color)
@@ -260,8 +266,10 @@ class ThemeSelector:
                 if isinstance(label, tk.Label):
                     label.configure(bg=self.bg_color, fg=self.text_color)
 
-        # Treeview style
-        if hasattr(self, 'exclusion_tree') and hasattr(self, '_configure_tree_style'):
+        # Directory panel tree + scrollbar (ttk needs explicit styling on Windows)
+        if hasattr(self, 'exclusion_tree'):
+            self._configure_directory_ttk_styles()
+        elif hasattr(self, '_configure_tree_style'):
             self._configure_tree_style()
 
         # Console
@@ -286,13 +294,16 @@ class ThemeSelector:
         # Buttons
         self.update_all_buttons()
 
+        self._apply_workspace_chrome_theme()
+        self._apply_ttk_chrome_theme()
+
         # Toolbar and pills
         if hasattr(self, '_fix_toolbar_colors'):
             self._fix_toolbar_colors()
-        if hasattr(self, '_fix_pill_colors'):
-            self._fix_pill_colors()
         if hasattr(self, '_refresh_media_pill_state'):
             self._refresh_media_pill_state()
+
+        self._apply_menubar_colors()
 
         # Reload home dashboard if visible
         if getattr(self, '_active_app_view', None) == 'home':
@@ -349,6 +360,7 @@ class ThemeSelector:
                 else:                                      variant = 'secondary'
             colors = self.get_button_colors(variant)
             button.configure(bg=colors['bg'], fg=colors['fg'], activebackground=colors['active'])
+            self._bind_button_hover(button, variant)
 
         for manager_ui in getattr(self, '_manager_uis', []):
             try:
@@ -361,7 +373,436 @@ class ThemeSelector:
                     variant = getattr(button, '_variant', 'secondary')
                     colors  = self.get_button_colors(variant)
                     button.configure(bg=colors['bg'], fg=colors['fg'], activebackground=colors['active'])
+                    self._bind_button_hover(button, variant)
             except Exception:
+                pass
+
+    def _bind_button_hover(self, button, variant):
+        def on_enter(_e, v=variant):
+            colors = self.get_button_colors(v)
+            button.configure(bg=colors['active'])
+
+        def on_leave(_e, v=variant):
+            colors = self.get_button_colors(v)
+            button.configure(bg=colors['bg'])
+
+        button.bind("<Enter>", on_enter)
+        button.bind("<Leave>", on_leave)
+
+    def _ensure_ttk_native_theme(self):
+        native = getattr(self, '_ttk_native_theme', None)
+        if native:
+            return native
+        style = ttk.Style()
+        names = style.theme_names()
+        if 'vista' in names:
+            native = 'vista'
+        elif 'xpnative' in names:
+            native = 'xpnative'
+        else:
+            native = 'default'
+        self._ttk_native_theme = native
+        return native
+
+    def _configure_directory_ttk_styles(self):
+        self._configure_directory_tree_style()
+        self._configure_directory_scrollbar_style()
+
+    def _configure_directory_tree_style(self):
+        """Native tree look with forced dashboard background colors."""
+        try:
+            style = ttk.Style()
+            native = self._ensure_ttk_native_theme()
+            try:
+                style.theme_use(native)
+            except tk.TclError:
+                pass
+
+            tree_bg = self.listbox_bg
+            tree_fg = self.listbox_fg
+            style.configure(
+                "ExclusionTree.Treeview",
+                background=tree_bg,
+                foreground=tree_fg,
+                fieldbackground=tree_bg,
+                rowheight=32,
+                borderwidth=0,
+                relief="flat",
+            )
+            if hasattr(self, 'tree_font'):
+                style.configure("ExclusionTree.Treeview", font=self.tree_font)
+
+            style.map(
+                "ExclusionTree.Treeview",
+                background=[("selected", self.listbox_select_bg)],
+                foreground=[("selected", "#FFFFFF")],
+                fieldbackground=[("!disabled", tree_bg), ("disabled", tree_bg)],
+            )
+            style.configure(
+                "ExclusionTree.Treeview.Heading",
+                background=self.surface_color,
+                foreground=self.text_color,
+                relief="flat",
+                borderwidth=0,
+                font=("Segoe UI", 9, "bold"),
+            )
+            style.map(
+                "ExclusionTree.Treeview.Heading",
+                background=[
+                    ("active", self.surface_color),
+                    ("pressed", self.surface_color),
+                ],
+                foreground=[
+                    ("active", self.text_color),
+                    ("pressed", self.text_color),
+                ],
+            )
+
+            tree = getattr(self, 'exclusion_tree', None)
+            if tree is not None:
+                try:
+                    tree.configure(style="ExclusionTree.Treeview")
+                except tk.TclError:
+                    pass
+
+            container = getattr(self, 'dir_tree_container', None)
+            if container is not None:
+                try:
+                    container.configure(
+                        bg=tree_bg,
+                        highlightbackground=self.border_color,
+                        highlightthickness=1,
+                    )
+                except tk.TclError:
+                    pass
+
+            self._configure_directory_tree_tags()
+        except Exception:
+            pass
+
+    def _configure_directory_tree_tags(self):
+        """Row tags: excluded dirs (italic/red), excluded videos (italic strike), favourites (yellow)."""
+        tree = getattr(self, 'exclusion_tree', None)
+        if tree is None:
+            return
+        try:
+            excl_fg = getattr(self, 'excluded_color', self.accent_secondary)
+            fav_fg = getattr(self, 'favorite_color', "#F5C518")
+            normal_fg = self.listbox_fg
+            muted_fg = self.text_muted
+
+            italic = getattr(self, 'tree_font_italic', None)
+            excl_video_font = getattr(self, 'tree_font_excl_video', None)
+            bold = getattr(self, 'tree_font_bold', None)
+            if italic is None and hasattr(self, 'tree_font'):
+                from tkinter.font import Font
+                fam = self.tree_font.actual().get("family", "Segoe UI")
+                size = self.tree_font.actual().get("size", 10)
+                italic = Font(family=fam, size=size, slant="italic")
+            if excl_video_font is None and italic is not None:
+                from tkinter.font import Font
+                fam = italic.actual().get("family", "Segoe UI")
+                size = italic.actual().get("size", 10)
+                excl_video_font = Font(family=fam, size=size, slant="italic", overstrike=True)
+
+            tree.tag_configure("folder", foreground=normal_fg)
+            tree.tag_configure(
+                "folder_excl",
+                foreground=excl_fg,
+                font=italic,
+            )
+            tree.tag_configure("video", foreground=normal_fg)
+            tree.tag_configure(
+                "video_excl",
+                foreground=excl_fg,
+                font=excl_video_font,
+            )
+            tree.tag_configure("video_fav", foreground=fav_fg)
+            tree.tag_configure(
+                "video_fav_excl",
+                foreground=fav_fg,
+                font=excl_video_font,
+            )
+            tree.tag_configure(
+                "now_playing",
+                foreground=self.accent_color,
+                font=bold,
+            )
+            tree.tag_configure("placeholder", foreground=muted_fg)
+            tree.tag_configure("drag_indicator", foreground=self.accent_color)
+            tree.tag_configure("rating_star", foreground=fav_fg)
+        except tk.TclError:
+            pass
+
+    def _configure_directory_scrollbar_style(self):
+        """Scrollbar only: clam layout/colors copied into the native ttk theme."""
+        try:
+            style = ttk.Style()
+            native = self._ensure_ttk_native_theme()
+            trough = self.bg_color if self.dark_mode else self.alt_row_color
+            scroll_bg = self.border_color
+            scroll_active = self.hover_color
+            scroll_style = "ExclusionTree.Vertical.TScrollbar"
+            scroll_opts = dict(
+                background=scroll_bg,
+                troughcolor=trough,
+                bordercolor=self.border_color,
+                arrowcolor=self.text_muted,
+                darkcolor=self.border_color,
+                lightcolor=self.surface_color,
+                relief="flat",
+                gripcount=0,
+            )
+            scroll_map = dict(
+                background=[
+                    ("active", scroll_active),
+                    ("pressed", self.accent_color),
+                    ("disabled", scroll_bg),
+                ],
+                arrowcolor=[("active", self.text_color), ("pressed", "#FFFFFF")],
+            )
+
+            layout = None
+            try:
+                style.theme_use("clam")
+                style.configure(scroll_style, **scroll_opts)
+                style.map(scroll_style, **scroll_map)
+                try:
+                    layout = style.layout(scroll_style)
+                except tk.TclError:
+                    layout = None
+            except tk.TclError:
+                pass
+            finally:
+                try:
+                    style.theme_use(native)
+                except tk.TclError:
+                    pass
+
+            if layout:
+                try:
+                    style.layout(scroll_style, layout)
+                except tk.TclError:
+                    pass
+            style.configure(scroll_style, **scroll_opts)
+            style.map(scroll_style, **scroll_map)
+
+            scrollbar = getattr(self, 'exclusion_scrollbar', None)
+            if scrollbar is not None:
+                try:
+                    scrollbar.configure(style=scroll_style)
+                except tk.TclError:
+                    pass
+        except Exception:
+            pass
+
+    def _apply_ttk_chrome_theme(self):
+        try:
+            style = ttk.Style()
+            style.configure("TFrame", background=self.bg_color)
+            style.configure("TLabel", background=self.bg_color, foreground=self.text_color)
+            style.configure(
+                "Modern.TCheckbutton",
+                background=self.bg_color,
+                foreground=self.text_color,
+                font=("Segoe UI", 10),
+                padding=4,
+            )
+            style.map(
+                "Modern.TCheckbutton",
+                foreground=[("active", self.text_color), ("disabled", self.text_muted)],
+                background=[("active", self.bg_color)],
+            )
+        except Exception:
+            pass
+
+    def _apply_workspace_chrome_theme(self):
+        frame_names = (
+            'workspace_frame', 'workspace_header', 'workspace_body', 'workspace_nav',
+            'content_frame', 'dir_section', 'dir_compact_rail', 'dir_frame',
+            'exclusion_buttons_frame', 'embedded_view_frame', 'console_section',
+        )
+        for name in frame_names:
+            widget = getattr(self, name, None)
+            if widget is not None:
+                try:
+                    widget.configure(bg=self.bg_color)
+                except tk.TclError:
+                    pass
+
+        for name in ('workspace_title_label', 'dir_header_label'):
+            label = getattr(self, name, None)
+            if isinstance(label, tk.Label):
+                label.configure(bg=self.bg_color, fg=self.text_color)
+
+        context = getattr(self, 'workspace_context_label', None)
+        if isinstance(context, tk.Label):
+            context.configure(bg=self.bg_color, fg=self.muted_fg)
+
+        header = getattr(self, 'workspace_header', None)
+        if header is not None:
+            self._restyle_frame_subtree(header, skip_toolbar=False)
+
+        if hasattr(self, 'dir_section'):
+            self._restyle_directory_panel()
+
+        if hasattr(self, 'embedded_view_frame') and self.embedded_view_frame is not None:
+            try:
+                if self.embedded_view_frame.winfo_exists():
+                    self.embedded_view_frame.configure(bg=self.bg_color)
+            except tk.TclError:
+                pass
+
+        self.update_container_borders()
+        self._style_directory_compact_rail()
+
+    def _pointer_over_widget(self, widget):
+        try:
+            if not widget.winfo_exists():
+                return False
+            px, py = widget.winfo_pointerxy()
+            wx, wy = widget.winfo_rootx(), widget.winfo_rooty()
+            return wx <= px <= (wx + widget.winfo_width()) and wy <= py <= (wy + widget.winfo_height())
+        except tk.TclError:
+            return False
+
+    def _sync_play_toolbar_btn(self):
+        btn = getattr(self, 'play_toolbar_btn', None)
+        if btn is None or not hasattr(self, '_tb_colors'):
+            return
+        c = self._tb_colors()
+        if self._pointer_over_widget(btn):
+            btn.config(bg=c["play_hover_bg"], fg="#FFFFFF")
+        else:
+            btn.config(bg=c["play_fg"], fg="#FFFFFF")
+
+    def _create_dir_rail_icon_btn(self, parent, icon, command, variant="primary"):
+        colors = self.get_button_colors(variant)
+        btn = tk.Label(
+            parent, text=icon,
+            bg=colors["bg"], fg=colors["fg"],
+            font=("Segoe UI", 13, "bold" if variant == "primary" else "normal"),
+            width=2, height=1,
+            padx=12, pady=11,
+            cursor="hand2",
+            relief=tk.FLAT, bd=0,
+        )
+        btn._rail_variant = variant
+
+        def on_enter(_e, v=variant):
+            c = self.get_button_colors(v)
+            btn.configure(bg=c["active"])
+
+        def on_leave(_e, v=variant):
+            c = self.get_button_colors(v)
+            btn.configure(bg=c["bg"])
+
+        def on_press(_e, v=variant):
+            c = self.get_button_colors(v)
+            btn.configure(bg=c["active"])
+
+        def on_release(_e):
+            c = self.get_button_colors(btn._rail_variant)
+            btn.configure(bg=c["active"] if self._pointer_over_widget(btn) else c["bg"])
+            if command:
+                command()
+
+        btn.bind("<Enter>", on_enter)
+        btn.bind("<Leave>", on_leave)
+        btn.bind("<ButtonPress-1>", on_press)
+        btn.bind("<ButtonRelease-1>", on_release)
+        return btn
+
+    def _style_directory_compact_rail(self):
+        rail = getattr(self, 'dir_compact_rail', None)
+        if rail is None:
+            return
+        try:
+            rail.configure(bg=self.bg_color, width=52)
+            card = getattr(self, 'dir_rail_card', None)
+            if card is not None:
+                card.configure(
+                    bg=self.surface_color,
+                    highlightbackground=self.border_color,
+                    highlightthickness=1,
+                )
+            sep = getattr(self, 'dir_rail_sep', None)
+            if sep is not None:
+                sep.configure(bg=self.border_color)
+            for attr in ('dir_rail_add_btn', 'dir_rail_expand_btn'):
+                btn = getattr(self, attr, None)
+                if btn is None:
+                    continue
+                variant = getattr(btn, '_rail_variant', 'secondary')
+                colors = self.get_button_colors(variant)
+                btn.configure(bg=colors["bg"], fg=colors["fg"])
+        except tk.TclError:
+            pass
+
+    def _restyle_frame_subtree(self, widget, skip_toolbar=False):
+        if skip_toolbar and hasattr(self, 'toolbar'):
+            try:
+                if widget is self.toolbar or self._is_toolbar_descendant(widget):
+                    return
+            except Exception:
+                pass
+        try:
+            if isinstance(widget, (tk.Frame, tk.Toplevel)):
+                widget.configure(bg=self.bg_color)
+            elif isinstance(widget, tk.Label):
+                if widget is getattr(self, 'workspace_context_label', None):
+                    widget.configure(bg=self.bg_color, fg=self.muted_fg)
+                else:
+                    widget.configure(bg=self.bg_color, fg=self.text_color)
+            for child in widget.winfo_children():
+                self._restyle_frame_subtree(child, skip_toolbar=skip_toolbar)
+        except tk.TclError:
+            pass
+
+    def _restyle_directory_panel(self):
+        section = getattr(self, 'dir_section', None)
+        if section is None:
+            return
+
+        def _walk(widget):
+            try:
+                if isinstance(widget, tk.Frame):
+                    tree_container = getattr(self, 'dir_tree_container', None)
+                    if tree_container is not None and widget is tree_container:
+                        widget.configure(
+                            bg=self.listbox_bg,
+                            highlightbackground=self.border_color,
+                            highlightthickness=1,
+                        )
+                    elif widget.winfo_children() and any(
+                            isinstance(c, ttk.Treeview) for c in widget.winfo_children()):
+                        widget.configure(
+                            bg=self.listbox_bg,
+                            highlightbackground=self.border_color,
+                            highlightthickness=1,
+                        )
+                    else:
+                        widget.configure(bg=self.bg_color)
+                elif isinstance(widget, tk.Label):
+                    widget.configure(bg=self.bg_color, fg=self.text_color)
+                elif isinstance(widget, tk.Entry):
+                    widget.configure(
+                        bg=self.entry_bg, fg=self.entry_fg,
+                        insertbackground=self.entry_fg,
+                        highlightbackground=self.entry_border,
+                    )
+                for child in widget.winfo_children():
+                    _walk(child)
+            except tk.TclError:
+                pass
+
+        _walk(section)
+        self._configure_directory_ttk_styles()
+        rail = getattr(self, 'dir_compact_rail', None)
+        if rail is not None:
+            try:
+                rail.configure(bg=self.bg_color)
+            except tk.TclError:
                 pass
 
     def register_manager_ui(self, manager_ui):
@@ -392,9 +833,7 @@ class ThemeSelector:
                 if isinstance(widget, tk.Button) and hasattr(widget, '_variant'):
                     colors = self.get_button_colors(widget._variant)
                     widget.configure(bg=colors['bg'], fg=colors['fg'], activebackground=colors['active'])
-                    bg, active = colors['bg'], colors['active']
-                    widget.bind("<Enter>", lambda e, b=active: widget.configure(bg=b))
-                    widget.bind("<Leave>", lambda e, b=bg:    widget.configure(bg=b))
+                    self._bind_button_hover(widget, widget._variant)
                     return
 
                 if isinstance(widget, tk.Frame) and getattr(widget, '_accent', False):
@@ -557,47 +996,151 @@ class ThemeSelector:
     def pill_accents(self, lbl):
         return (self.PILL_ACCENTS_DARK if self.dark_mode else self.PILL_ACCENTS_LIGHT)[lbl]
 
+    def _active_tab_label(self):
+        return getattr(self, '_view_tab_labels', {}).get(
+            getattr(self, '_active_app_view', 'home'), 'Home')
+
+    def _bind_toolbar_label_hover(self, btn, play=False, menu=None, command=None):
+        def on_enter(_e):
+            c = self._tb_colors()
+            if play:
+                btn.config(bg=c["play_hover_bg"], fg="#FFFFFF")
+            else:
+                btn.config(bg=c["hover"], fg=c["fg"])
+
+        def on_leave(_e):
+            c = self._tb_colors()
+            if play:
+                btn.config(bg=c["play_fg"], fg="#FFFFFF")
+            else:
+                btn.config(bg=c["bg"], fg=c["fg"])
+
+        def on_press(_e):
+            c = self._tb_colors()
+            if play:
+                btn.config(bg=c["play_active_bg"], fg="#FFFFFF")
+            else:
+                btn.config(bg=c["active"], fg="#FFFFFF")
+
+        def on_release(_e):
+            c = self._tb_colors()
+            if play:
+                btn.config(bg=c["play_hover_bg"], fg="#FFFFFF")
+            else:
+                btn.config(bg=c["hover"], fg=c["fg"])
+            if menu is not None:
+                try:
+                    menu.tk_popup(btn.winfo_rootx(), btn.winfo_rooty() + btn.winfo_height())
+                finally:
+                    menu.grab_release()
+            elif command is not None:
+                command()
+
+        btn.bind("<Enter>", on_enter)
+        btn.bind("<Leave>", on_leave)
+        btn.bind("<ButtonPress-1>", on_press)
+        btn.bind("<ButtonRelease-1>", on_release)
+
+    def _bind_theme_toolbar_hover(self):
+        btn = getattr(self, 'theme_toolbar_btn', None)
+        if btn is None:
+            return
+
+        def on_enter(_e):
+            c = self._tb_colors()
+            btn.config(bg=c["hover"], fg=c["fg"])
+
+        def on_leave(_e):
+            c = self._tb_colors()
+            btn.config(bg=c["bg"], fg=c["fg"])
+
+        def on_press(_e):
+            c = self._tb_colors()
+            btn.config(bg=c["active"], fg="#FFFFFF")
+
+        def on_release(_e):
+            c = self._tb_colors()
+            btn.config(bg=c["hover"], fg=c["fg"])
+            self._toggle_theme_menu()
+
+        btn.bind("<Enter>", on_enter)
+        btn.bind("<Leave>", on_leave)
+        btn.bind("<ButtonPress-1>", on_press)
+        btn.bind("<ButtonRelease-1>", on_release)
+
+    def _bind_play_toolbar_hover(self):
+        btn = getattr(self, 'play_toolbar_btn', None)
+        if btn is None:
+            return
+
+        def on_enter(_e):
+            c = self._tb_colors()
+            btn.config(bg=c["play_hover_bg"], fg="#FFFFFF")
+
+        def on_leave(_e):
+            self._sync_play_toolbar_btn()
+
+        def on_press(_e):
+            c = self._tb_colors()
+            btn.config(bg=c["play_active_bg"], fg="#FFFFFF")
+
+        def on_release(_e):
+            self.global_play()
+            self.root.after_idle(self._sync_play_toolbar_btn)
+
+        btn.bind("<Enter>", on_enter)
+        btn.bind("<Leave>", on_leave)
+        btn.bind("<ButtonPress-1>", on_press)
+        btn.bind("<ButtonRelease-1>", on_release)
+        self._sync_play_toolbar_btn()
+
+    def _bind_media_pill_hover(self, btn, label):
+        def on_enter(_e):
+            if label != self._active_tab_label():
+                btn.config(bg=self.hover_color, fg=self.accent_color)
+
+        def on_leave(_e):
+            if label != self._active_tab_label():
+                btn.config(bg=self.bg_color, fg=self.text_muted)
+
+        btn.bind("<Enter>", on_enter)
+        btn.bind("<Leave>", on_leave)
+
     def _fix_toolbar_colors(self):
         if not hasattr(self, 'toolbar') or not hasattr(self, '_tb_colors'):
             return
         cc = self._tb_colors()
         self.toolbar.configure(bg=cc["bg"])
         if hasattr(self, '_toolbar_btns'):
-            for btn in self._toolbar_btns.values():
-                btn.config(bg=cc["bg"], fg=cc["fg"])
+            menus = getattr(self, '_toolbar_menus', {})
+            commands = getattr(self, '_toolbar_commands', {})
+            for text, btn in self._toolbar_btns.items():
+                play = getattr(btn, '_toolbar_play', False)
+                btn.config(bg=cc["bg"], fg=cc["play_fg"] if play else cc["fg"])
+                self._bind_toolbar_label_hover(
+                    btn, play=play,
+                    menu=menus.get(text),
+                    command=commands.get(text),
+                )
         if hasattr(self, 'play_toolbar_btn'):
-            self.play_toolbar_btn.config(bg=cc["bg"], fg=cc["play_fg"])
+            self._bind_play_toolbar_hover()
         if hasattr(self, 'theme_toolbar_btn'):
-            self.theme_toolbar_btn.config(bg=cc["bg"], fg=cc["fg"])
+            self.theme_toolbar_btn.config(
+                text="☀" if self.dark_mode else "🌙",
+                bg=cc["bg"], fg=cc["fg"])
+            self._bind_theme_toolbar_hover()
         if hasattr(self, 'loop_toolbar_btn'):
             self.loop_toolbar_btn.config(bg=cc["bg"], fg=cc["fg"])
+            self._bind_toolbar_label_hover(self.loop_toolbar_btn, play=False)
         if hasattr(self, 'sleep_countdown_label'):
             self.sleep_countdown_label.config(bg=cc["bg"], fg=cc["fg"])
         for child in self.toolbar.winfo_children():
             if isinstance(child, tk.Frame):
-                child.configure(bg=cc["border"])  # changed from cc["sep"]
-        self._fix_pill_colors()
-
-    def _fix_pill_colors(self):
-        if not hasattr(self, '_media_pill_btns') or not self._media_pill_btns:
-            return
-        if not hasattr(self, '_tb_colors'):
-            return
-        cc = self._tb_colors()
-        for lbl, btn in self._media_pill_btns.items():
-            try:
-                if hasattr(self, '_view_pill_accents'):
-                    a = self._view_pill_accents(lbl)
-                    btn.config(bg=a[4], fg=a[0],
-                               highlightbackground=a[5], highlightcolor=a[5])
-                else:
-                    normal_fg = self.pill_accents(lbl)[0]
-                    btn.config(bg=cc["bg"], fg=normal_fg,
-                               highlightbackground=normal_fg, highlightcolor=normal_fg)
-            except KeyError:
-                pass
-        if hasattr(self, '_refresh_media_pill_state'):
-            self._refresh_media_pill_state()
+                child.configure(bg=cc["border"])
+        if hasattr(self, '_media_pill_btns'):
+            for lbl, btn in self._media_pill_btns.items():
+                btn.config(bg=self.bg_color)
+                self._bind_media_pill_hover(btn, lbl)
 
     def _fix_pill_colors_initial(self):
         self._fix_toolbar_colors()
@@ -605,12 +1148,6 @@ class ThemeSelector:
     def _toggle_theme_menu(self):
         self._show_home_view()
         self.toggle_theme()
-        if hasattr(self, 'theme_toolbar_btn') and hasattr(self, '_tb_colors'):
-            cc = self._tb_colors()
-            self.theme_toolbar_btn.config(
-                text="☀" if self.dark_mode else "🌙",
-                bg=cc["bg"], fg=cc["fg"])
-        self._fix_toolbar_colors()
 
     def _toggle_loop_from_menu(self):
         self.toggle_loop_mode()

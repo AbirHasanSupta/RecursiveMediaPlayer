@@ -502,30 +502,32 @@ def select_multiple_folders_and_play():
                 self.update_console(f"Dropped {added} director{'ies' if added > 1 else 'y'}")
 
         def setup_theme(self):
-            # Base light mode defaults (will be toggled later)
-            self.bg_color = "#f5f5f5"
-            self.surface_color = "#ffffff"
-            self.accent_color = "#3498db"
-            self.accent_secondary = "#e74c3c"
-            self.text_color = "#333333"
-            self.text_muted = "#666666"
-            self.border_color = "#cccccc"
-            self.hover_color = "#f0f0f0"
-            self.listbox_bg = "white"
+            # Dashboard-aligned palette (apply_theme refines for dark mode)
+            self.bg_color = "#F7F9FC"
+            self.surface_color = "#FFFFFF"
+            self.accent_color = "#5E81F4"
+            self.accent_secondary = "#FF6B6B"
+            self.text_color = "#1E2A3A"
+            self.text_muted = "#5B6C8F"
+            self.border_color = "#E2E8F0"
+            self.hover_color = "#EDF2F7"
+            self.listbox_bg = "#FFFFFF"
             self.listbox_fg = self.text_color
             self.listbox_select_bg = self.accent_color
-            self.console_bg = "#2c3e50"
-            self.console_fg = "#ecf0f1"
-            self.frame_border = "#cccccc"
+            self.console_bg = "#1E2A3A"
+            self.console_fg = "#F7F9FC"
+            self.frame_border = self.border_color
             self.header_color = self.text_color
-            self.entry_bg = "white"
+            self.entry_bg = "#FFFFFF"
             self.entry_fg = self.text_color
-            self.entry_border = "#e0e0e0"
-            self.muted_fg = "#666666"
-            self.alt_row_color = "#ebebeb"
-            self.badge_bg = "#e8e8e8"
+            self.entry_border = "#E2E8F0"
+            self.muted_fg = self.text_muted
+            self.alt_row_color = "#F7F9FC"
+            self.badge_bg = "#EDF2F7"
             self.badge_fg = self.text_color
-            self.divider_color = "#dddddd"
+            self.divider_color = "#E2E8F0"
+            self.excluded_color = self.accent_secondary
+            self.favorite_color = "#D4A017"
 
             style = ttk.Style()
             style.configure("TFrame", background=self.bg_color)
@@ -552,6 +554,8 @@ def select_multiple_folders_and_play():
             self.tree_font = Font(family="Segoe UI", size=10)
             self.tree_font_bold = Font(family="Segoe UI", size=10, weight="bold")
             self.tree_font_italic = Font(family="Segoe UI", size=10, slant="italic")
+            self.tree_font_excl_video = Font(
+                family="Segoe UI", size=10, slant="italic", overstrike=True)
 
         def create_custom_buttons(self):
             self.button_variants = {
@@ -598,15 +602,7 @@ def select_multiple_folders_and_play():
                 cursor="hand2", highlightthickness=0
             )
             btn._variant = variant
-
-            def on_enter(e):
-                btn.configure(bg=active_bg)
-
-            def on_leave(e):
-                btn.configure(bg=bg)
-
-            btn.bind("<Enter>", on_enter)
-            btn.bind("<Leave>", on_leave)
+            self._bind_button_hover(btn, variant)
             return btn
 
         def setup_main_layout(self):
@@ -911,7 +907,7 @@ def select_multiple_folders_and_play():
                 child.destroy()
             self._active_app_view = view_name
             self._set_workspace_title(
-                getattr(self, "_view_tab_labels", {}).get(getattr(self, "_active_app_view", "gallery"), "Gallery"),
+                getattr(self, "_view_tab_labels", {}).get(getattr(self, "_active_app_view", "home"), "Home"),
                 self._selected_directory_summary()
             )
             self._refresh_media_pill_state()
@@ -955,13 +951,18 @@ def select_multiple_folders_and_play():
                     if isinstance(child, tk.Frame) and getattr(child, '_underline', False):
                         child.destroy()
                 if is_active:
-                    btn.config(fg=self.accent_color, font=("Segoe UI", 10, "bold"))
+                    btn.config(
+                        bg=self.bg_color, fg=self.accent_color,
+                        font=("Segoe UI", 10, "bold"))
                     underline = tk.Frame(btn.master, bg=self.accent_color, height=2)
                     underline._underline = True
                     # Place under the button
                     underline.place(relx=0.5, rely=1, anchor="s", relwidth=0.7)
                 else:
-                    btn.config(fg=self.text_muted, font=("Segoe UI", 10, "normal"))
+                    btn.config(
+                        bg=self.bg_color, fg=self.text_muted,
+                        font=("Segoe UI", 10, "normal"))
+                self._bind_media_pill_hover(btn, lbl)
 
         def global_play(self):
             if self.active_embedded_manager is not None:
@@ -1095,28 +1096,10 @@ def select_multiple_folders_and_play():
             super().apply_theme()
 
             self._reapply_tree_columns()
-            if hasattr(self, 'exclusion_tree'):
-                self._configure_tree_style()
-
-            style = ttk.Style()
-            style.configure("ExclusionTree.Treeview.Heading",
-                            background=self.bg_color,
-                            foreground=self.text_color,
-                            relief="flat",
-                            borderwidth=1)
-            style.map("ExclusionTree.Treeview.Heading",
-                      background=[('active', self.bg_color), ('pressed', self.bg_color), ('focus', self.bg_color)],
-                      foreground=[('active', self.text_color), ('pressed', self.text_color),
-                                  ('focus', self.text_color)])
 
             if dir_w > 10:
                 self.dir_section.config(width=dir_w)
                 self.dir_section.pack_propagate(False)
-
-            if getattr(self, '_active_app_view', None) == 'home':
-                if hasattr(self, 'exclusion_section') and self.exclusion_section.winfo_ismapped():
-                    self.exclusion_section.pack_forget()
-                self._render_home_dashboard()
 
         def _reapply_tree_columns(self):
             if not hasattr(self, 'exclusion_tree'):
@@ -1130,20 +1113,24 @@ def select_multiple_folders_and_play():
             self.dir_section.config(width=380)  # Changed from 465
             self.dir_section.pack_propagate(False)
 
-            self.dir_compact_rail = tk.Frame(self.content_frame, bg=self.bg_color, width=56)
+            self.dir_compact_rail = tk.Frame(self.content_frame, bg=self.bg_color, width=52)
             self.dir_compact_rail.pack_propagate(False)
 
-            compact_add = self.create_button(
-                self.dir_compact_rail, text="+", command=self.add_directory,
-                variant="primary", size="sm"
-            )
-            compact_add.pack(fill=tk.X, pady=(0, 4))
+            self.dir_rail_card = tk.Frame(
+                self.dir_compact_rail, bg=self.surface_color,
+                highlightbackground=self.border_color, highlightthickness=1)
+            self.dir_rail_card.pack(fill=tk.BOTH, expand=True, padx=5, pady=10)
 
-            compact_open = self.create_button(
-                self.dir_compact_rail, text="📁", command=self.expand_directory_panel,
-                variant="secondary", size="sm"
-            )
-            compact_open.pack(fill=tk.X, pady=(0, 8))
+            self.dir_rail_add_btn = self._create_dir_rail_icon_btn(
+                self.dir_rail_card, "＋", self.add_directory, variant="primary")
+            self.dir_rail_add_btn.pack(pady=(14, 10))
+
+            self.dir_rail_sep = tk.Frame(self.dir_rail_card, bg=self.border_color, height=1)
+            self.dir_rail_sep.pack(fill=tk.X, padx=10)
+
+            self.dir_rail_expand_btn = self._create_dir_rail_icon_btn(
+                self.dir_rail_card, "📁", self.expand_directory_panel, variant="secondary")
+            self.dir_rail_expand_btn.pack(pady=(10, 14))
 
             dir_header_frame = tk.Frame(self.dir_section, bg=self.bg_color)
             dir_header_frame.pack(fill=tk.X, pady=(0, 6))
@@ -1185,15 +1172,18 @@ def select_multiple_folders_and_play():
             self.dir_frame = tk.Frame(self.dir_section, bg=self.bg_color)
             self.dir_frame.pack(fill=tk.BOTH, expand=True)
 
-            tree_container = tk.Frame(self.dir_frame, bg=self.bg_color,
-                                      highlightbackground=self.border_color, highlightthickness=1)
-            tree_container.pack(fill=tk.BOTH, expand=True)
+            self.dir_tree_container = tk.Frame(
+                self.dir_frame, bg=self.listbox_bg,
+                highlightbackground=self.border_color, highlightthickness=1)
+            self.dir_tree_container.pack(fill=tk.BOTH, expand=True)
 
-            self.exclusion_scrollbar = ttk.Scrollbar(tree_container, orient=tk.VERTICAL)
+            self.exclusion_scrollbar = ttk.Scrollbar(
+                self.dir_tree_container, orient=tk.VERTICAL,
+                style="ExclusionTree.Vertical.TScrollbar")
             self.exclusion_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
             self.exclusion_tree = ttk.Treeview(
-                tree_container,
+                self.dir_tree_container,
                 style="ExclusionTree.Treeview",
                 selectmode="extended",
                 show="tree",
@@ -1492,7 +1482,7 @@ def select_multiple_folders_and_play():
             if not selected_dir:
                 return
             self._set_workspace_title(
-                getattr(self, "_view_tab_labels", {}).get(getattr(self, "_active_app_view", "home"), "Gallery"),
+                getattr(self, "_view_tab_labels", {}).get(getattr(self, "_active_app_view", "home"), "Home"),
                 self._selected_directory_summary()
             )
             self._refresh_active_manager_for_directory_context()
@@ -1542,6 +1532,8 @@ def select_multiple_folders_and_play():
             if mode == "compact":
                 self.dir_section.pack_forget()
                 self.dir_compact_rail.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10), before=self.workspace_frame)
+                if hasattr(self, '_style_directory_compact_rail'):
+                    self._style_directory_compact_rail()
                 return
 
             if hasattr(self, "dir_compact_rail"):
@@ -1566,46 +1558,17 @@ def select_multiple_folders_and_play():
         # ------------------------------------------------------------------
 
         def _configure_tree_style(self):
-            style = ttk.Style()
-            # Use 'clam' theme for better customisation
-            style.theme_use("clam")
-            style.configure(
-                "ExclusionTree.Treeview",
-                background=self.listbox_bg,
-                foreground=self.listbox_fg,
-                fieldbackground=self.listbox_bg,
-                rowheight=32,
-                borderwidth=0,
-                font=self.tree_font,
-            )
-            style.map(
-                "ExclusionTree.Treeview",
-                background=[("selected", self.accent_color)],
-                foreground=[("selected", "white")],
-            )
-            style.configure(
-                "ExclusionTree.Treeview.Heading",
-                background=self.bg_color,
-                foreground=self.text_color,
-                relief="flat",
-                borderwidth=0,
-                font=("Segoe UI", 9, "bold")
-            )
-            style.map(
-                "ExclusionTree.Treeview.Heading",
-                background=[("active", self.bg_color), ("pressed", self.bg_color)],
-            )
+            self._configure_directory_ttk_styles()
 
         def setup_exclusion_section(self):
             # Tree and search bar are now in the left panel (setup_directory_section).
             # This method only wires up the checkboxes into exclusion_buttons_frame.
             # self.exclusion_section = tk.Frame(self.workspace_body, bg=self.bg_color)
             # self.exclusion_section.pack(fill=tk.BOTH, expand=True)
-            self._set_workspace_title("Gallery", self._selected_directory_summary())
+            self._set_workspace_title("Home", self._selected_directory_summary())
 
             # Apply annotation column config now that settings_manager is available
             self._reapply_tree_columns()
-            self.exclusion_tree.tag_configure("rating_star", foreground="#f5c518")
             self._configure_tree_style()
 
             checkboxes_row = tk.Frame(self.exclusion_buttons_frame, bg=self.bg_color)
@@ -3183,7 +3146,7 @@ def select_multiple_folders_and_play():
             self.current_selected_dir_index = selected_index
             selected_dir = self.selected_dirs[selected_index]
             self._set_workspace_title(
-                getattr(self, "_view_tab_labels", {}).get(getattr(self, "_active_app_view", "gallery"), "Gallery"),
+                getattr(self, "_view_tab_labels", {}).get(getattr(self, "_active_app_view", "home"), "Home"),
                 self._selected_directory_summary()
             )
             self._refresh_active_manager_for_directory_context(selected_dir)
@@ -4774,19 +4737,10 @@ def select_multiple_folders_and_play():
                            padx=16, pady=6, cursor="hand2")
             btn.pack(side=tk.LEFT, padx=2)
 
-            def on_enter(e):
-                if self._active_app_view != self._view_tab_labels.get(label):
-                    btn.config(fg=self.accent_color)
-
-            def on_leave(e):
-                if self._active_app_view != self._view_tab_labels.get(label):
-                    btn.config(fg=self.text_muted)
-
-            def on_press(e):
+            def on_press(_e):
                 btn.config(fg=self.accent_color, font=("Segoe UI", 10, "bold"))
 
-            def on_release(e):
-                btn.config(fg=self.accent_color, font=("Segoe UI", 10, "bold"))
+            def on_release(_e):
                 cmd = {
                     "Home": self._show_home_view,
                     "Gallery": self._show_grid_view,
@@ -4798,10 +4752,9 @@ def select_multiple_folders_and_play():
                 }[label]
                 cmd()
 
-            btn.bind("<Enter>", on_enter)
-            btn.bind("<Leave>", on_leave)
             btn.bind("<ButtonPress-1>", on_press)
             btn.bind("<ButtonRelease-1>", on_release)
+            self._bind_media_pill_hover(btn, label)
 
             self._media_pill_btns[label] = btn
             return btn
@@ -4817,34 +4770,26 @@ def select_multiple_folders_and_play():
                 "tags": "Tags & Ratings",
             }
             def _tb_colors():
-                if self.dark_mode:
-                    return {
-                        "bg": self.surface_color,
-                        "fg": self.text_color,
-                        "hover": self.hover_color,
-                        "active": self.accent_color,
-                        "border": self.border_color,
-                        "play_fg": self.accent_secondary,
-                        "play_hover_bg": "#FF5555",
-                        "play_active_bg": "#E04444"
-                    }
-                else:
-                    return {
-                        "bg": self.surface_color,
-                        "fg": self.text_color,
-                        "hover": self.hover_color,
-                        "active": self.accent_color,
-                        "border": self.border_color,
-                        "play_fg": self.accent_secondary,
-                        "play_hover_bg": "#FF5555",
-                        "play_active_bg": "#E04444"
-                    }
+                return {
+                    "bg": self.surface_color,
+                    "fg": self.text_color,
+                    "hover": self.hover_color,
+                    "hover_bg": self.hover_color,
+                    "hover_fg": self.text_color,
+                    "active": self.accent_color,
+                    "border": self.border_color,
+                    "play_fg": self.accent_secondary,
+                    "play_hover_bg": "#FF5555",
+                    "play_active_bg": "#E04444",
+                }
 
             self._tb_colors = _tb_colors
             self.toolbar = tk.Frame(self.root, bg=_tb_colors()["bg"], height=44)
             self.toolbar.pack(side=tk.TOP, fill=tk.X, before=self.main_frame)
             self.toolbar.pack_propagate(False)
             self._toolbar_btns = {}
+            self._toolbar_menus = {}
+            self._toolbar_commands = {}
 
             def make_dropdown_menu(entries):
                 c = _tb_colors()
@@ -4870,31 +4815,13 @@ def select_multiple_folders_and_play():
                                font=("Segoe UI", 10, font_weight),
                                padx=14, pady=10, cursor="hand2")
                 btn.pack(side=tk.LEFT)
+                btn._toolbar_play = play
                 self._toolbar_btns[text] = btn
-
-                def on_enter(e):
-                    btn.config(bg=c["hover"], fg=c["fg"] if not play else "#FFFFFF")
-
-                def on_leave(e):
-                    btn.config(bg=c["bg"], fg=c["play_fg"] if play else c["fg"])
-
-                def on_press(e):
-                    btn.config(bg=c["active"] if not play else c["play_active_bg"], fg="#FFFFFF")
-
-                def on_release(e):
-                    btn.config(bg=c["hover"] if not play else c["play_hover_bg"], fg="#FFFFFF")
-                    if menu:
-                        try:
-                            menu.tk_popup(btn.winfo_rootx(), btn.winfo_rooty() + btn.winfo_height())
-                        finally:
-                            menu.grab_release()
-                    elif command:
-                        command()
-
-                btn.bind("<Enter>", on_enter)
-                btn.bind("<Leave>", on_leave)
-                btn.bind("<ButtonPress-1>", on_press)
-                btn.bind("<ButtonRelease-1>", on_release)
+                if menu is not None:
+                    self._toolbar_menus[text] = menu
+                if command is not None:
+                    self._toolbar_commands[text] = command
+                self._bind_toolbar_label_hover(btn, play=play, menu=menu, command=command)
                 return btn
 
             for pill_label in ["Home", "Gallery", "Playlist", "Queue", "Favourites", "Tags & Ratings", "History"]:
@@ -4949,24 +4876,7 @@ def select_multiple_folders_and_play():
                 bg=c["bg"], fg=c["fg"],
                 font=("Segoe UI", 12), padx=12, pady=10, cursor="hand2")
             self.theme_toolbar_btn.pack(side=tk.RIGHT, padx=(0, 6))
-
-            def _theme_enter(e):
-                self.theme_toolbar_btn.config(bg=c["hover"], fg=c["fg"])
-
-            def _theme_leave(e):
-                self.theme_toolbar_btn.config(bg=c["bg"], fg=c["fg"])
-
-            def _theme_press(e):
-                self.theme_toolbar_btn.config(bg=c["active"], fg="#FFFFFF")
-
-            def _theme_release(e):
-                self.theme_toolbar_btn.config(bg=c["hover"], fg=c["fg"])
-                self._toggle_theme_menu()
-
-            self.theme_toolbar_btn.bind("<Enter>", _theme_enter)
-            self.theme_toolbar_btn.bind("<Leave>", _theme_leave)
-            self.theme_toolbar_btn.bind("<ButtonPress-1>", _theme_press)
-            self.theme_toolbar_btn.bind("<ButtonRelease-1>", _theme_release)
+            self._bind_theme_toolbar_hover()
 
             # Play button (prominent)
             self.play_toolbar_btn = tk.Label(
@@ -4974,24 +4884,7 @@ def select_multiple_folders_and_play():
                 bg=c["play_fg"], fg="#FFFFFF",
                 font=("Segoe UI", 10, "bold"), padx=16, pady=10, cursor="hand2")
             self.play_toolbar_btn.pack(side=tk.RIGHT, padx=(0, 8))
-
-            def _play_enter(e):
-                self.play_toolbar_btn.config(bg=c["play_hover_bg"], fg="#FFFFFF")
-
-            def _play_leave(e):
-                self.play_toolbar_btn.config(bg=c["play_fg"], fg="#FFFFFF")
-
-            def _play_press(e):
-                self.play_toolbar_btn.config(bg=c["play_active_bg"], fg="#FFFFFF")
-
-            def _play_release(e):
-                self.play_toolbar_btn.config(bg=c["play_hover_bg"], fg="#FFFFFF")
-                self.global_play()
-
-            self.play_toolbar_btn.bind("<Enter>", _play_enter)
-            self.play_toolbar_btn.bind("<Leave>", _play_leave)
-            self.play_toolbar_btn.bind("<ButtonPress-1>", _play_press)
-            self.play_toolbar_btn.bind("<ButtonRelease-1>", _play_release)
+            self._bind_play_toolbar_hover()
 
             # Original button_frame remains for legacy compatibility
             self.button_frame = tk.Frame(self.main_frame, bg=self.bg_color)
