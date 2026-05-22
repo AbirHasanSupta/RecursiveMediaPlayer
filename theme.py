@@ -203,90 +203,68 @@ class ThemeSelector:
 
     def apply_theme(self):
         if self.dark_mode:
-            self.bg_color          = "#2B2B2B"
-            self.accent_color      = "#4A9EFF"
-            self.text_color        = "#A9B7C6"
-            self.listbox_bg        = "#313335"
-            self.listbox_fg        = "#A9B7C6"
-            self.listbox_select_bg = "#214283"
-            self.console_bg        = "#1E1F22"
-            self.console_fg        = "#BCBEC4"
-            self.frame_border      = "#323232"
-            self.header_color      = "#BBBBBB"
-            self.entry_bg          = "#313335"
-            self.entry_fg          = "#A9B7C6"
-            self.entry_border      = "#323232"
-            self.muted_fg          = "#6B7A8A"
-            self.badge_bg          = "#3C3F41"
-            self.badge_fg          = "#A9B7C6"
-            self.alt_row_color     = "#313335"
-            self.divider_color     = "#3A3B3E"
+            self.bg_color = "#0F1217"
+            self.surface_color = "#1A1E26"
+            self.accent_color = "#7B9CFF"
+            self.accent_secondary = "#FF8A8A"
+            self.text_color = "#E2E8F0"
+            self.text_muted = "#8A99B5"
+            self.border_color = "#2A303C"
+            self.hover_color = "#252C38"
+            self.listbox_bg = "#1A1E26"
+            self.listbox_fg = "#E2E8F0"
+            self.listbox_select_bg = "#7B9CFF"
+            self.console_bg = "#1A1E26"
+            self.console_fg = "#E2E8F0"
+            self.entry_bg = "#1A1E26"
+            self.entry_fg = "#E2E8F0"
+            self.entry_border = "#2A303C"
+            self.alt_row_color = "#252C38"
+            self.badge_bg = "#2A303C"
+            self.badge_fg = "#E2E8F0"
+            self.divider_color = "#2A303C"
         else:
-            self.bg_color          = "#f5f5f5"
-            self.accent_color      = "#3498db"
-            self.text_color        = "#333333"
-            self.listbox_bg        = "white"
-            self.listbox_fg        = "#333333"
-            self.listbox_select_bg = "#3498db"
-            self.console_bg        = "#2c3e50"
-            self.console_fg        = "#ecf0f1"
-            self.frame_border      = "#cccccc"
-            self.entry_bg          = "white"
-            self.entry_fg          = "#333333"
-            self.entry_border      = "#e0e0e0"
-            self.header_color      = "#333333"
-            self.muted_fg          = "#666666"
-            self.badge_bg          = "#e8e8e8"
-            self.badge_fg          = "#333333"
-            self.alt_row_color     = "#ebebeb"
-            self.divider_color     = "#dddddd"
+            self.bg_color = "#F7F9FC"
+            self.surface_color = "#FFFFFF"
+            self.accent_color = "#5E81F4"
+            self.accent_secondary = "#FF6B6B"
+            self.text_color = "#1E2A3A"
+            self.text_muted = "#5B6C8F"
+            self.border_color = "#E2E8F0"
+            self.hover_color = "#EDF2F7"
+            self.listbox_bg = "#FFFFFF"
+            self.listbox_fg = "#1E2A3A"
+            self.listbox_select_bg = "#5E81F4"
+            self.console_bg = "#1E2A3A"
+            self.console_fg = "#F7F9FC"
+            self.entry_bg = "#FFFFFF"
+            self.entry_fg = "#1E2A3A"
+            self.entry_border = "#E2E8F0"
+            self.alt_row_color = "#F7F9FC"
+            self.badge_bg = "#EDF2F7"
+            self.badge_fg = "#1E2A3A"
+            self.divider_color = "#E2E8F0"
 
-        if hasattr(self, 'theme_button'):
-            self.theme_button.config(text="Light Mode" if self.dark_mode else "Dark Mode")
-
+        # Apply colours to root and main frames
         self.root.configure(bg=self.bg_color)
         self.main_frame.configure(bg=self.bg_color)
         self.content_frame.configure(bg=self.bg_color)
-
-        for section in ['dir_section', 'exclusion_section', 'status_frame', 'button_frame']:
+        for section in ['dir_section', 'status_frame', 'button_frame']:
             if hasattr(self, section):
                 getattr(self, section).configure(bg=self.bg_color)
 
-        for frame_attr in dir(self):
-            if frame_attr.endswith('_frame') and hasattr(self, frame_attr):
-                frame = getattr(self, frame_attr)
-                if hasattr(self, 'toolbar') and frame is self.toolbar:
-                    continue
-                if isinstance(frame, tk.Frame):
-                    frame.configure(bg=self.bg_color)
-
-        self._fix_toolbar_colors()
-
+        # Update labels
         for label_attr in dir(self):
             if label_attr.endswith('_label') and hasattr(self, label_attr):
-                if label_attr == 'sleep_countdown_label':
-                    continue
                 label = getattr(self, label_attr)
                 if isinstance(label, tk.Label):
-                    if 'header' in label_attr or label.cget('font') == str(self.header_font):
-                        label.configure(bg=self.bg_color, fg=self.header_color)
-                    else:
-                        label.configure(bg=self.bg_color, fg=self.text_color)
+                    label.configure(bg=self.bg_color, fg=self.text_color)
 
-        if hasattr(self, 'dir_listbox'):
-            self.dir_listbox.configure(
-                bg=self.listbox_bg,
-                fg=self.listbox_fg,
-                selectbackground=self.listbox_select_bg,
-                selectforeground="white",
-                highlightbackground=self.frame_border,
-            )
-
-        # ── Treeview (exclusion panel) ────────────────────────────────────
-        # Re-run the style + tag configuration so colours match the new theme.
+        # Treeview style
         if hasattr(self, 'exclusion_tree') and hasattr(self, '_configure_tree_style'):
             self._configure_tree_style()
 
+        # Console
         if hasattr(self, 'console_text'):
             self.console_text.configure(
                 bg=self.console_bg, fg=self.console_fg,
@@ -294,38 +272,7 @@ class ThemeSelector:
                 insertbackground=self.console_fg,
             )
 
-        if hasattr(self, 'scrollbar') and self.dark_mode:
-            self.scrollbar.configure(bg=self.bg_color, troughcolor=self.listbox_bg)
-
-        if hasattr(self, 'console_scrollbar') and self.dark_mode:
-            self.console_scrollbar.configure(bg=self.console_bg, troughcolor=self.console_bg)
-
-        # Update exclusion container border color
-        if hasattr(self, 'exclusion_frame'):
-            for child in self.exclusion_frame.winfo_children():
-                if isinstance(child, tk.Frame):
-                    child.configure(
-                        bg=self.listbox_bg,
-                        highlightbackground=self.frame_border
-                    )
-
-        self.update_container_borders()
-        self._apply_menubar_colors()
-
-        style = ttk.Style()
-        style.configure("TFrame",     background=self.bg_color)
-        style.configure("TLabel",     background=self.bg_color, foreground=self.text_color)
-        style.configure(
-            "Modern.TCheckbutton",
-            background=self.bg_color, foreground=self.text_color,
-            font=("Segoe UI", 10), padding=4,
-        )
-        style.map(
-            "Modern.TCheckbutton",
-            foreground=[("active", self.text_color), ("selected", self.accent_color)],
-            background=[("active", self.bg_color)],
-        )
-
+        # Entries
         for entry_attr in dir(self):
             if entry_attr.endswith('_entry') and hasattr(self, entry_attr):
                 entry = getattr(self, entry_attr)
@@ -336,22 +283,23 @@ class ThemeSelector:
                         highlightbackground=self.entry_border,
                     )
 
-        style.configure("TRadiobutton", background=self.bg_color, foreground=self.text_color)
-        style.map("TRadiobutton", background=[("active", self.bg_color)])
-
+        # Buttons
         self.update_all_buttons()
-        _dir_w = self.dir_section.winfo_width() if hasattr(self, 'dir_section') else 0
-        _exc_w = self.exclusion_section.winfo_width() if hasattr(self, 'exclusion_section') else 0
 
-        self.update_frames_recursive(self.root)
+        # Toolbar and pills
+        if hasattr(self, '_fix_toolbar_colors'):
+            self._fix_toolbar_colors()
+        if hasattr(self, '_fix_pill_colors'):
+            self._fix_pill_colors()
+        if hasattr(self, '_refresh_media_pill_state'):
+            self._refresh_media_pill_state()
 
-        # Restore widths if they were valid (not 1/default)
-        if _dir_w > 1 and _exc_w > 1:
-            self.dir_section.configure(width=_dir_w)
-            self.exclusion_section.configure(width=_exc_w)
-            self.dir_section.pack_propagate(False)
-            self.exclusion_section.pack_propagate(False)
-        self._apply_theme_to_toplevels()
+        # Reload home dashboard if visible
+        if getattr(self, '_active_app_view', None) == 'home':
+            if hasattr(self, 'exclusion_section') and self.exclusion_section.winfo_ismapped():
+                self.exclusion_section.pack_forget()
+            self._render_home_dashboard()
+
 
     def _get_loop_icon(self):
         icons = {"loop_on": "⟳  ON", "loop_off": "→ OFF", "shuffle": "⤨ RND"}
@@ -509,29 +457,29 @@ class ThemeSelector:
     def get_button_colors(self, variant):
         if self.dark_mode:
             variants = {
-                "primary":  {"bg": "#365880", "fg": "#A9B7C6", "active": "#4A6BA3"},
-                "success":  {"bg": "#499C54", "fg": "white",   "active": "#5AAE66"},
-                "danger":   {"bg": "#C75450", "fg": "white",   "active": "#E06862"},
-                "warning":  {"bg": "#CC7832", "fg": "white",   "active": "#D68843"},
-                "secondary":{"bg": "#4C5052", "fg": "#A9B7C6", "active": "#5C6164"},
-                "dark":     {"bg": "#3A3A3C", "fg": "#A9B7C6", "active": "#4A4A4C"},
-                "theme":    {"bg": "#5C6164", "fg": "#FFFFFF",  "active": "#6C7174"},
-                "playlist": {"bg": "#9b59b6", "fg": "white",   "active": "#8e44ad"},
-                "history":  {"bg": "#5a6c7d", "fg": "white",   "active": "#4a5a6b"},
-                "settings": {"bg": "#6c7b7c", "fg": "white",   "active": "#5a6c6d"},
+                "primary": {"bg": "#2D5A8E", "fg": "#FFFFFF", "active": "#1A4070"},
+                "success": {"bg": "#2E7D32", "fg": "#FFFFFF", "active": "#1B5E20"},
+                "danger": {"bg": "#C62828", "fg": "#FFFFFF", "active": "#B71C1C"},
+                "warning": {"bg": "#F57C00", "fg": "#FFFFFF", "active": "#E65100"},
+                "secondary": {"bg": "#4A5568", "fg": "#FFFFFF", "active": "#2D3748"},
+                "dark": {"bg": "#2D3748", "fg": "#FFFFFF", "active": "#1A202C"},
+                "theme": {"bg": "#4A5568", "fg": "#FFFFFF", "active": "#2D3748"},
+                "playlist": {"bg": "#6B46C1", "fg": "#FFFFFF", "active": "#553C9A"},
+                "history": {"bg": "#3182CE", "fg": "#FFFFFF", "active": "#2B6CB0"},
+                "settings": {"bg": "#718096", "fg": "#FFFFFF", "active": "#4A5568"},
             }
         else:
             variants = {
-                "primary":  {"bg": "#2d89ef", "fg": "white", "active": "#1e70cf"},
-                "success":  {"bg": "#27ae60", "fg": "white", "active": "#229954"},
-                "danger":   {"bg": "#e74c3c", "fg": "white", "active": "#c0392b"},
-                "warning":  {"bg": "#f39c12", "fg": "white", "active": "#e67e22"},
-                "secondary":{"bg": "#95a5a6", "fg": "white", "active": "#7f8c8d"},
-                "dark":     {"bg": "#34495e", "fg": "white", "active": "#2c3e50"},
-                "theme":    {"bg": "#34495e", "fg": "white", "active": "#2c3e50"},
-                "playlist": {"bg": "#8e44ad", "fg": "white", "active": "#7d3c98"},
-                "history":  {"bg": "#2c3e50", "fg": "white", "active": "#34495e"},
-                "settings": {"bg": "#7f8c8d", "fg": "white", "active": "#6c7b7c"},
+                "primary": {"bg": "#5E81F4", "fg": "#FFFFFF", "active": "#4A6CD4"},
+                "success": {"bg": "#38A169", "fg": "#FFFFFF", "active": "#2F855A"},
+                "danger": {"bg": "#FF6B6B", "fg": "#FFFFFF", "active": "#E05555"},
+                "warning": {"bg": "#ED8936", "fg": "#FFFFFF", "active": "#DD6B20"},
+                "secondary": {"bg": "#A0AEC0", "fg": "#FFFFFF", "active": "#718096"},
+                "dark": {"bg": "#4A5568", "fg": "#FFFFFF", "active": "#2D3748"},
+                "theme": {"bg": "#4A5568", "fg": "#FFFFFF", "active": "#2D3748"},
+                "playlist": {"bg": "#9F7AEA", "fg": "#FFFFFF", "active": "#805AD5"},
+                "history": {"bg": "#4299E1", "fg": "#FFFFFF", "active": "#3182CE"},
+                "settings": {"bg": "#A0AEC0", "fg": "#FFFFFF", "active": "#718096"},
             }
         return variants.get(variant, variants["primary"])
 
@@ -627,7 +575,7 @@ class ThemeSelector:
             self.sleep_countdown_label.config(bg=cc["bg"], fg=cc["fg"])
         for child in self.toolbar.winfo_children():
             if isinstance(child, tk.Frame):
-                child.configure(bg=cc["sep"])
+                child.configure(bg=cc["border"])  # changed from cc["sep"]
         self._fix_pill_colors()
 
     def _fix_pill_colors(self):
