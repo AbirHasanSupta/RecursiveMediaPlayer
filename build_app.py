@@ -596,7 +596,7 @@ def select_multiple_folders_and_play():
             return btn
 
         def setup_main_layout(self):
-            self._active_app_view = "home"
+            self._active_app_view = "gallery"
             self.active_embedded_manager = None
             self.embedded_view_frame = None
             self._directory_panel_mode = "expanded"
@@ -614,12 +614,12 @@ def select_multiple_folders_and_play():
             title_block = tk.Frame(self.workspace_header, bg=self.bg_color)
             title_block.pack(side=tk.LEFT, fill=tk.Y)
             self.workspace_title_label = tk.Label(
-                title_block, text="Library", font=self.header_font,
+                title_block, text="Gallery", font=self.header_font,
                 bg=self.bg_color, fg=self.text_color
             )
             self.workspace_title_label.pack(anchor="w")
             self.workspace_context_label = tk.Label(
-                title_block, text="Select a directory to browse videos",
+                title_block, text="No directory selected",
                 font=self.small_font, bg=self.bg_color, fg=self.muted_fg
             )
             self.workspace_context_label.pack(anchor="w", pady=(2, 0))
@@ -655,15 +655,13 @@ def select_multiple_folders_and_play():
                 self.embedded_view_frame.pack_forget()
                 for child in self.embedded_view_frame.winfo_children():
                     child.destroy()
-            if hasattr(self, "exclusion_section") and self.exclusion_section.winfo_exists():
-                self.exclusion_section.pack(fill=tk.BOTH, expand=True)
-            self._set_workspace_title("Library", "Browse the selected directory")
-            self._active_app_view = "home"
+            self._set_workspace_title("Gallery", "No directory selected")
+            self._active_app_view = "gallery"
             self._refresh_media_pill_state()
 
         def _show_embedded_view(self, view_name, builder):
             self._cleanup_active_manager()
-            if hasattr(self, "exclusion_section") and self.exclusion_section.winfo_exists():
+            if hasattr(self, 'exclusion_section') and self.exclusion_section.winfo_ismapped():
                 self.exclusion_section.pack_forget()
             frame = self._ensure_embedded_view_frame()
             frame.configure(bg=self.bg_color)
@@ -672,7 +670,7 @@ def select_multiple_folders_and_play():
                 child.destroy()
             self._active_app_view = view_name
             self._set_workspace_title(
-                getattr(self, "_view_tab_labels", {}).get(view_name, view_name.title()),
+                getattr(self, "_view_tab_labels", {}).get(getattr(self, "_active_app_view", "gallery"), "Gallery"),
                 self._selected_directory_summary()
             )
             self._refresh_media_pill_state()
@@ -842,11 +840,12 @@ def select_multiple_folders_and_play():
 
         def apply_theme(self):
             dir_w = self.dir_section.winfo_width() if hasattr(self, 'dir_section') else 0
-            exc_w = self.exclusion_section.winfo_width() if hasattr(self, 'exclusion_section') else 0
 
             super().apply_theme()
 
             self._reapply_tree_columns()
+            if hasattr(self, 'exclusion_tree'):
+                self._configure_tree_style()
 
             style = ttk.Style()
             style.configure("ExclusionTree.Treeview.Heading",
@@ -859,39 +858,20 @@ def select_multiple_folders_and_play():
                       foreground=[('active', self.text_color), ('pressed', self.text_color),
                                   ('focus', self.text_color)])
 
-            if dir_w > 10 and exc_w > 10:
+            if dir_w > 10:
                 self.dir_section.config(width=dir_w)
-                self.exclusion_section.config(width=exc_w)
                 self.dir_section.pack_propagate(False)
-                self.exclusion_section.pack_propagate(False)
 
         def _reapply_tree_columns(self):
-            """Reconfigure treeview columns (preserves size column, toggles annotation columns)."""
             if not hasattr(self, 'exclusion_tree'):
                 return
-            show_ann = self.settings_manager.get_settings().show_video_annotations_in_tree
-
-            if show_ann:
-                self.exclusion_tree.configure(columns=("rating", "tags", "size"))
-                self.exclusion_tree.column("rating", width=100, minwidth=100, stretch=False, anchor="center")
-                self.exclusion_tree.column("tags", width=180, minwidth=120, stretch=False, anchor="w")
-                self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
-                self.exclusion_tree.heading("rating", text="Rating", anchor="center")
-                self.exclusion_tree.heading("tags", text="Tags", anchor="w")
-                self.exclusion_tree.heading("size", text="Size", anchor="e")
-            else:
-                self.exclusion_tree.configure(columns=("size",))
-                self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
-                self.exclusion_tree.heading("size", text="Size", anchor="e")
-
-            # Name column (always present)
-            self.exclusion_tree.column("#0", width=400, minwidth=200, stretch=True, anchor="w")
-            self.exclusion_tree.heading("#0", text="Name", anchor="w")
+            self.exclusion_tree.configure(columns=())
+            self.exclusion_tree.column("#0", minwidth=200, stretch=True, anchor="w")
 
         def setup_directory_section(self):
             self.dir_section = tk.Frame(self.content_frame, bg=self.bg_color)
             self.dir_section.pack(side=tk.LEFT, fill=tk.Y, expand=False, padx=(0, 14), before=self.workspace_frame)
-            self.dir_section.config(width=360)
+            self.dir_section.config(width=460)
             self.dir_section.pack_propagate(False)
 
             self.dir_compact_rail = tk.Frame(self.content_frame, bg=self.bg_color, width=56)
@@ -904,9 +884,9 @@ def select_multiple_folders_and_play():
             compact_open.pack(fill=tk.X, pady=(0, 8))
 
             dir_header_frame = tk.Frame(self.dir_section, bg=self.bg_color)
-            dir_header_frame.pack(fill=tk.X, pady=(0, 10))
+            dir_header_frame.pack(fill=tk.X, pady=(0, 6))
 
-            self.dir_header_label = tk.Label(dir_header_frame, text="Directories",
+            self.dir_header_label = tk.Label(dir_header_frame, text="Gallery",
                                              font=self.header_font, bg=self.bg_color, fg=self.text_color)
             self.dir_header_label.pack(side=tk.LEFT, anchor='w')
 
@@ -916,35 +896,277 @@ def select_multiple_folders_and_play():
             )
             self.dir_shrink_btn.pack(side=tk.RIGHT)
 
+            add_dir_btn = self.create_button(
+                dir_header_frame, text="+", command=self.add_directory,
+                variant="secondary", size="sm"
+            )
+            add_dir_btn.pack(side=tk.RIGHT, padx=(0, 4))
+
+            # Search bar
+            search_frame = tk.Frame(self.dir_section, bg=self.bg_color)
+            search_frame.pack(fill=tk.X, pady=(0, 4))
+
+            self.search_entry = tk.Entry(
+                search_frame, font=self.small_font, bg="white", fg=self.text_color,
+                relief=tk.FLAT, bd=1, highlightthickness=1, highlightbackground="#e0e0e0"
+            )
+            self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+            self.search_entry.bind('<KeyRelease>', self.on_search_changed)
+
+            clear_search_btn = self.create_button(
+                search_frame, text="✕", command=self.clear_search,
+                variant="secondary", size="sm"
+            )
+            clear_search_btn.pack(side=tk.LEFT)
+
+            # Main tree container (fills most of the panel)
             self.dir_frame = tk.Frame(self.dir_section, bg=self.bg_color)
             self.dir_frame.pack(fill=tk.BOTH, expand=True)
 
-            list_container = tk.Frame(self.dir_frame, bg=self.bg_color,
+            tree_container = tk.Frame(self.dir_frame, bg=self.bg_color,
                                       highlightbackground="#cccccc", highlightthickness=1)
-            list_container.pack(fill=tk.BOTH, expand=True)
+            tree_container.pack(fill=tk.BOTH, expand=True)
 
-            self.scrollbar = tk.Scrollbar(list_container)
-            self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            self.exclusion_scrollbar = ttk.Scrollbar(tree_container, orient=tk.VERTICAL)
+            self.exclusion_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-            self.dir_listbox = tk.Listbox(
-                list_container, selectmode=tk.EXTENDED,
-                yscrollcommand=self.scrollbar.set,
-                font=self.normal_font, bg="white", fg=self.text_color,
-                selectbackground=self.accent_color, selectforeground="white",
-                activestyle="none", relief=tk.FLAT, highlightthickness=1,
-                highlightbackground="#e0e0e0", bd=0
+            self.exclusion_tree = ttk.Treeview(
+                tree_container,
+                style="ExclusionTree.Treeview",
+                selectmode="extended",
+                show="tree",
+                columns=(),
+                yscrollcommand=self.exclusion_scrollbar.set,
             )
-            self.dir_listbox.pack(fill=tk.BOTH, expand=True)
-            self.dir_listbox.bind('<<ListboxSelect>>', self.on_directory_select)
-            self.dir_listbox.bind('<FocusOut>', self.on_directory_focus_out)
-            self.dir_listbox.bind('<FocusIn>', self.on_directory_focus_in)
-            self.dir_listbox.bind('<Button-1>', self._on_main_dir_left_click)
-            self.dir_listbox.bind('<Button-3>', self._show_main_dir_context_menu)
-            self.dir_listbox.bind('<Control-a>', self._select_all_main_dirs)
-            self.dir_listbox.bind('<Control-A>', self._select_all_main_dirs)
-            self.dir_listbox.bind('<B1-Motion>', self._on_drag)
-            self.dir_listbox.bind('<ButtonRelease-1>', self._on_drop)
-            self.scrollbar.config(command=self.dir_listbox.yview)
+            self.exclusion_scrollbar.config(command=self.exclusion_tree.yview)
+            self.exclusion_tree.column("#0", minwidth=200, stretch=True, anchor="w")
+            self.exclusion_tree.pack(fill=tk.BOTH, expand=True)
+
+            # Shim: dir_listbox API backed by dir_tree iid->root-dir mapping
+            self._dir_root_iids = []   # ordered list of iids for root dirs
+            self._dir_iid_selected = set()
+
+            class _DirListboxShim:
+                def __init__(shim, owner):
+                    shim.owner = owner
+
+                def insert(shim, pos, display_name):
+                    idx = len(shim.owner._dir_root_iids)
+                    iid = f"__root_{idx}__"
+                    shim.owner._dir_root_iids.append(iid)
+                    shim.owner.exclusion_tree.insert(
+                        "", tk.END, iid=iid,
+                        text=f"📁 {display_name}", tags=("folder",), open=False
+                    )
+                    shim.owner.current_subdirs_mapping[iid] = shim.owner.selected_dirs[idx] if idx < len(shim.owner.selected_dirs) else display_name
+
+                def delete(shim, index):
+                    if 0 <= index < len(shim.owner._dir_root_iids):
+                        iid = shim.owner._dir_root_iids.pop(index)
+                        # Collect all descendant iids before deleting
+                        def _collect_all(parent):
+                            result = []
+                            try:
+                                for child in shim.owner.exclusion_tree.get_children(parent):
+                                    result.append(child)
+                                    result.extend(_collect_all(child))
+                            except Exception:
+                                pass
+                            return result
+                        descendants = _collect_all(iid)
+                        try:
+                            shim.owner.exclusion_tree.delete(iid)
+                        except Exception:
+                            pass
+                        for d in descendants + [iid]:
+                            if d in shim.owner.current_subdirs_mapping:
+                                del shim.owner.current_subdirs_mapping[d]
+
+                def curselection(shim):
+                    sel = list(shim.owner.exclusion_tree.selection())
+                    result = []
+                    for iid in sel:
+                        if iid in shim.owner._dir_root_iids:
+                            result.append(shim.owner._dir_root_iids.index(iid))
+                    return tuple(sorted(set(result)))
+
+                def selection_clear(shim, first, last=None):
+                    if last is None:
+                        try:
+                            shim.owner.exclusion_tree.selection_remove(shim.owner._dir_root_iids[first])
+                        except Exception:
+                            pass
+                    else:
+                        for i in range(first, min(last + 1, len(shim.owner._dir_root_iids))):
+                            try:
+                                shim.owner.exclusion_tree.selection_remove(shim.owner._dir_root_iids[i])
+                            except Exception:
+                                pass
+
+                def selection_set(shim, index):
+                    if 0 <= index < len(shim.owner._dir_root_iids):
+                        shim.owner.exclusion_tree.selection_add(shim.owner._dir_root_iids[index])
+
+                def activate(shim, index):
+                    if 0 <= index < len(shim.owner._dir_root_iids):
+                        shim.owner.exclusion_tree.focus(shim.owner._dir_root_iids[index])
+
+                def nearest(shim, y):
+                    iid = shim.owner.exclusion_tree.identify_row(y)
+                    if iid and iid in shim.owner._dir_root_iids:
+                        return shim.owner._dir_root_iids.index(iid)
+                    return -1
+
+                def size(shim):
+                    return len(shim.owner._dir_root_iids)
+
+                def get(shim, index):
+                    if 0 <= index < len(shim.owner._dir_root_iids):
+                        iid = shim.owner._dir_root_iids[index]
+                        return shim.owner.exclusion_tree.item(iid, "text")
+                    return ""
+
+                def yview(shim):
+                    return shim.owner.exclusion_tree.yview()
+
+                def bind(shim, *args, **kwargs):
+                    pass  # bindings handled on exclusion_tree directly
+
+                def configure(shim, **kwargs):
+                    pass  # tree is a Treeview; theme applies via _configure_tree_style
+
+                config = configure  # tk alias
+
+            self.dir_listbox = _DirListboxShim(self)
+
+            # Bind events on the tree
+            self._selection_anchor = None
+            self.exclusion_tree.bind("<Button-1>", self._on_tree_left_click_unified)
+            self.exclusion_tree.bind("<Double-Button-1>", self._on_double_click)
+            self.exclusion_tree.bind("<Button-3>", self._on_tree_right_click_unified)
+            self.exclusion_tree.bind("<<TreeviewOpen>>", self._on_tree_open)
+            self.exclusion_tree.bind("<<TreeviewClose>>", self._on_tree_close)
+            self.exclusion_tree.bind("<Control-a>",
+                                     lambda e: (self.exclusion_tree.selection_set(self._tree_get_all_iids()), "break")[1])
+            self.exclusion_tree.bind("<Control-A>",
+                                     lambda e: (self.exclusion_tree.selection_set(self._tree_get_all_iids()), "break")[1])
+            self.exclusion_tree.bind("<Delete>", self._on_key_toggle_exclusion)
+            self.exclusion_tree.bind("<space>", self._on_key_toggle_exclusion)
+
+            # Checkboxes row at the bottom of the panel
+            self.exclusion_buttons_frame = tk.Frame(self.dir_section, bg=self.bg_color)
+            self.exclusion_buttons_frame.pack(fill=tk.X, pady=(6, 0))
+
+            self.search_frame = tk.Frame(self.dir_section, bg=self.bg_color)  # kept for compat
+
+        def _on_tree_left_click_unified(self, event):
+            iid = self.exclusion_tree.identify_row(event.y)
+            region = self.exclusion_tree.identify_region(event.x, event.y)
+
+            if region == "tree":
+                return
+
+            if not iid:
+                self.exclusion_tree.selection_remove(self.exclusion_tree.selection())
+                self._selection_anchor = None
+                return
+
+            is_root = iid in self._dir_root_iids
+
+            ctrl_held  = bool(event.state & 0x4)
+            shift_held = bool(event.state & 0x1)
+            current    = list(self.exclusion_tree.selection())
+
+            if shift_held:
+                if self._selection_anchor is None:
+                    self._selection_anchor = current[0] if current else iid
+                all_iids = self._tree_get_all_iids()
+                try:
+                    a = all_iids.index(self._selection_anchor)
+                    b = all_iids.index(iid)
+                except ValueError:
+                    a = b = 0
+                start, end = min(a, b), max(a, b)
+                self.exclusion_tree.selection_set(all_iids[start:end + 1])
+                if is_root:
+                    self._trigger_root_selection(iid)
+                return "break"
+
+            if ctrl_held:
+                if iid in current:
+                    self.exclusion_tree.selection_remove(iid)
+                else:
+                    self.exclusion_tree.selection_add(iid)
+                self._selection_anchor = iid
+                if is_root:
+                    self._trigger_root_selection(iid)
+                return "break"
+
+            # Plain click
+            if is_root:
+                if current == [iid]:
+                    # toggle off
+                    self.exclusion_tree.selection_remove(iid)
+                    self.current_selected_dir_index = None
+                    self.clear_exclusion_children(iid)
+                    self._is_filtered_mode = False
+                    self._selection_anchor = None
+                    return "break"
+                self.exclusion_tree.selection_set(iid)
+                self._selection_anchor = iid
+                self._trigger_root_selection(iid)
+                return "break"
+
+            # Non-root item
+            self.exclusion_tree.selection_set(iid)
+            self._selection_anchor = iid
+            return "break"
+
+        def _trigger_root_selection(self, iid):
+            if iid not in self._dir_root_iids:
+                return
+            idx = self._dir_root_iids.index(iid)
+            self._is_filtered_mode = False
+            self.current_selected_dir_index = idx
+            selected_dir = self.selected_dirs[idx] if idx < len(self.selected_dirs) else None
+            if not selected_dir:
+                return
+            self._set_workspace_title(
+                getattr(self, "_view_tab_labels", {}).get(getattr(self, "_active_app_view", "home"), "Gallery"),
+                self._selected_directory_summary()
+            )
+            self._refresh_active_manager_for_directory_context()
+            self.expanded_paths.clear()
+            self.collapsed_paths.clear()
+            self._load_root_children(iid, selected_dir)
+
+        def _load_root_children(self, root_iid, directory):
+            # Remove existing children of this root node, then populate via load_subdirectories
+            for child in self.exclusion_tree.get_children(root_iid):
+                self.exclusion_tree.delete(child)
+                # clean mapping
+                if child in self.current_subdirs_mapping:
+                    del self.current_subdirs_mapping[child]
+            self.load_subdirectories(directory, max_depth=20, _root_iid=root_iid)
+
+        def clear_exclusion_children(self, root_iid):
+            for child in list(self.exclusion_tree.get_children(root_iid)):
+                try:
+                    self.exclusion_tree.delete(child)
+                except Exception:
+                    pass
+
+        def _on_tree_right_click_unified(self, event):
+            iid = self.exclusion_tree.identify_row(event.y)
+            if iid and iid in self._dir_root_iids:
+                # Right-click on a root dir: show root dir context menu
+                if iid not in self.exclusion_tree.selection():
+                    self.exclusion_tree.selection_set(iid)
+                idx = self._dir_root_iids.index(iid)
+                self._show_main_dir_context_menu_for_index(event, idx)
+            else:
+                # Delegate to existing exclusion tree context menu
+                self._show_context_menu(event)
 
         def shrink_directory_panel(self):
             self._set_directory_panel_mode("compact")
@@ -966,7 +1188,7 @@ def select_multiple_folders_and_play():
                 self.dir_compact_rail.pack_forget()
             if not self.dir_section.winfo_ismapped():
                 self.dir_section.pack(side=tk.LEFT, fill=tk.Y, expand=False, padx=(0, 14), before=self.workspace_frame)
-            self.dir_section.config(width=360)
+            self.dir_section.config(width=460)
 
         def on_directory_focus_out(self, event):
             selection = self.dir_listbox.curselection()
@@ -1066,118 +1288,16 @@ def select_multiple_folders_and_play():
             self.exclusion_tree.tag_configure("ann_bookmark", foreground=bm_teal)
 
         def setup_exclusion_section(self):
+            # Tree and search bar are now in the left panel (setup_directory_section).
+            # This method only wires up the checkboxes into exclusion_buttons_frame.
             self.exclusion_section = tk.Frame(self.workspace_body, bg=self.bg_color)
             self.exclusion_section.pack(fill=tk.BOTH, expand=True)
-            self._set_workspace_title("Library", self._selected_directory_summary())
+            self._set_workspace_title("Gallery", self._selected_directory_summary())
 
-            # exclusion_header_frame = tk.Frame(self.exclusion_section, bg=self.bg_color)
-            # exclusion_header_frame.pack(fill=tk.X, pady=(0, 10))
-            #
-            # exclusion_header = tk.Label(exclusion_header_frame, text="Subdirectories and Videos",
-            #                             font=self.header_font, bg=self.bg_color, fg=self.text_color)
-            # exclusion_header.pack(side=tk.LEFT, anchor='w')
-            #
-            # self.video_count_label = tk.Label(
-            #     exclusion_header_frame, text="  —  0 videos",
-            #     font=self.normal_font, bg=self.bg_color, fg="#888888"
-            # )
-            # self.video_count_label.pack(side=tk.LEFT, anchor='w')
-
-            # self.selected_dir_label = tk.Label(
-            #     self.exclusion_section,
-            #     text="Select a directory to see its folders and videos",
-            #     font=self.small_font, bg=self.bg_color, fg="#666666"
-            # )
-            # self.selected_dir_label.pack(anchor='w', pady=(0, 10))
-
-            self.search_frame = tk.Frame(self.exclusion_section, bg=self.bg_color)
-            self.search_frame.pack(fill=tk.X, pady=(0, 10))
-
-            search_label = tk.Label(self.search_frame, text="Search:",
-                                    font=self.small_font, bg=self.bg_color, fg=self.text_color)
-            search_label.pack(side=tk.LEFT, padx=(0, 5))
-
-            self.search_entry = tk.Entry(
-                self.search_frame, font=self.normal_font, bg="white", fg=self.text_color,
-                relief=tk.FLAT, bd=1, highlightthickness=1, highlightbackground="#e0e0e0"
-            )
-            self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-            self.search_entry.bind('<KeyRelease>', self.on_search_changed)
-
-            clear_search_btn = self.create_button(
-                self.search_frame, text="Clear", command=self.clear_search,
-                variant="secondary", size="sm"
-            )
-            clear_search_btn.pack(side=tk.LEFT)
-
-            # ── Treeview container ─────────────────────────────────────────────
-            self.exclusion_frame = tk.Frame(self.exclusion_section, bg=self.bg_color)
-            self.exclusion_frame.pack(fill=tk.BOTH, expand=True)
-
-            exclusion_container = tk.Frame(
-                self.exclusion_frame, bg=self.bg_color,
-                highlightbackground="#cccccc", highlightthickness=1
-            )
-            exclusion_container.pack(fill=tk.BOTH, expand=True)
-
-            # Scrollbars
-            self.exclusion_scrollbar = ttk.Scrollbar(exclusion_container, orient=tk.VERTICAL)
-            self.exclusion_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-            # Treeview
-            self.exclusion_tree = ttk.Treeview(
-                exclusion_container,
-                style="ExclusionTree.Treeview",
-                selectmode="extended",
-                show="tree headings",
-                columns=("rating", "tags", "size"),
-                yscrollcommand=self.exclusion_scrollbar.set,
-            )
-
-            self.exclusion_scrollbar.config(command=self.exclusion_tree.yview)
-
-            show_ann = self.settings_manager.get_settings().show_video_annotations_in_tree
-
-            if show_ann:
-                self.exclusion_tree.configure(columns=("rating", "tags", "size"))
-                self.exclusion_tree.column("rating", width=100, minwidth=100, stretch=False, anchor="center")
-                self.exclusion_tree.column("tags", width=180, minwidth=120, stretch=False, anchor="w")
-                self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
-                self.exclusion_tree.heading("rating", text="Rating", anchor="center")
-                self.exclusion_tree.heading("tags", text="Tags", anchor="w")
-                self.exclusion_tree.heading("size", text="Size", anchor="e")
-            else:
-                self.exclusion_tree.configure(columns=("size",))
-                self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
-                self.exclusion_tree.heading("size", text="Size", anchor="e")
-
-            self.exclusion_tree.column("#0", width=400, minwidth=200, stretch=True, anchor="w")
-            self.exclusion_tree.heading("#0", text="Name", anchor="w")
-
-            # Tag for rating stars (yellow)
+            # Apply annotation column config now that settings_manager is available
+            self._reapply_tree_columns()
             self.exclusion_tree.tag_configure("rating_star", foreground="#f5c518")
-
-            self.exclusion_tree.pack(fill=tk.BOTH, expand=True)
-
-            # Bind events
-            self._selection_anchor = None
-            self.exclusion_tree.bind("<Button-1>", self._on_left_click)
-            self.exclusion_tree.bind("<Double-Button-1>", self._on_double_click)
-            self.exclusion_tree.bind("<Button-3>", self._show_context_menu)
-            self.exclusion_tree.bind("<<TreeviewOpen>>", self._on_tree_open)
-            self.exclusion_tree.bind("<<TreeviewClose>>", self._on_tree_close)
-            self.exclusion_tree.bind("<Control-a>",
-                                     lambda e: (self.exclusion_tree.selection_set(self._tree_get_all_iids()), "break")[
-                                         1])
-            self.exclusion_tree.bind("<Control-A>",
-                                     lambda e: (self.exclusion_tree.selection_set(self._tree_get_all_iids()), "break")[
-                                         1])
-            self.exclusion_tree.bind("<Delete>", self._on_key_toggle_exclusion)
-            self.exclusion_tree.bind("<space>", self._on_key_toggle_exclusion)
-
-            # ── Checkboxes row ────────────────────────────────────────────────
-            self.exclusion_buttons_frame = tk.Frame(self.exclusion_section, bg=self.bg_color)
-            self.exclusion_buttons_frame.pack(fill=tk.X, pady=(10, 0))
+            self._configure_tree_style()
 
             checkboxes_row = tk.Frame(self.exclusion_buttons_frame, bg=self.bg_color)
             checkboxes_row.pack(fill=tk.X, pady=(0, 5))
@@ -1275,13 +1395,112 @@ def select_multiple_folders_and_play():
                     self.exclusion_tree.item(iid, text=label, tags=(tag,))
                     break
 
+        def _lazy_expand_node(self, iid, directory):
+            selected_dir = self.get_current_selected_directory()
+            if not selected_dir:
+                return
+
+            existing = self.exclusion_tree.get_children(iid)
+            placeholder_only = (
+                len(existing) == 1 and
+                self.exclusion_tree.item(existing[0], "tags") == ("placeholder",)
+            )
+            if existing and not placeholder_only:
+                self.exclusion_tree.item(iid, open=True)
+                return
+
+            for child in existing:
+                try:
+                    self.exclusion_tree.delete(child)
+                    self.current_subdirs_mapping.pop(child, None)
+                except Exception:
+                    pass
+
+            ph = f"__lz_loading_{iid}__"
+            self.exclusion_tree.insert(iid, tk.END, iid=ph, text="  Loading…", tags=("placeholder",))
+            self.exclusion_tree.item(iid, open=True)
+
+            excluded_dir_set = set(os.path.normpath(p) for p in self.excluded_subdirs.get(selected_dir, []))
+            excluded_vid_set = set(os.path.normpath(p) for p in self.excluded_videos.get(selected_dir, []))
+            show_videos = self.show_videos
+            only_excl = self.show_only_excluded
+            base = selected_dir
+            node_dir = os.path.abspath(directory)
+
+            def build():
+                items = []
+                iid_counter = [0]
+
+                def next_iid():
+                    iid_counter[0] += 1
+                    return f"lz_{iid}_{iid_counter[0]}"
+
+                try:
+                    with os.scandir(node_dir) as it:
+                        entries = sorted(it, key=lambda e: (not e.is_dir(), e.name.lower()))
+                    for entry in entries:
+                        full = entry.path
+                        norm_full = os.path.normpath(full)
+                        if entry.is_dir():
+                            child_iid = next_iid()
+                            items.append((child_iid, full, True))
+                        elif show_videos and entry.is_file() and is_video(entry.name):
+                            is_excl_v = norm_full in excluded_vid_set
+                            if only_excl and not is_excl_v:
+                                continue
+                            child_iid = next_iid()
+                            items.append((child_iid, full, False))
+                except PermissionError:
+                    pass
+
+                def post():
+                    try:
+                        self.exclusion_tree.delete(ph)
+                    except Exception:
+                        pass
+
+                    if not items:
+                        self.exclusion_tree.insert(iid, tk.END,
+                            iid=f"__lz_empty_{iid}__",
+                            text="  Empty", tags=("placeholder",))
+                        return
+
+                    for child_iid, path, is_dir in items:
+                        tag = self._tag_for_item(path, base, excluded_dir_set, excluded_vid_set)
+                        label = self._label_for_item(path, is_dir, excluded_dir_set, excluded_vid_set, base)
+                        if is_dir:
+                            ph2 = f"__lz_ph_{child_iid}__"
+                            self.exclusion_tree.insert(iid, tk.END, iid=child_iid,
+                                text=label, tags=(tag,), open=False, values=())
+                            self.exclusion_tree.insert(child_iid, tk.END,
+                                iid=ph2, text="  Loading…", tags=("placeholder",))
+                        else:
+                            self.exclusion_tree.insert(iid, tk.END, iid=child_iid,
+                                text=label, tags=(tag,), values=())
+                        self.current_subdirs_mapping[child_iid] = path
+
+                    if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+                        self.video_preview_manager.attach_to_listbox(
+                            self.exclusion_tree, self.current_subdirs_mapping)
+
+                self.root.after(0, post)
+
+            ManagedThread(target=build, name="LazyExpand").start()
+
         def _on_tree_open(self, event):
             iid = self.exclusion_tree.focus()
             path = self.current_subdirs_mapping.get(iid)
-            if path:
+            if path and os.path.isdir(path):
                 norm = os.path.normpath(path)
                 self.expanded_paths.add(norm)
                 self.collapsed_paths.discard(norm)
+                existing = self.exclusion_tree.get_children(iid)
+                placeholder_only = (
+                    len(existing) == 1 and
+                    self.exclusion_tree.item(existing[0], 'tags') == ('placeholder',)
+                )
+                if not existing or placeholder_only:
+                    self._lazy_expand_node(iid, path)
 
         def _on_tree_close(self, event):
             iid = self.exclusion_tree.focus()
@@ -1406,16 +1625,15 @@ def select_multiple_folders_and_play():
                 return "break"
 
             if os.path.isdir(target_path):
-                # toggle expand/collapse
                 norm_target = os.path.normpath(target_path)
                 if self.exclusion_tree.item(iid, "open"):
                     self.exclusion_tree.item(iid, open=False)
                     self.collapsed_paths.add(norm_target)
                     self.expanded_paths.discard(norm_target)
                 else:
-                    self.exclusion_tree.item(iid, open=True)
                     self.expanded_paths.add(norm_target)
                     self.collapsed_paths.discard(norm_target)
+                    self._lazy_expand_node(iid, target_path)
                 return "break"
 
             if not os.path.isfile(target_path) or not is_video(target_path):
@@ -1525,7 +1743,7 @@ def select_multiple_folders_and_play():
                     command=lambda: self.exclusion_tree.selection_remove(self._tree_get_all_iids()))
 
             context_menu.add_separator()
-            context_menu.add_command(label="Open in Grid View",
+            context_menu.add_command(label="Open in Gallery",
                 command=lambda: self._context_open_grid_view(selection))
 
             selected_dir = self.get_current_selected_directory()
@@ -1610,29 +1828,6 @@ def select_multiple_folders_and_play():
                 context_menu.add_command(label="Properties",
                                          command=lambda: self._context_show_folder_properties(first_path))
 
-            if first_path and os.path.isfile(first_path):
-                show_ann = self.settings_manager.get_settings().show_video_annotations_in_tree
-                if show_ann:
-                    context_menu.add_separator()
-                    rating = self.annotation_service.get_rating(first_path)
-                    tags = self.annotation_service.get_tags(first_path)
-                    bookmarks = self.annotation_service.get_bookmarks(first_path)
-                    if rating > 0:
-                        context_menu.add_command(
-                            label="☆ Remove Rating",
-                            command=lambda p=first_path: self._set_rating_for_path(p, 0)
-                        )
-                    if tags:
-                        context_menu.add_command(
-                            label="🏷 Remove All Tags",
-                            command=lambda p=first_path: self._remove_all_tags_from_path(p)
-                        )
-                    if bookmarks:
-                        context_menu.add_command(
-                            label="🔖 Remove All Bookmarks",
-                            command=lambda p=first_path: self._remove_all_bookmarks_from_path(p)
-                        )
-
             try:
                 context_menu.tk_popup(event.x_root, event.y_root)
             finally:
@@ -1707,18 +1902,56 @@ def select_multiple_folders_and_play():
             return f"{prefix}{name}{fav}{excl}{now}"
 
         def _clear_tree(self):
-            """Remove all rows from the Treeview and reset the mapping."""
-            for iid in self.exclusion_tree.get_children():
-                self.exclusion_tree.delete(iid)
-            self.current_subdirs_mapping = {}
+            """Remove all non-root rows from the Treeview and reset non-root mapping entries."""
+            root_iids = set(getattr(self, '_dir_root_iids', []))
+            # Clear children of each root node
+            for riid in root_iids:
+                try:
+                    for child in list(self.exclusion_tree.get_children(riid)):
+                        self.exclusion_tree.delete(child)
+                except Exception:
+                    pass
+            # Remove any top-level items that are NOT root dir nodes (placeholders etc.)
+            for iid in list(self.exclusion_tree.get_children()):
+                if iid not in root_iids:
+                    try:
+                        self.exclusion_tree.delete(iid)
+                    except Exception:
+                        pass
+            # Rebuild mapping keeping only root entries
+            new_mapping = {}
+            for riid in root_iids:
+                if riid in self.current_subdirs_mapping:
+                    new_mapping[riid] = self.current_subdirs_mapping[riid]
+            self.current_subdirs_mapping = new_mapping
 
-        def load_subdirectories(self, directory, max_depth=20, restore_path=None, restore_scroll=None):
+        def load_subdirectories(self, directory, max_depth=20, restore_path=None, restore_scroll=None, _root_iid=None):
             self.current_max_depth = max_depth
-            show_ann = self.settings_manager.get_settings().show_video_annotations_in_tree
+            # Auto-resolve root iid from directory path
+            if _root_iid is None and hasattr(self, '_dir_root_iids') and hasattr(self, 'selected_dirs'):
+                for i, d in enumerate(self.selected_dirs):
+                    if d == directory and i < len(self._dir_root_iids):
+                        _root_iid = self._dir_root_iids[i]
+                        break
 
-            self._clear_tree()
-            self.exclusion_tree.insert("", tk.END, iid="__loading__",
-                                       text="  Loading…", tags=("placeholder",))
+            if _root_iid is not None:
+                # Scoped load: populate under a specific root node, don't clear whole tree
+                # Remove existing children first
+                for child in list(self.exclusion_tree.get_children(_root_iid)):
+                    try:
+                        self.exclusion_tree.delete(child)
+                        if child in self.current_subdirs_mapping:
+                            del self.current_subdirs_mapping[child]
+                    except Exception:
+                        pass
+                loading_iid = f"__loading_{_root_iid}__"
+                self.exclusion_tree.insert(_root_iid, tk.END, iid=loading_iid,
+                                           text="  Loading…", tags=("placeholder",))
+                self.exclusion_tree.item(_root_iid, open=True)
+            else:
+                self._clear_tree()
+                self.exclusion_tree.insert("", tk.END, iid="__loading__",
+                                           text="  Loading…ª", tags=("placeholder",))
 
             if not hasattr(self, '_subdir_load_token'):
                 self._subdir_load_token = None
@@ -1806,7 +2039,8 @@ def select_multiple_folders_and_play():
                         if norm_root == base_norm:
                             iid = next_iid()
                             path_to_iid[norm_root] = iid
-                            items.append(("", root, True, iid))
+                            tree_parent = _root_iid if _root_iid is not None else ""
+                            items.append((tree_parent, root, True, iid))
                         elif include_dir and show_this_dir:
                             parent_norm = os.path.normpath(os.path.dirname(root))
                             parent_iid = path_to_iid.get(parent_norm, "")
@@ -1844,12 +2078,26 @@ def select_multiple_folders_and_play():
                             if self._subdir_load_token is not token:
                                 return
 
-                        self._clear_tree()
-                        mapping      = {}
+                        if _root_iid is not None:
+                            # Remove loading placeholder under root node
+                            loading_iid = f"__loading_{_root_iid}__"
+                            try:
+                                self.exclusion_tree.delete(loading_iid)
+                            except Exception:
+                                pass
+                            if not items:
+                                self.exclusion_tree.insert(_root_iid, tk.END,
+                                                           iid=f"__empty_{_root_iid}__",
+                                                           text="  No items found", tags=("placeholder",))
+                                return
+                        else:
+                            self._clear_tree()
+
+                        mapping      = {} if _root_iid is None else dict(self.current_subdirs_mapping)
                         target_iid   = None
                         restore_norm = os.path.normpath(restore_path) if restore_path else None
 
-                        if not items:
+                        if _root_iid is None and not items:
                             self.exclusion_tree.insert("", tk.END, iid="__empty__",
                                                        text="  No items found", tags=("placeholder",))
                             self.current_subdirs_mapping = {}
@@ -1905,17 +2153,13 @@ def select_multiple_folders_and_play():
                                     size_str = meta_size
                                 else:
                                     size_str = self._get_video_size_str(path)
-                                if show_ann:
-                                    rating_str = self._get_rating_stars(path) if not is_dir else ""
-                                    tags_str = self._get_tags_str(path) if not is_dir else ""
-                                else:
-                                    rating_str = tags_str = ""
+                                rating_str = tags_str = ""
 
                                 self.exclusion_tree.insert(
                                     parent_iid, tk.END, iid=iid,
                                     text=label, tags=(tag,),
                                     open=open_state,
-                                    values=(rating_str, tags_str, size_str) if show_ann else (size_str,)
+                                    values=()
                                 )
                                 mapping[iid] = path
                                 if restore_norm and norm_p == restore_norm:
@@ -2438,7 +2682,7 @@ def select_multiple_folders_and_play():
         def _show_annotation_browser_embedded(self, frame, selected_dirs):
             ui = self.annotation_browser.show_embedded(
                 frame,
-                close_callback=self._show_home_view
+                close_callback=self._show_grid_view
             )
             if hasattr(ui, "set_directory_filter"):
                 ui.set_directory_filter(selected_dirs)
@@ -2629,20 +2873,20 @@ def select_multiple_folders_and_play():
             self.current_selected_dir_index = selected_index
             selected_dir = self.selected_dirs[selected_index]
             self._set_workspace_title(
-                getattr(self, "_view_tab_labels", {}).get(getattr(self, "_active_app_view", "home"), "Library"),
+                getattr(self, "_view_tab_labels", {}).get(getattr(self, "_active_app_view", "gallery"), "Gallery"),
                 self._selected_directory_summary()
             )
-            self._refresh_active_manager_for_directory_context()
+            self._refresh_active_manager_for_directory_context(selected_dir)
             self.expanded_paths.clear()
             self.collapsed_paths.clear()
             self.load_subdirectories(selected_dir, max_depth=20)
 
-        def _refresh_active_manager_for_directory_context(self):
+        def _refresh_active_manager_for_directory_context(self, forced_dir=None):
             active = getattr(self, "_active_app_view", "home")
             if active == "favourites":
                 self._show_favorites_manager()
-            elif active == "gallery":
-                self._show_grid_view_for_current_directory()
+            elif active == "gallery" or active == "home":
+                self._show_grid_view_for_current_directory(forced_dir=forced_dir)
             elif active == "history" and getattr(self, "active_embedded_manager", None):
                 try:
                     self.active_embedded_manager.set_directory_filter(self.get_selected_directories())
@@ -2656,11 +2900,13 @@ def select_multiple_folders_and_play():
                 except Exception:
                     pass
 
-        def _show_grid_view_for_current_directory(self):
+        def _show_grid_view_for_current_directory(self, forced_dir=None):
             selected_dirs = self.get_selected_directories()
-            selected_dir = self.get_current_selected_directory()
+            selected_dir = forced_dir or self.get_current_selected_directory()
             if not selected_dirs and selected_dir:
                 selected_dirs = [selected_dir]
+            if forced_dir and forced_dir not in selected_dirs:
+                selected_dirs = [forced_dir]
             if not selected_dirs:
                 return
 
@@ -3114,15 +3360,120 @@ def select_multiple_folders_and_play():
                 self.load_subdirectories(selected_dir, max_depth=1)
 
         def toggle_expand_all(self):
-            selected_dir = self.get_current_selected_directory()
-            if not selected_dir:
-                messagebox.showinfo("Information", "Please select a directory first.")
-                self.expand_all_var.set(self.expand_all_default)
-                return
             self.save_preferences()
+            if self.expand_all_var.get():
+                self._expand_all_tree_nodes()
+            else:
+                self._collapse_all_tree_nodes()
+
+        def _collapse_all_tree_nodes(self):
             self.expanded_paths.clear()
             self.collapsed_paths.clear()
-            self.load_subdirectories(selected_dir, max_depth=20)
+            # Remove all children from every root node — only root dirs remain visible
+            root_iids = set(self._dir_root_iids)
+            for root_iid in self._dir_root_iids:
+                for child in list(self.exclusion_tree.get_children(root_iid)):
+                    try:
+                        self.exclusion_tree.delete(child)
+                    except Exception:
+                        pass
+            # Rebuild mapping: keep only root entries
+            self.current_subdirs_mapping = {
+                iid: path for iid, path in self.current_subdirs_mapping.items()
+                if iid in root_iids
+            }
+
+        def _expand_all_tree_nodes(self):
+            self.expanded_paths.clear()
+            self.collapsed_paths.clear()
+            show_videos = self.show_videos
+            only_excl = self.show_only_excluded
+            iid_counter = [0]
+
+            def next_iid():
+                iid_counter[0] += 1
+                return f"ea_{iid_counter[0]}"
+
+            def fmt_size(b):
+                if b >= 1024 ** 3:
+                    return f"{b / 1024 ** 3:.2f} GB"
+                elif b >= 1024 ** 2:
+                    return f"{b / 1024 ** 2:.1f} MB"
+                return f"{b // 1024} KB"
+
+            def expand_recursive(parent_iid, directory, root_dir):
+                excluded_dir_set = set(os.path.normpath(p) for p in self.excluded_subdirs.get(root_dir, []))
+                excluded_vid_set = set(os.path.normpath(p) for p in self.excluded_videos.get(root_dir, []))
+
+                # Clear existing children (placeholder or stale)
+                for child in list(self.exclusion_tree.get_children(parent_iid)):
+                    try:
+                        self.exclusion_tree.delete(child)
+                        self.current_subdirs_mapping.pop(child, None)
+                    except Exception:
+                        pass
+
+                try:
+                    with os.scandir(directory) as it:
+                        entries = sorted(it, key=lambda e: (not e.is_dir(), e.name.lower()))
+                except PermissionError:
+                    return
+
+                for entry in entries:
+                    full = entry.path
+                    norm_full = os.path.normpath(full)
+                    child_iid = next_iid()
+                    tag = self._tag_for_item(full, root_dir, excluded_dir_set, excluded_vid_set)
+                    label = self._label_for_item(full, entry.is_dir(), excluded_dir_set, excluded_vid_set, root_dir)
+                    if entry.is_dir():
+                        try:
+                            size_str = fmt_size(sum(
+                                os.path.getsize(os.path.join(dp, fn))
+                                for dp, _, fnames in os.walk(full) for fn in fnames
+                            ))
+                        except Exception:
+                            size_str = ""
+                        vals = ()
+                        self.exclusion_tree.insert(parent_iid, tk.END, iid=child_iid,
+                            text=label, tags=(tag,), open=True, values=vals)
+                        self.current_subdirs_mapping[child_iid] = full
+                        expand_recursive(child_iid, full, root_dir)
+                    elif show_videos and entry.is_file() and is_video(entry.name):
+                        norm_full = os.path.normpath(full)
+                        is_excl_v = norm_full in excluded_vid_set
+                        if only_excl and not is_excl_v:
+                            continue
+                        try:
+                            size_str = fmt_size(os.path.getsize(full))
+                        except Exception:
+                            size_str = ""
+                        rating_str = ""
+                        tags_str = ""
+                        vals = ()
+                        self.exclusion_tree.insert(parent_iid, tk.END, iid=child_iid,
+                            text=label, tags=(tag,), values=vals)
+                        self.current_subdirs_mapping[child_iid] = full
+
+                self.exclusion_tree.item(parent_iid, open=True)
+
+            def worker():
+                # Collect (root_iid, root_path) pairs for all main dirs
+                pairs = []
+                for i, root_iid in enumerate(self._dir_root_iids):
+                    root_path = self.selected_dirs[i] if i < len(self.selected_dirs) else None
+                    if root_path and os.path.isdir(root_path):
+                        pairs.append((root_iid, root_path))
+
+                def do_expand():
+                    for root_iid, root_path in pairs:
+                        expand_recursive(root_iid, root_path, root_path)
+                    if hasattr(self, "video_preview_manager") and self.video_preview_manager:
+                        self.video_preview_manager.attach_to_listbox(
+                            self.exclusion_tree, self.current_subdirs_mapping)
+
+                self.root.after(0, do_expand)
+
+            ManagedThread(target=worker, name="ExpandAll").start()
 
         def toggle_videos_visibility(self):
             selected_dir = self.get_current_selected_directory()
@@ -3246,12 +3597,18 @@ def select_multiple_folders_and_play():
             if not selection:
                 return
 
+            self._show_main_dir_context_menu_for_index(event, selection[0])
+
+        def _show_main_dir_context_menu_for_index(self, event, index):
             context_menu = self._make_context_menu()
             context_menu.add_command(label="Play Selected",      command=self._play_selected_main_dirs)
-            context_menu.add_command(label="Open in Grid View",  command=self._open_grid_view_main_dirs)
+            context_menu.add_command(label="Open in Gallery",  command=self._open_grid_view_main_dirs)
             context_menu.add_separator()
             context_menu.add_command(label="Remove Selected",    command=self.remove_directory)
-            context_menu.post(event.x_root, event.y_root)
+            try:
+                context_menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                context_menu.grab_release()
 
         def _play_selected_main_dirs(self):
             selection = self.dir_listbox.curselection()
@@ -3338,7 +3695,7 @@ def select_multiple_folders_and_play():
                 lambda frame: self.favorites_manager.show_embedded(
                     frame,
                     selected_scope,
-                    close_callback=self._show_home_view
+                    close_callback=self._show_grid_view
                 )
             )
 
@@ -3545,7 +3902,7 @@ def select_multiple_folders_and_play():
                 "queue",
                 lambda frame: self.queue_manager.show_embedded(
                     frame,
-                    close_callback=self._show_home_view
+                    close_callback=self._show_grid_view
                 )
             )
 
@@ -3623,7 +3980,7 @@ def select_multiple_folders_and_play():
         def _show_history_embedded(self, frame, selected_dirs):
             ui = self.watch_history_manager.show_embedded(
                 frame,
-                close_callback=self._show_home_view
+                close_callback=self._show_grid_view
             )
             if hasattr(ui, "set_directory_filter"):
                 ui.set_directory_filter(selected_dirs)
@@ -3664,7 +4021,7 @@ def select_multiple_folders_and_play():
             if not selected_dirs and selected_dir:
                 selected_dirs = [selected_dir]
             if not selected_dirs:
-                messagebox.showwarning("Warning", "Please select a directory first")
+                self._set_workspace_title("Gallery", "No directory selected")
                 return
             selected_dir = selected_dirs[0]
 
@@ -3754,7 +4111,7 @@ def select_multiple_folders_and_play():
                     frame,
                     videos,
                     self.video_preview_manager,
-                    close_callback=self._show_home_view
+                    close_callback=lambda: self._set_workspace_title("Gallery", "No directory selected")
                 )
             )
 
@@ -3821,7 +4178,7 @@ def select_multiple_folders_and_play():
                 "playlist",
                 lambda frame: self.playlist_manager.show_embedded(
                     frame,
-                    close_callback=self._show_home_view
+                    close_callback=self._show_grid_view
                 )
             )
 
@@ -3852,6 +4209,17 @@ def select_multiple_folders_and_play():
                 self._submit_scan(directory)
                 self.update_video_count()
                 self.save_preferences()
+                new_idx = len(self.selected_dirs) - 1
+                self._dir_root_iids_select_and_trigger(new_idx)
+
+        def _dir_root_iids_select_and_trigger(self, idx):
+            if not hasattr(self, '_dir_root_iids') or idx >= len(self._dir_root_iids):
+                self.root.after(300, lambda: self._dir_root_iids_select_and_trigger(idx))
+                return
+            iid = self._dir_root_iids[idx]
+            self.exclusion_tree.selection_set(iid)
+            self.exclusion_tree.see(iid)
+            self._trigger_root_selection(iid)
 
         def remove_directory(self):
             selected_indices = self.dir_listbox.curselection()
@@ -3908,7 +4276,7 @@ def select_multiple_folders_and_play():
                 "settings",
                 lambda frame: self.settings_manager.show_embedded(
                     frame,
-                    close_callback=self._show_home_view
+                    close_callback=self._show_grid_view
                 )
             )
 
@@ -4067,28 +4435,7 @@ def select_multiple_folders_and_play():
                     self._toggle_annotation_columns(new_show)
 
         def _toggle_annotation_columns(self, enabled):
-            left_width = self.dir_section.winfo_width() if hasattr(self, 'dir_section') else 0
-
-            if enabled:
-                self.exclusion_tree.configure(columns=("rating", "tags", "size"))
-                self.exclusion_tree.column("rating", width=100, minwidth=100, stretch=False, anchor="center")
-                self.exclusion_tree.column("tags", width=180, minwidth=120, stretch=False, anchor="w")
-                self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
-                self.exclusion_tree.heading("rating", text="Rating", anchor="center")
-                self.exclusion_tree.heading("tags", text="Tags", anchor="w")
-                self.exclusion_tree.heading("size", text="Size", anchor="e")
-            else:
-                self.exclusion_tree.configure(columns=("size",))
-                self.exclusion_tree.column("size", width=90, minwidth=90, stretch=False, anchor="e")
-                self.exclusion_tree.heading("size", text="Size", anchor="e")
-
-            cur = self.get_current_selected_directory()
-            if cur:
-                self.load_subdirectories(cur)
-
-            if left_width > 10:
-                self.dir_section.config(width=left_width)
-                self.dir_section.pack_propagate(False)
+            pass
 
         def _clear_thumbnail_cache(self):
             try:
@@ -4216,7 +4563,6 @@ def select_multiple_folders_and_play():
             make_toolbar_btn("Settings", command=self._show_settings)
 
             _media_pill_commands = {
-                "Home": self._show_home_view,
                 "Gallery": self._show_grid_view,
                 "Playlist": self._manage_playlists,
                 "Queue": self._show_queue_manager,
@@ -4225,7 +4571,6 @@ def select_multiple_folders_and_play():
                 "History": self._show_watch_history,
             }
             self._view_tab_labels = {
-                "home": "Home",
                 "gallery": "Gallery",
                 "playlist": "Playlist",
                 "queue": "Queue",
@@ -4238,7 +4583,6 @@ def select_multiple_folders_and_play():
             def _view_pill_accents(label):
                 if self.dark_mode:
                     palette = {
-                        "Home": ("#c7ccd6", "#343a46", "#ffffff", "#2b303a", "#202228", "#373b45"),
                         "Gallery": ("#83b7ff", "#2d5a8e", "#ffffff", "#1a4070", "#202228", "#2d5a8e"),
                         "Playlist": ("#8ec7ff", "#1f5d9d", "#ffffff", "#174a7f", "#202228", "#35506c"),
                         "Queue": ("#7bd99b", "#1f7f4b", "#ffffff", "#176139", "#202228", "#315c42"),
@@ -4248,7 +4592,6 @@ def select_multiple_folders_and_play():
                     }
                 else:
                     palette = {
-                        "Home": ("#4a5568", "#d7dde8", "#1a2035", "#c7cfdd", "#f6f7fb", "#d9dee8"),
                         "Gallery": ("#2d7ef7", "#1a6de8", "#ffffff", "#1557bd", "#f6f7fb", "#b9d4ff"),
                         "Playlist": ("#246aa7", "#1a5fa8", "#ffffff", "#144d8a", "#f6f7fb", "#c6dff4"),
                         "Queue": ("#23834a", "#1a8a4a", "#ffffff", "#156e3a", "#f6f7fb", "#c7e8d2"),
@@ -4295,7 +4638,7 @@ def select_multiple_folders_and_play():
                 btn.bind("<ButtonPress-1>", on_press)
                 btn.bind("<ButtonRelease-1>", on_release)
 
-            for _pill_label in ["Home", "Gallery", "Playlist", "Queue", "Favourites", "Tags & Ratings", "History"]:
+            for _pill_label in ["Gallery", "Playlist", "Queue", "Favourites", "Tags & Ratings", "History"]:
                 _make_media_pill(_pill_label)
             self._refresh_media_pill_state()
 

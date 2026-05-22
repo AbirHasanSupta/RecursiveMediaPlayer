@@ -416,6 +416,17 @@ class GridViewManager:
                  font=("Segoe UI", 15, "bold"),
                  bg=t['header_bg'], fg=t['text']).pack(side=tk.LEFT, pady=14)
 
+        if self._embedded and self.close_callback:
+            close_btn = tk.Label(
+                h_inner, text="✕", font=("Segoe UI", 14),
+                bg=t['header_bg'], fg=t['text_sub'],
+                cursor="hand2", padx=10
+            )
+            close_btn.pack(side=tk.RIGHT, pady=14)
+            close_btn.bind("<Button-1>", lambda e: self._close_grid_view())
+            close_btn.bind("<Enter>", lambda e: close_btn.config(fg=t['danger']))
+            close_btn.bind("<Leave>", lambda e: close_btn.config(fg=t['text_sub']))
+
         # separator line
         tk.Frame(gw, bg=t['divider'], height=1).pack(fill=tk.X)
 
