@@ -651,119 +651,251 @@ def select_multiple_folders_and_play():
                 child.destroy()
             frame.pack(fill=tk.BOTH, expand=True)
 
-            t_bg = self.bg_color
-            t_text = self.text_color
-            t_mute = self.muted_fg
-            t_acc = self.accent_color
-            card_bg = "#ffffff" if not self.dark_mode else "#2a2b2e"
-            card_border = "#e0e0e0" if not self.dark_mode else "#3a3b3f"
+            is_dark = self.dark_mode
 
-            # Outer scroll canvas
-            pad = tk.Frame(frame, bg=t_bg)
-            pad.pack(fill=tk.BOTH, expand=True, padx=32, pady=24)
+            # ── 2026 palette ───────────────────────────────────────────────
+            if is_dark:
+                bg = "#0f1117"
+                surface = "#1a1d27"
+                surface2 = "#22263a"
+                border = "#2e3350"
+                text_pri = "#f0f2ff"
+                text_sec = "#8b92b8"
+                accent = "#6c63ff"
+                accent2 = "#ff6b9d"
+                hero_grad1 = "#1a1d27"
+                pill_bg = "#1e2235"
+            else:
+                bg = "#f4f6fc"
+                surface = "#ffffff"
+                surface2 = "#eef0fa"
+                border = "#dde1f5"
+                text_pri = "#0d0f1e"
+                text_sec = "#6b718f"
+                accent = "#5b52f0"
+                accent2 = "#f0527a"
+                hero_grad1 = "#5b52f0"
+                pill_bg = "#ebebfb"
 
-            # ── Hero greeting ──────────────────────────────────────────────────
-            hero = tk.Frame(pad, bg=t_acc if not self.dark_mode else "#1a4070", pady=24)
-            hero.pack(fill=tk.X, pady=(0, 22))
-            tk.Label(hero, text="🎬  Recursive Video Player",
-                     font=Font(family="Segoe UI", size=20, weight="bold"),
-                     bg=t_acc if not self.dark_mode else "#1a4070",
-                     fg="#ffffff").pack()
-            tk.Label(hero, text="Select a directory from the panel · then explore your library",
+            def _blend(c1, c2, t):
+                r1, g1, b1 = int(c1[1:3], 16), int(c1[3:5], 16), int(c1[5:7], 16)
+                r2, g2, b2 = int(c2[1:3], 16), int(c2[3:5], 16), int(c2[5:7], 16)
+                return f"#{int(r1 + (r2 - r1) * t):02x}{int(g1 + (g2 - g1) * t):02x}{int(b1 + (b2 - b1) * t):02x}"
+
+            frame.configure(bg=bg)
+
+            # ── Scrollable canvas ──────────────────────────────────────────
+            canvas = tk.Canvas(frame, bg=bg, highlightthickness=0, bd=0)
+            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            inner = tk.Frame(canvas, bg=bg)
+            inner_win = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+            def _on_configure(e):
+                canvas.configure(scrollregion=canvas.bbox("all"))
+                canvas.itemconfig(inner_win, width=canvas.winfo_width())
+
+            inner.bind("<Configure>", _on_configure)
+            canvas.bind("<Configure>", lambda e: canvas.itemconfig(inner_win, width=e.width))
+
+            pad = tk.Frame(inner, bg=bg)
+            pad.pack(fill=tk.BOTH, expand=True, padx=36, pady=28)
+
+            # ── Hero banner ────────────────────────────────────────────────
+            hero_bg = accent if not is_dark else "#1e2235"
+            hero = tk.Frame(pad, bg=hero_bg, pady=0)
+            hero.pack(fill=tk.X, pady=(0, 24))
+
+            # top accent stripe
+            stripe = tk.Frame(hero, bg=accent2, height=3)
+            stripe.pack(fill=tk.X, side=tk.TOP)
+
+            hero_inner = tk.Frame(hero, bg=hero_bg)
+            hero_inner.pack(fill=tk.X, padx=28, pady=22)
+
+            left_hero = tk.Frame(hero_inner, bg=hero_bg)
+            left_hero.pack(side=tk.LEFT, fill=tk.Y)
+
+            tk.Label(left_hero,
+                     text="Recursive Video Player",
+                     font=Font(family="Segoe UI", size=22, weight="bold"),
+                     bg=hero_bg, fg="#ffffff").pack(anchor="w")
+            tk.Label(left_hero,
+                     text="Your personal media library · fast, organised, beautiful",
                      font=Font(family="Segoe UI", size=10),
-                     bg=t_acc if not self.dark_mode else "#1a4070",
-                     fg="#d0e8ff" if not self.dark_mode else "#a8c8f0").pack(pady=(4, 0))
+                     bg=hero_bg,
+                     fg="#c8d0ff" if not is_dark else "#8b92b8").pack(anchor="w", pady=(5, 0))
 
-            # ── Stats row ──────────────────────────────────────────────────────
+            # play button on right
+            play_btn_bg = accent2
+            play_btn = tk.Label(hero_inner, text="▶  Play All",
+                                font=Font(family="Segoe UI", size=10, weight="bold"),
+                                bg=play_btn_bg, fg="#ffffff",
+                                padx=18, pady=9, cursor="hand2")
+            play_btn.pack(side=tk.RIGHT, anchor="center")
+            play_btn.bind("<Button-1>", lambda e: self.play_videos())
+            play_btn.bind("<Enter>", lambda e: play_btn.config(bg=_blend(play_btn_bg, "#000000", 0.15)))
+            play_btn.bind("<Leave>", lambda e: play_btn.config(bg=play_btn_bg))
+
+            # ── Stats cards ────────────────────────────────────────────────
             total_dirs = len(self.selected_dirs)
             total_vids = sum(
                 sum(1 for v in (self.scan_cache.get(d) or ([],))[0]
                     if not self.is_video_excluded(d, v))
                 for d in self.selected_dirs
             ) if hasattr(self, 'scan_cache') else 0
-            has_history = (hasattr(self, 'watch_history_manager') and
-                           bool(getattr(self.watch_history_manager, 'service', None)))
 
-            stats = [
-                ("📁", str(total_dirs), "Directories"),
-                ("🎞️", str(total_vids), "Videos"),
-                ("⭐", "Favourites", "Quick access"),
-                ("🕐", "History", "Recently watched"),
+            stat_data = [
+                ("📁", str(total_dirs), "Directories", accent, None),
+                ("🎬", str(total_vids), "Videos", accent2, None),
+                ("⭐", "Favourites", "Quick access", "#f5a623", self._show_favorites_manager),
+                ("🕐", "History", "Recently watched", "#34c98a", self._show_watch_history),
             ]
-            stats_row = tk.Frame(pad, bg=t_bg)
-            stats_row.pack(fill=tk.X, pady=(0, 22))
-            for i, (icon, val, lbl) in enumerate(stats):
-                stats_row.columnconfigure(i, weight=1)
-                card = tk.Frame(stats_row, bg=card_bg,
-                                highlightbackground=card_border, highlightthickness=1)
-                card.grid(row=0, column=i, padx=(0 if i == 0 else 8, 0), sticky="nsew", ipady=14)
-                tk.Label(card, text=icon, font=Font(family="Segoe UI Emoji", size=20),
-                         bg=card_bg, fg=t_acc).pack(pady=(10, 2))
-                val_lbl = tk.Label(card, text=val, font=Font(family="Segoe UI", size=14, weight="bold"),
-                                   bg=card_bg, fg=t_text)
-                val_lbl.pack()
-                tk.Label(card, text=lbl, font=Font(family="Segoe UI", size=9),
-                         bg=card_bg, fg=t_mute).pack(pady=(0, 10))
-                if i == 0:
-                    self._home_dirs_label = val_lbl
-                elif i == 1:
-                    self._home_vids_label = val_lbl
 
-            # ── Quick actions ──────────────────────────────────────────────────
-            sec_lbl = tk.Label(pad, text="Quick Actions",
-                               font=Font(family="Segoe UI", size=12, weight="bold"),
-                               bg=t_bg, fg=t_text)
-            sec_lbl.pack(anchor="w", pady=(0, 10))
+            stats_row = tk.Frame(pad, bg=bg)
+            stats_row.pack(fill=tk.X, pady=(0, 26))
+            for i in range(4):
+                stats_row.columnconfigure(i, weight=1, uniform="sc")
 
-            actions_row = tk.Frame(pad, bg=t_bg)
-            actions_row.pack(fill=tk.X, pady=(0, 22))
+            for i, (icon, val, lbl, col, cmd) in enumerate(stat_data):
+                card = tk.Frame(stats_row, bg=surface,
+                                highlightbackground=border, highlightthickness=1,
+                                cursor="hand2" if cmd else "")
+                card.grid(row=0, column=i, padx=(0 if i == 0 else 10, 0), sticky="nsew")
 
-            quick_actions = [
-                ("🖼️  Gallery", "#2d7ef7", self._show_grid_view),
-                ("🎵  Playlist", "#246aa7", self._manage_playlists),
-                ("⭐  Favourites", "#b86010", self._show_favorites_manager),
-                ("🕐  History", "#6b7280", self._show_watch_history),
-                ("📋  Queue", "#23834a", self._show_queue_manager),
-                ("🏷️  Tags & Ratings", "#8a6d0a", self._show_annotation_browser),
+                # left color bar
+                bar = tk.Frame(card, bg=col, width=4)
+                bar.pack(side=tk.LEFT, fill=tk.Y)
+
+                body = tk.Frame(card, bg=surface)
+                body.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=14, pady=14)
+
+                top_row = tk.Frame(body, bg=surface)
+                top_row.pack(fill=tk.X)
+                tk.Label(top_row, text=icon,
+                         font=Font(family="Segoe UI Emoji", size=16),
+                         bg=surface, fg=col).pack(side=tk.LEFT)
+
+                val_lbl = tk.Label(body, text=val,
+                                   font=Font(family="Segoe UI", size=18, weight="bold"),
+                                   bg=surface, fg=text_pri)
+                val_lbl.pack(anchor="w", pady=(4, 0))
+                tk.Label(body, text=lbl,
+                         font=Font(family="Segoe UI", size=9),
+                         bg=surface, fg=text_sec).pack(anchor="w")
+
+                if i == 0: self._home_dirs_label = val_lbl
+                if i == 1: self._home_vids_label = val_lbl
+
+                if cmd:
+                    for w in (card, body, val_lbl):
+                        w.bind("<Button-1>", lambda e, c=cmd: c())
+                        w.bind("<Enter>", lambda e, f=card: f.config(bg=surface2,
+                                                                     highlightbackground=accent))
+                        w.bind("<Leave>", lambda e, f=card: f.config(bg=surface,
+                                                                     highlightbackground=border))
+
+            # ── Section label helper ───────────────────────────────────────
+            def _section(text):
+                row = tk.Frame(pad, bg=bg)
+                row.pack(fill=tk.X, pady=(0, 12))
+                tk.Label(row, text=text,
+                         font=Font(family="Segoe UI", size=11, weight="bold"),
+                         bg=bg, fg=text_pri).pack(side=tk.LEFT)
+                sep = tk.Frame(row, bg=border, height=1)
+                sep.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 0), pady=6)
+
+            # ── Quick actions ──────────────────────────────────────────────
+            _section("Quick Actions")
+
+            actions = [
+                ("🖼", "Gallery", "Browse as grid", "#5b52f0", self._show_grid_view),
+                ("🎵", "Playlist", "Manage playlists", "#7c3aed", self._manage_playlists),
+                ("⭐", "Favourites", "Your starred videos", "#f5a623", self._show_favorites_manager),
+                ("🕐", "History", "Recently watched", "#34c98a", self._show_watch_history),
+                ("📋", "Queue", "Up next", "#06b6d4", self._show_queue_manager),
+                ("🏷", "Tags & Ratings", "Annotate & filter", "#f0527a", self._show_annotation_browser),
             ]
-            num_rows = (len(quick_actions) + 2) // 3
-            action_rows = []
-            for r in range(num_rows):
-                row_frame = tk.Frame(pad, bg=t_bg)
-                row_frame.pack(fill=tk.X, pady=(0, 10))
-                for c in range(3):
-                    row_frame.columnconfigure(c, weight=1, uniform="qa")
-                action_rows.append(row_frame)
 
-            for i, (label, color, cmd) in enumerate(quick_actions):
-                col = i % 3
-                row = i // 3
-                row_frame = action_rows[row]
-                btn_frame = tk.Frame(row_frame, bg=color, cursor="hand2")
-                btn_frame.grid(row=0, column=col, padx=(0 if col == 0 else 8, 0), sticky="nsew", ipady=10)
-                lbl_w = tk.Label(btn_frame, text=label,
-                                 font=Font(family="Segoe UI", size=10, weight="bold"),
-                                 bg=color, fg="#ffffff", cursor="hand2")
-                lbl_w.pack(expand=True, padx=14, pady=14)
-                for w in (btn_frame, lbl_w):
-                    w.bind("<Button-1>", lambda e, c=cmd: c())
-                    w.bind("<Enter>", lambda e, f=btn_frame, c=color: f.config(bg=_hex_blend(c, "#000000", 0.15)))
-                    w.bind("<Leave>", lambda e, f=btn_frame, c=color: f.config(bg=c))
+            grid_frame = tk.Frame(pad, bg=bg)
+            grid_frame.pack(fill=tk.X, pady=(0, 26))
+            for c in range(3):
+                grid_frame.columnconfigure(c, weight=1, uniform="qa")
 
-            # ── Getting started tip ────────────────────────────────────────────
-            tip_bg = "#fffbea" if not self.dark_mode else "#2b2a1e"
-            tip_fg = "#7a5c00" if not self.dark_mode else "#f0c060"
-            tip = tk.Frame(pad, bg=tip_bg, highlightbackground="#f0d070" if not self.dark_mode else "#5a4a10",
-                           highlightthickness=1)
+            for i, (icon, title, sub, col, cmd) in enumerate(actions):
+                r, c = divmod(i, 3)
+                card = tk.Frame(grid_frame, bg=surface,
+                                highlightbackground=border, highlightthickness=1,
+                                cursor="hand2")
+                card.grid(row=r, column=c,
+                          padx=(0 if c == 0 else 10, 0),
+                          pady=(0 if r == 0 else 10, 0),
+                          sticky="nsew")
+
+                inner_card = tk.Frame(card, bg=surface)
+                inner_card.pack(fill=tk.BOTH, expand=True, padx=16, pady=14)
+
+                icon_pill = tk.Label(inner_card, text=icon,
+                                     font=Font(family="Segoe UI Emoji", size=18),
+                                     bg=col, fg="#ffffff",
+                                     width=3, pady=6)
+                icon_pill.pack(anchor="w")
+
+                tk.Label(inner_card, text=title,
+                         font=Font(family="Segoe UI", size=11, weight="bold"),
+                         bg=surface, fg=text_pri).pack(anchor="w", pady=(8, 0))
+                tk.Label(inner_card, text=sub,
+                         font=Font(family="Segoe UI", size=9),
+                         bg=surface, fg=text_sec).pack(anchor="w", pady=(2, 0))
+
+                def _bind_card(card_f, inner_f, c=cmd, col=col):
+                    def _enter(e):
+                        card_f.config(bg=surface2, highlightbackground=col)
+                        inner_f.config(bg=surface2)
+                        for w in inner_f.winfo_children():
+                            try:
+                                if isinstance(w, tk.Label) and w.cget("bg") == surface:
+                                    w.config(bg=surface2)
+                            except Exception:
+                                pass
+
+                    def _leave(e):
+                        card_f.config(bg=surface, highlightbackground=border)
+                        inner_f.config(bg=surface)
+                        for w in inner_f.winfo_children():
+                            try:
+                                if isinstance(w, tk.Label) and w.cget("bg") == surface2:
+                                    w.config(bg=surface)
+                            except Exception:
+                                pass
+
+                    for w in [card_f, inner_f] + list(inner_f.winfo_children()):
+                        try:
+                            w.bind("<Button-1>", lambda e, fn=c: fn())
+                            w.bind("<Enter>", _enter)
+                            w.bind("<Leave>", _leave)
+                        except Exception:
+                            pass
+
+                _bind_card(card, inner_card)
+
+            # ── Getting started tip ────────────────────────────────────────
+            tip_bg = "#eef0fa" if not is_dark else "#1a1d27"
+            tip_fg = accent
+            tip_brd = border
+            tip = tk.Frame(pad, bg=tip_bg,
+                           highlightbackground=tip_brd, highlightthickness=1)
             tip.pack(fill=tk.X, pady=(4, 0))
-            tk.Label(tip, text="💡  Tip: Click + on the panel header to add a folder, then pick a tab above to explore.",
-                     font=Font(family="Segoe UI", size=9), bg=tip_bg, fg=tip_fg,
-                     wraplength=700, justify="left").pack(anchor="w", padx=14, pady=10)
 
-            def _hex_blend(c1, c2, t):
-                r1, g1, b1 = int(c1[1:3], 16), int(c1[3:5], 16), int(c1[5:7], 16)
-                r2, g2, b2 = int(c2[1:3], 16), int(c2[3:5], 16), int(c2[5:7], 16)
-                return f"#{int(r1 + (r2 - r1) * t):02x}{int(g1 + (g2 - g1) * t):02x}{int(b1 + (b2 - b1) * t):02x}"
+            tip_inner = tk.Frame(tip, bg=tip_bg)
+            tip_inner.pack(fill=tk.X, padx=16, pady=10)
+            tk.Label(tip_inner, text="💡",
+                     font=Font(family="Segoe UI Emoji", size=11),
+                     bg=tip_bg, fg=tip_fg).pack(side=tk.LEFT, padx=(0, 8))
+            tk.Label(tip_inner,
+                     text="Click  +  on the panel header to add a folder, then pick any action above to explore your library.",
+                     font=Font(family="Segoe UI", size=9),
+                     bg=tip_bg, fg=text_sec,
+                     wraplength=680, justify="left").pack(side=tk.LEFT)
 
         def _ensure_embedded_view_frame(self):
             if self.embedded_view_frame and self.embedded_view_frame.winfo_exists():
