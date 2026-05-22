@@ -404,7 +404,7 @@ class PlaylistUI:
                        relief="flat", bd=1, font=("Segoe UI", 9))
 
         # Grid View – works for any number of playlists
-        menu.add_command(label="⊞  Open in Grid View",
+        menu.add_command(label="⊞  Open in Gallery",
                          command=lambda: self._open_grid_view_for_playlists(selected_playlists))
 
         # Edit Info – only for single selection
@@ -582,7 +582,7 @@ class PlaylistUI:
         context_menu.add_separator()
 
         context_menu.add_command(
-            label="Open in Grid View",
+            label="Open in Gallery",
             command=lambda: self._open_grid_view_from_selection(selection)
         )
 

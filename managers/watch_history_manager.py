@@ -347,6 +347,7 @@ class WatchHistoryUI:
         self.video_preview_manager = None
         self._embedded = False
         self._close_callback = None
+        self.grid_view_manager = None
         self.theme_provider.register_manager_ui(self)
 
     def _get_design_tokens(self):
@@ -718,6 +719,11 @@ class WatchHistoryUI:
         context_menu.add_separator()
 
         context_menu.add_command(
+            label="Open in Gallery",
+            command=lambda: self._open_grid_view_from_selection(selected_entries))
+        context_menu.add_separator()
+
+        context_menu.add_command(
             label="Remove from History",
             command=self._remove_selected
         )
@@ -742,6 +748,19 @@ class WatchHistoryUI:
             context_menu.tk_popup(event.x_root, event.y_root)
         finally:
             context_menu.grab_release()
+
+    def _open_grid_view_from_selection(self, selection):
+        if not hasattr(self, 'grid_view_manager') or not self.grid_view_manager:
+            return
+
+        videos_to_play = set()
+
+        for entry in selection:
+            if os.path.exists(entry.video_path):
+                videos_to_play.add(entry.video_path)
+
+        if videos_to_play:
+            self.grid_view_manager.show_grid_view(videos_to_play, self.video_preview_manager)
 
     def _play_selected_from_context(self, entries):
         """Play selected videos from context menu"""
@@ -1012,6 +1031,9 @@ class WatchHistoryManager:
     def set_play_callback(self, callback):
         """Set callback for playing videos from history"""
         self.ui.play_callback = callback
+
+    def set_grid_view_manager(self, grid_view_manager):
+        self.ui.grid_view_manager = grid_view_manager
 
     def _should_track_history(self) -> bool:
         """Check if history tracking is enabled in settings"""

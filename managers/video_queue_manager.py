@@ -568,7 +568,7 @@ class QueueUI:
         context_menu.add_separator()
 
         context_menu.add_command(
-            label="Open in Grid View",
+            label="Open in Gallery",
             command=lambda: self._open_grid_view_from_selection(selection)
         )
 

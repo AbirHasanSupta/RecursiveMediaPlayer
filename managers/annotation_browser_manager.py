@@ -1468,7 +1468,7 @@ class AnnotationBrowserManager:
         menu.add_separator()
 
         menu.add_command(
-            label="Open in Grid View",
+            label="Open in Gallery",
             command=lambda: self._open_grid_view_from_selection(sel))
         menu.add_separator()
 
