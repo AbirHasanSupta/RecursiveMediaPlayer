@@ -82,6 +82,8 @@ class GridViewManager:
         self.get_player_count_callback = None
         self.open_file_location_callback = None
         self.show_properties_callback = None
+        self.exclude_video_callback = None
+        self.remove_exclusion_video_callback = None
 
         self._drag_source = None
         self._drag_ghost = None
@@ -137,6 +139,8 @@ class GridViewManager:
     def set_get_player_count_callback(self, cb):                 self.get_player_count_callback = cb
     def set_open_file_location_callback(self, cb):               self.open_file_location_callback = cb
     def set_show_properties_callback(self, cb):                  self.show_properties_callback = cb
+    def set_exclude_video_callback(self, cb):                    self.exclude_video_callback = cb
+    def set_remove_exclusion_video_callback(self, cb):           self.remove_exclusion_video_callback = cb
     def set_annotation_service(self, svc):
         self.annotation_service = svc
         if svc:
@@ -1742,11 +1746,15 @@ class GridViewManager:
         for vp in list(self.selected_items):
             self.excluded_items.add(vp)
             self._update_card_selection(vp)
+            if self.exclude_video_callback:
+                self.exclude_video_callback(vp)
 
     def _remove_exclusion_selected(self):
         for vp in list(self.selected_items):
             self.excluded_items.discard(vp)
             self._update_card_selection(vp)
+            if self.remove_exclusion_video_callback:
+                self.remove_exclusion_video_callback(vp)
 
     def get_excluded_items(self):
         return set(self.excluded_items)

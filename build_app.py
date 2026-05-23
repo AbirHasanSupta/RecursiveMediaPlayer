@@ -343,6 +343,8 @@ def select_multiple_folders_and_play():
             self.grid_view_manager.set_open_file_location_callback(self._context_open_location)
             self.grid_view_manager.set_show_properties_callback(self._context_show_properties)
             self.grid_view_manager.set_annotation_service(self.annotation_service)
+            self.grid_view_manager.set_exclude_video_callback(self._grid_exclude_video)
+            self.grid_view_manager.set_remove_exclusion_video_callback(self._grid_remove_exclusion_video)
 
             self.settings_manager.ui.cleanup_resume_callback = lambda: self.resume_manager.service.cleanup_old_positions(
                 self.settings_manager.get_settings().auto_cleanup_days)
@@ -4124,6 +4126,72 @@ def select_multiple_folders_and_play():
                 messagebox.showinfo("Properties", info)
             except Exception as e:
                 messagebox.showerror("Error", f"Could not retrieve properties: {e}")
+
+        def _find_root_dir_for_video(self, video_path):
+            """Return the selected_dirs root that owns video_path, or None."""
+            norm_vp = os.path.normpath(video_path)
+            best = None
+            best_len = -1
+            for rd in self.selected_dirs:
+                norm_rd = os.path.normpath(rd)
+                try:
+                    if norm_vp.startswith(norm_rd + os.sep) or norm_vp == norm_rd:
+                        if len(norm_rd) > best_len:
+                            best = rd
+                            best_len = len(norm_rd)
+                except Exception:
+                    pass
+            return best
+
+        def _grid_exclude_video(self, video_path):
+            root_dir = self._find_root_dir_for_video(video_path)
+            if not root_dir:
+                return
+            norm_vp = os.path.normpath(video_path)
+            if root_dir not in self.excluded_videos:
+                self.excluded_videos[root_dir] = []
+            if norm_vp not in (os.path.normpath(v) for v in self.excluded_videos[root_dir]):
+                self.excluded_videos[root_dir].append(video_path)
+            self.update_console(f"Excluded: {os.path.basename(video_path)}")
+            self.update_video_count()
+            self._retag_video_in_tree(video_path, root_dir)
+            if self.save_directories:
+                self.save_preferences()
+
+        def _grid_remove_exclusion_video(self, video_path):
+            root_dir = self._find_root_dir_for_video(video_path)
+            if not root_dir:
+                return
+            if root_dir in self.excluded_videos:
+                norm_vp = os.path.normpath(video_path)
+                self.excluded_videos[root_dir] = [
+                    v for v in self.excluded_videos[root_dir]
+                    if os.path.normpath(v) != norm_vp
+                ]
+                if not self.excluded_videos[root_dir]:
+                    del self.excluded_videos[root_dir]
+            self.update_console(f"Removed exclusion: {os.path.basename(video_path)}")
+            self.update_video_count()
+            self._retag_video_in_tree(video_path, root_dir)
+            if self.save_directories:
+                self.save_preferences()
+
+        def _retag_video_in_tree(self, video_path, root_dir):
+            """Update the tag and label of a single video item in the exclusion tree."""
+            if not hasattr(self, 'exclusion_tree') or not hasattr(self, 'current_subdirs_mapping'):
+                return
+            norm_vp = os.path.normpath(video_path)
+            excluded_dir_set = set(os.path.normpath(p) for p in self.excluded_subdirs.get(root_dir, []))
+            excluded_vid_set = set(os.path.normpath(p) for p in self.excluded_videos.get(root_dir, []))
+            for iid, path in list(self.current_subdirs_mapping.items()):
+                if os.path.normpath(path) == norm_vp:
+                    try:
+                        tag   = self._tag_for_item(path, root_dir, excluded_dir_set, excluded_vid_set)
+                        label = self._label_for_item(path, False, excluded_dir_set, excluded_vid_set, root_dir)
+                        self.exclusion_tree.item(iid, text=label, tags=(tag,))
+                    except Exception:
+                        pass
+                    break
 
         def _context_open_grid_view(self, selection):
             selected_dir = self.get_current_selected_directory()
