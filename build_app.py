@@ -306,14 +306,13 @@ def select_multiple_folders_and_play():
                 lambda videos: self.playlist_manager.add_videos_to_playlist([], videos)
             )
             self.grid_view_manager.set_add_to_favourites_callback(
-                lambda videos: self.favorites_manager.add_to_favorites(videos, self.get_current_selected_directory())
+                lambda videos: self._add_videos_to_favorites_smart(videos)
             )
             self.grid_view_manager.set_remove_from_favourites_callback(
-                lambda videos: self.favorites_manager.remove_from_favorites(videos,
-                                                                            self.get_current_selected_directory())
+                lambda videos: self._remove_videos_from_favorites_smart(videos)
             )
             self.grid_view_manager.set_is_favourite_callback(
-                lambda video_path: self.favorites_manager.is_favorite(video_path, self.get_current_selected_directory())
+                lambda video_path: self._is_favourite_smart(video_path)
             )
             self.grid_view_manager.set_add_to_queue_callback(
                 lambda videos: self.queue_manager.add_to_queue(videos, added_from="grid_view")
@@ -2948,7 +2947,7 @@ def select_multiple_folders_and_play():
             self._active_player = player
 
         def _show_annotation_browser(self):
-            selected_dirs = self.get_selected_directories()
+            selected_dirs = self._get_effective_selected_dirs()
             self._show_embedded_view(
                 "tags",
                 lambda frame: self._show_annotation_browser_embedded(frame, selected_dirs)
@@ -3166,13 +3165,13 @@ def select_multiple_folders_and_play():
                 pass
             elif active == "history" and getattr(self, "active_embedded_manager", None):
                 try:
-                    self.active_embedded_manager.set_directory_filter(self.get_selected_directories())
+                    self.active_embedded_manager.set_directory_filter(self._get_effective_selected_dirs())
                     self.active_embedded_manager.refresh()
                 except Exception:
                     pass
             elif active == "tags" and getattr(self, "active_embedded_manager", None):
                 try:
-                    self.active_embedded_manager.set_directory_filter(self.get_selected_directories())
+                    self.active_embedded_manager.set_directory_filter(self._get_effective_selected_dirs())
                     self.active_embedded_manager.refresh()
                 except Exception:
                     pass
@@ -3184,6 +3183,8 @@ def select_multiple_folders_and_play():
                 selected_dirs = [selected_dir]
             if forced_dir and forced_dir not in selected_dirs:
                 selected_dirs = [forced_dir]
+            if not selected_dirs:
+                selected_dirs = list(self.selected_dirs)
             if not selected_dirs:
                 return
 
@@ -3278,9 +3279,12 @@ def select_multiple_folders_and_play():
                     return self.selected_dirs[idx]
             if self.current_selected_dir_index is not None and self.current_selected_dir_index < len(self.selected_dirs):
                 return self.selected_dirs[self.current_selected_dir_index]
-            if self.selected_dirs:
-                return self.selected_dirs[-1]
+
             return None
+
+        def _get_effective_selected_dirs(self):
+            selected = self.get_selected_directories()
+            return selected if selected else list(self.selected_dirs)
 
         def get_all_videos_for_statistics(self):
             all_videos = []
@@ -3972,6 +3976,8 @@ def select_multiple_folders_and_play():
         def _show_favorites_manager(self):
             selected_dirs = self.get_selected_directories()
             selected_scope = selected_dirs if len(selected_dirs) > 1 else self.get_current_selected_directory()
+            if not selected_scope:
+                selected_scope = list(self.selected_dirs)
             self._show_embedded_view(
                 "favourites",
                 lambda frame: self.favorites_manager.show_embedded(
@@ -4126,6 +4132,37 @@ def select_multiple_folders_and_play():
                 messagebox.showinfo("Properties", info)
             except Exception as e:
                 messagebox.showerror("Error", f"Could not retrieve properties: {e}")
+
+        def _add_videos_to_favorites_smart(self, videos):
+            cur_dir = self.get_current_selected_directory()
+            if cur_dir:
+                self.favorites_manager.add_to_favorites(videos, cur_dir)
+                return
+            by_dir = {}
+            for v in videos:
+                d = self._find_root_dir_for_video(v) or os.path.dirname(v)
+                by_dir.setdefault(d, []).append(v)
+            for d, vids in by_dir.items():
+                self.favorites_manager.add_to_favorites(vids, d)
+
+        def _remove_videos_from_favorites_smart(self, videos):
+            cur_dir = self.get_current_selected_directory()
+            if cur_dir:
+                self.favorites_manager.remove_from_favorites(videos, cur_dir)
+                return
+            by_dir = {}
+            for v in videos:
+                d = self._find_root_dir_for_video(v) or os.path.dirname(v)
+                by_dir.setdefault(d, []).append(v)
+            for d, vids in by_dir.items():
+                self.favorites_manager.remove_from_favorites(vids, d)
+
+        def _is_favourite_smart(self, video_path):
+            cur_dir = self.get_current_selected_directory()
+            if cur_dir:
+                return self.favorites_manager.is_favorite(video_path, cur_dir)
+            d = self._find_root_dir_for_video(video_path) or os.path.dirname(video_path)
+            return self.favorites_manager.is_favorite(video_path, d)
 
         def _find_root_dir_for_video(self, video_path):
             """Return the selected_dirs root that owns video_path, or None."""
@@ -4319,7 +4356,7 @@ def select_multiple_folders_and_play():
             self._launch_player(player)
 
         def _show_watch_history(self):
-            selected_dirs = self.get_selected_directories()
+            selected_dirs = self._get_effective_selected_dirs()
             self._show_embedded_view(
                 "history",
                 lambda frame: self._show_history_embedded(frame, selected_dirs)
@@ -4368,6 +4405,8 @@ def select_multiple_folders_and_play():
             selected_dir = self.get_current_selected_directory()
             if not selected_dirs and selected_dir:
                 selected_dirs = [selected_dir]
+            if not selected_dirs:
+                selected_dirs = list(self.selected_dirs)
             if not selected_dirs:
                 self._set_workspace_title("Gallery", "No directory selected")
                 return
