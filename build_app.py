@@ -1300,12 +1300,13 @@ def select_multiple_folders_and_play():
                 self.console_section.pack(fill=tk.X, pady=(0, 15))
             console_section = self.console_section
 
-            console_header_frame = tk.Frame(console_section, bg=self.bg_color)
-            console_header_frame.pack(fill=tk.X, pady=(0, 10))
+            self.console_header_frame = tk.Frame(console_section, bg=self.bg_color)
+            self.console_header_frame.pack(fill=tk.X, pady=(0, 10))
+            console_header_frame = self.console_header_frame
 
-            console_header = tk.Label(console_header_frame, text="Player Console",
-                                      font=self.header_font, bg=self.bg_color, fg=self.text_color)
-            console_header.pack(side=tk.LEFT, anchor='w')
+            self.console_header_label = tk.Label(console_header_frame, text="Player Console",
+                                                 font=self.header_font, bg=self.bg_color, fg=self.text_color)
+            self.console_header_label.pack(side=tk.LEFT, anchor='w')
 
             self.clear_console_button = self.create_button(
                 console_header_frame, text="Clear", command=self.clear_console,
@@ -1314,17 +1315,20 @@ def select_multiple_folders_and_play():
             self.clear_console_button.pack(side=tk.LEFT, padx=(10, 0), anchor='w')
 
             # Outer container with subtle border
-            console_container = tk.Frame(console_section, bg=self.bg_color,
+            self.console_container = tk.Frame(console_section, bg=self.bg_color,
                                          highlightbackground=self.border_color,
                                          highlightthickness=1, bd=0)
-            console_container.pack(fill=tk.X, pady=(0, 10))
+            self.console_container.pack(fill=tk.X, pady=(0, 10))
+            console_container = self.console_container
 
             # Inner padding frame
-            inner_pad = tk.Frame(console_container, bg=self.bg_color, padx=8, pady=8)
-            inner_pad.pack(fill=tk.BOTH, expand=True)
+            self.console_inner_pad = tk.Frame(console_container, bg=self.bg_color, padx=8, pady=8)
+            self.console_inner_pad.pack(fill=tk.BOTH, expand=True)
+            inner_pad = self.console_inner_pad
 
-            console_frame = tk.Frame(inner_pad, bg=self.bg_color)
-            console_frame.pack(fill=tk.BOTH, expand=True)
+            self.console_frame = tk.Frame(inner_pad, bg=self.bg_color)
+            self.console_frame.pack(fill=tk.BOTH, expand=True)
+            console_frame = self.console_frame
 
             self.console_scrollbar = tk.Scrollbar(console_frame)
             self.console_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)

@@ -615,6 +615,17 @@ class ThemeSelector:
                     scrollbar.configure(style=scroll_style)
                 except tk.TclError:
                     pass
+                try:
+                    scrollbar.configure(
+                        bg=scroll_bg,
+                        troughcolor=trough,
+                        activebackground=scroll_active,
+                        highlightbackground=trough,
+                        highlightthickness=0,
+                        bd=0,
+                    )
+                except tk.TclError:
+                    pass
         except Exception:
             pass
 
@@ -643,6 +654,7 @@ class ThemeSelector:
             'workspace_frame', 'workspace_header', 'workspace_body', 'workspace_nav',
             'content_frame', 'dir_section', 'dir_compact_rail', 'dir_frame',
             'exclusion_buttons_frame', 'embedded_view_frame', 'console_section',
+            'console_header_frame', 'console_container', 'console_inner_pad', 'console_frame',
         )
         for name in frame_names:
             widget = getattr(self, name, None)
