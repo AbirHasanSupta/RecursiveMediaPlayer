@@ -442,6 +442,24 @@ class ThemeSelector:
                 foreground=[("selected", "#FFFFFF")],
                 fieldbackground=[("!disabled", tree_bg), ("disabled", tree_bg)],
             )
+            try:
+                style.element_create("ExclusionTree.customfield", "from", "default", "field")
+                style.layout("ExclusionTree.Treeview", [
+                    ("ExclusionTree.customfield", {
+                        "sticky": "nswe",
+                        "border": "2",
+                        "children": [
+                            ("ExclusionTree.Treeview.padding", {
+                                "sticky": "nswe",
+                                "children": [
+                                    ("ExclusionTree.Treeview.treearea", {"sticky": "nswe"})
+                                ]
+                            })
+                        ]
+                    })
+                ])
+            except tk.TclError:
+                pass
             style.configure(
                 "ExclusionTree.Treeview.Heading",
                 background=self.surface_color,
@@ -944,22 +962,25 @@ class ThemeSelector:
                 return self.bg_color
 
         def apply_idle():
+            if not btn.winfo_exists(): return
             btn.config(bg=_parent_bg(), fg=idle, font=self._manager_action_link_font())
 
         def apply_hover():
+            if not btn.winfo_exists(): return
             btn.config(bg=_parent_bg(), fg=hover, font=self._manager_action_link_font(underline=True))
 
         def apply_active():
+            if not btn.winfo_exists(): return
             btn.config(bg=_parent_bg(), fg=active, font=self._manager_action_link_font(bold=True))
 
         def on_enter(_e):
-            apply_hover()
+            if btn.winfo_exists(): apply_hover()
 
         def on_leave(_e):
-            apply_idle()
+            if btn.winfo_exists(): apply_idle()
 
         def on_press(_e):
-            apply_active()
+            if btn.winfo_exists(): apply_active()
 
         def on_release(_e):
             if command:
