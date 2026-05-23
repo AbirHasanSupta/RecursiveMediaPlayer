@@ -218,6 +218,11 @@ class AnnotationBrowserManager:
         self._dragging_index = None
         self.video_preview_manager = None
         self.grid_view_manager = None
+        self.add_to_playlist_callback = None
+        self.add_to_queue_callback = None
+        self.add_to_favourites_callback = None
+        self.remove_from_favourites_callback = None
+        self.is_favourite_callback = None
         self._annotation_listener = None
         self._embedded = False
         self._close_callback = None
@@ -267,6 +272,21 @@ class AnnotationBrowserManager:
 
     def set_grid_view_manager(self, grid_view_manager):
         self.grid_view_manager = grid_view_manager
+
+    def set_add_to_playlist_callback(self, cb):
+        self.add_to_playlist_callback = cb
+
+    def set_add_to_queue_callback(self, cb):
+        self.add_to_queue_callback = cb
+
+    def set_add_to_favourites_callback(self, cb):
+        self.add_to_favourites_callback = cb
+
+    def set_remove_from_favourites_callback(self, cb):
+        self.remove_from_favourites_callback = cb
+
+    def set_is_favourite_callback(self, cb):
+        self.is_favourite_callback = cb
 
     # ── Async Loading ────────────────────────────────────────────────────────
 
@@ -331,6 +351,26 @@ class AnnotationBrowserManager:
 
         self._clear_loading_state()
         self._loading = False
+
+    def _context_add_to_playlist(self, paths):
+        valid = [p for p in paths if os.path.isfile(p)]
+        if valid and self.add_to_playlist_callback:
+            self.add_to_playlist_callback(valid)
+
+    def _context_add_to_queue(self, paths):
+        valid = [p for p in paths if os.path.isfile(p)]
+        if valid and self.add_to_queue_callback:
+            self.add_to_queue_callback(valid)
+
+    def _context_add_to_favourites(self, paths):
+        valid = [p for p in paths if os.path.isfile(p)]
+        if valid and self.add_to_favourites_callback:
+            self.add_to_favourites_callback(valid)
+
+    def _context_remove_from_favourites(self, paths):
+        valid = [p for p in paths if os.path.isfile(p)]
+        if valid and self.remove_from_favourites_callback:
+            self.remove_from_favourites_callback(valid)
 
     def _clear_loading_state(self):
         self._loading = False
@@ -1591,6 +1631,24 @@ class AnnotationBrowserManager:
         menu.add_command(
             label="Open in Gallery",
             command=lambda: self._open_grid_view_from_selection(sel))
+        menu.add_separator()
+
+        paths = [self._filtered_videos[i] for i in sel if i < len(self._filtered_videos)]
+
+        if self.add_to_playlist_callback:
+            menu.add_command(label="Add to Playlist",
+                             command=lambda ps=paths: self._context_add_to_playlist(ps))
+        if self.add_to_queue_callback:
+            menu.add_command(label="Add to Queue",
+                             command=lambda ps=paths: self._context_add_to_queue(ps))
+        if self.is_favourite_callback and (self.add_to_favourites_callback or self.remove_from_favourites_callback):
+            all_fav = all(self.is_favourite_callback(p) for p in paths)
+            if all_fav and self.remove_from_favourites_callback:
+                menu.add_command(label="Remove from Favourites",
+                                 command=lambda ps=paths: self._context_remove_from_favourites(ps))
+            elif self.add_to_favourites_callback:
+                menu.add_command(label="Add to Favourites",
+                                 command=lambda ps=paths: self._context_add_to_favourites(ps))
         menu.add_separator()
 
         if n == 1:

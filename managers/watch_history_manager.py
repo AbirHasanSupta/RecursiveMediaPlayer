@@ -348,6 +348,11 @@ class WatchHistoryUI:
         self._embedded = False
         self._close_callback = None
         self.grid_view_manager = None
+        self.add_to_playlist_callback = None
+        self.add_to_queue_callback = None
+        self.add_to_favourites_callback = None
+        self.remove_from_favourites_callback = None
+        self.is_favourite_callback = None
         self.theme_provider.register_manager_ui(self)
 
     def _get_design_tokens(self):
@@ -768,6 +773,24 @@ class WatchHistoryUI:
             command=lambda: self._open_grid_view_from_selection(selected_entries))
         context_menu.add_separator()
 
+        if self.add_to_playlist_callback:
+            context_menu.add_command(label="Add to Playlist",
+                                     command=lambda es=selected_entries: self._context_add_to_playlist(es))
+        if self.add_to_queue_callback:
+            context_menu.add_command(label="Add to Queue",
+                                     command=lambda es=selected_entries: self._context_add_to_queue(es))
+        if self.is_favourite_callback and (self.add_to_favourites_callback or self.remove_from_favourites_callback):
+            paths = [e.video_path for e in selected_entries]
+            all_fav = all(self.is_favourite_callback(p) for p in paths)
+            if all_fav and self.remove_from_favourites_callback:
+                context_menu.add_command(label="Remove from Favourites",
+                                         command=lambda es=selected_entries: self._context_remove_from_favourites(es))
+            elif self.add_to_favourites_callback:
+                context_menu.add_command(label="Add to Favourites",
+                                         command=lambda es=selected_entries: self._context_add_to_favourites(es))
+
+        context_menu.add_separator()
+
         context_menu.add_command(
             label="Remove from History",
             command=self._remove_selected
@@ -793,6 +816,26 @@ class WatchHistoryUI:
             context_menu.tk_popup(event.x_root, event.y_root)
         finally:
             context_menu.grab_release()
+
+    def _context_add_to_playlist(self, entries):
+        paths = [e.video_path for e in entries if os.path.isfile(e.video_path)]
+        if paths and self.add_to_playlist_callback:
+            self.add_to_playlist_callback(paths)
+
+    def _context_add_to_queue(self, entries):
+        paths = [e.video_path for e in entries if os.path.isfile(e.video_path)]
+        if paths and self.add_to_queue_callback:
+            self.add_to_queue_callback(paths)
+
+    def _context_add_to_favourites(self, entries):
+        paths = [e.video_path for e in entries if os.path.isfile(e.video_path)]
+        if paths and self.add_to_favourites_callback:
+            self.add_to_favourites_callback(paths)
+
+    def _context_remove_from_favourites(self, entries):
+        paths = [e.video_path for e in entries if os.path.isfile(e.video_path)]
+        if paths and self.remove_from_favourites_callback:
+            self.remove_from_favourites_callback(paths)
 
     def _open_grid_view_from_selection(self, selection):
         if not hasattr(self, 'grid_view_manager') or not self.grid_view_manager:
@@ -1079,6 +1122,21 @@ class WatchHistoryManager:
 
     def set_grid_view_manager(self, grid_view_manager):
         self.ui.grid_view_manager = grid_view_manager
+
+    def set_add_to_playlist_callback(self, cb):
+        self.ui.add_to_playlist_callback = cb
+
+    def set_add_to_queue_callback(self, cb):
+        self.ui.add_to_queue_callback = cb
+
+    def set_add_to_favourites_callback(self, cb):
+        self.ui.add_to_favourites_callback = cb
+
+    def set_remove_from_favourites_callback(self, cb):
+        self.ui.remove_from_favourites_callback = cb
+
+    def set_is_favourite_callback(self, cb):
+        self.ui.is_favourite_callback = cb
 
     def _should_track_history(self) -> bool:
         """Check if history tracking is enabled in settings"""

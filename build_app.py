@@ -260,6 +260,21 @@ def select_multiple_folders_and_play():
             self.watch_history_manager.set_play_callback(self._play_history_videos)
             self.watch_history_manager.set_video_preview_manager(self.video_preview_manager)
             self.watch_history_manager.set_grid_view_manager(self.grid_view_manager)
+            self.watch_history_manager.set_add_to_playlist_callback(
+                lambda videos: self.playlist_manager.add_videos_to_playlist([], videos)
+            )
+            self.watch_history_manager.set_add_to_queue_callback(
+                lambda videos: self.queue_manager.add_to_queue(videos, added_from="watch_history")
+            )
+            self.watch_history_manager.set_add_to_favourites_callback(
+                lambda videos: self._add_videos_to_favorites_smart(videos)
+            )
+            self.watch_history_manager.set_remove_from_favourites_callback(
+                lambda videos: self._remove_videos_from_favorites_smart(videos)
+            )
+            self.watch_history_manager.set_is_favourite_callback(
+                lambda video_path: self._is_favourite_smart(video_path)
+            )
 
             self.resume_manager = ResumePlaybackManager()
             self.resume_manager.set_resume_enabled(self.smart_resume_enabled)
@@ -299,6 +314,21 @@ def select_multiple_folders_and_play():
             )
             self.annotation_browser.set_video_preview_manager(self.video_preview_manager)
             self.annotation_browser.set_grid_view_manager(self.grid_view_manager)
+            self.annotation_browser.set_add_to_playlist_callback(
+                lambda videos: self.playlist_manager.add_videos_to_playlist([], videos)
+            )
+            self.annotation_browser.set_add_to_queue_callback(
+                lambda videos: self.queue_manager.add_to_queue(videos, added_from="annotation_browser")
+            )
+            self.annotation_browser.set_add_to_favourites_callback(
+                lambda videos: self._add_videos_to_favorites_smart(videos)
+            )
+            self.annotation_browser.set_remove_from_favourites_callback(
+                lambda videos: self._remove_videos_from_favorites_smart(videos)
+            )
+            self.annotation_browser.set_is_favourite_callback(
+                lambda video_path: self._is_favourite_smart(video_path)
+            )
 
             self.dual_player_manager = DualPlayerManager(
                 self.root,
