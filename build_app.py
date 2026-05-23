@@ -3403,6 +3403,8 @@ def select_multiple_folders_and_play():
             self._active_player = None
             self.update_console("Player closed.")
             self._on_player_stopped()
+            if getattr(self, '_active_app_view', None) == 'home':
+                self.root.after(150, self._render_home_dashboard)
 
         def _save_loop_callback(self, loop_mode: str):
             self.loop_mode = loop_mode
