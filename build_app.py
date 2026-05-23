@@ -1497,9 +1497,9 @@ def select_multiple_folders_and_play():
                 highlightbackground=self.border_color, highlightthickness=1)
             self.dir_tree_container.pack(fill=tk.BOTH, expand=True)
 
-            self.exclusion_scrollbar = ttk.Scrollbar(
+            self.exclusion_scrollbar = tk.Scrollbar(
                 self.dir_tree_container, orient=tk.VERTICAL,
-                style="ExclusionTree.Vertical.TScrollbar")
+                width=10, relief=tk.FLAT, borderwidth=0)
             self.exclusion_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
             self.exclusion_tree = ttk.Treeview(
