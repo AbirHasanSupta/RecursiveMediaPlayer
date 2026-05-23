@@ -10,9 +10,9 @@ from managers.resource_manager import ManagedExecutor, get_resource_manager, Man
 from utils import _responsive_geometry
 
 # ── Design tokens (override per-theme in _get_design_tokens) ─────────────────
-_CARD_RADIUS   = 10   # visual only – used via Canvas for rounded rects
+_CARD_RADIUS   = 10
 _CARD_W        = 260
-_CARD_H        = 146  # thumb height  (16:9 × 260)
+_CARD_H        = 146
 _INFO_H        = 52
 _CARD_PAD_X    = 10
 _CARD_PAD_Y    = 10
@@ -89,6 +89,7 @@ class GridViewManager:
         self._drag_type = None
 
         get_resource_manager().register_cleanup_callback(self._cleanup)
+        self.theme_provider.register_manager_ui(self)
 
     def _cleanup(self):
         try:
@@ -190,94 +191,55 @@ class GridViewManager:
     # ─────────────────────────────────────────────────────────────────────────
 
     def _tok(self):
-        """Return a dict of refined design-system tokens for the current theme."""
+        """Return design-system tokens derived from theme_provider's dashboard palette."""
+        base = self.theme_provider.get_manager_design_tokens()
         dark = getattr(self.theme_provider, 'dark_mode', False)
+
+        # Compute grid‑specific derived colours
         if dark:
-            return dict(
-                bg          = "#16181c",
-                surface     = "#1f2127",
-                surface2    = "#282b32",
-                surface3    = "#2e3139",
-                border      = "#35383f",
-                border_soft = "#2a2d34",
-                text        = "#e4e7ee",
-                text_sub    = "#8892a4",
-                text_muted  = "#52596a",
-                accent      = "#5b9cf6",
-                accent_dim  = "#172344",
-                accent_hover= "#4a8af0",
-                success     = "#3ecf6e",
-                danger      = "#f05252",
-                warn        = "#f5a623",
-                now_playing = "#3ecf6e",
-                excluded    = "#c0392b",
-                thumb_bg    = "#0b0c0f",
-                header_bg   = "#1a1d22",
-                pill_bg     = "#282b32",
-                pill_bg_h   = "#313540",
-                pill_fg     = "#9aa4b8",
-                scrollbar   = "#35383f",
-                card_hover  = "#252830",
-                divider     = "#2a2d34",
-            )
+            accent_dim = "#172344"
+            card_hover = base.get('surface2', "#2e3139")
+            pill_bg = base.get('surface2', "#2e3139")
         else:
-            return dict(
-                bg          = "#eef0f5",
-                surface     = "#ffffff",
-                surface2    = "#f4f6fa",
-                surface3    = "#edf0f6",
-                border      = "#dce0ea",
-                border_soft = "#e8eaf2",
-                text        = "#1a2035",
-                text_sub    = "#556070",
-                text_muted  = "#96a0b5",
-                accent      = "#2d7ef7",
-                accent_dim  = "#dbeafe",
-                accent_hover= "#1a6de8",
-                success     = "#18a555",
-                danger      = "#e63946",
-                warn        = "#e07b00",
-                now_playing = "#18a555",
-                excluded    = "#c0392b",
-                thumb_bg    = "#0d0e10",
-                header_bg   = "#e8ebf2",
-                pill_bg     = "#e8ecf4",
-                pill_bg_h   = "#dde2ee",
-                pill_fg     = "#4a5568",
-                scrollbar   = "#c5cad8",
-                card_hover  = "#f7f8fc",
-                divider     = "#e4e8f0",
-            )
+            accent_dim = "#dbeafe"
+            card_hover = base.get('surface2', "#edf0f6")
+            pill_bg = base.get('surface2', "#edf0f6")
+
+        return dict(
+            # base tokens (direct passthrough)
+            bg          = base['bg'],
+            surface     = base['surface'],
+            surface2    = base['surface2'],
+            border      = base['border'],
+            border_soft = base['divider'],
+            text        = base['text'],
+            text_sub    = base['text_muted'],
+            text_muted  = base['text_muted'],
+            accent      = base['accent'],
+            success     = base.get('queue_accent', "#3ecf6e"),
+            danger      = base.get('accent_secondary', "#f05252"),
+            warn        = base.get('favorites_accent', "#F5C518"),
+            header_bg   = base['header_bg'],
+            divider     = base['divider'],
+            # grid‑specific overrides / additions
+            accent_dim  = accent_dim,
+            accent_hover= base['accent'],
+            now_playing = base.get('queue_accent', "#3ecf6e"),
+            excluded    = base.get('accent_secondary', "#f05252"),
+            thumb_bg    = "#0b0c0f" if dark else "#0d0e10",
+            pill_bg     = pill_bg,
+            pill_bg_h   = base.get('surface2', "#2e3139" if dark else "#edf0f6"),
+            pill_fg     = base['text_muted'],
+            scrollbar   = base['border'],
+            card_hover  = card_hover,
+        )
+
 
     # ─────────────────────────────────────────────────────────────────────────
     # Main window (new UI structure)
     # ─────────────────────────────────────────────────────────────────────────
     def _get_design_tokens(self):
-        dark = self.theme_provider.dark_mode
-        if dark:
-            return {
-                "bg": "#16181c",
-                "surface": "#1f2127",
-                "surface2": "#282b32",
-                "header_bg": "#1a1b1e",
-                "text": "#e4e7ee",
-                "text_muted": "#52596a",
-                "accent": "#5b9cf6",
-                "border": "#35383f",
-                "divider": "#2a2d34",
-            }
-        else:
-            return {
-                "bg": "#eef0f5",
-                "surface": "#ffffff",
-                "surface2": "#f4f6fa",
-                "header_bg": "#ebedf0",
-                "text": "#1a2035",
-                "text_muted": "#96a0b5",
-                "accent": "#2d7ef7",
-                "border": "#dce0ea",
-                "divider": "#e4e8f0",
-            }
+        return self._tok()
 
     def show_grid_view(self, videos, video_preview_manager=None):
         if hasattr(self.theme_provider, "_open_grid_view"):
@@ -309,7 +271,6 @@ class GridViewManager:
         self.grid_window.title("Video Gallery")
         self.grid_window.geometry(_responsive_geometry(self.root, 1600, 900))
         self.grid_window.configure(bg=t['bg'])
-
 
         self.items = []
         self.selected_items = set()
@@ -397,10 +358,10 @@ class GridViewManager:
         self._update_tag_filter_btn()
 
     def _build_ui(self, videos, t):
-        """Construct the entire window layout."""
+        """Construct the entire window layout using theme tokens."""
         gw = self.grid_window
 
-        # ── Header (icon + title + play selected button) ──────────────────────
+        # ── Header (icon + title + optional close button) ──────────────────────
         header = tk.Frame(gw, bg=t['header_bg'], height=58)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
@@ -430,7 +391,7 @@ class GridViewManager:
         # separator line
         tk.Frame(gw, bg=t['divider'], height=1).pack(fill=tk.X)
 
-        # ── Toolbar strip (unchanged, but use t colours) ───────────────────────
+        # ── Toolbar strip (using surface2 background) ───────────────────────────
         toolbar_bg = t['surface2']
         toolbar = tk.Frame(gw, bg=toolbar_bg, height=52)
         toolbar.pack(fill=tk.X, padx=0)
@@ -439,7 +400,7 @@ class GridViewManager:
         inner_tb = tk.Frame(toolbar, bg=toolbar_bg)
         inner_tb.pack(fill=tk.BOTH, expand=True, padx=28)
 
-        # Grid-size label + spinbox
+        # Columns spinbox
         tk.Label(inner_tb, text="Columns", font=("Segoe UI", 9),
                  bg=toolbar_bg, fg=t['text_muted']).pack(side=tk.LEFT, anchor='w', pady=13)
         self.grid_size_var = tk.IntVar(value=6)
@@ -478,23 +439,25 @@ class GridViewManager:
 
         tk.Frame(inner_tb, bg=t['border'], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=10, padx=4)
 
-        # Tags filter button
+        # Tags filter button (action link)
         tk.Label(inner_tb, text="Tags", font=("Segoe UI", 9),
                  bg=toolbar_bg, fg=t['text_muted']).pack(side=tk.LEFT, padx=(14, 6), pady=13)
-        self._tag_filter_btn = tk.Label(
-            inner_tb, text="All tags ▾",
-            font=("Segoe UI", 9),
-            bg=t['surface2'], fg=t['text_muted'],
-            padx=14, pady=5, cursor="hand2"
+        tp = self.theme_provider
+        self._tag_filter_btn = tp.create_manager_action_link(
+            inner_tb, "All tags ▾", lambda: None, style="secondary"
         )
         self._tag_filter_btn.pack(side=tk.LEFT, padx=(0, 4), pady=13)
         self._tag_filter_btn.bind("<Button-1>", lambda e: self._show_tag_filter_menu(e))
 
         tk.Frame(inner_tb, bg=t['border'], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=10, padx=10)
 
-        # Selection actions (pill buttons)
-        self._make_pill_btn(inner_tb, "Select All", self._select_all, t).pack(side=tk.LEFT, padx=3, pady=13)
-        self._make_pill_btn(inner_tb, "Clear", self._clear_selection, t).pack(side=tk.LEFT, padx=3, pady=13)
+        # Selection action links (Select All / Clear)
+        tp.create_manager_action_link(
+            inner_tb, "Select All", self._select_all, style="secondary"
+        ).pack(side=tk.LEFT, padx=3, pady=13)
+        tp.create_manager_action_link(
+            inner_tb, "Clear", self._clear_selection, style="secondary"
+        ).pack(side=tk.LEFT, padx=3, pady=13)
 
         # Page size right-aligned
         right_tb = tk.Frame(inner_tb, bg=toolbar_bg)
@@ -512,19 +475,18 @@ class GridViewManager:
 
         tk.Frame(gw, bg=t['divider'], height=1).pack(fill=tk.X)
 
-        # ── Pagination row (unchanged) ─────────────────────────────────────────
+        # ── Pagination row (using action links for Prev/Next) ───────────────────
         self._pagination_frame = tk.Frame(gw, bg=t['bg'])
         self._pagination_frame.pack(fill=tk.X, padx=28, pady=(12, 4))
         self._build_pagination_bar()
 
-        # ── Canvas / scrollable grid (unchanged) ───────────────────────────────
+        # ── Canvas / scrollable grid ───────────────────────────────────────────
         body = tk.Frame(gw, bg=t['bg'])
         body.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
 
         self.canvas = tk.Canvas(body, bg=t['bg'], highlightthickness=0)
-        scrollbar = tk.Scrollbar(body, orient=tk.VERTICAL, command=self.canvas.yview,
-                                 bg=t['bg'], troughcolor=t['bg'],
-                                 activebackground=t['divider'], width=10)
+        scrollbar = tk.Scrollbar(body, orient=tk.VERTICAL, command=self.canvas.yview)
+        self.theme_provider.configure_manager_scrollbar(scrollbar, t)
         self.canvas.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 4))
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -570,6 +532,44 @@ class GridViewManager:
         if hasattr(gw, "protocol"):
             gw.protocol("WM_DELETE_WINDOW", _on_closing)
 
+        # ── Bottom action bar ──────────────────────────────────────────────────
+        tk.Frame(gw, bg=t['divider'], height=1).pack(fill=tk.X, side=tk.BOTTOM)
+        action_bar = tk.Frame(gw, bg=t['surface2'], height=48)
+        action_bar.pack(fill=tk.X, side=tk.BOTTOM)
+        action_bar.pack_propagate(False)
+        act_inner = tk.Frame(action_bar, bg=t['surface2'])
+        act_inner.pack(fill=tk.BOTH, expand=True, padx=20)
+
+        # Selection badge (pill)
+        self.selection_label = tk.Label(
+            act_inner, text="  Nothing selected  ",
+            font=("Segoe UI", 9),
+            bg=t['pill_bg'], fg=t['text_muted'],
+            padx=8, pady=4,
+        )
+        self.selection_label.pack(side=tk.LEFT, pady=10)
+
+        # Drag hint label
+        self.drag_mode_label = tk.Label(
+            act_inner, text="",
+            font=("Segoe UI", 9, "italic"),
+            bg=t['surface2'], fg=t['text_muted'],
+        )
+        self.drag_mode_label.pack(side=tk.LEFT, padx=(12, 0), pady=10)
+
+        # Action links (right side)
+        act_links = tk.Frame(act_inner, bg=t['surface2'])
+        act_links.pack(side=tk.RIGHT, pady=8)
+        tp.create_manager_action_link(
+            act_links, "➕  Add to Queue", self._context_add_to_queue, style="queue"
+        ).pack(side=tk.LEFT)
+        tp.create_manager_action_link(
+            act_links, "➕  Add to Playlist", self._context_add_to_playlist, style="playlist"
+        ).pack(side=tk.LEFT)
+        tp.create_manager_action_link(
+            act_links, "▶  Play Selected", self._play_selected, style="primary"
+        ).pack(side=tk.LEFT)
+
         # Start loading videos (unchanged)
         ManagedThread(target=self._load_videos, args=(videos,), name="LoadGridVideos").start()
 
@@ -579,7 +579,6 @@ class GridViewManager:
     def _show_tag_filter_menu(self, event):
         if not self.annotation_service:
             return
-        # Collect all tags from all video items
         all_tags = set()
         for it in getattr(self, 'all_items', self.items):
             if it['type'] == 'video':
@@ -588,14 +587,8 @@ class GridViewManager:
         if not all_tags:
             return
 
-        t = self._tok()
-        menu = tk.Menu(self.grid_window, tearoff=0,
-                       bg=t['surface'], fg=t['text'],
-                       activebackground=t['accent_dim'],
-                       activeforeground=t['accent'],
-                       relief="flat", bd=1, font=("Segoe UI", 9))
+        menu = self.theme_provider.create_manager_context_menu(self.grid_window)
 
-        # Only add "Clear tag filter" if any filters are active
         if self._active_tag_filters:
             menu.add_command(label="Clear tag filter", command=lambda: (
                 self._active_tag_filters.clear(),
@@ -625,14 +618,23 @@ class GridViewManager:
         if not self._tag_filter_btn:
             return
         t = self._tok()
+        tp = self.theme_provider
         if self._active_tag_filters:
             label = f"Tags: {', '.join(sorted(self._active_tag_filters)[:2])}"
             if len(self._active_tag_filters) > 2:
                 label += f" +{len(self._active_tag_filters) - 2}"
             label += " ▾"
-            self._tag_filter_btn.config(text=label, fg=t['accent'], bg=t['accent_dim'])
+            idle, hover, active = tp._manager_action_link_colors("primary", tp.get_manager_design_tokens())
+            self._tag_filter_btn.config(text=label, fg=idle)
+            self._tag_filter_btn._link_idle = idle
+            self._tag_filter_btn._link_hover = hover
+            self._tag_filter_btn._link_active = active
         else:
-            self._tag_filter_btn.config(text="All tags ▾", fg=t['pill_fg'], bg=t['pill_bg'])
+            idle, hover, active = tp._manager_action_link_colors("secondary", tp.get_manager_design_tokens())
+            self._tag_filter_btn.config(text="All tags ▾", fg=idle)
+            self._tag_filter_btn._link_idle = idle
+            self._tag_filter_btn._link_hover = hover
+            self._tag_filter_btn._link_active = active
 
     def _apply_tag_filter(self):
         self._page = 0
@@ -675,6 +677,23 @@ class GridViewManager:
 
         self.root.after(0, self._rebuild_grid)
 
+
+    def apply_theme(self):
+        if not self.grid_window:
+            return
+        try:
+            if not self.grid_window.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        t = self._tok()
+        tp = self.theme_provider
+        self.grid_window.configure(bg=t['bg'])
+        tp.restyle_manager_action_links(self.grid_window)
+        tp.restyle_manager_buttons(self.grid_window)
+        self._update_tag_filter_btn()
+        self._rebuild_grid()
+
     def play_from_global(self):
         """Play selected videos, or all videos if nothing selected."""
         videos = self._get_selected_videos()
@@ -683,33 +702,29 @@ class GridViewManager:
         if videos and self.play_callback:
             self.play_callback(videos)
 
-    def _make_btn(self, parent, text, cmd, bg, fg, hover=None):
-        """Flat rectangular button with hover colour."""
-        btn = tk.Label(
+    def _make_btn(self, parent, text, cmd, bg, fg, hover=None, variant="primary"):
+        """Theme-aligned button using variant system."""
+        tp = self.theme_provider
+        colors = tp.get_button_colors(variant)
+        btn = tk.Button(
             parent, text=text,
             font=("Segoe UI", 9, "bold"),
-            bg=bg, fg=fg,
-            padx=18, pady=9,
+            bg=colors["bg"], fg=colors["fg"],
+            relief=tk.FLAT, bd=0,
+            padx=18, pady=7,
             cursor="hand2",
+            activebackground=colors["active"],
+            activeforeground="#FFFFFF",
         )
+        btn._variant = variant
         btn.bind("<Button-1>", lambda e: cmd())
-        if hover:
-            btn.bind("<Enter>", lambda e: btn.configure(bg=hover))
-            btn.bind("<Leave>", lambda e: btn.configure(bg=bg))
+        tp._bind_button_hover(btn, variant)
         return btn
 
     def _make_pill_btn(self, parent, text, cmd, t):
-        """Small pill-shaped button for toolbar."""
-        btn = tk.Label(
-            parent, text=text,
-            font=("Segoe UI", 9),
-            bg=t['pill_bg'], fg=t['pill_fg'],
-            padx=14, pady=5,
-            cursor="hand2",
-        )
-        btn.bind("<Button-1>", lambda e: cmd())
-        btn.bind("<Enter>",    lambda e: btn.configure(bg=t['pill_bg_h'], fg=t['text']))
-        btn.bind("<Leave>",    lambda e: btn.configure(bg=t['pill_bg'], fg=t['pill_fg']))
+        """Action-link style pill for toolbar/pagination – no box border."""
+        tp = self.theme_provider
+        btn = tp.create_manager_action_link(parent, text, cmd, style="secondary")
         return btn
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -852,13 +867,14 @@ class GridViewManager:
             w.destroy()
 
         t = self._tok()
+        tp = self.theme_provider
         self._get_page_items()
         total_pages = self._total_pages()
         total_videos = sum(1 for i in self.items if i['type'] == 'video')
 
         pg_frame = self._pagination_frame
 
-        prev_btn = self._make_pill_btn(pg_frame, "← Prev", self._prev_page, t)
+        prev_btn = tp.create_manager_action_link(pg_frame, "← Prev", self._prev_page, style="secondary")
         prev_btn.pack(side=tk.LEFT, padx=(0, 4))
 
         self._page_label = tk.Label(
@@ -869,7 +885,7 @@ class GridViewManager:
         )
         self._page_label.pack(side=tk.LEFT, padx=10)
 
-        next_btn = self._make_pill_btn(pg_frame, "Next →", self._next_page, t)
+        next_btn = tp.create_manager_action_link(pg_frame, "Next →", self._next_page, style="secondary")
         next_btn.pack(side=tk.LEFT, padx=(4, 20))
 
         tk.Label(pg_frame, text="Go to", font=("Segoe UI", 9),
@@ -1333,6 +1349,11 @@ class GridViewManager:
     def _update_selection_label(self):
         if not hasattr(self, 'selection_label'):
             return
+        try:
+            if not self.selection_label.winfo_exists():
+                return
+        except tk.TclError:
+            return
         t = self._tok()
         n = len(self.selected_items)
         if n == 0:
@@ -1531,13 +1552,7 @@ class GridViewManager:
     # ─────────────────────────────────────────────────────────────────────────
 
     def _show_context_menu(self, event, vp):
-        _tp = self.theme_provider
-        context_menu = tk.Menu(self.grid_window, tearoff=0,
-                               bg="#313335" if _tp.dark_mode else "#f5f5f5",
-                               fg="#A9B7C6" if _tp.dark_mode else "#333333",
-                               activebackground="#2D5A8E" if _tp.dark_mode else "#3498db",
-                               activeforeground="#FFFFFF",
-                               relief="flat", bd=1, font=("Segoe UI", 9))
+        context_menu = self.theme_provider.create_manager_context_menu(self.grid_window)
 
         if not self.selected_items:
             return
