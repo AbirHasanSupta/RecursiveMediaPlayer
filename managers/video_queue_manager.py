@@ -335,6 +335,8 @@ class QueueUI:
         self.drag_data = None
         self.video_preview_manager = None
         self.grid_view_manager = None
+        self.add_to_favorites_callback = None
+        self.add_to_playlist_callback = None
         self._embedded = False
         self._close_callback = None
         self.theme_provider.register_manager_ui(self)
@@ -595,6 +597,18 @@ class QueueUI:
             label="Open in Gallery",
             command=lambda: self._open_grid_view_from_selection(selection)
         )
+
+        if self.add_to_favorites_callback and selected_videos:
+            context_menu.add_command(
+                label="Add to Favourites",
+                command=lambda v=selected_videos: self.add_to_favorites_callback(v)
+            )
+
+        if self.add_to_playlist_callback and selected_videos:
+            context_menu.add_command(
+                label="Add to Playlist",
+                command=lambda v=selected_videos: self.add_to_playlist_callback(v)
+            )
 
         context_menu.add_separator()
 
@@ -915,10 +929,16 @@ class VideoQueueManager:
         return self.ui
 
     def add_to_queue(self, video_paths: List[str], added_from: str = "manual") -> int:
-        return self.service.add_to_queue(video_paths, added_from)
+        count = self.service.add_to_queue(video_paths, added_from)
+        if count and self.ui:
+            self.ui._refresh_queue()
+        return count
 
     def play_next(self, video_paths: List[str], added_from: str = "manual") -> int:
-        return self.service.play_next(video_paths, added_from)
+        count = self.service.play_next(video_paths, added_from)
+        if count and self.ui:
+            self.ui._refresh_queue()
+        return count
 
     def get_next_video(self) -> Optional[str]:
         return self.service.get_next_video()
@@ -945,3 +965,9 @@ class VideoQueueManager:
 
     def set_grid_view_manager(self, grid_view_manager):
         self.ui.grid_view_manager = grid_view_manager
+
+    def set_add_to_favorites_callback(self, callback):
+        self.ui.add_to_favorites_callback = callback
+
+    def set_add_to_playlist_callback(self, callback):
+        self.ui.add_to_playlist_callback = callback

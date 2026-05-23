@@ -234,6 +234,8 @@ class FavoritesUI:
         self.dragging_index = None
         self.video_preview_manager = None
         self.grid_view_manager = None
+        self.add_to_queue_callback = None
+        self.add_to_playlist_callback = None
         self._embedded = False
         self._close_callback = None
         self.theme_provider.register_manager_ui(self)
@@ -457,6 +459,25 @@ class FavoritesUI:
             label="Open in Gallery",
             command=lambda: self._open_grid_view_from_selection(selection)
         )
+
+        selected_videos = [
+            self.favorite_entries[i].video_path
+            for i in selection
+            if 0 <= i < len(self.favorite_entries)
+               and os.path.isfile(self.favorite_entries[i].video_path)
+        ]
+
+        if self.add_to_queue_callback and selected_videos:
+            context_menu.add_command(
+                label="Add to Queue",
+                command=lambda v=selected_videos: self.add_to_queue_callback(v)
+            )
+
+        if self.add_to_playlist_callback and selected_videos:
+            context_menu.add_command(
+                label="Add to Playlist",
+                command=lambda v=selected_videos: self.add_to_playlist_callback(v)
+            )
 
         context_menu.add_separator()
 
@@ -873,12 +894,18 @@ class FavoritesManager:
         return self.ui
 
     def add_to_favorites(self, video_paths: List[str], directory_path: str) -> int:
-        return self.service.add_multiple_to_favorites(video_paths, directory_path)
+        count = self.service.add_multiple_to_favorites(video_paths, directory_path)
+        if count and self.ui:
+            self.ui._refresh_favorites_list()
+        return count
 
     def remove_from_favorites(self, video_paths: List[str], directory_path: str) -> int:
         count = self.service.remove_multiple_from_favorites(video_paths, directory_path)
-        if count > 0 and self._on_removed_callback:
-            self._on_removed_callback()
+        if count > 0:
+            if self._on_removed_callback:
+                self._on_removed_callback()
+            if self.ui:
+                self.ui._refresh_favorites_list()
         return count
 
     def is_favorite(self, video_path: str, directory_path: str) -> bool:
@@ -893,3 +920,9 @@ class FavoritesManager:
 
     def set_grid_view_manager(self, grid_view_manager):
         self.ui.grid_view_manager = grid_view_manager
+
+    def set_add_to_queue_callback(self, callback):
+        self.ui.add_to_queue_callback = callback
+
+    def set_add_to_playlist_callback(self, callback):
+        self.ui.add_to_playlist_callback = callback

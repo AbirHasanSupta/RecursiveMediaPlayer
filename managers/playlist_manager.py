@@ -167,6 +167,8 @@ class PlaylistUI:
         self.playlist_window = None
         self.video_preview_manager = None
         self.grid_view_manager = None
+        self.add_to_favorites_callback = None
+        self.add_to_queue_callback = None
         self.video_mapping = {}
 
         self.dragging_index = None
@@ -611,6 +613,26 @@ class PlaylistUI:
             command=lambda: self._open_grid_view_from_selection(selection)
         )
 
+        if self.current_playlist:
+            selected_videos = [
+                self.current_playlist.videos[i]
+                for i in selection
+                if 0 <= i < len(self.current_playlist.videos)
+                   and os.path.isfile(self.current_playlist.videos[i])
+            ]
+
+            if self.add_to_favorites_callback and selected_videos:
+                context_menu.add_command(
+                    label="Add to Favourites",
+                    command=lambda v=selected_videos: self.add_to_favorites_callback(v)
+                )
+
+            if self.add_to_queue_callback and selected_videos:
+                context_menu.add_command(
+                    label="Add to Queue",
+                    command=lambda v=selected_videos: self.add_to_queue_callback(v)
+                )
+
         context_menu.add_separator()
 
         context_menu.add_command(
@@ -933,17 +955,7 @@ class PlaylistUI:
                 f"Removed {len(selection)} video{'s' if len(selection) > 1 else ''} from '{self.current_playlist.name}'")
 
         self._refresh_video_list()
-
-        current_selection = self.playlist_listbox.curselection()
-        if current_selection:
-            playlists = self.playlist_service.get_all_playlists()
-            if current_selection[0] < len(playlists):
-                playlist = playlists[current_selection[0]]
-                new_display_text = f"{playlist.name} ({len(playlist.videos)} videos)"
-                self.playlist_listbox.delete(current_selection[0])
-                self.playlist_listbox.insert(current_selection[0], new_display_text)
-                self.playlist_listbox.selection_set(current_selection[0])
-                self.playlist_listbox.activate(current_selection[0])
+        self._refresh_playlist_list()
 
     def _play_playlist(self):
         if not self.current_playlist or not self.current_playlist.videos:
@@ -1058,8 +1070,6 @@ class PlaylistInfoDialog:
 
 
 class PlaylistManager:
-    """Main playlist manager following Dependency Inversion Principle"""
-
     def __init__(self, parent, theme_provider):
         self.storage = PlaylistStorage()
         self.service = PlaylistService(self.storage)
@@ -1077,28 +1087,28 @@ class PlaylistManager:
             self._log_callback(message)
 
     def set_play_callback(self, callback: Callable):
-        """Set callback for playing playlists"""
         self._play_callback = callback
 
     def set_video_preview_manager(self, preview_manager):
-        """Set video preview manager for the UI"""
         self.ui.video_preview_manager = preview_manager
 
     def set_grid_view_manager(self, grid_view_manager):
-        """Set grid view manager for the UI"""
         self.ui.grid_view_manager = grid_view_manager
 
+    def set_add_to_favorites_callback(self, callback):
+        self.ui.add_to_favorites_callback = callback
+
+    def set_add_to_queue_callback(self, callback):
+        self.ui.add_to_queue_callback = callback
+
     def show_manager(self):
-        """Show the playlist manager window"""
         self.ui.show_playlist_manager()
 
     def show_embedded(self, parent, close_callback=None):
-        """Show the playlist manager inside an existing frame."""
         self.ui.show_playlist_manager_embedded(parent, close_callback)
         return self.ui
 
     def add_videos_to_playlist(self, videos: List[str], selected_videos: List[str] = None):
-        """Add videos to playlist with selection dialog"""
         if not videos and not selected_videos:
             messagebox.showwarning("Warning", "No videos to add to playlist", parent=self.ui.parent)
             return
@@ -1115,6 +1125,7 @@ class PlaylistManager:
                 name, description = result
                 self.service.create_playlist(name, description, videos_to_add)
                 self._log(f"Playlist '{name}' created with {len(videos_to_add)} videos")
+                self.ui._refresh_playlist_list()
         else:
             self._show_add_to_playlist_dialog(videos_to_add, playlists)
 
@@ -1193,6 +1204,7 @@ class PlaylistManager:
                 name, desc = result
                 self.service.create_playlist(name, desc, videos)
                 self._log(f"Playlist '{name}' created with {len(videos)} videos")
+                self.ui._refresh_playlist_list()
 
         def add_to_existing():
             sel = playlist_listbox.curselection()
@@ -1203,6 +1215,7 @@ class PlaylistManager:
             self.service.add_videos_to_playlist(chosen.id, videos)
             self._log(f"Added {len(videos)} videos to '{chosen.name}'")
             dialog.destroy()
+            self.ui._refresh_playlist_list()
 
         tp.create_button(left, "+ New Playlist", create_new, "primary", "md").pack(side=tk.LEFT)
 

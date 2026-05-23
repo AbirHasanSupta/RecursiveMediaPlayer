@@ -247,6 +247,12 @@ def select_multiple_folders_and_play():
             self.playlist_manager.set_log_callback(self.update_console)
             self.playlist_manager.set_video_preview_manager(self.video_preview_manager)
             self.playlist_manager.set_grid_view_manager(self.grid_view_manager)
+            self.playlist_manager.set_add_to_favorites_callback(
+                lambda videos: self._add_videos_to_favorites_smart(videos)
+            )
+            self.playlist_manager.set_add_to_queue_callback(
+                lambda videos: self.queue_manager.add_to_queue(videos, added_from="playlist")
+            )
             self.playlist_manager.ui.video_preview_manager = self.video_preview_manager
 
             self.watch_history_manager = WatchHistoryManager(self.root, self)
@@ -262,12 +268,24 @@ def select_multiple_folders_and_play():
             self.queue_manager.set_play_callback(self._play_queue_videos)
             self.queue_manager.set_video_preview_manager(self.video_preview_manager)
             self.queue_manager.set_grid_view_manager(self.grid_view_manager)
+            self.queue_manager.set_add_to_favorites_callback(
+                lambda videos: self._add_videos_to_favorites_smart(videos)
+            )
+            self.queue_manager.set_add_to_playlist_callback(
+                lambda videos: self.playlist_manager.add_videos_to_playlist([], videos)
+            )
 
             self.favorites_manager = FavoritesManager(self.root, self)
             self.favorites_manager.set_play_callback(self._play_favorites_videos)
             self.favorites_manager.set_video_preview_manager(self.video_preview_manager)
             self.favorites_manager.set_grid_view_manager(self.grid_view_manager)
             self.favorites_manager.set_on_removed_callback(self._refresh_tree_after_fav_change)
+            self.favorites_manager.set_add_to_queue_callback(
+                lambda videos: self.queue_manager.add_to_queue(videos, added_from="favorites")
+            )
+            self.favorites_manager.set_add_to_playlist_callback(
+                lambda videos: self.playlist_manager.add_videos_to_playlist([], videos)
+            )
 
             self.annotation_service = VideoAnnotationService()
             self.annotation_service.subscribe(self._on_any_annotation_changed)
