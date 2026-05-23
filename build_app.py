@@ -659,6 +659,7 @@ def select_multiple_folders_and_play():
             self.active_embedded_manager = None
             self.embedded_view_frame = None
             self._directory_panel_mode = "expanded"
+            self._dir_panel_width = 380
             self.main_frame = tk.Frame(self.root, bg=self.bg_color, padx=16, pady=14)
             self.main_frame.pack(fill=tk.BOTH, expand=True)
             self.content_frame = tk.Frame(self.main_frame, bg=self.bg_color)
@@ -1433,9 +1434,47 @@ def select_multiple_folders_and_play():
 
         def setup_directory_section(self):
             self.dir_section = tk.Frame(self.content_frame, bg=self.bg_color)
-            self.dir_section.pack(side=tk.LEFT, fill=tk.Y, expand=False, padx=(0, 14), before=self.workspace_frame)
-            self.dir_section.config(width=380)  # Changed from 465
+            self.dir_section.pack(side=tk.LEFT, fill=tk.Y, expand=False, padx=(0, 0), before=self.workspace_frame)
+            self.dir_section.config(width=self._dir_panel_width)
             self.dir_section.pack_propagate(False)
+
+            self._dir_resizer = tk.Frame(self.content_frame, bg=self.border_color, width=4, cursor="sb_h_double_arrow")
+            self._dir_resizer.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10), before=self.workspace_frame)
+            self._dir_resizer.pack_propagate(False)
+
+            self._dir_resizer_dragging = False
+            self._dir_resizer_start_x = 0
+            self._dir_resizer_start_w = 0
+
+            def _on_resizer_enter(e):
+                self._dir_resizer.config(bg=self.accent_color)
+
+            def _on_resizer_leave(e):
+                self._dir_resizer.config(bg=self.border_color if not self._dir_resizer_dragging else self.accent_color)
+
+            def _on_resizer_press(e):
+                self._dir_resizer_dragging = True
+                self._dir_resizer_start_x = e.x_root
+                self._dir_resizer_start_w = self.dir_section.winfo_width()
+                self._dir_resizer.config(bg=self.accent_color)
+
+            def _on_resizer_drag(e):
+                if not self._dir_resizer_dragging:
+                    return
+                delta = e.x_root - self._dir_resizer_start_x
+                new_w = max(120, min(600, self._dir_resizer_start_w + delta))
+                self._dir_panel_width = new_w
+                self.dir_section.config(width=new_w)
+
+            def _on_resizer_release(e):
+                self._dir_resizer_dragging = False
+                self._dir_resizer.config(bg=self.border_color)
+
+            self._dir_resizer.bind("<Enter>", _on_resizer_enter)
+            self._dir_resizer.bind("<Leave>", _on_resizer_leave)
+            self._dir_resizer.bind("<ButtonPress-1>", _on_resizer_press)
+            self._dir_resizer.bind("<B1-Motion>", _on_resizer_drag)
+            self._dir_resizer.bind("<ButtonRelease-1>", _on_resizer_release)
 
             self.dir_compact_rail = tk.Frame(self.content_frame, bg=self.bg_color, width=52)
             self.dir_compact_rail.pack_propagate(False)
@@ -1855,6 +1894,8 @@ def select_multiple_folders_and_play():
 
             if mode == "compact":
                 self.dir_section.pack_forget()
+                if hasattr(self, '_dir_resizer'):
+                    self._dir_resizer.pack_forget()
                 self.dir_compact_rail.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10), before=self.workspace_frame)
                 if hasattr(self, '_style_directory_compact_rail'):
                     self._style_directory_compact_rail()
@@ -1863,8 +1904,10 @@ def select_multiple_folders_and_play():
             if hasattr(self, "dir_compact_rail"):
                 self.dir_compact_rail.pack_forget()
             if not self.dir_section.winfo_ismapped():
-                self.dir_section.pack(side=tk.LEFT, fill=tk.Y, expand=False, padx=(0, 14), before=self.workspace_frame)
-            self.dir_section.config(width=380)
+                self.dir_section.pack(side=tk.LEFT, fill=tk.Y, expand=False, padx=(0, 0), before=self.workspace_frame)
+            self.dir_section.config(width=self._dir_panel_width)
+            if hasattr(self, '_dir_resizer') and not self._dir_resizer.winfo_ismapped():
+                self._dir_resizer.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10), before=self.workspace_frame)
 
         def on_directory_focus_out(self, event):
             selection = self.dir_listbox.curselection()
