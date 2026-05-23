@@ -464,17 +464,44 @@ class WatchHistoryUI:
         t = self._get_design_tokens()
         tp = self.theme_provider
         style = ttk.Style()
+        style.theme_use("clam")
+        try:
+            style.element_create("Hist.customfield", "from", "default", "field")
+        except tk.TclError:
+            pass
+        try:
+            style.element_create("Hist.customheading", "from", "default", "field")
+        except tk.TclError:
+            pass
+        style.layout("Hist.Treeview", [
+            ("Hist.customfield", {"sticky": "nswe", "border": "2", "children": [
+                ("Hist.Treeview.padding", {"sticky": "nswe", "children": [
+                    ("Hist.Treeview.treearea", {"sticky": "nswe"})
+                ]})
+            ]})
+        ])
+        style.layout("Hist.Treeview.Heading", [
+            ("Hist.customheading", {"sticky": "nswe", "children": [
+                ("Treeheading.padding", {"sticky": "nswe", "children": [
+                    ("Treeheading.label", {"sticky": "we"})
+                ]})
+            ]})
+        ])
         style.configure("Hist.Treeview",
                         background=t["surface"], fieldbackground=t["surface"],
                         foreground=t["text"], rowheight=28,
                         borderwidth=0, relief="flat")
         style.configure("Hist.Treeview.Heading",
-                        background=t["surface2"], foreground=t["text"],
+                        background=t["surface2"], fieldbackground=t["surface2"], foreground=t["text"],
                         font=(tp.small_font.actual()["family"], 9, "bold"),
                         relief="flat", borderwidth=0, padding=(6, 6))
         style.map("Hist.Treeview",
                   background=[("selected", t["accent"])],
-                  foreground=[("selected", "white")])
+                  foreground=[("selected", "white")],
+                  fieldbackground=[("!selected", t["surface"])])
+        style.map("Hist.Treeview.Heading",
+                  background=[("active", t["surface2"])],
+                  foreground=[("active", t["text"])])
         if hasattr(self, "_hist_card"):
             try:
                 self._hist_card.configure(
@@ -580,12 +607,34 @@ class WatchHistoryUI:
         card.pack(fill=tk.BOTH, expand=True)
 
         style = ttk.Style()
+        try:
+            style.element_create("Hist.customfield", "from", "default", "field")
+        except tk.TclError:
+            pass
+        try:
+            style.element_create("Hist.customheading", "from", "default", "field")
+        except tk.TclError:
+            pass
+        style.layout("Hist.Treeview", [
+            ("Hist.customfield", {"sticky": "nswe", "border": "2", "children": [
+                ("Hist.Treeview.padding", {"sticky": "nswe", "children": [
+                    ("Hist.Treeview.treearea", {"sticky": "nswe"})
+                ]})
+            ]})
+        ])
+        style.layout("Hist.Treeview.Heading", [
+            ("Hist.customheading", {"sticky": "nswe", "children": [
+                ("Treeheading.padding", {"sticky": "nswe", "children": [
+                    ("Treeheading.label", {"sticky": "we"})
+                ]})
+            ]})
+        ])
         style.configure("Hist.Treeview",
                         background=t['surface'], fieldbackground=t['surface'],
                         foreground=t['text'], rowheight=28,
                         borderwidth=0, relief="flat")
         style.configure("Hist.Treeview.Heading",
-                        background=t['surface2'], foreground=t['text'],
+                        background=t["surface2"], fieldbackground=t["surface2"], foreground=t["text"],
                         font=(tp.small_font.actual()["family"], 9, "bold"),
                         relief="flat", borderwidth=0, padding=(6, 6))
         style.map("Hist.Treeview",
@@ -606,11 +655,9 @@ class WatchHistoryUI:
             self.history_tree.column(col, width=width, minwidth=70, anchor=anchor)
 
         vsb = ttk.Scrollbar(card, orient=tk.VERTICAL, command=self.history_tree.yview)
-        hsb = ttk.Scrollbar(card, orient=tk.HORIZONTAL, command=self.history_tree.xview)
-        self.history_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
         self.history_tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
-        hsb.grid(row=1, column=0, sticky="ew")
+        self.history_tree.configure(yscrollcommand=vsb.set)
         card.grid_rowconfigure(0, weight=1)
         card.grid_columnconfigure(0, weight=1)
 
