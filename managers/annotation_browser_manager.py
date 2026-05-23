@@ -25,7 +25,84 @@ def _fmt_ms(ms: int) -> str:
 
 # ── Palette helpers ────────────────────────────────────────────────────────────
 
-def _p(dark_mode):
+def _p(dark_mode, tp=None):
+    if tp is not None:
+        t = tp.get_manager_design_tokens()
+        accent = t["accent"]
+        gold = t["favorites_accent"]
+        panel = t["surface"]
+        sidebar = t["surface2"]
+        header_bg = t["header_bg"]
+        sep = t["divider"]
+        border = t["border"]
+        text = t["text"]
+        muted = t["text_muted"]
+        if dark_mode:
+            tag_sel_bg  = "#1c3557"
+            tag_sel_fg  = accent
+            tag_norm_fg = muted
+            tag_hover   = "#2a2b30"
+            item_hover  = "#2a2b30"
+            item_alt    = t.get("surface2", "#252628")
+            pill_bg     = "#1c3557"
+            pill_fg     = accent
+            star_on     = gold
+            star_off    = "#3a3b3f"
+            rb_sel      = "#1c3557"
+            rb_sel_fg   = accent
+            rb_nor      = sidebar
+            rb_nor_fg   = muted
+            count_bg    = "#1c3557"
+            count_fg    = accent
+            bm_bg       = "#1c2e48"
+            bm_fg       = accent
+            bm_border   = "#1c3557"
+            detail_bg   = panel
+            status_bg   = t.get("surface2", "#16171a")
+            search_bg   = t.get("surface2", "#2a2b30")
+            search_hl   = accent
+        else:
+            tag_sel_bg  = "#dceeff"
+            tag_sel_fg  = "#1a6dc8"
+            tag_norm_fg = muted
+            tag_hover   = t.get("surface2", "#ebedf0")
+            item_hover  = "#f0f6ff"
+            item_alt    = t.get("surface2", "#f9f9fb")
+            pill_bg     = "#dceeff"
+            pill_fg     = "#1a6dc8"
+            star_on     = gold
+            star_off    = "#d0d5de"
+            rb_sel      = "#dceeff"
+            rb_sel_fg   = "#1a6dc8"
+            rb_nor      = sidebar
+            rb_nor_fg   = "#888"
+            count_bg    = "#dceeff"
+            count_fg    = "#1a6dc8"
+            bm_bg       = "#e8f3ff"
+            bm_fg       = "#1a6dc8"
+            bm_border   = "#b8d4f5"
+            detail_bg   = panel
+            status_bg   = sidebar
+            search_bg   = t["surface"]
+            search_hl   = accent
+        return {
+            "accent": accent, "gold": gold, "gold_dim": gold,
+            "panel": panel, "sidebar": sidebar, "header_bg": header_bg,
+            "tag_sel_bg": tag_sel_bg, "tag_sel_fg": tag_sel_fg,
+            "tag_norm_fg": tag_norm_fg, "tag_hover": tag_hover,
+            "item_hover": item_hover, "item_alt": item_alt,
+            "pill_bg": pill_bg, "pill_fg": pill_fg,
+            "star_on": star_on, "star_off": star_off,
+            "rb_sel": rb_sel, "rb_sel_fg": rb_sel_fg,
+            "rb_nor": rb_nor, "rb_nor_fg": rb_nor_fg,
+            "sep": sep, "border": border,
+            "count_bg": count_bg, "count_fg": count_fg,
+            "bm_bg": bm_bg, "bm_fg": bm_fg, "bm_border": bm_border,
+            "detail_bg": detail_bg, "status_bg": status_bg,
+            "search_bg": search_bg, "search_hl": search_hl,
+            "text": text, "text_muted": muted,
+        }
+    # fallback (no tp) – original hardcoded values
     if dark_mode:
         return {
             "accent":      "#4A9EFF",
@@ -49,6 +126,7 @@ def _p(dark_mode):
             "rb_nor":      "#27282c",
             "rb_nor_fg":   "#6b7a8a",
             "sep":         "#2d2e33",
+            "border":      "#2d2e33",
             "count_bg":    "#1c3557",
             "count_fg":    "#4A9EFF",
             "bm_bg":       "#1c2e48",
@@ -58,6 +136,8 @@ def _p(dark_mode):
             "status_bg":   "#16171a",
             "search_bg":   "#2a2b30",
             "search_hl":   "#4A9EFF",
+            "text":        "#e4e7ee",
+            "text_muted":  "#8b9ab0",
         }
     return {
         "accent":      "#2d89ef",
@@ -81,6 +161,7 @@ def _p(dark_mode):
         "rb_nor":      "#ebedf0",
         "rb_nor_fg":   "#888",
         "sep":         "#e0e2e8",
+        "border":      "#e0e2e8",
         "count_bg":    "#dceeff",
         "count_fg":    "#1a6dc8",
         "bm_bg":       "#e8f3ff",
@@ -90,6 +171,8 @@ def _p(dark_mode):
         "status_bg":   "#ebedf0",
         "search_bg":   "#ffffff",
         "search_hl":   "#2d89ef",
+        "text":        "#1a2035",
+        "text_muted":  "#555e6e",
     }
 
 
@@ -258,7 +341,7 @@ class AnnotationBrowserManager:
         if not self._tag_frame_inner or not self._vid_inner:
             return
 
-        P = _p(self.tp.dark_mode)
+        P = _p(self.tp.dark_mode, self.tp)
 
         # Clear existing content and show loading message in tag panel
         for w in self._tag_frame_inner.winfo_children():
@@ -291,13 +374,8 @@ class AnnotationBrowserManager:
 
     def _show_add_tag_menu(self, event):
         tp = self.tp
-        P = _p(tp.dark_mode)
-        menu = tk.Menu(self._win, tearoff=0,
-                       bg="#27282c" if tp.dark_mode else "#f4f5f7",
-                       fg=tp.text_color,
-                       activebackground=P["tag_sel_bg"],
-                       activeforeground=P["tag_sel_fg"],
-                       relief="flat", bd=0, font=("Segoe UI", 9))
+        P = _p(tp.dark_mode, tp)
+        menu = tp.create_manager_context_menu(self._win)
         if self._vid_selection:
             menu.add_command(label="✏  Add new tag to selected videos",
                              command=self._prompt_add_tag_to_selection)
@@ -312,7 +390,7 @@ class AnnotationBrowserManager:
 
     def _prompt_add_tag_to_selection(self):
         tp = self.tp
-        P = _p(tp.dark_mode)
+        P = _p(tp.dark_mode, tp)
         if not self._vid_selection:
             return
         dlg = tk.Toplevel(self._win)
@@ -381,7 +459,7 @@ class AnnotationBrowserManager:
 
     def _prompt_create_empty_tag(self):
         tp = self.tp
-        P = _p(tp.dark_mode)
+        P = _p(tp.dark_mode, tp)
         dlg = tk.Toplevel(self._win)
         dlg.withdraw()
         dlg.title("New Tag")
@@ -437,7 +515,7 @@ class AnnotationBrowserManager:
 
     def _build_window(self, parent=None):
         tp = self.tp
-        P = _p(tp.dark_mode)
+        P = _p(tp.dark_mode, tp)
 
         embedded = parent is not None
         win = tk.Frame(parent, bg=P["panel"]) if embedded else tk.Toplevel(self.root)
@@ -537,9 +615,14 @@ class AnnotationBrowserManager:
             rb.pack(side=tk.LEFT, padx=1)
             rb._val = i
             rb.bind("<Button-1>", lambda e, v=i: self._on_rating_click(v))
-            rb.bind("<Enter>", lambda e, b=rb: b.config(bg=P["tag_hover"]))
-            rb.bind("<Leave>", lambda e, b=rb, v=i:
-                    b.config(bg=P["rb_sel"] if self._rating_var.get() == v else P["rb_nor"]))
+            rb.bind("<Enter>", lambda e, b=rb, v=i: b.config(
+                bg=_p(self.tp.dark_mode, self.tp)["rb_sel"] if self._rating_var.get() != v else _p(self.tp.dark_mode, self.tp)["rb_sel"],
+                highlightbackground=_p(self.tp.dark_mode, self.tp)["search_hl"]
+            ))
+            rb.bind("<Leave>", lambda e, b=rb, v=i: b.config(
+                bg=_p(self.tp.dark_mode, self.tp)["rb_sel"] if self._rating_var.get() == v else _p(self.tp.dark_mode, self.tp)["rb_nor"],
+                highlightbackground=_p(self.tp.dark_mode, self.tp)["search_hl"] if self._rating_var.get() == v else _p(self.tp.dark_mode, self.tp)["sep"]
+            ))
             self._rb_btns.append(rb)
 
         self._update_rb_visuals(P)
@@ -552,8 +635,12 @@ class AnnotationBrowserManager:
                  bg=P["sidebar"]).pack(anchor="w")
         btn_wrap = tk.Frame(action_wrap, bg=P["sidebar"])
         btn_wrap.pack()
-        self._make_flat_btn(btn_wrap, "✕  Clear", self._clear_filters, P).pack(side=tk.LEFT, padx=(0, 6))
-        self._make_flat_btn(btn_wrap, "⟳  Refresh", self.refresh, P).pack(side=tk.LEFT)
+        self.tp.create_manager_action_link(
+            btn_wrap, "✕  Clear", self._clear_filters, style="warning"
+        ).pack(side=tk.LEFT, padx=(0, 2))
+        self.tp.create_manager_action_link(
+            btn_wrap, "⟳  Refresh", self.refresh, style="secondary"
+        ).pack(side=tk.LEFT)
 
         filter_lbl_wrap = tk.Frame(fb, bg=P["sidebar"])
         filter_lbl_wrap.pack(side=tk.RIGHT, fill=tk.Y)
@@ -744,6 +831,45 @@ class AnnotationBrowserManager:
         if hasattr(win, "deiconify"):
             win.deiconify()
 
+    def apply_theme(self):
+        if not self._win or not self._win.winfo_exists():
+            return
+        try:
+            tp = self.tp
+            P = _p(tp.dark_mode, tp)
+            self._win.configure(bg=P["panel"])
+
+            def _walk(widget):
+                try:
+                    if isinstance(widget, tk.Frame):
+                        role = getattr(widget, "_ann_role", None)
+                        if role == "header":
+                            widget.configure(bg=P["header_bg"])
+                        elif role == "sidebar":
+                            widget.configure(bg=P["sidebar"])
+                        elif role == "detail":
+                            widget.configure(bg=P["detail_bg"])
+                        elif role == "status":
+                            widget.configure(bg=P["status_bg"])
+                        elif role == "panel":
+                            widget.configure(bg=P["panel"])
+                        elif role == "filter":
+                            widget.configure(bg=P["sidebar"])
+                        else:
+                            pass
+                    for child in widget.winfo_children():
+                        _walk(child)
+                except tk.TclError:
+                    pass
+
+            _walk(self._win)
+            tp.restyle_manager_buttons(self._win)
+            tp.restyle_manager_action_links(self._win)
+            self._update_rb_visuals(P)
+            self._start_async_load()
+        except Exception:
+            pass
+
     def play_from_global(self):
         """Play the filtered videos (or selected if any)."""
         if self._vid_selection:
@@ -773,24 +899,29 @@ class AnnotationBrowserManager:
     # ── Helper widget builders ─────────────────────────────────────────────────
 
     def _make_header_btn(self, parent, text, cmd, bg, fg):
+        tp = self.tp
+        colors = tp.get_button_colors("primary")
         btn = tk.Button(parent, text=text, command=cmd,
                         font=("Segoe UI", 9, "bold"),
-                        bg=bg, fg=fg, relief=tk.FLAT, bd=0,
+                        bg=colors["bg"], fg=colors["fg"], relief=tk.FLAT, bd=0,
                         padx=14, pady=6, cursor="hand2",
-                        activebackground=bg, activeforeground=fg)
-        btn.bind("<Enter>", lambda e: btn.config(bg=self._lighten(bg)))
-        btn.bind("<Leave>", lambda e: btn.config(bg=bg))
+                        activebackground=colors["active"], activeforeground="#FFFFFF")
+        btn._variant = "primary"
+        tp._bind_button_hover(btn, "primary")
         return btn
 
     def _make_flat_btn(self, parent, text, cmd, P):
+        tp = self.tp
+        colors = tp.get_button_colors("secondary")
         btn = tk.Button(parent, text=text, command=cmd,
                         font=("Segoe UI", 9),
-                        bg=P["rb_nor"], fg=self.tp.text_color,
+                        bg=colors["bg"], fg=colors["fg"],
                         relief=tk.FLAT, bd=0,
                         padx=10, pady=5, cursor="hand2",
-                        activebackground=P["tag_hover"],
-                        activeforeground=self.tp.text_color,
-                        highlightbackground=P["sep"], highlightthickness=1)
+                        activebackground=colors["active"],
+                        activeforeground="#FFFFFF")
+        btn._variant = "secondary"
+        tp._bind_button_hover(btn, "secondary")
         return btn
 
     @staticmethod
@@ -814,7 +945,7 @@ class AnnotationBrowserManager:
             return
 
         tp = self.tp
-        P = _p(tp.dark_mode)
+        P = _p(tp.dark_mode, tp)
 
         for w in self._tag_frame_inner.winfo_children():
             w.destroy()
@@ -919,14 +1050,9 @@ class AnnotationBrowserManager:
 
     def _on_tag_right_click(self, event, tag):
         tp = self.tp
-        P = _p(tp.dark_mode)
+        P = _p(tp.dark_mode, tp)
         count = len(self.svc.get_videos_with_tag(tag))
-        menu = tk.Menu(self._win, tearoff=0,
-                       bg="#27282c" if tp.dark_mode else "#f4f5f7",
-                       fg=tp.text_color,
-                       activebackground="#1c3557" if tp.dark_mode else "#dceeff",
-                       activeforeground="#4A9EFF" if tp.dark_mode else "#1a6dc8",
-                       relief="flat", bd=0, font=("Segoe UI", 9))
+        menu = tp.create_manager_context_menu(self._win)
         menu.add_command(
             label=f"  {tag}  ({count} video{'s' if count != 1 else ''})",
             state="disabled")
@@ -957,7 +1083,7 @@ class AnnotationBrowserManager:
 
     def _rename_tag(self, old_tag):
         tp = self.tp
-        P = _p(tp.dark_mode)
+        P = _p(tp.dark_mode, tp)
         dlg = tk.Toplevel(self._win)
         dlg.withdraw()
         dlg.title("Rename Tag")
@@ -1038,7 +1164,7 @@ class AnnotationBrowserManager:
 
     def _on_rating_click(self, val):
         self._rating_var.set(val)
-        P = _p(self.tp.dark_mode)
+        P = _p(self.tp.dark_mode, self.tp)
         self._update_rb_visuals(P)
         self.refresh()
 
@@ -1060,7 +1186,7 @@ class AnnotationBrowserManager:
             return
 
         tp = self.tp
-        P = _p(tp.dark_mode)
+        P = _p(tp.dark_mode, tp)
 
         min_rating = self._rating_var.get() if self._rating_var else 0
         all_annotated = self._cached_annotated_videos
@@ -1119,7 +1245,7 @@ class AnnotationBrowserManager:
         if not hasattr(self, '_vid_inner') or not self._vid_inner:
             return
         tp = self.tp
-        P = _p(tp.dark_mode)
+        P = _p(tp.dark_mode, tp)
 
         for w in self._vid_inner.winfo_children():
             w.destroy()
@@ -1287,7 +1413,7 @@ class AnnotationBrowserManager:
 
     def _refresh_row_colors(self):
         tp = self.tp
-        P = _p(tp.dark_mode)
+        P = _p(tp.dark_mode, tp)
         for i, row in enumerate(self._vid_rows):
             is_sel = i in self._vid_selection
             bg_ = P["accent"] if is_sel else (P["item_alt"] if i % 2 else P["panel"])
@@ -1317,7 +1443,7 @@ class AnnotationBrowserManager:
     def _clear_filters(self):
         self._selected_tags.clear()
         self._rating_var.set(0)
-        P = _p(self.tp.dark_mode)
+        P = _p(self.tp.dark_mode, self.tp)
         self._update_rb_visuals(P)
         if self._search_var:
             self._search_var.set("")
@@ -1334,7 +1460,7 @@ class AnnotationBrowserManager:
 
     def _show_detail(self, path: str):
         tp = self.tp
-        P = _p(tp.dark_mode)
+        P = _p(tp.dark_mode, tp)
         rating = self.svc.get_rating(path)
         tags = self.svc.get_tags(path)
         bookmarks = self.svc.get_bookmarks(path)
@@ -1379,7 +1505,7 @@ class AnnotationBrowserManager:
 
     def _clear_detail(self):
         tp = self.tp
-        P = _p(tp.dark_mode)
+        P = _p(tp.dark_mode, tp)
         if self._detail_lbl:
             self._detail_lbl.config(text="  Select a video to see details", fg=tp.muted_fg)
         if self._detail_stars_lbl:
@@ -1443,18 +1569,13 @@ class AnnotationBrowserManager:
         if not self._win:
             return
         tp = self.tp
-        P = _p(tp.dark_mode)
+        P = _p(tp.dark_mode, tp)
 
         sel = sorted(self._vid_selection)
         if not sel:
             return
 
-        menu = tk.Menu(self._win, tearoff=0,
-                       bg="#27282c" if tp.dark_mode else "#f4f5f7",
-                       fg=tp.text_color,
-                       activebackground="#1c3557" if tp.dark_mode else "#dceeff",
-                       activeforeground="#4A9EFF" if tp.dark_mode else "#1a6dc8",
-                       relief="flat", bd=0, font=("Segoe UI", 9))
+        menu = tp.create_manager_context_menu(self._win)
 
         n = len(sel)
         menu.add_command(

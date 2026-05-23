@@ -351,31 +351,7 @@ class WatchHistoryUI:
         self.theme_provider.register_manager_ui(self)
 
     def _get_design_tokens(self):
-        dark = self.theme_provider.dark_mode
-        if dark:
-            return {
-                "bg": "#16181c",  # main window background
-                "surface": "#1f2127",  # card background
-                "surface2": "#282b32",  # alternate card background / sidebar
-                "header_bg": "#1a1b1e",  # header background (distinct)
-                "text": "#e4e7ee",
-                "text_muted": "#52596a",
-                "accent": "#5b9cf6",
-                "border": "#35383f",
-                "divider": "#2a2d34",
-            }
-        else:
-            return {
-                "bg": "#eef0f5",
-                "surface": "#ffffff",
-                "surface2": "#f4f6fa",
-                "header_bg": "#ebedf0",
-                "text": "#1a2035",
-                "text_muted": "#96a0b5",
-                "accent": "#2d7ef7",
-                "border": "#dce0ea",
-                "divider": "#e4e8f0",
-            }
+        return self.theme_provider.get_manager_design_tokens()
 
     def show_history_manager(self):
         if self.history_window and self.history_window.winfo_exists():
@@ -423,11 +399,93 @@ class WatchHistoryUI:
         if self._embedded and self._close_callback:
             self._close_callback()
 
+
+
+    def apply_theme(self):
+        win = self.history_window
+        if win is None:
+            return
+        try:
+            if not win.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        t = self._get_design_tokens()
+        tp = self.theme_provider
+        win.configure(bg=t["bg"])
+        for attr in ("_hist_header", "_hist_body", "_hist_card", "_hist_filter_row", "_hist_btn_row"):
+            w = getattr(self, attr, None)
+            if w is None:
+                continue
+            role = getattr(w, "_manager_role", "body")
+            bg = t.get({"header": "header_bg", "surface": "surface", "surface2": "surface2", "body": "bg"}.get(role, "bg"), t["bg"])
+            try:
+                w.configure(bg=bg)
+            except tk.TclError:
+                pass
+        if hasattr(self, "stats_label"):
+            self.stats_label.configure(bg=t["header_bg"], fg=t["text_muted"])
+        self._restyle_filter_buttons()
+        self._restyle_treeview()
+        tp.restyle_manager_buttons(win)
+        tp.restyle_manager_action_links(win)
+
+    def _restyle_filter_buttons(self):
+        t = self._get_design_tokens()
+        tp = self.theme_provider
+        if not hasattr(self, "filter_buttons"):
+            return
+        cur = self.filter_var.get() if self.filter_var else "all"
+        for btn, val in self.filter_buttons:
+            try:
+                if val == cur:
+                    btn.config(
+                        bg=t["accent"], fg="#FFFFFF",
+                        relief=tk.FLAT,
+                        highlightbackground=t["accent"], highlightthickness=1,
+                    )
+                else:
+                    btn.config(
+                        bg=t["surface2"], fg=t["text"],
+                        relief=tk.FLAT,
+                        highlightbackground=t["border"], highlightthickness=1,
+                    )
+            except tk.TclError:
+                pass
+
+    def _restyle_treeview(self):
+        if not hasattr(self, "history_tree"):
+            return
+        t = self._get_design_tokens()
+        tp = self.theme_provider
+        style = ttk.Style()
+        style.configure("Hist.Treeview",
+                        background=t["surface"], fieldbackground=t["surface"],
+                        foreground=t["text"], rowheight=28,
+                        borderwidth=0, relief="flat")
+        style.configure("Hist.Treeview.Heading",
+                        background=t["surface2"], foreground=t["text"],
+                        font=(tp.small_font.actual()["family"], 9, "bold"),
+                        relief="flat", borderwidth=0, padding=(6, 6))
+        style.map("Hist.Treeview",
+                  background=[("selected", t["accent"])],
+                  foreground=[("selected", "white")])
+        if hasattr(self, "_hist_card"):
+            try:
+                self._hist_card.configure(
+                    bg=t["surface"],
+                    highlightbackground=t["border"], highlightthickness=1,
+                )
+            except tk.TclError:
+                pass
+
     def _setup_history_ui(self):
         tp = self.theme_provider
         t = self._get_design_tokens()
 
         header = tk.Frame(self.history_window, bg=t['header_bg'], height=58)
+        header._manager_role = "header"
+        self._hist_header = header
         header.pack(fill=tk.X)
         header.pack_propagate(False)
         h_inner = tk.Frame(header, bg=t['header_bg'])
@@ -435,8 +493,11 @@ class WatchHistoryUI:
 
         title_box = tk.Frame(h_inner, bg=t['header_bg'])
         title_box.pack(side=tk.LEFT, fill=tk.Y)
+
+        tp_dark = tp.dark_mode
+        history_accent = "#C39BD3" if tp_dark else "#9b59b6"
         tk.Label(title_box, text="🕐", font=("Segoe UI Emoji", 18),
-                 bg=t['header_bg'], fg=t['accent']).pack(side=tk.LEFT, padx=(0, 10), pady=14)
+                 bg=t['header_bg'], fg=history_accent).pack(side=tk.LEFT, padx=(0, 10), pady=14)
         tk.Label(title_box, text="Watch History",
                  font=("Segoe UI", 15, "bold"),
                  bg=t['header_bg'], fg=t['text']).pack(side=tk.LEFT, pady=14)
@@ -447,85 +508,70 @@ class WatchHistoryUI:
 
         tk.Frame(self.history_window, bg=t['divider'], height=1).pack(fill=tk.X)
 
-        # Filter row - redesigned as obvious clickable buttons
+        # Filter row – unified pill style matching FavoritesUI chip pattern
         filter_row = tk.Frame(self.history_window, bg=t['bg'])
-        filter_row.pack(fill=tk.X, padx=20, pady=(14, 6))
+        filter_row._manager_role = "body"
+        self._hist_filter_row = filter_row
+        filter_row.pack(fill=tk.X, padx=20, pady=(12, 0))
 
         tk.Label(filter_row, text="Filter by:", font=tp.small_font,
-                 bg=t['bg'], fg=t['text_muted']).pack(side=tk.LEFT, padx=(0, 12))
+                 bg=t['bg'], fg=t['text_muted']).pack(side=tk.LEFT, padx=(0, 10))
 
         self.filter_var = tk.StringVar(value="all")
-        self.filter_buttons = []  # store (widget, value)
+        self.filter_buttons = []
 
-        # Define filter options: (label, value)
         filters = [("All time", "all"), ("Today", "today"),
                    ("7 days", "week"), ("30 days", "month")]
 
         for label_text, val in filters:
-            # Create a container frame to give a button-like appearance
-            btn_frame = tk.Frame(filter_row, bg=t['bg'])
-            btn_frame.pack(side=tk.LEFT, padx=3)
-
-            # The actual clickable label inside the frame
-            lbl = tk.Label(btn_frame, text=f"  {label_text}  ",
+            lbl = tk.Label(filter_row, text=f"  {label_text}  ",
                            font=tp.small_font,
-                           padx=6, pady=3,
+                           padx=4, pady=4,
                            cursor="hand2",
-                           relief=tk.RAISED,
-                           borderwidth=1)
+                           relief=tk.FLAT,
+                           highlightthickness=1)
+            lbl.pack(side=tk.LEFT, padx=3)
 
-            # Set initial style: active = accent, inactive = surface2
             is_active = (val == self.filter_var.get())
             if is_active:
-                lbl.config(bg=t['accent'], fg="white",
-                           highlightbackground=t['accent'], highlightthickness=0)
+                lbl.config(bg=t['accent'], fg="#FFFFFF",
+                           highlightbackground=t['accent'])
             else:
                 lbl.config(bg=t['surface2'], fg=t['text'],
-                           highlightbackground=t['border'], highlightthickness=1)
+                           highlightbackground=t['border'])
 
-            lbl.pack(fill=tk.BOTH, expand=True)
-
-            # Store for later updates
             self.filter_buttons.append((lbl, val))
 
-            # Define click handler
-            def click_handler(v=val, btn=lbl):
-                # Update filter_var
+            def click_handler(v=val):
                 self.filter_var.set(v)
-                # Update visual states
-                for b, bval in self.filter_buttons:
-                    if bval == v:
-                        b.config(bg=t['accent'], fg="white",
-                                 highlightbackground=t['accent'], highlightthickness=0)
-                    else:
-                        b.config(bg=t['surface2'], fg=t['text'],
-                                 highlightbackground=t['border'], highlightthickness=1)
-                # Apply filter and refresh
+                self._restyle_filter_buttons()
                 self._apply_filter()
                 self._update_stats_label()
 
-            # Bind events
-            lbl.bind("<Button-1>", lambda e, h=click_handler: h())
+            def on_enter(e, btn=lbl, v=val):
+                if self.filter_var.get() != v:
+                    btn.config(bg=t['hover_color'] if hasattr(t, 'hover_color') else t['surface2'],
+                               fg=t['accent'],
+                               highlightbackground=t['accent'])
 
-            # Hover effects
-            def on_enter(e, btn=lbl, val=val):
-                if self.filter_var.get() != val:
-                    btn.config(bg=t['accent'], fg="white",
-                               highlightbackground=t['accent'], highlightthickness=0)
-
-            def on_leave(e, btn=lbl, val=val):
-                if self.filter_var.get() != val:
+            def on_leave(e, btn=lbl, v=val):
+                if self.filter_var.get() != v:
                     btn.config(bg=t['surface2'], fg=t['text'],
-                               highlightbackground=t['border'], highlightthickness=1)
+                               highlightbackground=t['border'])
 
+            lbl.bind("<Button-1>", lambda e, h=click_handler: h())
             lbl.bind("<Enter>", on_enter)
             lbl.bind("<Leave>", on_leave)
 
-        # Main treeview (unchanged from your existing code)
         body = tk.Frame(self.history_window, bg=t['bg'])
-        body.pack(fill=tk.BOTH, expand=True, padx=20, pady=12)
+        body._manager_role = "body"
+        self._hist_body = body
+        body.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
         card = tk.Frame(body, bg=t['surface'],
                         highlightbackground=t['border'], highlightthickness=1)
+        card._manager_role = "surface"
+        self._hist_card = card
         card.pack(fill=tk.BOTH, expand=True)
 
         style = ttk.Style()
@@ -568,14 +614,19 @@ class WatchHistoryUI:
         self.history_tree.bind("<Button-1>", self._on_history_left_click)
         self.history_tree.bind("<Leave>", self._on_tree_leave)
 
-        # Bottom buttons (unchanged)
         btn_container = tk.Frame(body, bg=t['bg'])
+        btn_container._manager_role = "body"
+        self._hist_btn_row = btn_container
         btn_container.pack(fill=tk.X, pady=(8, 0))
 
-        tp.create_button(btn_container, "Clear All History", self._clear_all_history,
-                         "warning", "md").pack(side=tk.LEFT, padx=(0, 8))
-        tp.create_button(btn_container, "↺  Refresh", self._refresh_history_list,
-                         "secondary", "md").pack(side=tk.LEFT)
+        hist_actions = tk.Frame(btn_container, bg=t["bg"])
+        hist_actions.pack(side=tk.RIGHT)
+        tp.create_manager_action_link(
+            hist_actions, "↺  Refresh", self._refresh_history_list, style="secondary"
+        ).pack(side=tk.LEFT)
+        tp.create_manager_action_link(
+            hist_actions, "✕  Clear all history", self._clear_all_history, style="warning"
+        ).pack(side=tk.LEFT)
 
     def _update_stats_label(self):
         total = len(self.history_service.get_all_history())
@@ -699,13 +750,7 @@ class WatchHistoryUI:
         if not selected_entries:
             return
 
-        _tp = self.theme_provider
-        context_menu = tk.Menu(self.history_window, tearoff=0,
-                               bg="#313335" if _tp.dark_mode else "#f5f5f5",
-                               fg="#A9B7C6" if _tp.dark_mode else "#333333",
-                               activebackground="#2D5A8E" if _tp.dark_mode else "#3498db",
-                               activeforeground="#FFFFFF",
-                               relief="flat", bd=1, font=("Segoe UI", 9))
+        context_menu = self.theme_provider.create_manager_context_menu(self.history_window)
 
         context_menu.add_command(
             label=f"Play Selected ({len(selected_entries)} video{'s' if len(selected_entries) > 1 else ''})",
