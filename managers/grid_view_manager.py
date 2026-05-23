@@ -587,7 +587,7 @@ class GridViewManager:
 
         # ── Slim status strip (pagination centered, selection left, hint right) ─
         tk.Frame(gw, bg=t['divider'], height=1).pack(fill=tk.X, side=tk.BOTTOM)
-        status_strip = tk.Frame(gw, bg=t['surface2'], height=28)
+        status_strip = tk.Frame(gw, bg=t['surface2'], height=26)
         status_strip.pack(fill=tk.X, side=tk.BOTTOM)
         status_strip.pack_propagate(False)
         status_strip.columnconfigure(0, weight=1)
@@ -599,23 +599,22 @@ class GridViewManager:
         left_st.grid(row=0, column=0, sticky='w', padx=14, pady=0)
 
         self.selection_label = tk.Label(
-            left_st, text="  Nothing selected  ",
+            left_st, text="Nothing selected",
             font=("Segoe UI", 8),
-            bg=t['pill_bg'], fg=t['text_muted'],
-            padx=7, pady=1,
+            bg=t['surface2'], fg=t['text_muted'],
         )
-        self.selection_label.pack(side=tk.LEFT, pady=5)
+        self.selection_label.pack(side=tk.LEFT, pady=0)
 
         self.drag_mode_label = tk.Label(
             left_st, text="",
             font=("Segoe UI", 8, "italic"),
             bg=t['surface2'], fg=t['text_muted'],
         )
-        self.drag_mode_label.pack(side=tk.LEFT, padx=(10, 0), pady=5)
+        self.drag_mode_label.pack(side=tk.LEFT, padx=(8, 0), pady=0)
 
         # Center: pagination controls
         self._pagination_frame = tk.Frame(status_strip, bg=t['surface2'])
-        self._pagination_frame.grid(row=0, column=1, pady=0)
+        self._pagination_frame.grid(row=0, column=1, pady=0, ipady=0)
         self._build_pagination_bar()
 
         # Right: keyboard hint
@@ -624,10 +623,10 @@ class GridViewManager:
 
         tk.Label(
             right_st,
-            text="Double-click to play  ·  Right-click for options  ·  Drag to reorder",
+            text="Double-click · Right-click · Drag to reorder",
             font=("Segoe UI", 8),
             bg=t['surface2'], fg=t['text_muted'],
-        ).pack(side=tk.RIGHT, pady=5)
+        ).pack(side=tk.RIGHT, pady=0)
 
         # Start loading videos (unchanged)
         ManagedThread(target=self._load_videos, args=(videos,), name="LoadGridVideos").start()
@@ -926,43 +925,50 @@ class GridViewManager:
             w.destroy()
 
         t = self._tok()
-        tp = self.theme_provider
         self._get_page_items()
         total_pages = self._total_pages()
         total_videos = sum(1 for i in self.items if i['type'] == 'video')
 
-        pg_frame = self._pagination_frame
-        bar_bg   = t['surface2']
+        pg = self._pagination_frame
+        bar_bg = t['surface2']
 
-        prev_btn = tp.create_manager_action_link(pg_frame, "‹ Prev", self._prev_page, style="secondary")
-        prev_btn.pack(side=tk.LEFT, padx=(0, 6), pady=5)
+        def _nav(text, cmd, active):
+            fg = t['text_sub'] if active else t['border']
+            lbl = tk.Label(pg, text=text, font=("Segoe UI", 11),
+                           bg=bar_bg, fg=fg,
+                           cursor="hand2" if active else "arrow", padx=3)
+            if active:
+                lbl.bind("<Button-1>", lambda e: cmd())
+                lbl.bind("<Enter>", lambda e: lbl.config(fg=t['accent']))
+                lbl.bind("<Leave>", lambda e: lbl.config(fg=fg))
+            return lbl
 
-        self._page_label = tk.Label(
-            pg_frame,
-            text=f"Page {self._page + 1} / {total_pages}  ·  {total_videos:,} videos",
-            font=("Segoe UI", 8),
-            bg=bar_bg, fg=t['text_sub']
-        )
-        self._page_label.pack(side=tk.LEFT, padx=6)
+        _nav("‹", self._prev_page, self._page > 0).pack(side=tk.LEFT, padx=(0, 2))
 
-        next_btn = tp.create_manager_action_link(pg_frame, "Next ›", self._next_page, style="secondary")
-        next_btn.pack(side=tk.LEFT, padx=(6, 16), pady=5)
+        pill = tk.Frame(pg, bg=t['border_soft'], padx=6, pady=0)
+        pill.pack(side=tk.LEFT, padx=4)
+        tk.Label(pill, text=f"{self._page + 1} / {total_pages}",
+                 font=("Segoe UI", 8), bg=t['border_soft'], fg=t['text_sub']).pack(pady=2)
 
-        tk.Frame(pg_frame, bg=t['border'], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=5)
+        _nav("›", self._next_page, self._page < total_pages - 1).pack(side=tk.LEFT, padx=(2, 8))
 
-        tk.Label(pg_frame, text="Go to", font=("Segoe UI", 8),
-                 bg=bar_bg, fg=t['text_sub']).pack(side=tk.LEFT, padx=(12, 4))
+        tk.Label(pg, text="·", font=("Segoe UI", 8), bg=bar_bg, fg=t['border']).pack(side=tk.LEFT, padx=3)
+        tk.Label(pg, text=f"{total_videos:,} videos",
+                 font=("Segoe UI", 7), bg=bar_bg, fg=t['text_muted']).pack(side=tk.LEFT, padx=(4, 8))
+        tk.Label(pg, text="·", font=("Segoe UI", 8), bg=bar_bg, fg=t['border']).pack(side=tk.LEFT, padx=3)
 
+        tk.Label(pg, text="go", font=("Segoe UI", 8),
+                 bg=bar_bg, fg=t['text_muted']).pack(side=tk.LEFT, padx=(4, 2))
         self._jump_var = tk.StringVar(value=str(self._page + 1))
         jump_entry = tk.Entry(
-            pg_frame, textvariable=self._jump_var, width=3,
+            pg, textvariable=self._jump_var, width=3,
             font=("Segoe UI", 8),
             bg=t['surface'], fg=t['text'],
             relief=tk.FLAT, bd=0,
             highlightthickness=1, highlightbackground=t['border'],
             insertbackground=t['text']
         )
-        jump_entry.pack(side=tk.LEFT, padx=(0, 2), ipady=3)
+        jump_entry.pack(side=tk.LEFT, padx=(0, 2), ipady=1)
         jump_entry.bind("<Return>", lambda e: self._jump_to_page())
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -1457,14 +1463,14 @@ class GridViewManager:
         t = self._tok()
         n = len(self.selected_items)
         if n == 0:
-            self.selection_label.config(text="  Nothing selected  ",
-                                        bg=t['pill_bg'], fg=t['text_muted'])
+            self.selection_label.config(text="Nothing selected",
+                                        bg=t['surface2'], fg=t['text_muted'])
         elif n == 1:
-            self.selection_label.config(text="  1 video selected  ",
-                                        bg=t['accent_dim'], fg=t['accent'])
+            self.selection_label.config(text="1 video selected",
+                                        bg=t['surface2'], fg=t['accent'])
         else:
-            self.selection_label.config(text=f"  {n} videos selected  ",
-                                        bg=t['accent_dim'], fg=t['accent'])
+            self.selection_label.config(text=f"{n} videos selected",
+                                        bg=t['surface2'], fg=t['accent'])
 
     # ─────────────────────────────────────────────────────────────────────────
     # Playback (original)
