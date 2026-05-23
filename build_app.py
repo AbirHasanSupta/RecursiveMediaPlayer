@@ -11,7 +11,7 @@ except ImportError:
 
 import threading
 import tkinter as tk
-from datetime import datetime
+from datetime import datetime, timedelta
 from tkinter import filedialog, messagebox, ttk
 from tkinter.font import Font
 import os
@@ -702,89 +702,167 @@ def select_multiple_folders_and_play():
             self._render_home_dashboard()
 
         def _render_home_dashboard(self):
+            import random as _random
             frame = self._ensure_embedded_view_frame()
             for child in frame.winfo_children():
                 child.destroy()
             frame.pack(fill=tk.BOTH, expand=True)
 
-            is_dark = self.dark_mode
-            bg = self.bg_color
+            bg      = self.bg_color
             surface = self.surface_color
             surface2 = self.alt_row_color
-            border = self.border_color
+            border  = self.border_color
             text_pri = self.text_color
             text_sec = self.text_muted
-            accent = self.accent_color
+            accent  = self.accent_color
             accent2 = self.accent_secondary
 
             frame.configure(bg=bg)
 
-            # Scrollable canvas
-            canvas = tk.Canvas(frame, bg=bg, highlightthickness=0, bd=0)
-            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            inner = tk.Frame(canvas, bg=bg)
-            inner_win = canvas.create_window((0, 0), window=inner, anchor="nw")
+            # ── shared helpers ────────────────────────────────────────────
+            def _bind_hover(card_f, inner_f, cmd, col):
+                def _enter(e):
+                    card_f.config(bg=self.hover_color, highlightbackground=col)
+                    inner_f.config(bg=self.hover_color)
+                    for w in inner_f.winfo_children():
+                        try:
+                            if isinstance(w, tk.Label) and w.cget("bg") == surface:
+                                w.config(bg=self.hover_color)
+                        except Exception:
+                            pass
+                def _leave(e):
+                    card_f.config(bg=surface, highlightbackground=border)
+                    inner_f.config(bg=surface)
+                    for w in inner_f.winfo_children():
+                        try:
+                            if isinstance(w, tk.Label) and w.cget("bg") == self.hover_color:
+                                w.config(bg=surface)
+                        except Exception:
+                            pass
+                for w in [card_f, inner_f] + list(inner_f.winfo_children()):
+                    try:
+                        w.bind("<Button-1>", lambda e, fn=cmd: fn())
+                        w.bind("<Enter>", _enter)
+                        w.bind("<Leave>", _leave)
+                    except Exception:
+                        pass
 
-            def _on_configure(e):
-                canvas.configure(scrollregion=canvas.bbox("all"))
-                canvas.itemconfig(inner_win, width=canvas.winfo_width())
+            # ── gather analytics data ─────────────────────────────────────
+            hist_stats = {}
+            all_history = []
+            if hasattr(self, 'watch_history_manager'):
+                try:
+                    hist_stats  = self.watch_history_manager.get_history_stats()
+                    all_history = self.watch_history_manager.service.get_all_history()
+                except Exception:
+                    pass
 
-            inner.bind("<Configure>", _on_configure)
-            canvas.bind("<Configure>", lambda e: canvas.itemconfig(inner_win, width=e.width))
+            today_n  = hist_stats.get('today_count', 0)
+            week_n   = hist_stats.get('week_count', 0)
+            unique_n = hist_stats.get('unique_videos', 0)
 
-            pad = tk.Frame(inner, bg=bg)
-            pad.pack(fill=tk.BOTH, expand=True, padx=36, pady=28)
+            avg_pct = 0.0
+            tracked = [e.completion_percentage for e in all_history if e.completion_percentage > 0]
+            if tracked:
+                avg_pct = sum(tracked) / len(tracked)
 
-            # Hero banner
-            hero_bg = surface
-            hero = tk.Frame(pad, bg=hero_bg, pady=0)
-            hero.pack(fill=tk.X, pady=(0, 24))
-
-            stripe = tk.Frame(hero, bg=accent2, height=3)
-            stripe.pack(fill=tk.X, side=tk.TOP)
-
-            hero_inner = tk.Frame(hero, bg=hero_bg)
-            hero_inner.pack(fill=tk.X, padx=28, pady=22)
-
-            left_hero = tk.Frame(hero_inner, bg=hero_bg)
-            left_hero.pack(side=tk.LEFT, fill=tk.Y)
-
-            tk.Label(left_hero,
-                     text="Recursive Video Player",
-                     font=Font(family="Segoe UI", size=22, weight="bold"),
-                     bg=hero_bg, fg=text_pri).pack(anchor="w")
-            tk.Label(left_hero,
-                     text="Your personal media library · fast, organised, beautiful",
-                     font=Font(family="Segoe UI", size=10),
-                     bg=hero_bg, fg=text_sec).pack(anchor="w", pady=(5, 0))
-
-            # Play all button
-            play_btn_bg = accent2
-            play_btn = tk.Label(hero_inner, text="▶  Play All",
-                                font=Font(family="Segoe UI", size=10, weight="bold"),
-                                bg=play_btn_bg, fg="#ffffff",
-                                padx=18, pady=9, cursor="hand2")
-            play_btn.pack(side=tk.RIGHT, anchor="center")
-            play_btn.bind("<Button-1>", lambda e: self.play_videos())
-            play_btn.bind("<Enter>", lambda e: play_btn.config(bg=accent))
-            play_btn.bind("<Leave>", lambda e: play_btn.config(bg=play_btn_bg))
-
-            # Stats cards
-            total_dirs = len(self.selected_dirs)
-            total_vids = sum(
-                sum(1 for v in (self.scan_cache.get(d) or ([],))[0] if not self.is_video_excluded(d, v))
+            total_lib_vids = sum(
+                sum(1 for v in (self.scan_cache.get(d) or ([],))[0]
+                    if not self.is_video_excluded(d, v))
                 for d in self.selected_dirs
             ) if hasattr(self, 'scan_cache') else 0
 
+            day_counts = [0] * 7
+            today_date = datetime.now().date()
+            for e in all_history:
+                try:
+                    delta = (today_date - datetime.fromisoformat(e.watched_at).date()).days
+                    if 0 <= delta < 7:
+                        day_counts[6 - delta] += 1
+                except Exception:
+                    pass
+
+            dir_counts: dict = {}
+            for e in all_history:
+                dk = os.path.basename(e.directory_path) or e.directory_path
+                dir_counts[dk] = dir_counts.get(dk, 0) + 1
+            top_dirs = sorted(dir_counts.items(), key=lambda x: x[1], reverse=True)[:4]
+
+            pct_watched = (unique_n / total_lib_vids * 100) if total_lib_vids > 0 else 0
+
+            # ── scrollable root ───────────────────────────────────────────
+            canvas = tk.Canvas(frame, bg=bg, highlightthickness=0, bd=0)
+            # vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=canvas.yview)
+            # canvas.configure(yscrollcommand=vsb.set)
+            # vsb.pack(side=tk.RIGHT, fill=tk.Y)
+            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+            inner = tk.Frame(canvas, bg=bg)
+            inner_win = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+            def _on_inner_configure(e):
+                canvas.configure(scrollregion=canvas.bbox("all"))
+            def _on_canvas_configure(e):
+                canvas.itemconfig(inner_win, width=e.width)
+            inner.bind("<Configure>", _on_inner_configure)
+            canvas.bind("<Configure>", _on_canvas_configure)
+
+            # def _on_mousewheel(e):
+            #     canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+            # canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+            pad = tk.Frame(inner, bg=bg)
+            pad.pack(fill=tk.BOTH, expand=True, padx=30, pady=20)
+
+            # ── hero ──────────────────────────────────────────────────────
+            hero = tk.Frame(pad, bg=surface)
+            hero.pack(fill=tk.X, pady=(0, 18))
+            tk.Frame(hero, bg=accent2, height=3).pack(fill=tk.X, side=tk.TOP)
+            hero_inner = tk.Frame(hero, bg=surface)
+            hero_inner.pack(fill=tk.X, padx=24, pady=18)
+
+            left_hero = tk.Frame(hero_inner, bg=surface)
+            left_hero.pack(side=tk.LEFT, fill=tk.Y)
+            tk.Label(left_hero, text="Recursive Video Player",
+                     font=Font(family="Segoe UI", size=20, weight="bold"),
+                     bg=surface, fg=text_pri).pack(anchor="w")
+            tk.Label(left_hero, text="Your personal media library · fast, organised, beautiful",
+                     font=Font(family="Segoe UI", size=10),
+                     bg=surface, fg=text_sec).pack(anchor="w", pady=(4, 0))
+
+            play_btn = tk.Label(hero_inner, text="▶  Play All",
+                                font=Font(family="Segoe UI", size=10, weight="bold"),
+                                bg=accent2, fg="#ffffff", padx=16, pady=8, cursor="hand2")
+            play_btn.pack(side=tk.RIGHT, anchor="center")
+            play_btn.bind("<Button-1>", lambda e: self.play_videos())
+            play_btn.bind("<Enter>", lambda e: play_btn.config(bg=accent))
+            play_btn.bind("<Leave>", lambda e: play_btn.config(bg=accent2))
+
+            # ── two-column body ───────────────────────────────────────────
+            body_row = tk.Frame(pad, bg=bg)
+            body_row.pack(fill=tk.BOTH, expand=True)
+            body_row.columnconfigure(0, weight=5)
+            body_row.columnconfigure(1, weight=3)
+
+            left_col = tk.Frame(body_row, bg=bg)
+            left_col.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+
+            right_col = tk.Frame(body_row, bg=bg)
+            right_col.grid(row=0, column=1, sticky="nsew")
+
+            # ── left: stats row ───────────────────────────────────────────
+            total_dirs = len(self.selected_dirs)
+            total_vids = total_lib_vids
+
             stat_data = [
-                ("📁", str(total_dirs), "Directories", accent, None),
-                ("🎬", str(total_vids), "Videos", accent2, None),
-                ("⭐", "Favourites", "Quick access", "#f5a623", self._show_favorites_manager),
-                ("🕐", "History", "Recently watched", "#34c98a", self._show_watch_history),
+                ("📁", str(total_dirs),       "Directories",    accent,    None),
+                ("🎬", str(total_vids),        "Videos",         accent2,   None),
+                ("📅", str(today_n),           "Watched Today",  "#06b6d4", self._show_watch_history),
+                ("✓",  f"{avg_pct:.0f}%",      "Avg Completion", "#34c98a", self._show_watch_history),
             ]
 
-            stats_row = tk.Frame(pad, bg=bg)
-            stats_row.pack(fill=tk.X, pady=(0, 26))
+            stats_row = tk.Frame(left_col, bg=bg)
+            stats_row.pack(fill=tk.X, pady=(0, 14))
             for i in range(4):
                 stats_row.columnconfigure(i, weight=1, uniform="sc")
 
@@ -792,133 +870,326 @@ def select_multiple_folders_and_play():
                 card = tk.Frame(stats_row, bg=surface,
                                 highlightbackground=border, highlightthickness=1,
                                 cursor="hand2" if cmd else "")
-                card.grid(row=0, column=i, padx=(0 if i == 0 else 10, 0), sticky="nsew")
-
-                bar = tk.Frame(card, bg=col, width=4)
-                bar.pack(side=tk.LEFT, fill=tk.Y)
-
+                card.grid(row=0, column=i, padx=(0 if i == 0 else 8, 0), sticky="nsew")
+                tk.Frame(card, bg=col, width=4).pack(side=tk.LEFT, fill=tk.Y)
                 body = tk.Frame(card, bg=surface)
-                body.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=14, pady=14)
-
-                top_row = tk.Frame(body, bg=surface)
-                top_row.pack(fill=tk.X)
-                tk.Label(top_row, text=icon,
-                         font=Font(family="Segoe UI Emoji", size=16),
-                         bg=surface, fg=col).pack(side=tk.LEFT)
-
+                body.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=12, pady=12)
+                tk.Label(body, text=icon, font=Font(family="Segoe UI Emoji", size=13),
+                         bg=surface, fg=col).pack(anchor="w")
                 val_lbl = tk.Label(body, text=val,
-                                   font=Font(family="Segoe UI", size=18, weight="bold"),
+                                   font=Font(family="Segoe UI", size=16, weight="bold"),
                                    bg=surface, fg=text_pri)
-                val_lbl.pack(anchor="w", pady=(4, 0))
-                tk.Label(body, text=lbl,
-                         font=Font(family="Segoe UI", size=9),
+                val_lbl.pack(anchor="w", pady=(2, 0))
+                tk.Label(body, text=lbl, font=Font(family="Segoe UI", size=8),
                          bg=surface, fg=text_sec).pack(anchor="w")
-
                 if i == 0: self._home_dirs_label = val_lbl
                 if i == 1: self._home_vids_label = val_lbl
-
                 if cmd:
                     for w in (card, body, val_lbl):
                         w.bind("<Button-1>", lambda e, c=cmd: c())
                         w.bind("<Enter>", lambda e, f=card: f.config(bg=self.hover_color, highlightbackground=accent))
                         w.bind("<Leave>", lambda e, f=card: f.config(bg=surface, highlightbackground=border))
 
-            # Section helper
-            def _section(text):
-                row = tk.Frame(pad, bg=bg)
-                row.pack(fill=tk.X, pady=(0, 12))
-                tk.Label(row, text=text,
-                         font=Font(family="Segoe UI", size=11, weight="bold"),
-                         bg=bg, fg=text_pri).pack(side=tk.LEFT)
-                sep = tk.Frame(row, bg=border, height=1)
-                sep.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 0), pady=6)
-
-            # Quick actions
-            _section("Quick Actions")
-            actions = [
-                ("🖼", "Gallery", "Browse as grid", self.accent_color, self._show_grid_view),
-                ("🎵", "Playlist", "Manage playlists", "#7c3aed", self._manage_playlists),
-                ("⭐", "Favourites", "Your starred videos", "#f5a623", self._show_favorites_manager),
-                ("🕐", "History", "Recently watched", "#34c98a", self._show_watch_history),
-                ("📋", "Queue", "Up next", "#06b6d4", self._show_queue_manager),
-                ("🏷", "Tags & Ratings", "Annotate & filter", self.accent_secondary, self._show_annotation_browser),
+            # ── left: quick actions (3, daily-rotating) ──────────────────
+            all_actions = [
+                ("🖼", "Gallery",      "Browse as grid",      accent,            self._show_grid_view),
+                ("🎵", "Playlist",     "Manage playlists",    "#7c3aed",         self._manage_playlists),
+                ("⭐", "Favourites",   "Your starred videos", "#f5a623",         self._show_favorites_manager),
+                ("🕐", "History",      "Recently watched",    "#34c98a",         self._show_watch_history),
+                ("📋", "Queue",        "Up next",             "#06b6d4",         self._show_queue_manager),
+                ("🏷", "Tags & Ratings","Annotate & filter",  accent2,           self._show_annotation_browser),
             ]
+            seed = datetime.now().toordinal()
+            rng = _random.Random(seed)
+            actions = rng.sample(all_actions, 3)
 
-            grid_frame = tk.Frame(pad, bg=bg)
-            grid_frame.pack(fill=tk.X, pady=(0, 26))
-            for c in range(3):
-                grid_frame.columnconfigure(c, weight=1, uniform="qa")
+            qa_lbl_row = tk.Frame(left_col, bg=bg)
+            qa_lbl_row.pack(fill=tk.X, pady=(0, 10))
+            tk.Label(qa_lbl_row, text="Quick Actions",
+                     font=Font(family="Segoe UI", size=11, weight="bold"),
+                     bg=bg, fg=text_pri).pack(side=tk.LEFT)
+            tk.Frame(qa_lbl_row, bg=border, height=1).pack(
+                side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 0), pady=6)
 
-            for i, (icon, title, sub, col, cmd) in enumerate(actions):
-                r, c = divmod(i, 3)
-                card = tk.Frame(grid_frame, bg=surface,
+            qa_frame = tk.Frame(left_col, bg=bg)
+            qa_frame.pack(fill=tk.X)
+            for ci in range(3):
+                qa_frame.columnconfigure(ci, weight=1, uniform="qa")
+
+            for ci, (icon, title, sub, col, cmd) in enumerate(actions):
+                card = tk.Frame(qa_frame, bg=surface,
                                 highlightbackground=border, highlightthickness=1,
                                 cursor="hand2")
-                card.grid(row=r, column=c,
-                          padx=(0 if c == 0 else 10, 0),
-                          pady=(0 if r == 0 else 10, 0),
-                          sticky="nsew")
-
+                card.grid(row=0, column=ci, padx=(0 if ci == 0 else 10, 0), sticky="nsew")
                 inner_card = tk.Frame(card, bg=surface)
-                inner_card.pack(fill=tk.BOTH, expand=True, padx=16, pady=14)
-
-                icon_pill = tk.Label(inner_card, text=icon,
-                                     font=Font(family="Segoe UI Emoji", size=18),
-                                     bg=col, fg="#ffffff",
-                                     width=3, pady=6)
-                icon_pill.pack(anchor="w")
-
+                inner_card.pack(fill=tk.BOTH, expand=True, padx=14, pady=12)
+                tk.Label(inner_card, text=icon,
+                         font=Font(family="Segoe UI Emoji", size=18),
+                         bg=col, fg="#ffffff", width=3, pady=5).pack(anchor="w")
                 tk.Label(inner_card, text=title,
                          font=Font(family="Segoe UI", size=11, weight="bold"),
-                         bg=surface, fg=text_pri).pack(anchor="w", pady=(8, 0))
+                         bg=surface, fg=text_pri).pack(anchor="w", pady=(7, 0))
                 tk.Label(inner_card, text=sub,
                          font=Font(family="Segoe UI", size=9),
                          bg=surface, fg=text_sec).pack(anchor="w", pady=(2, 0))
+                _bind_hover(card, inner_card, cmd, col)
 
-                def _bind_card(card_f, inner_f, c=cmd, col=col):
-                    def _enter(e):
-                        card_f.config(bg=self.hover_color, highlightbackground=col)
-                        inner_f.config(bg=self.hover_color)
-                        for w in inner_f.winfo_children():
+            # ── right: analytics panel ────────────────────────────────────
+            analytics_card = tk.Frame(right_col, bg=surface,
+                                      highlightbackground=border, highlightthickness=1)
+            analytics_card.pack(fill=tk.BOTH, expand=True)
+            tk.Frame(analytics_card, bg=accent, height=3).pack(fill=tk.X, side=tk.TOP)
+            ac_inner = tk.Frame(analytics_card, bg=surface)
+            ac_inner.pack(fill=tk.BOTH, expand=True, padx=14, pady=12)
+
+            tk.Label(ac_inner, text="Watch Analytics",
+                     font=Font(family="Segoe UI", size=10, weight="bold"),
+                     bg=surface, fg=text_pri).pack(anchor="w", pady=(0, 10))
+
+            # mini stats: week + coverage
+            ms_row = tk.Frame(ac_inner, bg=surface)
+            ms_row.pack(fill=tk.X, pady=(0, 12))
+            ms_row.columnconfigure(0, weight=1)
+            ms_row.columnconfigure(1, weight=1)
+
+            for mci, (mv, ml, mc) in enumerate([
+                (str(week_n),            "This week",  "#7c3aed"),
+                (f"{pct_watched:.0f}%",  "Coverage",   accent2),
+            ]):
+                mf = tk.Frame(ms_row, bg=surface2)
+                mf.grid(row=0, column=mci, padx=(0 if mci == 0 else 6, 0), sticky="nsew")
+                tk.Label(mf, text=mv,
+                         font=Font(family="Segoe UI", size=14, weight="bold"),
+                         bg=surface2, fg=mc).pack(padx=10, pady=(8, 0), anchor="w")
+                tk.Label(mf, text=ml,
+                         font=Font(family="Segoe UI", size=8),
+                         bg=surface2, fg=text_sec).pack(padx=10, pady=(0, 8), anchor="w")
+
+            # 7-day activity bar
+            tk.Label(ac_inner, text="Last 7 days",
+                     font=Font(family="Segoe UI", size=8, weight="bold"),
+                     bg=surface, fg=text_sec).pack(anchor="w", pady=(0, 4))
+
+            bar_h = 40
+            bar_canvas = tk.Canvas(ac_inner, bg=surface, height=bar_h + 18,
+                                   highlightthickness=0, bd=0)
+            bar_canvas.pack(fill=tk.X, pady=(0, 12))
+
+            def _draw_bars(c=bar_canvas, counts=day_counts):
+                c.delete("all")
+                w = c.winfo_width() or 300
+                max_v = max(counts) if any(counts) else 1
+                n = len(counts)
+                gap = 5
+                bw = max(4, (w - gap * (n + 1)) // n)
+                today_date_l = datetime.now().date()
+                for k, v in enumerate(counts):
+                    delta = n - 1 - k
+                    dl = (today_date_l - timedelta(days=delta)).strftime("%a")
+                    x0 = gap + k * (bw + gap)
+                    x1 = x0 + bw
+                    y1 = 2 + bar_h
+                    filled = max(3, int((v / max_v) * bar_h)) if max_v else 3
+                    c.create_rectangle(x0, 2, x1, y1, fill=surface2, outline="", width=0)
+                    bcol = accent2 if k == n - 1 else accent
+                    c.create_rectangle(x0, y1 - filled, x1, y1, fill=bcol, outline="", width=0)
+                    c.create_text(x0 + bw // 2, y1 + 9, text=dl,
+                                  fill=text_sec, font=("Segoe UI", 7))
+
+            bar_canvas.bind("<Configure>", lambda e: _draw_bars())
+            bar_canvas.after(60, _draw_bars)
+
+            # top dirs
+            tk.Frame(ac_inner, bg=border, height=1).pack(fill=tk.X, pady=(0, 8))
+            tk.Label(ac_inner, text="Top directories",
+                     font=Font(family="Segoe UI", size=8, weight="bold"),
+                     bg=surface, fg=text_sec).pack(anchor="w", pady=(0, 6))
+
+            bar_colors = [accent, accent2, "#7c3aed", "#06b6d4"]
+            if top_dirs:
+                max_dc = top_dirs[0][1]
+                for ti, (dname, dcount) in enumerate(top_dirs):
+                    rf = tk.Frame(ac_inner, bg=surface)
+                    rf.pack(fill=tk.X, pady=2)
+                    tk.Label(rf, text=dname[:18] + ("…" if len(dname) > 18 else ""),
+                             font=Font(family="Segoe UI", size=8),
+                             bg=surface, fg=text_pri, anchor="w", width=18).pack(side=tk.LEFT)
+                    bg_bar = tk.Frame(rf, bg=surface2, height=8)
+                    bg_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 6))
+                    bg_bar.pack_propagate(False)
+                    _col = bar_colors[ti % len(bar_colors)]
+                    _ratio = dcount / max_dc if max_dc else 0
+                    def _fill(p=bg_bar, r=_ratio, c=_col):
+                        p.update_idletasks()
+                        pw = p.winfo_width() or 80
+                        tk.Frame(p, bg=c, width=max(4, int(pw * r)), height=8).place(x=0, y=0)
+                    bg_bar.after(90, _fill)
+                    tk.Label(rf, text=str(dcount),
+                             font=Font(family="Segoe UI", size=8),
+                             bg=surface, fg=text_sec).pack(side=tk.LEFT)
+            else:
+                tk.Label(ac_inner,
+                         text="No watch history yet.",
+                         font=Font(family="Segoe UI", size=8),
+                         bg=surface, fg=text_sec).pack(anchor="w")
+
+            # ── continue watching row ─────────────────────────────────────
+            _cw_seen = set()
+            _cw_entries = []
+            for _cw_e in sorted(all_history, key=lambda x: x.watched_at, reverse=True):
+                if _cw_e.video_path not in _cw_seen and os.path.isfile(_cw_e.video_path):
+                    _cw_seen.add(_cw_e.video_path)
+                    _cw_entries.append(_cw_e)
+                if len(_cw_entries) >= 4:
+                    break
+
+            if _cw_entries:
+                cw_hdr = tk.Frame(pad, bg=bg)
+                cw_hdr.pack(fill=tk.X, pady=(16, 8))
+                tk.Label(cw_hdr, text="Continue Watching",
+                         font=Font(family="Segoe UI", size=11, weight="bold"),
+                         bg=bg, fg=text_pri).pack(side=tk.LEFT)
+                tk.Frame(cw_hdr, bg=border, height=1).pack(
+                    side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 0), pady=6)
+                _see_all_lbl = tk.Label(cw_hdr, text="See all →",
+                                        font=Font(family="Segoe UI", size=9),
+                                        bg=bg, fg=accent, cursor="hand2")
+                _see_all_lbl.pack(side=tk.RIGHT)
+                _see_all_lbl.bind("<Button-1>", lambda e: self._show_watch_history())
+                _see_all_lbl.bind("<Enter>", lambda e: _see_all_lbl.config(fg=accent2))
+                _see_all_lbl.bind("<Leave>", lambda e: _see_all_lbl.config(fg=accent))
+
+                cw_grid = tk.Frame(pad, bg=bg)
+                cw_grid.pack(fill=tk.X)
+                for _cw_ci in range(len(_cw_entries)):
+                    cw_grid.columnconfigure(_cw_ci, weight=1, uniform="cw")
+
+                for _cw_ci, _cw_entry in enumerate(_cw_entries):
+                    _cw_fname = os.path.splitext(os.path.basename(_cw_entry.video_path))[0]
+                    _cw_name_disp = (_cw_fname[:24] + "…") if len(_cw_fname) > 24 else _cw_fname
+                    _cw_pct = min(100.0, max(0.0, float(_cw_entry.completion_percentage or 0)))
+                    _cw_dur = _cw_entry.get_duration_formatted() if _cw_entry.duration_watched else ""
+                    try:
+                        _cw_delta = datetime.now() - datetime.fromisoformat(_cw_entry.watched_at)
+                        if _cw_delta.days == 0:
+                            _cw_hrs = _cw_delta.seconds // 3600
+                            _cw_time = (f"{_cw_delta.seconds // 60}m ago"
+                                        if _cw_hrs == 0 else f"{_cw_hrs}h ago")
+                        elif _cw_delta.days == 1:
+                            _cw_time = "Yesterday"
+                        else:
+                            _cw_time = f"{_cw_delta.days}d ago"
+                    except Exception:
+                        _cw_time = ""
+
+                    _cw_bar_col = ("#34c98a" if _cw_pct >= 80
+                                   else (accent if _cw_pct >= 35 else accent2))
+
+                    _cw_card = tk.Frame(cw_grid, bg=surface,
+                                        highlightbackground=border, highlightthickness=1,
+                                        cursor="hand2")
+                    _cw_card.grid(row=0, column=_cw_ci,
+                                  padx=(0 if _cw_ci == 0 else 8, 0), sticky="nsew")
+
+                    tk.Frame(_cw_card, bg=_cw_bar_col, height=3).pack(fill=tk.X, side=tk.TOP)
+
+                    _cw_body = tk.Frame(_cw_card, bg=surface)
+                    _cw_body.pack(fill=tk.BOTH, expand=True, padx=10, pady=8)
+
+                    tk.Label(_cw_body, text=_cw_name_disp,
+                             font=Font(family="Segoe UI", size=9, weight="bold"),
+                             bg=surface, fg=text_pri, anchor="w").pack(fill=tk.X)
+
+                    _cw_meta = tk.Frame(_cw_body, bg=surface)
+                    _cw_meta.pack(fill=tk.X, pady=(2, 5))
+                    tk.Label(_cw_meta, text=_cw_time,
+                             font=Font(family="Segoe UI", size=8),
+                             bg=surface, fg=text_sec).pack(side=tk.LEFT)
+                    if _cw_dur:
+                        tk.Label(_cw_meta, text=f"  ·  {_cw_dur}",
+                                 font=Font(family="Segoe UI", size=8),
+                                 bg=surface, fg=text_sec).pack(side=tk.LEFT)
+
+                    _cw_prog_bg = tk.Frame(_cw_body, bg=surface2, height=5)
+                    _cw_prog_bg.pack(fill=tk.X)
+                    _cw_prog_bg.pack_propagate(False)
+
+                    def _fill_cw_prog(p=_cw_prog_bg, r=_cw_pct / 100, c=_cw_bar_col):
+                        p.update_idletasks()
+                        pw = p.winfo_width() or 80
+                        tk.Frame(p, bg=c, width=max(2, int(pw * r)), height=5).place(x=0, y=0)
+                    _cw_prog_bg.after(130, _fill_cw_prog)
+
+                    _cw_bot = tk.Frame(_cw_body, bg=surface)
+                    _cw_bot.pack(fill=tk.X, pady=(4, 0))
+                    tk.Label(_cw_bot, text=f"{_cw_pct:.0f}%",
+                             font=Font(family="Segoe UI", size=8, weight="bold"),
+                             bg=surface, fg=_cw_bar_col).pack(side=tk.LEFT)
+                    _cw_resume = tk.Label(_cw_bot, text="▶  Resume",
+                                          font=Font(family="Segoe UI", size=8, weight="bold"),
+                                          bg=_cw_bar_col, fg="#ffffff",
+                                          padx=8, pady=2, cursor="hand2")
+                    _cw_resume.pack(side=tk.RIGHT)
+
+                    def _do_play_cw(path=_cw_entry.video_path):
+                        self._play_continue_watching_video(path)
+
+                    for _cw_w in (_cw_card, _cw_body, _cw_resume):
+                        _cw_w.bind("<Button-1>", lambda e, fn=_do_play_cw: fn())
+
+                    def _cw_card_enter(e, c=_cw_card, b=_cw_body, bc=_cw_bar_col,
+                                       sf=surface, hc=self.hover_color, bd=border):
+                        c.config(bg=hc, highlightbackground=bc)
+                        b.config(bg=hc)
+                        for _w in b.winfo_children():
                             try:
-                                if isinstance(w, tk.Label) and w.cget("bg") == surface:
-                                    w.config(bg=self.hover_color)
+                                if isinstance(_w, (tk.Label, tk.Frame)) and _w.cget("bg") == sf:
+                                    _w.config(bg=hc)
                             except Exception:
                                 pass
+                        for _w in b.winfo_children():
+                            if isinstance(_w, tk.Frame):
+                                for _ww in _w.winfo_children():
+                                    try:
+                                        if isinstance(_ww, tk.Label) and _ww.cget("bg") == sf:
+                                            _ww.config(bg=hc)
+                                    except Exception:
+                                        pass
 
-                    def _leave(e):
-                        card_f.config(bg=surface, highlightbackground=border)
-                        inner_f.config(bg=surface)
-                        for w in inner_f.winfo_children():
+                    def _cw_card_leave(e, c=_cw_card, b=_cw_body,
+                                       sf=surface, hc=self.hover_color, bd=border):
+                        c.config(bg=sf, highlightbackground=bd)
+                        b.config(bg=sf)
+                        for _w in b.winfo_children():
                             try:
-                                if isinstance(w, tk.Label) and w.cget("bg") == self.hover_color:
-                                    w.config(bg=surface)
+                                if isinstance(_w, (tk.Label, tk.Frame)) and _w.cget("bg") == hc:
+                                    _w.config(bg=sf)
                             except Exception:
                                 pass
+                        for _w in b.winfo_children():
+                            if isinstance(_w, tk.Frame):
+                                for _ww in _w.winfo_children():
+                                    try:
+                                        if isinstance(_ww, tk.Label) and _ww.cget("bg") == hc:
+                                            _ww.config(bg=sf)
+                                    except Exception:
+                                        pass
 
-                    for w in [card_f, inner_f] + list(inner_f.winfo_children()):
-                        try:
-                            w.bind("<Button-1>", lambda e, fn=c: fn())
-                            w.bind("<Enter>", _enter)
-                            w.bind("<Leave>", _leave)
-                        except Exception:
-                            pass
+                    _cw_card.bind("<Enter>", _cw_card_enter)
+                    _cw_card.bind("<Leave>", _cw_card_leave)
+                    _cw_body.bind("<Enter>", _cw_card_enter)
+                    _cw_body.bind("<Leave>", _cw_card_leave)
 
-                _bind_card(card, inner_card)
-
-            # Tip section
-            tip_bg = self.alt_row_color
-            tip_fg = self.accent_color
-            tip_brd = self.border_color
+            # ── tip ───────────────────────────────────────────────────────
+            tip_bg = surface2
             tip = tk.Frame(pad, bg=tip_bg,
-                           highlightbackground=tip_brd, highlightthickness=1)
-            tip.pack(fill=tk.X, pady=(4, 0))
-
+                           highlightbackground=border, highlightthickness=1)
+            tip.pack(fill=tk.X, pady=(14, 0))
             tip_inner = tk.Frame(tip, bg=tip_bg)
-            tip_inner.pack(fill=tk.X, padx=16, pady=10)
+            tip_inner.pack(fill=tk.X, padx=14, pady=8)
             tk.Label(tip_inner, text="💡",
-                     font=Font(family="Segoe UI Emoji", size=11),
-                     bg=tip_bg, fg=tip_fg).pack(side=tk.LEFT, padx=(0, 8))
+                     font=Font(family="Segoe UI Emoji", size=10),
+                     bg=tip_bg, fg=accent).pack(side=tk.LEFT, padx=(0, 8))
             tk.Label(tip_inner,
                      text="Click  +  on the panel header to add a folder, then pick any action above to explore your library.",
                      font=Font(family="Segoe UI", size=9),
@@ -4419,6 +4690,48 @@ def select_multiple_folders_and_play():
                 ui.set_directory_filter(selected_dirs)
                 ui.refresh()
             return ui
+
+        def _play_continue_watching_video(self, video_path):
+            if not video_path or not os.path.isfile(video_path):
+                return
+
+            norm_path = os.path.normpath(video_path)
+
+            # 1. Try the resume service directly (bypasses the enabled flag)
+            saved_pos = self.resume_manager.service.get_resume_position(norm_path)
+
+            # 2. Fall back: derive position from watch history
+            if saved_pos is None and hasattr(self, 'watch_history_manager'):
+                try:
+                    all_hist = self.watch_history_manager.service.get_all_history()
+                    for _he in sorted(all_hist, key=lambda x: x.watched_at, reverse=True):
+                        if os.path.normpath(_he.video_path) == norm_path:
+                            if _he.duration_watched > 0 and _he.total_duration > 0:
+                                _pos_ms  = int(_he.duration_watched * 1000)
+                                _dur_ms  = int(_he.total_duration * 1000)
+                                self.resume_manager.service.update_position(
+                                    norm_path, _pos_ms, _dur_ms)
+                                saved_pos = self.resume_manager.service.get_resume_position(
+                                    norm_path)
+                            break
+                except Exception:
+                    pass
+
+            vdir = os.path.dirname(video_path)
+            player = self._make_player(
+                [video_path], {video_path: vdir}, [vdir], 0)
+
+            # 3. Temporarily force resume on so the player seeks on start
+            _orig_enabled = self.resume_manager._resume_enabled
+            if saved_pos is not None:
+                self.resume_manager.set_resume_enabled(True)
+
+            self._launch_player(player)
+
+            # 4. Restore original flag after player has had time to seek
+            if saved_pos is not None and not _orig_enabled:
+                self.root.after(3000,
+                    lambda: self.resume_manager.set_resume_enabled(_orig_enabled))
 
         def _play_history_videos(self, videos):
             if not videos:
