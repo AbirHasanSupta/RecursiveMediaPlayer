@@ -392,6 +392,13 @@ def select_multiple_folders_and_play():
             self.grid_view_manager.set_annotation_service(self.annotation_service)
             self.grid_view_manager.set_exclude_video_callback(self._grid_exclude_video)
             self.grid_view_manager.set_remove_exclusion_video_callback(self._grid_remove_exclusion_video)
+            self.grid_view_manager.set_locate_in_panel_callback(self.locate_in_directory_panel)
+
+            # self.playlist_manager.set_locate_in_panel_callback(self.locate_in_directory_panel)
+            # self.watch_history_manager.set_locate_in_panel_callback(self.locate_in_directory_panel)
+            # self.favorites_manager.set_locate_in_panel_callback(self.locate_in_directory_panel)
+            # self.queue_manager.set_locate_in_panel_callback(self.locate_in_directory_panel)
+            # self.annotation_browser.set_locate_in_panel_callback(self.locate_in_directory_panel)
 
             self.settings_manager.ui.cleanup_resume_callback = lambda: self.resume_manager.service.cleanup_old_positions(
                 self.settings_manager.get_settings().auto_cleanup_days)
@@ -2962,23 +2969,6 @@ def select_multiple_folders_and_play():
                 self.update_console(f"Error opening location: {e}")
                 messagebox.showerror("Error", f"Could not open folder location: {e}")
 
-        def _context_open_location(self, file_path):
-            try:
-                import subprocess
-                if os.name == 'nt':
-                    subprocess.Popen(f'explorer /select,"{file_path}"')
-                elif os.name == 'posix':
-                    if sys.platform == 'darwin':
-                        subprocess.Popen(['open', '-R', file_path])
-                    else:
-                        subprocess.Popen(['xdg-open', os.path.dirname(file_path)])
-                self.update_console(f"Opened location: {os.path.dirname(file_path)}")
-            except Exception as e:
-                self.update_console(f"Error opening location: {e}")
-                messagebox.showerror("Error", f"Could not open file location: {e}")
-
-            self.root.after(0, post_drive)
-
         # ------------------------------------------------------------------
         # Now-playing indicator
         # ------------------------------------------------------------------
@@ -4457,6 +4447,91 @@ def select_multiple_folders_and_play():
                 self.update_console(f"Copied path: {file_path}")
             except Exception as e:
                 self.update_console(f"Error copying path: {e}")
+
+        def locate_in_directory_panel(self, video_path):
+            if not video_path or not os.path.isfile(video_path):
+                return
+            norm_target = os.path.normpath(video_path)
+
+            for iid, path in list(self.current_subdirs_mapping.items()):
+                if os.path.normpath(path) == norm_target:
+                    self._tree_reveal_item(iid)
+                    return
+
+            root_iid, root_dir = None, None
+            for i, d in enumerate(self.selected_dirs):
+                if norm_target.startswith(os.path.normpath(d) + os.sep):
+                    root_dir = d
+                    if i < len(self._dir_root_iids):
+                        root_iid = self._dir_root_iids[i]
+                    break
+
+            if root_iid is None:
+                return
+
+            norm_root = os.path.normpath(root_dir)
+            parts = os.path.relpath(norm_target, norm_root).split(os.sep)
+            current_iid = root_iid
+            current_dir = norm_root
+
+            for part in parts:
+                target_path = os.path.normpath(os.path.join(current_dir, part))
+                found_iid = next(
+                    (c for c in self.exclusion_tree.get_children(current_iid)
+                     if os.path.normpath(self.current_subdirs_mapping.get(c, '')) == target_path),
+                    None
+                )
+                if found_iid is None:
+                    for ch in list(self.exclusion_tree.get_children(current_iid)):
+                        if self.exclusion_tree.item(ch, 'tags') == ('placeholder',):
+                            try:
+                                self.exclusion_tree.delete(ch)
+                                self.current_subdirs_mapping.pop(ch, None)
+                            except Exception:
+                                pass
+                    try:
+                        with os.scandir(current_dir) as it:
+                            entries = sorted(it, key=lambda e: (not e.is_dir(), e.name.lower()))
+                        existing_paths = {
+                            os.path.normpath(self.current_subdirs_mapping.get(c, ''))
+                            for c in self.exclusion_tree.get_children(current_iid)
+                        }
+                        for entry in entries:
+                            ep = os.path.normpath(entry.path)
+                            if ep in existing_paths:
+                                continue
+                            if not entry.is_dir() and not is_video(entry.name):
+                                continue
+                            self._tree_iid_counter += 1
+                            new_iid = f"loc_{self._tree_iid_counter}"
+                            if entry.is_dir():
+                                self.exclusion_tree.insert(current_iid, tk.END, iid=new_iid,
+                                                           text=f"📁 {entry.name}", tags=("folder",))
+                                self._tree_iid_counter += 1
+                                self.exclusion_tree.insert(new_iid, tk.END,
+                                                           iid=f"loc_ph_{self._tree_iid_counter}",
+                                                           text="  Loading…", tags=("placeholder",))
+                            else:
+                                self.exclusion_tree.insert(current_iid, tk.END, iid=new_iid,
+                                                           text=f"🎬 {entry.name}", tags=("video",))
+                            self.current_subdirs_mapping[new_iid] = entry.path
+                            if ep == target_path:
+                                found_iid = new_iid
+                    except Exception:
+                        pass
+
+                if found_iid is None:
+                    return
+                self.exclusion_tree.item(current_iid, open=True)
+                current_iid = found_iid
+                current_dir = target_path
+
+            self._tree_reveal_item(current_iid)
+
+        def _tree_reveal_item(self, iid):
+            self.exclusion_tree.selection_set(iid)
+            self.exclusion_tree.focus(iid)
+            self.exclusion_tree.see(iid)
 
         def _context_open_location(self, file_path):
             try:

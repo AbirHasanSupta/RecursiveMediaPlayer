@@ -89,6 +89,7 @@ class GridViewManager:
         self.show_properties_callback = None
         self.exclude_video_callback = None
         self.remove_exclusion_video_callback = None
+        self.locate_in_panel_callback = None
 
         self._drag_source = None
         self._drag_ghost = None
@@ -151,6 +152,9 @@ class GridViewManager:
         if svc:
             self._annotation_listener = self._on_annotation_changed
             svc.subscribe(self._annotation_listener)
+
+    def set_locate_in_panel_callback(self, cb):
+        self.locate_in_panel_callback = cb
 
     def _on_annotation_changed(self):
         if self.grid_window and self.grid_window.winfo_exists():
@@ -1797,6 +1801,9 @@ class GridViewManager:
                                      command=lambda: self._context_open_file_location(single))
             context_menu.add_command(label="Properties",
                                      command=lambda: self._context_show_properties(single))
+            if self.locate_in_panel_callback:
+                context_menu.add_command(label="Reveal in Directory Panel",
+                                         command=lambda: self.locate_in_panel_callback(single))
 
         try:
             context_menu.tk_popup(event.x_root, event.y_root)
