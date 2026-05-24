@@ -28,7 +28,6 @@ from managers.resource_manager import ThreadSafeDict, get_resource_manager, Mana
     ManagedThread
 from theme import ThemeSelector
 from utils import gather_videos_with_directories, is_video, gather_videos
-from vlc_player_controller import VLCPlayerControllerForMultipleDirectory
 from managers.playlist_manager import PlaylistManager
 from managers.watch_history_manager import WatchHistoryManager
 from managers.resume_playback_manager import ResumePlaybackManager
@@ -3319,6 +3318,7 @@ def select_multiple_folders_and_play():
             player.on_loop_change        = self._save_loop_callback
             player.on_close_save         = self._on_player_close_save
             player.on_video_changed      = self.on_video_changed
+            player.on_video_end          = self._on_player_video_end
             player.on_add_to_playlist    = lambda vids: self.playlist_manager.add_videos_to_playlist([], vids)
             player.on_add_to_queue       = lambda vids: self.queue_manager.add_to_queue(vids, added_from="player")
             player.on_add_to_favourites  = lambda vids: self.favorites_manager.add_to_favorites(
@@ -3491,6 +3491,10 @@ def select_multiple_folders_and_play():
                 try: self._loop_mode_var.set(loop_mode)
                 except Exception: pass
             self.save_preferences()
+
+        def _on_player_video_end(self, path: str, pos: int, dur: int):
+            if hasattr(self, 'watch_history_manager') and path:
+                self.watch_history_manager.track_video_end(path, pos // 1000, dur // 1000)
 
         def _on_player_close_save(self, index, path, loop_mode, volume, is_muted, duration_watched=0, total_duration=0):
             self.loop_mode               = loop_mode
