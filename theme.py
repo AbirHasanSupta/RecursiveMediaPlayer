@@ -652,7 +652,7 @@ class ThemeSelector:
     def _apply_workspace_chrome_theme(self):
         frame_names = (
             'workspace_frame', 'workspace_header', 'workspace_body', 'workspace_nav',
-            'content_frame', 'dir_section', 'dir_compact_rail', 'dir_frame',
+            'content_frame', 'dir_section', 'dir_frame',
             'exclusion_buttons_frame', 'embedded_view_frame', 'console_section',
             'console_header_frame', 'console_container', 'console_inner_pad', 'console_frame',
         )
@@ -688,7 +688,7 @@ class ThemeSelector:
                 pass
 
         self.update_container_borders()
-        self._style_directory_compact_rail()
+        self._style_sidebar()
 
     def _pointer_over_widget(self, widget):
         try:
@@ -745,68 +745,74 @@ class ThemeSelector:
     def _sync_play_toolbar_btn(self):
         self._restore_play_toolbar_after_click()
 
-    def _create_dir_rail_icon_btn(self, parent, icon, command, variant="primary"):
-        colors = self.get_button_colors(variant)
+    def _create_sidebar_icon_btn(self, parent, icon, command, tooltip=None):
         btn = tk.Label(
             parent, text=icon,
-            bg=colors["bg"], fg=colors["fg"],
-            font=("Segoe UI", 13, "bold" if variant == "primary" else "normal"),
-            width=2, height=1,
-            padx=12, pady=11,
-            cursor="hand2",
-            relief=tk.FLAT, bd=0,
+            bg=self.surface_color, fg=self.text_color,
+            font=("Segoe UI", 15, "bold"), anchor="center",
+            pady=10, cursor="hand2",
+            relief=tk.FLAT, bd=0, highlightthickness=0,
         )
-        btn._rail_variant = variant
+        btn._sb_command = command
 
-        def on_enter(_e, v=variant):
-            c = self.get_button_colors(v)
-            btn.configure(bg=c["active"])
-
-        def on_leave(_e, v=variant):
-            c = self.get_button_colors(v)
-            btn.configure(bg=c["bg"])
-
-        def on_press(_e, v=variant):
-            c = self.get_button_colors(v)
-            btn.configure(bg=c["active"])
-
-        def on_release(_e):
-            c = self.get_button_colors(btn._rail_variant)
-            btn.configure(bg=c["active"] if self._pointer_over_widget(btn) else c["bg"])
+        def on_enter(_e):
+            btn.config(bg=self.accent_color, fg="#ffffff")
+        def on_leave(_e):
+            btn.config(bg=self.surface_color, fg=self.text_color)
+        def on_click(_e):
+            btn.config(bg=self.accent_color, fg="#ffffff")
             if command:
-                command()
+                btn.after(80, command)
 
         btn.bind("<Enter>", on_enter)
         btn.bind("<Leave>", on_leave)
-        btn.bind("<ButtonPress-1>", on_press)
-        btn.bind("<ButtonRelease-1>", on_release)
+        btn.bind("<Button-1>", on_click)
+
+        if tooltip:
+            import tkinter as _tk
+            _tip_win = [None]
+            def _show_tip(e):
+                if _tip_win[0]: return
+                x = btn.winfo_rootx() + btn.winfo_width() + 6
+                y = btn.winfo_rooty() + 4
+                tw = _tk.Toplevel(btn)
+                tw.wm_overrideredirect(True)
+                tw.wm_geometry(f"+{x}+{y}")
+                _tk.Label(tw, text=tooltip, bg=self.console_bg, fg=self.console_fg,
+                          font=("Segoe UI", 9), padx=8, pady=4, relief="flat").pack()
+                _tip_win[0] = tw
+            def _hide_tip(e):
+                if _tip_win[0]:
+                    try: _tip_win[0].destroy()
+                    except: pass
+                    _tip_win[0] = None
+            btn.bind("<Enter>", lambda e: (_show_tip(e), on_enter(e)))
+            btn.bind("<Leave>", lambda e: (_hide_tip(e), on_leave(e)))
+
         return btn
 
-    def _style_directory_compact_rail(self):
-        rail = getattr(self, 'dir_compact_rail', None)
-        if rail is None:
+    def _create_dir_rail_icon_btn(self, parent, icon, command, variant="primary"):
+        return self._create_sidebar_icon_btn(parent, icon, command)
+
+    def _style_sidebar(self):
+        panel = getattr(self, '_sidebar_panel', None)
+        if panel is None:
             return
         try:
-            rail.configure(bg=self.bg_color, width=52)
-            card = getattr(self, 'dir_rail_card', None)
-            if card is not None:
-                card.configure(
-                    bg=self.surface_color,
-                    highlightbackground=self.border_color,
-                    highlightthickness=1,
-                )
-            sep = getattr(self, 'dir_rail_sep', None)
-            if sep is not None:
-                sep.configure(bg=self.border_color)
-            for attr in ('dir_rail_add_btn', 'dir_rail_expand_btn'):
+            panel.configure(bg=self.surface_color)
+            divider = getattr(self, '_sidebar_divider', None)
+            if divider:
+                divider.configure(bg=self.border_color)
+            for attr in ('_sb_toggle_btn', '_sb_add_btn'):
                 btn = getattr(self, attr, None)
                 if btn is None:
                     continue
-                variant = getattr(btn, '_rail_variant', 'secondary')
-                colors = self.get_button_colors(variant)
-                btn.configure(bg=colors["bg"], fg=colors["fg"])
+                btn.configure(bg=self.surface_color, fg=self.text_color)
         except tk.TclError:
             pass
+
+    def _style_directory_compact_rail(self):
+        self._style_sidebar()
 
     def _restyle_frame_subtree(self, widget, skip_toolbar=False):
         if skip_toolbar and hasattr(self, 'toolbar'):
@@ -871,6 +877,15 @@ class ThemeSelector:
         if rail is not None:
             try:
                 rail.configure(bg=self.bg_color)
+            except tk.TclError:
+                pass
+        wrap = getattr(self, '_search_wrap', None)
+        if wrap:
+            try:
+                wrap.configure(bg=self.entry_bg, highlightbackground=self.entry_border)
+                icon = getattr(self, '_search_icon', None)
+                if icon:
+                    icon.configure(bg=self.entry_bg, fg=self.text_muted)
             except tk.TclError:
                 pass
 

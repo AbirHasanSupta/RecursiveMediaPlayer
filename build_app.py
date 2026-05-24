@@ -671,6 +671,12 @@ def select_multiple_folders_and_play():
             self.content_frame = tk.Frame(self.main_frame, bg=self.bg_color)
             self.content_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
 
+            self._sidebar_panel = tk.Frame(self.content_frame, bg=self.surface_color, width=40)
+            self._sidebar_panel.pack(side=tk.LEFT, fill=tk.Y)
+            self._sidebar_panel.pack_propagate(False)
+            self._sidebar_divider = tk.Frame(self.content_frame, bg=self.border_color, width=1)
+            self._sidebar_divider.pack(side=tk.LEFT, fill=tk.Y)
+
             self.workspace_frame = tk.Frame(self.content_frame, bg=self.bg_color)
             self.workspace_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
@@ -1468,7 +1474,7 @@ def select_multiple_folders_and_play():
                 if not self._dir_resizer_dragging:
                     return
                 delta = e.x_root - self._dir_resizer_start_x
-                new_w = max(120, min(600, self._dir_resizer_start_w + delta))
+                new_w = max(50, min(700, self._dir_resizer_start_w + delta))
                 self._dir_panel_width = new_w
                 self.dir_section.config(width=new_w)
 
@@ -1482,24 +1488,13 @@ def select_multiple_folders_and_play():
             self._dir_resizer.bind("<B1-Motion>", _on_resizer_drag)
             self._dir_resizer.bind("<ButtonRelease-1>", _on_resizer_release)
 
-            self.dir_compact_rail = tk.Frame(self.content_frame, bg=self.bg_color, width=52)
-            self.dir_compact_rail.pack_propagate(False)
+            self._sb_toggle_btn = self._create_sidebar_icon_btn(
+                self._sidebar_panel, "◁", self._toggle_directory_panel, tooltip="Toggle Panel")
+            self._sb_toggle_btn.pack(fill=tk.X, pady=(12, 0))
 
-            self.dir_rail_card = tk.Frame(
-                self.dir_compact_rail, bg=self.surface_color,
-                highlightbackground=self.border_color, highlightthickness=1)
-            self.dir_rail_card.pack(fill=tk.BOTH, expand=True, padx=5, pady=10)
-
-            self.dir_rail_add_btn = self._create_dir_rail_icon_btn(
-                self.dir_rail_card, "＋", self.add_directory, variant="primary")
-            self.dir_rail_add_btn.pack(pady=(14, 10))
-
-            self.dir_rail_sep = tk.Frame(self.dir_rail_card, bg=self.border_color, height=1)
-            self.dir_rail_sep.pack(fill=tk.X, padx=10)
-
-            self.dir_rail_expand_btn = self._create_dir_rail_icon_btn(
-                self.dir_rail_card, "📁", self.expand_directory_panel, variant="secondary")
-            self.dir_rail_expand_btn.pack(pady=(10, 14))
+            self._sb_add_btn = self._create_sidebar_icon_btn(
+                self._sidebar_panel, "+", self.add_directory, tooltip="Add Directory")
+            self._sb_add_btn.pack(fill=tk.X, pady=(2, 0))
 
             dir_header_frame = tk.Frame(self.dir_section, bg=self.bg_color)
             dir_header_frame.pack(fill=tk.X, pady=(0, 6))
@@ -1508,36 +1503,46 @@ def select_multiple_folders_and_play():
                                              font=self.header_font, bg=self.bg_color, fg=self.text_color)
             self.dir_header_label.pack(side=tk.LEFT, anchor='w')
 
-            self.dir_shrink_btn = self.create_button(
-                dir_header_frame, text="◀", command=self.shrink_directory_panel,
-                variant="secondary", size="sm"
-            )
-            self.dir_shrink_btn.pack(side=tk.RIGHT)
-
-            add_dir_btn = self.create_button(
-                dir_header_frame, text="+", command=self.add_directory,
-                variant="secondary", size="sm"
-            )
-            add_dir_btn.pack(side=tk.RIGHT, padx=(0, 4))
-
             # Search bar
-            search_frame = tk.Frame(self.dir_section, bg=self.bg_color)
-            search_frame.pack(fill=tk.X, pady=(0, 4))
+            search_wrap = tk.Frame(
+                self.dir_section,
+                bg=self.entry_bg,
+                highlightbackground=self.entry_border,
+                highlightthickness=1,
+            )
+            search_wrap.pack(fill=tk.X, pady=(0, 6))
+
+            search_icon = tk.Label(
+                search_wrap, text="⌕",
+                bg=self.entry_bg, fg=self.text_muted,
+                font=("Segoe UI", 11), padx=6, pady=0,
+            )
+            search_icon.pack(side=tk.LEFT)
 
             self.search_entry = tk.Entry(
-                search_frame, font=self.small_font, bg=self.entry_bg, fg=self.entry_fg,
-                relief=tk.FLAT, bd=1, highlightthickness=1, highlightbackground=self.entry_border
+                search_wrap,
+                font=self.small_font,
+                bg=self.entry_bg, fg=self.entry_fg,
+                relief=tk.FLAT, bd=0,
+                highlightthickness=0,
+                insertbackground=self.accent_color,
             )
-            self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+            self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=6)
             self.search_entry.bind('<KeyRelease>', self.on_search_changed)
 
-            clear_search_btn = self.create_button(
-                search_frame, text="✕", command=self.clear_search,
-                variant="secondary", size="sm"
-            )
-            clear_search_btn.pack(side=tk.LEFT)
+            def _search_focus_in(e):
+                search_wrap.config(highlightbackground=self.accent_color, highlightthickness=1)
+                search_icon.config(fg=self.accent_color)
 
-            # Main tree container (fills most of the panel)
+            def _search_focus_out(e):
+                search_wrap.config(highlightbackground=self.entry_border, highlightthickness=1)
+                search_icon.config(fg=self.text_muted)
+
+            self.search_entry.bind('<FocusIn>', _search_focus_in)
+            self.search_entry.bind('<FocusOut>', _search_focus_out)
+            self._search_wrap = search_wrap
+            self._search_icon = search_icon
+
             self.dir_frame = tk.Frame(self.dir_section, bg=self.bg_color)
             self.dir_frame.pack(fill=tk.BOTH, expand=True)
 
@@ -1890,6 +1895,12 @@ def select_multiple_folders_and_play():
         def shrink_directory_panel(self):
             self._set_directory_panel_mode("compact")
 
+        def _toggle_directory_panel(self):
+            if self._directory_panel_mode == "compact":
+                self.expand_directory_panel()
+            else:
+                self.shrink_directory_panel()
+
         def expand_directory_panel(self):
             self._set_directory_panel_mode("expanded")
 
@@ -1902,18 +1913,17 @@ def select_multiple_folders_and_play():
                 self.dir_section.pack_forget()
                 if hasattr(self, '_dir_resizer'):
                     self._dir_resizer.pack_forget()
-                self.dir_compact_rail.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10), before=self.workspace_frame)
-                if hasattr(self, '_style_directory_compact_rail'):
-                    self._style_directory_compact_rail()
+                if hasattr(self, '_sb_toggle_btn'):
+                    self._sb_toggle_btn.config(text="▷")
                 return
 
-            if hasattr(self, "dir_compact_rail"):
-                self.dir_compact_rail.pack_forget()
             if not self.dir_section.winfo_ismapped():
                 self.dir_section.pack(side=tk.LEFT, fill=tk.Y, expand=False, padx=(0, 0), before=self.workspace_frame)
             self.dir_section.config(width=self._dir_panel_width)
             if hasattr(self, '_dir_resizer') and not self._dir_resizer.winfo_ismapped():
                 self._dir_resizer.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10), before=self.workspace_frame)
+            if hasattr(self, '_sb_toggle_btn'):
+                self._sb_toggle_btn.config(text="◁")
 
         def on_directory_focus_out(self, event):
             selection = self.dir_listbox.curselection()
