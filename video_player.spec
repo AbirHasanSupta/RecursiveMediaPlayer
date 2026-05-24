@@ -72,7 +72,6 @@ a = Analysis(
         ('key_press.py', '.'),
         ('theme.py', '.'),
         ('utils.py', '.'),
-        ('vlc_player_controller.py', '.'),
         ('embedded_player.py', '.'),
 
         # ── managers package ─────────────────────────────────────────────────
