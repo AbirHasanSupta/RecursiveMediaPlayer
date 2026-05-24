@@ -500,9 +500,6 @@ class GridViewManager:
 
         tk.Frame(inner_tb, bg=t['border'], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=8, padx=2)
 
-        # Tags filter
-        tk.Label(inner_tb, text="Tags", font=("Segoe UI", 8),
-                 bg=toolbar_bg, fg=t['text_muted']).pack(side=tk.LEFT, padx=(14, 6), pady=12)
         tp = self.theme_provider
         self._tag_filter_btn = tp.create_manager_action_link(
             inner_tb, "All tags ▾", lambda: None, style="secondary"
@@ -512,15 +509,6 @@ class GridViewManager:
 
         tk.Frame(inner_tb, bg=t['border'], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=8, padx=8)
 
-        # Select All / Clear
-        tp.create_manager_action_link(
-            inner_tb, "Select All", self._select_all, style="secondary"
-        ).pack(side=tk.LEFT, padx=3, pady=12)
-        tp.create_manager_action_link(
-            inner_tb, "Clear", self._clear_selection, style="secondary"
-        ).pack(side=tk.LEFT, padx=3, pady=12)
-
-        # Per page + Columns — right-aligned together
         right_tb = tk.Frame(inner_tb, bg=toolbar_bg)
         right_tb.pack(side=tk.RIGHT)
 
