@@ -421,7 +421,7 @@ class ThemeSelector:
             style = ttk.Style()
             native = self._ensure_ttk_native_theme()
             try:
-                style.theme_use(native)
+                style.theme_use("clam")
             except tk.TclError:
                 pass
 
@@ -556,6 +556,7 @@ class ThemeSelector:
             tree.tag_configure("placeholder", foreground=muted_fg)
             tree.tag_configure("drag_indicator", foreground=self.accent_color)
             tree.tag_configure("rating_star", foreground=fav_fg)
+            tree.tag_configure("hover", background=self.hover_color)
         except tk.TclError:
             pass
 
@@ -600,7 +601,7 @@ class ThemeSelector:
                 pass
             finally:
                 try:
-                    style.theme_use(native)
+                    style.theme_use("clam")
                 except tk.TclError:
                     pass
 

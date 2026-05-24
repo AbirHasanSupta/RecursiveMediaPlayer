@@ -235,6 +235,15 @@ def select_multiple_folders_and_play():
             app_settings = self.settings_manager.get_settings()
 
             self.video_preview_manager = VideoPreviewManager(self.root, self.update_console)
+            _orig_attach = self.video_preview_manager.attach_to_listbox
+
+            def _patched_attach(widget, mapping, _orig=_orig_attach):
+                _orig(widget, mapping)
+                if widget is self.exclusion_tree:
+                    self.exclusion_tree.bind("<Motion>", self._tree_hover_motion, "+")
+                    self.exclusion_tree.bind("<Leave>", self._tree_hover_leave)
+
+            self.video_preview_manager.attach_to_listbox = _patched_attach
             self.video_preview_manager.set_preview_duration(app_settings.preview_duration)
             self.video_preview_manager.set_video_preview_enabled(app_settings.use_video_preview)
 
@@ -1555,9 +1564,21 @@ def select_multiple_folders_and_play():
                 highlightbackground=self.border_color, highlightthickness=1)
             self.dir_tree_container.pack(fill=tk.BOTH, expand=True)
 
-            self.exclusion_scrollbar = tk.Scrollbar(
+            self.exclusion_scrollbar = ttk.Scrollbar(
                 self.dir_tree_container, orient=tk.VERTICAL,
-                width=10, relief=tk.FLAT, borderwidth=0)
+                style="ExclusionTree.Vertical.TScrollbar")
+
+            style = ttk.Style()
+            style.theme_use("clam")
+            style.configure(
+                "ExclusionTree.Vertical.TScrollbar",
+                gripcount=0,
+                borderwidth=0,
+                relief="flat",
+                arrowsize=10,
+                width=5
+            )
+
             self.exclusion_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
             self.exclusion_tree = ttk.Treeview(
@@ -1692,7 +1713,37 @@ def select_multiple_folders_and_play():
             self.exclusion_tree.bind("<B1-Motion>", self._on_drag_motion)
             self.exclusion_tree.bind("<ButtonRelease-1>", self._on_drag_release)
 
-            # Checkboxes row at the bottom of the panel
+            self._hovered_iid = None
+
+            def _on_tree_motion(e):
+                iid = self.exclusion_tree.identify_row(e.y)
+                if iid == self._hovered_iid:
+                    return
+                if self._hovered_iid:
+                    tags = list(self.exclusion_tree.item(self._hovered_iid, "tags"))
+                    if "hover" in tags:
+                        tags.remove("hover")
+                        self.exclusion_tree.item(self._hovered_iid, tags=tags)
+                self._hovered_iid = iid
+                if iid:
+                    tags = list(self.exclusion_tree.item(iid, "tags"))
+                    if "hover" not in tags:
+                        tags.append("hover")
+                        self.exclusion_tree.item(iid, tags=tags)
+
+            def _on_tree_leave(e):
+                if self._hovered_iid:
+                    tags = list(self.exclusion_tree.item(self._hovered_iid, "tags"))
+                    if "hover" in tags:
+                        tags.remove("hover")
+                        self.exclusion_tree.item(self._hovered_iid, tags=tags)
+                self._hovered_iid = None
+
+            self._tree_hover_motion = _on_tree_motion
+            self._tree_hover_leave = _on_tree_leave
+            self.exclusion_tree.bind("<Motion>", _on_tree_motion)
+            self.exclusion_tree.bind("<Leave>", _on_tree_leave)
+
             self.exclusion_buttons_frame = tk.Frame(self.dir_section, bg=self.bg_color)
             self.exclusion_buttons_frame.pack(fill=tk.X, pady=(6, 0))
 
@@ -2011,13 +2062,8 @@ def select_multiple_folders_and_play():
             self._configure_directory_ttk_styles()
 
         def setup_exclusion_section(self):
-            # Tree and search bar are now in the left panel (setup_directory_section).
-            # This method only wires up the checkboxes into exclusion_buttons_frame.
-            # self.exclusion_section = tk.Frame(self.workspace_body, bg=self.bg_color)
-            # self.exclusion_section.pack(fill=tk.BOTH, expand=True)
             self._set_workspace_title("Home", self._selected_directory_summary())
 
-            # Apply annotation column config now that settings_manager is available
             self._reapply_tree_columns()
             self._configure_tree_style()
 
@@ -2025,11 +2071,8 @@ def select_multiple_folders_and_play():
             self.excluded_only_var = tk.BooleanVar(value=self.show_only_excluded)
             self.expand_all_var = tk.BooleanVar(value=self.expand_all_default)
             self.save_directories_var = tk.BooleanVar(value=True)
-            # self.smart_resume_var = tk.BooleanVar(value=self.smart_resume_enabled)
             self.speed_var = tk.DoubleVar(value=1.0)
-        # ------------------------------------------------------------------
-        # Treeview expand/collapse event handlers
-        # ------------------------------------------------------------------
+
 
         def _get_video_size_str(self, path):
             try:
