@@ -8,8 +8,8 @@ from typing import Dict, Optional, Callable
 
 from managers.resource_manager import ManagedThread, get_resource_manager
 
+
 def _get_app_dirs():
-    """Return (appdata_dir, localappdata_dir) for Recursive Media Player."""
     import os, sys
     from pathlib import Path
     APP = "Recursive Media Player"
@@ -25,11 +25,7 @@ def _get_app_dirs():
     return settings, local
 
 
-
-
 class PlaybackPosition:
-    """Data class for storing playback position information"""
-
     def __init__(self, video_path: str, position: int = 0, duration: int = 0,
                  last_updated: str = None):
         self.video_path = os.path.normpath(video_path)
@@ -59,23 +55,17 @@ class PlaybackPosition:
         )
 
     def should_resume(self) -> bool:
-        """Determine if this video should be resumed (not near beginning or end)"""
         if self.duration == 0:
             return False
-
         min_position = 5000
         max_position = self.duration - 5000
-
-        return (self.position >= min_position and
-                self.position <= max_position)
+        return self.position >= min_position and self.position <= max_position
 
     def get_position_formatted(self) -> str:
-        """Get formatted position string"""
         seconds = self.position // 1000
         hours = seconds // 3600
         minutes = (seconds % 3600) // 60
         seconds = seconds % 60
-
         if hours > 0:
             return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
         else:
@@ -83,8 +73,6 @@ class PlaybackPosition:
 
 
 class PlaybackPositionStorage:
-    """Handles playback position persistence"""
-
     def __init__(self):
         _, _local_dir = _get_app_dirs()
         self.positions_dir = _local_dir / "Resume"
@@ -99,9 +87,7 @@ class PlaybackPositionStorage:
                 key=lambda x: x.last_updated,
                 reverse=True
             )[:self.max_entries]
-
             data = {pos.video_path: pos.to_dict() for pos in sorted_positions}
-
             with open(self.positions_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             return True
@@ -113,14 +99,11 @@ class PlaybackPositionStorage:
         try:
             if not self.positions_file.exists():
                 return {}
-
             with open(self.positions_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-
             positions = {}
             for video_path, pos_data in data.items():
                 positions[video_path] = PlaybackPosition.from_dict(pos_data)
-
             return positions
         except Exception as e:
             print(f"Error loading playback positions: {e}")
@@ -128,14 +111,11 @@ class PlaybackPositionStorage:
 
 
 class ResumePlaybackService:
-    """Service for managing playback positions and resume functionality"""
-
     def __init__(self, storage: PlaybackPositionStorage):
         self.storage = storage
         self._positions: Dict[str, PlaybackPosition] = {}
         self._lock = threading.RLock()
         self._load_positions()
-
         self._save_timer = None
         self._pending_saves = False
         from managers.resource_manager import get_resource_manager
@@ -155,46 +135,37 @@ class ResumePlaybackService:
         self._positions = self.storage.load_positions()
 
     def _schedule_save(self):
-        """Schedule a save operation to avoid too frequent disk writes"""
         if self._save_timer:
             self._save_timer.cancel()
-
         self._pending_saves = True
         self._save_timer = threading.Timer(5.0, self._perform_save)
         self._save_timer.start()
 
     def _perform_save(self):
-        """Perform the actual save operation"""
         if self._pending_saves:
             self.storage.save_positions(self._positions)
             self._pending_saves = False
 
     def update_position(self, video_path: str, position: int, duration: int = 0):
-        """Update playback position for a video"""
         with self._lock:
             video_path_norm = os.path.normpath(video_path)
-
             playback_pos = PlaybackPosition(
                 video_path=video_path_norm,
                 position=position,
                 duration=duration
             )
-
             self._positions[video_path_norm] = playback_pos
             self._schedule_save()
 
     def get_resume_position(self, video_path: str) -> Optional[PlaybackPosition]:
-        """Get resume position for a video"""
         with self._lock:
             video_path_norm = os.path.normpath(video_path)
             position = self._positions.get(video_path_norm)
-
             if position and position.should_resume():
                 return position
             return None
 
     def clear_position(self, video_path: str) -> bool:
-        """Clear saved position for a video"""
         with self._lock:
             video_path_norm = os.path.normpath(video_path)
             if video_path_norm in self._positions:
@@ -204,7 +175,6 @@ class ResumePlaybackService:
             return False
 
     def get_all_resume_positions(self) -> Dict[str, PlaybackPosition]:
-        """Get all positions that can be resumed"""
         with self._lock:
             resumable = {}
             for video_path, position in self._positions.items():
@@ -213,11 +183,9 @@ class ResumePlaybackService:
             return resumable
 
     def cleanup_old_positions(self, days: int = 30):
-        """Clean up positions older than specified days"""
         with self._lock:
             cutoff_date = (datetime.now() - timedelta(days=days)).date()
             to_remove = []
-
             for video_path, position in self._positions.items():
                 try:
                     last_updated = datetime.fromisoformat(position.last_updated).date()
@@ -225,25 +193,19 @@ class ResumePlaybackService:
                         to_remove.append(video_path)
                 except:
                     to_remove.append(video_path)
-
             for video_path in to_remove:
                 del self._positions[video_path]
-
             if to_remove:
                 self._schedule_save()
-
             return len(to_remove)
 
     def force_save(self):
-        """Force immediate save of positions"""
         if self._save_timer:
             self._save_timer.cancel()
         self._perform_save()
 
 
 class ResumePlaybackTracker:
-    """Tracks playback in real-time and manages resume functionality"""
-
     def __init__(self, service: ResumePlaybackService):
         self.service = service
         self._tracking_thread = None
@@ -253,22 +215,17 @@ class ResumePlaybackTracker:
         self._position_update_callback = None
 
     def start_tracking(self, player, video_path: str):
-        """Start tracking playback position for a video"""
         self.stop_tracking()
-
         self._current_player = player
         self._current_video = video_path
         self._is_tracking = True
-
         self._tracking_thread = ManagedThread(target=self._track_position, name="TrackPlayback")
         self._tracking_thread.start()
 
     def stop_tracking(self):
-        """Stop tracking current playback"""
         self._is_tracking = False
         if self._tracking_thread and self._tracking_thread.is_alive():
             self._tracking_thread.join(timeout=1.0)
-
         if self._current_player and self._current_video:
             try:
                 position = self._current_player.get_time()
@@ -277,102 +234,78 @@ class ResumePlaybackTracker:
                     self.service.update_position(self._current_video, position, duration)
             except:
                 pass
-
         self._current_player = None
         self._current_video = None
 
     def _track_position(self):
         last_save_time = 0
         save_interval = 10000
-
         while self._is_tracking and self._current_player:
             if get_resource_manager().is_shutting_down():
                 break
-
             try:
                 position = self._current_player.get_time()
                 duration = self._current_player.get_length()
-
                 if position >= 0 and duration > 0:
                     if position - last_save_time >= save_interval:
                         self.service.update_position(self._current_video, position, duration)
                         last_save_time = position
-
                         if self._position_update_callback:
                             try:
                                 self._position_update_callback(self._current_video, position, duration)
                             except:
                                 pass
-
                 time.sleep(1)
-
             except Exception:
                 break
 
     def set_position_update_callback(self, callback: Callable):
-        """Set callback for position updates"""
         self._position_update_callback = callback
 
 
 class ResumePlaybackManager:
-    """Main manager for resume playback functionality"""
-
     def __init__(self):
         self.storage = PlaybackPositionStorage()
         self.service = ResumePlaybackService(self.storage)
         self.tracker = ResumePlaybackTracker(self.service)
-
         self._resume_enabled = True
         self._auto_cleanup_days = 30
 
     def set_resume_enabled(self, enabled: bool):
-        """Enable or disable resume functionality"""
         self._resume_enabled = enabled
 
     def is_resume_enabled(self) -> bool:
-        """Check if resume functionality is enabled"""
         return self._resume_enabled
 
     def should_resume_video(self, video_path: str) -> Optional[PlaybackPosition]:
-        """Check if a video should be resumed and return position"""
         if not self._resume_enabled:
             return None
-
         return self.service.get_resume_position(video_path)
 
     def start_tracking_video(self, player, video_path: str):
-        """Start tracking playback for a video"""
         if self._resume_enabled:
             self.tracker.start_tracking(player, video_path)
 
     def stop_tracking_video(self):
-        """Stop tracking current video"""
         self.tracker.stop_tracking()
 
     def clear_video_position(self, video_path: str) -> bool:
-        """Clear saved position for a specific video"""
         return self.service.clear_position(video_path)
 
     def get_all_resumable_videos(self) -> Dict[str, PlaybackPosition]:
-        """Get all videos that can be resumed"""
         return self.service.get_all_resume_positions()
 
     def cleanup_old_positions(self) -> int:
-        """Clean up old position data"""
         return self.service.cleanup_old_positions(self._auto_cleanup_days)
 
     def force_save_positions(self):
-        """Force save all positions immediately"""
         self.service.force_save()
 
     def set_position_update_callback(self, callback: Callable):
-        """Set callback for position updates during playback"""
         self.tracker.set_position_update_callback(callback)
 
     def get_resume_stats(self) -> Dict:
-        """Get statistics about resumable videos"""
         resumable = self.get_all_resumable_videos()
-
         return {
             'total_resumable': len(resumable),
             'positions_stored': len(self.service._positions),

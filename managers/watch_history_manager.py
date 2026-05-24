@@ -13,7 +13,6 @@ from utils import _responsive_geometry
 
 
 def _get_app_dirs():
-    """Return (appdata_dir, localappdata_dir) for Recursive Media Player."""
     import os, sys
     from pathlib import Path
     APP = "Recursive Media Player"
@@ -30,15 +29,14 @@ def _get_app_dirs():
 
 
 class WatchHistoryEntry:
-    """Data class for watch history entry following Single Responsibility Principle"""
 
     def __init__(self, video_path: str, watched_at: str = None, duration_watched: int = 0,
                  total_duration: int = 0, completion_percentage: float = 0.0):
         self.id = str(uuid.uuid4())
         self.video_path = os.path.normpath(video_path)
         self.watched_at = watched_at or datetime.now().isoformat()
-        self.duration_watched = duration_watched  # in seconds
-        self.total_duration = total_duration  # in seconds
+        self.duration_watched = duration_watched
+        self.total_duration = total_duration
         self.completion_percentage = completion_percentage
         self.video_name = os.path.basename(self.video_path)
         self.directory_path = os.path.dirname(self.video_path)
@@ -96,17 +94,15 @@ class WatchHistoryEntry:
 
 
 class WatchHistoryStorage:
-    """Handles watch history persistence following Single Responsibility Principle"""
 
     def __init__(self):
         self.history_dir = _get_app_dirs()[1] / "History"
         self.history_dir.mkdir(parents=True, exist_ok=True)
         self.history_file = self.history_dir / "watch_history.json"
-        self.max_entries = 1000  # Limit history size
+        self.max_entries = 10000
 
     def save_history(self, entries: List[WatchHistoryEntry]) -> bool:
         try:
-            # Keep only the most recent entries
             sorted_entries = sorted(entries, key=lambda x: x.watched_at, reverse=True)
             limited_entries = sorted_entries[:self.max_entries]
 
@@ -127,7 +123,6 @@ class WatchHistoryStorage:
                 data = json.load(f)
 
             entries = [WatchHistoryEntry.from_dict(item) for item in data]
-            # Sort by watched time, most recent first
             return sorted(entries, key=lambda x: x.watched_at, reverse=True)
         except Exception as e:
             print(f"Error loading watch history: {e}")
@@ -135,7 +130,6 @@ class WatchHistoryStorage:
 
 
 class WatchHistoryService:
-    """Business logic for watch history operations following Single Responsibility Principle"""
 
     def __init__(self, storage: WatchHistoryStorage):
         self.storage = storage
@@ -153,37 +147,29 @@ class WatchHistoryService:
 
     def _load_history(self):
         self._history = self.storage.load_history()
-        # Clean up any existing duplicates on load
         with self._lock:
             if self._history:
-                seen_videos = {}  # video_path -> list of entries
+                seen_videos = {}
                 to_remove = []
 
-                # Group by video_path
                 for entry in self._history:
                     if entry.video_path not in seen_videos:
                         seen_videos[entry.video_path] = []
                     seen_videos[entry.video_path].append(entry)
 
-                # For each video, if it has multiple entries within 5 minutes of each other, merge them
                 for path, entries in seen_videos.items():
                     if len(entries) < 2:
                         continue
 
-                    # Entries are already sorted by date (most recent first)
-                    # We'll keep the most recent one and remove others that are within 5 minutes
                     kept_entry = entries[0]
                     for other_entry in entries[1:]:
                         try:
-                            # Also remove entries that have the exact same duration and are very close
-                            # This handles the "300+ times" case where they might be identical
                             t1 = datetime.fromisoformat(kept_entry.watched_at)
                             t2 = datetime.fromisoformat(other_entry.watched_at)
 
                             is_identical = (kept_entry.duration_watched == other_entry.duration_watched and
                                             kept_entry.total_duration == other_entry.total_duration)
 
-                            # If identical or within 5 minutes, remove the older one
                             if is_identical or abs((t1 - t2).total_seconds()) < 300:
                                 to_remove.append(other_entry)
                             else:
@@ -203,11 +189,7 @@ class WatchHistoryService:
 
     def add_watch_entry(self, video_path: str, duration_watched: int = 0,
                         total_duration: int = 0) -> WatchHistoryEntry:
-        # Ignore entries with 0 duration unless it's a very short video
-        # This prevents flooding history when just clicking through videos
         if duration_watched < 2 and total_duration > 10:
-            # Check if we already have an entry for this video
-            # If we do, don't add a new "0 duration" entry
             with self._lock:
                 video_path_norm = os.path.normpath(video_path)
                 for entry in self._history:
@@ -215,40 +197,33 @@ class WatchHistoryService:
                         return entry
 
         with self._lock:
-            # Check if this video was already watched recently (within last 5 minutes)
             video_path_norm = os.path.normpath(video_path)
             now = datetime.now()
 
-            # Find all recent entries for this video and update the most recent one
             recent_entry = None
             for entry in self._history:
                 if entry.video_path == video_path_norm:
                     try:
                         watched_at = datetime.fromisoformat(entry.watched_at)
                         if (now - watched_at).total_seconds() < 300:
-                            # If multiple recent entries exist (shouldn't happen with this fix),
-                            # we update the most recent one we find first (since it's sorted)
                             recent_entry = entry
                             break
                     except:
                         continue
 
             if recent_entry:
-                # Update existing recent entry instead of creating new one
                 recent_entry.duration_watched = duration_watched
                 recent_entry.total_duration = total_duration
                 if total_duration > 0:
                     recent_entry.completion_percentage = (duration_watched / total_duration) * 100
                 recent_entry.watched_at = now.isoformat()
 
-                # Move updated entry to the top of the list
                 self._history.remove(recent_entry)
                 self._history.insert(0, recent_entry)
 
                 self.storage.save_history(self._history)
                 return recent_entry
 
-            # Create new entry
             completion_percentage = 0.0
             if total_duration > 0:
                 completion_percentage = (duration_watched / total_duration) * 100
@@ -260,7 +235,7 @@ class WatchHistoryService:
                 completion_percentage=completion_percentage
             )
 
-            self._history.insert(0, entry)  # Add to beginning (most recent)
+            self._history.insert(0, entry)
             self.storage.save_history(self._history)
             return entry
 
@@ -309,7 +284,6 @@ class WatchHistoryService:
             return len(unique_paths)
 
     def cleanup_old_entries(self, days: int) -> int:
-        """Clean up history entries older than specified days"""
         with self._lock:
             cutoff_date = datetime.now() - timedelta(days=days)
             entries_to_remove = []
@@ -332,7 +306,6 @@ class WatchHistoryService:
 
 
 class WatchHistoryUI:
-    """UI components for watch history management following Interface Segregation Principle"""
 
     def __init__(self, parent, theme_provider, history_service: WatchHistoryService):
         self.parent = parent
@@ -404,8 +377,6 @@ class WatchHistoryUI:
         self.history_window = None
         if self._embedded and self._close_callback:
             self._close_callback()
-
-
 
     def apply_theme(self):
         win = self.history_window
@@ -541,7 +512,6 @@ class WatchHistoryUI:
 
         tk.Frame(self.history_window, bg=t['divider'], height=1).pack(fill=tk.X)
 
-        # Filter row – unified pill style matching FavoritesUI chip pattern
         filter_row = tk.Frame(self.history_window, bg=t['bg'])
         filter_row._manager_role = "body"
         self._hist_filter_row = filter_row
@@ -691,10 +661,8 @@ class WatchHistoryUI:
         self.stats_label.config(text=text)
 
     def play_from_global(self):
-        """Play selected history videos, or the most recent if nothing selected."""
         selection = self.history_tree.selection()
         if selection:
-            # play selected items
             videos = []
             for item in selection:
                 tags = self.history_tree.item(item, 'tags')
@@ -708,7 +676,6 @@ class WatchHistoryUI:
             if videos and self.play_callback:
                 self.play_callback(videos)
         else:
-            # play the most recent video
             if self.current_entries and self.play_callback:
                 self.play_callback([self.current_entries[0].video_path])
 
@@ -738,7 +705,6 @@ class WatchHistoryUI:
             self.parent.after(0, refresh)
 
     def _on_history_left_click(self, event):
-        """Handle left click to hide preview"""
         if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
             self.video_preview_manager.tooltip.hide_preview()
 
@@ -746,26 +712,22 @@ class WatchHistoryUI:
         if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
             self.video_preview_manager.tooltip.hide_preview()
 
-    # Replace _on_history_right_click with:
     def _on_history_right_click(self, event):
         item_id = self.history_tree.identify_row(event.y)
         if not item_id:
             return
 
         selection = self.history_tree.selection()
-        # If the clicked item is selected -> context menu
         if item_id in selection:
-            self._show_history_context_menu(event)  # move existing menu code here
+            self._show_history_context_menu(event)
             return
 
-        # Otherwise -> preview
         tags = self.history_tree.item(item_id, 'tags')
         if tags and hasattr(self, 'video_preview_manager') and self.video_preview_manager:
             entry_id = tags[0]
             for entry in self.current_entries:
                 if entry.id == entry_id and os.path.isfile(entry.video_path):
                     self.video_preview_manager.tooltip.hide_preview()
-                    # Use the index for preview manager
                     try:
                         idx = self.current_entries.index(entry)
                         self.video_preview_manager.right_clicked_item = idx
@@ -784,12 +746,10 @@ class WatchHistoryUI:
         self.history_tree.selection_remove(self.history_tree.selection())
 
     def _show_history_context_menu(self, event):
-        """Show context menu for selected history entries."""
         selection = self.history_tree.selection()
         if not selection:
             return
 
-        # Get selected entries
         selected_entries = []
         for item_id in selection:
             tags = self.history_tree.item(item_id, 'tags')
@@ -904,7 +864,6 @@ class WatchHistoryUI:
             self.grid_view_manager.show_grid_view(videos_to_play, self.video_preview_manager)
 
     def _play_selected_from_context(self, entries):
-        """Play selected videos from context menu"""
         if not entries:
             return
 
@@ -934,7 +893,6 @@ class WatchHistoryUI:
             )
 
     def _copy_path(self, file_path):
-        """Copy file path to clipboard"""
         try:
             self.parent.clipboard_clear()
             self.parent.clipboard_append(file_path)
@@ -942,7 +900,6 @@ class WatchHistoryUI:
             print(f"Error copying path: {e}")
 
     def _open_location(self, file_path):
-        """Open file location in explorer"""
         try:
             import subprocess
             import sys
@@ -956,7 +913,6 @@ class WatchHistoryUI:
             print(f"Error opening location: {e}")
 
     def _show_properties(self, entry):
-        """Show video properties dialog"""
         try:
             from datetime import datetime
 
@@ -1034,7 +990,6 @@ class WatchHistoryUI:
             video_mapping[i] = entry.video_path
 
     def _play_selected_video(self):
-        """Play selected video from history"""
         selection = self.history_tree.selection()
         if not selection:
             messagebox.showwarning("Warning", "Please select a video to play")
@@ -1044,7 +999,6 @@ class WatchHistoryUI:
             messagebox.showwarning("Warning", "Please select only one video to play")
             return
 
-        # Get entry ID from selection
         item = selection[0]
         tags = self.history_tree.item(item, 'tags')
         if not tags:
@@ -1052,7 +1006,6 @@ class WatchHistoryUI:
 
         entry_id = tags[0]
 
-        # Find the entry
         selected_entry = None
         for entry in self.current_entries:
             if entry.id == entry_id:
@@ -1067,14 +1020,12 @@ class WatchHistoryUI:
             messagebox.showerror("Error", f"Video file not found:\n{selected_entry.video_path}")
             return
 
-        # Call the play callback if it exists
         if hasattr(self, 'play_callback') and self.play_callback:
             self.play_callback([selected_entry.video_path])
         else:
             messagebox.showinfo("Info", f"Would play: {selected_entry.video_name}")
 
     def _remove_selected(self):
-        """Remove selected history entries"""
         selection = self.history_tree.selection()
         if not selection:
             messagebox.showwarning("Warning", "Please select entries to remove")
@@ -1094,7 +1045,6 @@ class WatchHistoryUI:
             self._refresh_history_list()
 
     def _clear_all_history(self):
-        """Clear all watch history"""
         total_entries = len(self.history_service.get_all_history())
         if total_entries == 0:
             return
@@ -1144,7 +1094,6 @@ class WatchHistoryUI:
 
 
 class WatchHistoryManager:
-    """Main watch history manager following Dependency Inversion Principle"""
 
     def __init__(self, parent, theme_provider):
         self.storage = WatchHistoryStorage()
@@ -1157,20 +1106,16 @@ class WatchHistoryManager:
         self._last_start_time = None
 
     def set_settings_manager(self, settings_manager):
-        """Set settings manager to check for history tracking settings"""
         self.settings_manager = settings_manager
 
     def show_manager(self):
-        """Show the watch history manager window"""
         self.ui.show_history_manager()
 
     def show_embedded(self, parent, close_callback=None):
-        """Show the watch history manager inside an existing frame."""
         self.ui.show_history_manager_embedded(parent, close_callback)
         return self.ui
 
     def set_play_callback(self, callback):
-        """Set callback for playing videos from history"""
         self.ui.play_callback = callback
 
     def set_grid_view_manager(self, grid_view_manager):
@@ -1195,21 +1140,18 @@ class WatchHistoryManager:
         self.ui.locate_in_panel_callback = cb
 
     def _should_track_history(self) -> bool:
-        """Check if history tracking is enabled in settings"""
         if self.settings_manager:
             settings = self.settings_manager.get_settings()
             return getattr(settings, 'enable_watch_history', True)
         return True
 
     def track_video_start(self, video_path: str):
-        """Track when a video starts playing"""
         if not self._should_track_history():
             return
         self._last_video_path = video_path
         self._last_start_time = datetime.now()
 
     def track_video_end(self, video_path: str, duration_watched: int = 0, total_duration: int = 0):
-        """Track when a video ends or changes"""
         if not self._should_track_history():
             return
         if video_path and os.path.exists(video_path):
@@ -1222,12 +1164,10 @@ class WatchHistoryManager:
             self.service.add_watch_entry(video_path, duration_watched, total_duration)
 
     def get_recent_videos(self, count: int = 10) -> List[WatchHistoryEntry]:
-        """Get recently watched videos"""
         all_history = self.service.get_all_history()
         return all_history[:count]
 
     def get_history_stats(self) -> Dict:
-        """Get watch history statistics"""
         all_history = self.service.get_all_history()
         unique_videos = self.service.get_unique_videos_count()
 

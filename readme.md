@@ -16,7 +16,6 @@ A sophisticated video player application with AI-powered semantic search capabil
 - **Advanced Grid View**: Visual explorer for browsing video collections
 - **Advanced Filter & Sort**: Filter by resolution, size, or date, and sort by various criteria
 - **Google Drive Support**: Stream and download videos directly from public Google Drive folders or links
-- **Voice Commands**: Control playback and navigation using natural voice commands
 - **Dual Player Mode**: Play and compare two videos side-by-side
 - **Embedded Player**: Integrated, high-performance video playback with rich controls
 - **Favorites System**: Bookmark and organize your favorite videos for quick access
@@ -56,8 +55,6 @@ pip install -r requirements\ai_requirements.txt
 - keyboard
 - opencv-python
 - numpy
-- SpeechRecognition (for voice commands)
-- PyAudio (for voice commands)
 
 #### AI Search Dependencies (Optional)
 - torch
@@ -75,7 +72,6 @@ pip install -r requirements\ai_requirements.txt
 4. Ensure VLC Media Player is installed and accessible
 5. Run the application: 
    - For standard mode: `python build_app.py` (uses high-performance Embedded Player)
-   - For AI-powered mode: `python app.py` (uses VLC Player Controller for integration)
 
 ## Usage
 
@@ -85,7 +81,6 @@ pip install -r requirements\ai_requirements.txt
    ```cmd
    python build_app.py
    ```
-   *Note: Use `python app.py` if you want to use AI search features.*
 2. **Add directories**: Click "Add Directory" to select folders containing videos
 3. **Configure exclusions** (optional): Select directories/videos to exclude from playback
 4. **Start playback**: Click "Play Videos" to begin
@@ -93,65 +88,6 @@ pip install -r requirements\ai_requirements.txt
 ### Keyboard Controls During Playback
 
 The application features comprehensive hotkey support. All shortcuts can be customized in the **Settings > Shortcuts** tab.
-
-#### General Controls
-| Key           | Action                                           |
-|---------------|--------------------------------------------------|
-| `Space`       | Pause/Resume                                     |
-| `Esc`         | Stop playback + Exit fullscreen                  |
-| `F` / `Enter` | Toggle fullscreen                                |
-| `I`           | Toggle Overlay                                   |
-| `V`           | Toggle voice commands (AI-powered mode)          |
-| `Ctrl+C`      | Copy current video path                          |
-| `T`           | Take screenshot                                  |
-
-#### Navigation
-| Key           | Action                                           |
-|---------------|--------------------------------------------------|
-| `D` / `PageUp`| Next video                                       |
-| `A` / `PageDn`| Previous video                                   |
-| `E`           | Next directory                                   |
-| `Q`           | Previous directory                               |
-| `Right Arrow` | Fast forward (200ms)                             |
-| `Left Arrow`  | Rewind (200ms)                                   |
-| `Ctrl+Right`  | Fast forward (5s)                                |
-| `Ctrl+Left`   | Rewind (5s)                                      |
-| `Shift+Right` | Fast forward (60s)                               |
-| `Shift+Left`  | Rewind (60s)                                     |
-| `N`           | Next chapter                                     |
-| `B`           | Previous chapter                                 |
-
-#### Audio & Display
-| Key           | Action                                           |
-|---------------|--------------------------------------------------|
-| `W` / `Up`    | Volume up                                        |
-| `S` / `Down`  | Volume down                                      |
-| `M`           | Toggle Mute                                      |
-| `1`           | Switch to monitor 1                              |
-| `2`           | Switch to monitor 2                              |
-| `Shift+F`     | Toggle dual player fullscreen                    |
-
-#### Video Adjustments
-| Key           | Action                                           |
-|---------------|--------------------------------------------------|
-| `+/=`         | Increase playback speed                          |
-| `-`           | Decrease playback speed                          |
-| `0` / `KP_0`  | Reset speed to 1.0x                              |
-| `R`           | Rotate video 90° clockwise                       |
-| `H`           | Flip video horizontally                          |
-| `Ctrl+=` / `Z`| Zoom in (+10%)                                   |
-| `Ctrl+-` / `z`| Zoom out (-10%)                                  |
-| `Ctrl+0` / `X`| Reset zoom to 100%                               |
-
-#### Advanced Features
-| Key           | Action                                           |
-|---------------|--------------------------------------------------|
-| `U`           | Cycle through subtitles                          |
-| `Ctrl+U`      | Disable subtitles                                |
-| `[`           | Set A-B loop point A                             |
-| `]`           | Set A-B loop point B                             |
-| `\`           | Clear A-B loop                                   |
-| `O`           | Cycle loop modes (Loop all / Loop one / Shuffle) |
 
 ## AI Search System
 
@@ -228,56 +164,6 @@ The application saves preferences automatically:
 - Hotkey customizations (rebindable in the "Shortcuts" tab)
 - Playback position (if resume enabled)
 - UI layout preferences
-
-### Configuration Files
-
-The application uses specific locations for different types of data:
-
-#### Application Settings
-- **Main Settings**: `%APPDATA%\Recursive Media Player\app_settings.json` (Windows)
-- **Linux/macOS**: `~/.config/Recursive Media Player/app_settings.json` or `~/Library/Application Support/...`
-
-#### Session & History Data
-- **Resume Positions**: `%LOCALAPPDATA%\Recursive Media Player\Resume\playback_positions.json`
-- **Watch History**: `%LOCALAPPDATA%\Recursive Media Player\History\watch_history.json`
-- **AI Search Indices**: `%LOCALAPPDATA%\Recursive Media Player\index_data\` (Default, configurable in Settings)
-- **Screenshots**: `~/Documents/Recursive Media Player/Screenshots/`
-
-#### User Content
-- **Playlists**: `~/Documents/Recursive Media Player/Playlists/playlists.json`
-- **Favorites**: `~/Documents/Recursive Media Player/Favorites/favorites.json`
-
-## File Structure
-
-```
-Recursive Video Player/
-├── build_app.py                   # Main GUI application entry point (Standard, uses Embedded Player)
-├── app.py                    # GUI application with AI search features (uses VLC Controller)
-├── build.py                  # Build script for creating the executable
-├── embedded_player.py        # Integrated video playback component used by build_app.py
-├── enhanced_model.py         # AI search system and model logic
-├── vlc_player_controller.py  # Video playback controller used by app.py
-├── key_press.py              # Global keyboard hotkey handling
-├── theme.py                  # Theme and UI styling configuration
-├── utils.py                  # Utility functions for file and video processing
-├── managers/                 # Specialized management systems
-│   ├── dual_player_manager.py     # Side-by-side video playback
-│   ├── favorites_manager.py       # Favorites system and UI
-│   ├── filter_sort_manager.py     # Advanced filtering/sorting logic
-│   ├── google_drive_manager.py    # Google Drive integration
-│   ├── grid_view_manager.py       # Visual video browser
-│   ├── playlist_manager.py        # Playlist creation and management
-│   ├── resume_playback_manager.py # Playback session recovery
-│   ├── settings_manager.py        # Persistent application settings
-│   ├── video_preview_manager.py   # Thumbnail and hover-preview logic
-│   ├── video_queue_manager.py     # Manual video queue
-│   ├── voice_command_manager.py   # Voice recognition and control
-│   └── watch_history_manager.py   # Playback history tracking
-├── requirements/
-│   ├── requirements.txt      # Core dependencies
-│   └── ai_requirements.txt   # AI/ML dependencies
-└── README.md                 # This file
-```
 
 ## Build and Distribution
 

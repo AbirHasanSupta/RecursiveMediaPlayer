@@ -74,7 +74,7 @@ def main():
     print(f"\nExecutable location: {os.path.abspath('dist/RecursiveVideoPlayer/RecursiveVideoPlayer.exe')}")
     print("\nNOTE: Before distributing, ensure:")
     print("  1. VLC is installed on target system")
-    print("  3. Test all features thoroughly")
+    print("  2. Test all features thoroughly")
 
 
 if __name__ == '__main__':
