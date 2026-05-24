@@ -1474,7 +1474,7 @@ def select_multiple_folders_and_play():
                 if not self._dir_resizer_dragging:
                     return
                 delta = e.x_root - self._dir_resizer_start_x
-                new_w = max(50, min(700, self._dir_resizer_start_w + delta))
+                new_w = max(83, min(700, self._dir_resizer_start_w + delta))
                 self._dir_panel_width = new_w
                 self.dir_section.config(width=new_w)
 
