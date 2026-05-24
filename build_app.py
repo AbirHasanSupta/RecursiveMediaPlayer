@@ -3,6 +3,7 @@ from icon_helper import apply_icon
 from managers.annotation_browser_manager import AnnotationBrowserManager
 from managers.video_metadata_manager import VideoAnnotationService
 from splash import show_splash
+import random as _random
 
 try:
     from version import __version__, __commit__, __build__
@@ -190,9 +191,8 @@ def select_multiple_folders_and_play():
             self.resource_manager = get_resource_manager()
             self.resource_manager.register_cleanup_callback(self._cleanup_scan_cache)
             self.resource_manager.register_cleanup_callback(self._cleanup_player_threads)
+            self._qa_seed = _random.randint(0, 10 ** 9)
             self.apply_theme()
-            # self.root.after(0, self._fix_pill_colors_initial)
-            # self.root.after(150, self._show_home_view)
             self.root.drop_target_register(DND_FILES)
             self.root.dnd_bind('<<Drop>>', self._on_drop_files)
             command_line_dir = self._get_command_line_directory()
@@ -715,7 +715,6 @@ def select_multiple_folders_and_play():
             self._render_home_dashboard()
 
         def _render_home_dashboard(self):
-            import random as _random
             frame = self._ensure_embedded_view_frame()
             for child in frame.winfo_children():
                 child.destroy()
@@ -819,15 +818,9 @@ def select_multiple_folders_and_play():
                 canvas.itemconfig(inner_win, width=e.width)
             inner.bind("<Configure>", _on_inner_configure)
             canvas.bind("<Configure>", _on_canvas_configure)
-
-            # def _on_mousewheel(e):
-            #     canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
-            # canvas.bind_all("<MouseWheel>", _on_mousewheel)
-
             pad = tk.Frame(inner, bg=bg)
-            pad.pack(fill=tk.BOTH, expand=True, padx=30, pady=20)
+            pad.pack(fill=tk.BOTH, expand=True, padx=30, pady=(35, 20))
 
-            # ── hero ──────────────────────────────────────────────────────
             hero = tk.Frame(pad, bg=surface)
             hero.pack(fill=tk.X, pady=(0, 18))
             tk.Frame(hero, bg=accent2, height=3).pack(fill=tk.X, side=tk.TOP)
@@ -851,7 +844,6 @@ def select_multiple_folders_and_play():
             play_btn.bind("<Enter>", lambda e: play_btn.config(bg=accent))
             play_btn.bind("<Leave>", lambda e: play_btn.config(bg=accent2))
 
-            # ── two-column body ───────────────────────────────────────────
             body_row = tk.Frame(pad, bg=bg)
             body_row.pack(fill=tk.BOTH, expand=True)
             body_row.columnconfigure(0, weight=5)
@@ -912,8 +904,7 @@ def select_multiple_folders_and_play():
                 ("📋", "Queue",        "Up next",             "#06b6d4",         self._show_queue_manager),
                 ("🏷", "Tags & Ratings","Annotate & filter",  accent2,           self._show_annotation_browser),
             ]
-            seed = datetime.now().toordinal()
-            rng = _random.Random(seed)
+            rng = _random.Random(self._qa_seed)
             actions = rng.sample(all_actions, 3)
 
             qa_lbl_row = tk.Frame(left_col, bg=bg)
@@ -1046,11 +1037,11 @@ def select_multiple_folders_and_play():
                          font=Font(family="Segoe UI", size=8),
                          bg=surface, fg=text_sec).pack(anchor="w")
 
-            # ── continue watching row ─────────────────────────────────────
             _cw_seen = set()
             _cw_entries = []
             for _cw_e in sorted(all_history, key=lambda x: x.watched_at, reverse=True):
-                if _cw_e.video_path not in _cw_seen and os.path.isfile(_cw_e.video_path):
+                _cw_e_pct = float(_cw_e.completion_percentage or 0)
+                if _cw_e.video_path not in _cw_seen and os.path.isfile(_cw_e.video_path) and 5 < _cw_e_pct < 95:
                     _cw_seen.add(_cw_e.video_path)
                     _cw_entries.append(_cw_e)
                 if len(_cw_entries) >= 4:
