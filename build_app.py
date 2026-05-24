@@ -671,7 +671,7 @@ def select_multiple_folders_and_play():
             self.content_frame = tk.Frame(self.main_frame, bg=self.bg_color)
             self.content_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
 
-            self._sidebar_panel = tk.Frame(self.content_frame, bg=self.surface_color, width=40)
+            self._sidebar_panel = tk.Frame(self.content_frame, bg=self.surface_color, width=52)
             self._sidebar_panel.pack(side=tk.LEFT, fill=tk.Y)
             self._sidebar_panel.pack_propagate(False)
             self._sidebar_divider = tk.Frame(self.content_frame, bg=self.border_color, width=1)
@@ -689,12 +689,12 @@ def select_multiple_folders_and_play():
                 title_block, text="Home", font=self.header_font,
                 bg=self.bg_color, fg=self.text_color
             )
-            self.workspace_title_label.pack(anchor="w")
+            # title label intentionally not packed — each view has its own header
             self.workspace_context_label = tk.Label(
-                title_block, text="No directory selected",
-                font=self.small_font, bg=self.bg_color, fg=self.muted_fg
+                title_block, text="Welcome to Recursive Video Player",
+                font=self.normal_font, bg=self.bg_color, fg=self.text_muted
             )
-            self.workspace_context_label.pack(anchor="w", pady=(2, 0))
+            self.workspace_context_label.pack(anchor="w", pady=(4, 0))
 
             self.workspace_nav = tk.Frame(self.workspace_header, bg=self.bg_color)
             self.workspace_nav.pack(side=tk.RIGHT, anchor="e")
@@ -5383,7 +5383,7 @@ def select_multiple_folders_and_play():
             btn = tk.Label(self.workspace_nav, text=label,
                            bg=self.bg_color, fg=self.text_muted,
                            font=("Segoe UI", 10, "normal"),
-                           padx=16, pady=6, cursor="hand2")
+                           padx=14, pady=3, cursor="hand2")
             btn.pack(side=tk.LEFT, padx=2)
 
             def on_press(_e):
@@ -5418,6 +5418,7 @@ def select_multiple_folders_and_play():
                 "history": "History",
                 "tags": "Tags & Ratings",
             }
+
             def _tb_colors():
                 return {
                     "bg": self.surface_color,
@@ -5436,12 +5437,16 @@ def select_multiple_folders_and_play():
                 }
 
             self._tb_colors = _tb_colors
-            self.toolbar = tk.Frame(self.root, bg=_tb_colors()["bg"], height=44)
-            self.toolbar.pack(side=tk.TOP, fill=tk.X, before=self.main_frame)
+            self.toolbar = tk.Frame(self.root, bg=_tb_colors()["bg"])
             self.toolbar.pack_propagate(False)
             self._toolbar_btns = {}
             self._toolbar_menus = {}
             self._toolbar_commands = {}
+
+            for pill_label in ["Home", "Gallery", "Playlist", "Queue", "Favourites", "Tags & Ratings", "History"]:
+                self._make_media_pill(pill_label)
+
+            sb = self._sidebar_panel
 
             def make_dropdown_menu(entries):
                 c = _tb_colors()
@@ -5458,48 +5463,82 @@ def select_multiple_folders_and_play():
                         menu.add_command(label=lbl, command=cmd)
                 return menu
 
-            def make_toolbar_btn(text, command=None, menu=None, play=False):
-                c = _tb_colors()
-                fg = c["play_fg"] if play else c["fg"]
-                font_weight = "bold" if play else "normal"
-                btn = tk.Label(self.toolbar, text=text,
-                               bg=c["bg"], fg=fg,
-                               font=("Segoe UI", 10, font_weight),
-                               padx=14, pady=10, cursor="hand2")
-                btn.pack(side=tk.LEFT)
-                btn._toolbar_play = play
-                self._toolbar_btns[text] = btn
-                if menu is not None:
-                    self._toolbar_menus[text] = menu
-                if command is not None:
-                    self._toolbar_commands[text] = command
-                self._bind_toolbar_label_hover(btn, play=play, menu=menu, command=command)
+            def _sb_sep():
+                tk.Frame(sb, bg=self.border_color, height=1).pack(fill=tk.X, padx=10, pady=(5, 5))
+
+            def _sb_btn(icon, tip, menu=None, command=None):
+                btn = tk.Label(
+                    sb, text=icon,
+                    bg=self.surface_color, fg=self.text_color,
+                    font=("Segoe UI", 15, "bold"), anchor="center",
+                    pady=10, cursor="hand2",
+                    relief=tk.FLAT, bd=0, highlightthickness=0,
+                )
+                btn.pack(fill=tk.X, pady=(2, 0))
+                _tip_win = [None]
+
+                def _show_tip(e):
+                    if _tip_win[0]: return
+                    x = btn.winfo_rootx() + btn.winfo_width() + 6
+                    y = btn.winfo_rooty() + 4
+                    tw = tk.Toplevel(btn)
+                    tw.wm_overrideredirect(True)
+                    tw.wm_geometry(f"+{x}+{y}")
+                    tk.Label(tw, text=tip, bg=self.console_bg, fg=self.console_fg,
+                             font=("Segoe UI", 9), padx=8, pady=4, relief="flat").pack()
+                    _tip_win[0] = tw
+
+                def _hide_tip(e):
+                    if _tip_win[0]:
+                        try: _tip_win[0].destroy()
+                        except: pass
+                        _tip_win[0] = None
+
+                def on_enter(e):
+                    btn.config(bg=self.accent_color, fg="#ffffff")
+                    _show_tip(e)
+
+                def on_leave(e):
+                    btn.config(bg=self.surface_color, fg=self.text_color)
+                    _hide_tip(e)
+
+                def on_press(e):
+                    btn.config(bg=self.accent_color, fg="#ffffff")
+
+                def on_release(e):
+                    btn.config(bg=self.accent_color, fg="#ffffff")
+                    if menu is not None:
+                        try:
+                            menu.tk_popup(btn.winfo_rootx() + btn.winfo_width() + 4, btn.winfo_rooty())
+                        finally:
+                            menu.grab_release()
+                    elif command is not None:
+                        command()
+
+                btn.bind("<Enter>", on_enter)
+                btn.bind("<Leave>", on_leave)
+                btn.bind("<ButtonPress-1>", on_press)
+                btn.bind("<ButtonRelease-1>", on_release)
                 return btn
 
-            for pill_label in ["Home", "Gallery", "Playlist", "Queue", "Favourites", "Tags & Ratings", "History"]:
-                self._make_media_pill(pill_label)
-            # File menu
+            _sb_sep()
+
             file_menu = make_dropdown_menu([
+
                 ("Add Directory", self.add_directory),
                 ("Add Google Drive Link", self.add_drive_link),
-                None,
-                ("Exit", self.cancel),
             ])
-            make_toolbar_btn("File", menu=file_menu)
+            self._toolbar_menus["File"] = file_menu
+            self._toolbar_btns["File"] = _sb_btn("📁", "File", menu=file_menu)
 
-            # Separator
-            sep = tk.Frame(self.toolbar, bg=_tb_colors()["border"], width=1, height=24)
-            sep.pack(side=tk.LEFT, padx=6, pady=10)
-
-            # View menu
             self._view_menu = make_dropdown_menu([
                 ("Hide Console" if self.show_console else "Show Console", self.toggle_console),
                 None,
                 ("Filter / Sort", self._show_filter_dialog),
             ])
-            make_toolbar_btn("View", menu=self._view_menu)
+            self._toolbar_menus["View"] = self._view_menu
+            self._toolbar_btns["View"] = _sb_btn("☰", "View", menu=self._view_menu)
 
-            # Playback menu (Loop mode)
             self._loop_mode_var = tk.StringVar(value=self.loop_mode)
             c = _tb_colors()
             _sel_color = self.accent_color
@@ -5526,30 +5565,36 @@ def select_multiple_folders_and_play():
                 command=self.toggle_smart_resume,
                 selectcolor=_sel_color,
             )
-            make_toolbar_btn("Playback", menu=playback_menu)
+            self._toolbar_menus["Playback"] = playback_menu
+            self._toolbar_btns["Playback"] = _sb_btn("↺", "Playback", menu=playback_menu)
 
-            make_toolbar_btn("Settings", command=self._show_settings)
+            _sb_sep()
 
-            # Theme toggle button (right side)
+            self._toolbar_btns["Settings"] = _sb_btn("⚙", "Settings", command=self._show_settings)
+
+            _sb_sep()
+
             self.theme_toolbar_btn = tk.Label(
-                self.toolbar, text="🌙" if not self.dark_mode else "☀",
-                bg=c["bg"], fg=c["fg"],
-                font=("Segoe UI", 12), padx=12, pady=10, cursor="hand2")
-            self.theme_toolbar_btn.pack(side=tk.RIGHT, padx=(0, 6))
+                sb, text="🌙" if not self.dark_mode else "☀",
+                bg=self.surface_color, fg=self.text_color,
+                font=("Segoe UI", 15, "bold"), pady=10, cursor="hand2",
+                relief=tk.FLAT, bd=0, highlightthickness=0, anchor="center"
+            )
+            self.theme_toolbar_btn.pack(fill=tk.X, pady=(2, 0))
             self._bind_theme_toolbar_hover()
 
-            # Play action — text + icon (no filled button)
+            _sb_sep()
+
             self._ensure_play_toolbar_fonts()
             self.play_toolbar_btn = tk.Label(
-                self.toolbar, text="▶  Play Videos",
-                bg=c["bg"], fg=c["play_text"],
-                font=self._play_toolbar_font,
-                padx=12, pady=10, cursor="hand2",
+                sb, text="▶",
+                bg=self.surface_color, fg="#2ecc71",
+                font=("Segoe UI", 20, "bold"), pady=12, cursor="hand2",
+                relief=tk.FLAT, bd=0, highlightthickness=0, anchor="center"
             )
-            self.play_toolbar_btn.pack(side=tk.RIGHT, padx=(0, 12))
+            self.play_toolbar_btn.pack(fill=tk.X, pady=(6, 10))
             self._bind_play_toolbar_hover()
 
-            # Original button_frame remains for legacy compatibility
             self.button_frame = tk.Frame(self.main_frame, bg=self.bg_color)
             self.button_frame.pack(fill=tk.X)
 

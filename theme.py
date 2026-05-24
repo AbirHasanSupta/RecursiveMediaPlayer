@@ -165,18 +165,21 @@ class ThemeSelector:
         self.config.save(prefs)
 
     def _apply_menubar_colors(self):
-        if not hasattr(self, 'toolbar') or not hasattr(self, '_tb_colors'):
+        if not hasattr(self, '_tb_colors'):
             return
         cc = self._tb_colors()
-        self.toolbar.config(bg=cc["bg"])
-
-        for child in self.toolbar.winfo_children():
-            if isinstance(child, tk.Label):
-                is_play = hasattr(self, 'play_toolbar_btn') and child is self.play_toolbar_btn
-                if is_play:
-                    self._apply_play_toolbar_idle()
-                else:
-                    child.config(bg=cc["bg"], fg=cc["fg"])
+        if hasattr(self, 'toolbar'):
+            try:
+                self.toolbar.config(bg=cc["bg"])
+                for child in self.toolbar.winfo_children():
+                    if isinstance(child, tk.Label):
+                        is_play = hasattr(self, 'play_toolbar_btn') and child is self.play_toolbar_btn
+                        if is_play:
+                            self._apply_play_toolbar_idle()
+                        else:
+                            child.config(bg=cc["bg"], fg=cc["fg"])
+            except tk.TclError:
+                pass
 
         def restyle_menu(m):
             try:
@@ -702,15 +705,15 @@ class ThemeSelector:
 
     def _play_toolbar_font_idle(self):
         from tkinter.font import Font
-        return Font(family="Segoe UI", size=10, weight="bold", underline=False)
+        return Font(family="Segoe UI", size=20, weight="bold", underline=False)
 
     def _play_toolbar_font_hover(self):
         from tkinter.font import Font
-        return Font(family="Segoe UI", size=10, weight="bold", underline=True)
+        return Font(family="Segoe UI", size=20, weight="bold", underline=False)
 
     def _play_toolbar_font_active(self):
         from tkinter.font import Font
-        return Font(family="Segoe UI", size=10, weight="bold", underline=False)
+        return Font(family="Segoe UI", size=20, weight="bold", underline=False)
 
     def _ensure_play_toolbar_fonts(self):
         """Legacy helper for initial widget creation in build_app."""
@@ -720,17 +723,23 @@ class ThemeSelector:
 
     def _apply_play_toolbar_idle(self):
         btn = getattr(self, 'play_toolbar_btn', None)
-        if btn is None or not hasattr(self, '_tb_colors'):
+        if btn is None:
             return
-        c = self._tb_colors()
-        btn.config(bg=c["bg"], fg=c["play_text"], font=self._play_toolbar_font_idle())
+        try:
+            btn.config(bg=self.surface_color, fg="#2ecc71",
+                       font=self._play_toolbar_font_idle())
+        except tk.TclError:
+            pass
 
     def _apply_play_toolbar_hover(self):
         btn = getattr(self, 'play_toolbar_btn', None)
-        if btn is None or not hasattr(self, '_tb_colors'):
+        if btn is None:
             return
-        c = self._tb_colors()
-        btn.config(bg=c["bg"], fg=c["play_text_hover"], font=self._play_toolbar_font_hover())
+        try:
+            btn.config(bg="#2ecc71", fg="#ffffff",
+                       font=self._play_toolbar_font_hover())
+        except tk.TclError:
+            pass
 
     def _restore_play_toolbar_after_click(self):
         """Re-apply hover or idle after click; run deferred so Leave is processed first."""
@@ -803,11 +812,21 @@ class ThemeSelector:
             divider = getattr(self, '_sidebar_divider', None)
             if divider:
                 divider.configure(bg=self.border_color)
-            for attr in ('_sb_toggle_btn', '_sb_add_btn'):
-                btn = getattr(self, attr, None)
-                if btn is None:
-                    continue
-                btn.configure(bg=self.surface_color, fg=self.text_color)
+            play_btn = getattr(self, 'play_toolbar_btn', None)
+            theme_btn = getattr(self, 'theme_toolbar_btn', None)
+            for child in panel.winfo_children():
+                try:
+                    if isinstance(child, tk.Frame):
+                        child.configure(bg=self.border_color)
+                    elif isinstance(child, tk.Label):
+                        if child is play_btn:
+                            child.configure(bg=self.surface_color, fg=self.accent_secondary)
+                        elif child is theme_btn:
+                            child.configure(bg=self.surface_color, fg=self.text_color)
+                        else:
+                            child.configure(bg=self.surface_color, fg=self.text_color)
+                except tk.TclError:
+                    pass
         except tk.TclError:
             pass
 
@@ -888,6 +907,8 @@ class ThemeSelector:
                     icon.configure(bg=self.entry_bg, fg=self.text_muted)
             except tk.TclError:
                 pass
+        if hasattr(self, '_refresh_dir_action_states'):
+            self._refresh_dir_action_states()
 
     def get_manager_design_tokens(self):
         """Dashboard-aligned palette for embedded manager UIs."""
@@ -1318,21 +1339,42 @@ class ThemeSelector:
         if btn is None:
             return
 
+        def _show_tip(e):
+            if getattr(btn, '_tip_win', None): return
+            x = btn.winfo_rootx() + btn.winfo_width() + 6
+            y = btn.winfo_rooty() + 4
+            tw = tk.Toplevel(btn)
+            tw.wm_overrideredirect(True)
+            tw.wm_geometry(f"+{x}+{y}")
+            tk.Label(tw, text="Toggle Theme", bg=self.console_bg, fg=self.console_fg,
+                     font=("Segoe UI", 9), padx=8, pady=4, relief="flat").pack()
+            btn._tip_win = tw
+
+        def _hide_tip():
+            tw = getattr(btn, '_tip_win', None)
+            if tw:
+                try: tw.destroy()
+                except: pass
+                btn._tip_win = None
+
         def on_enter(_e):
-            c = self._tb_colors()
-            btn.config(bg=c["hover"], fg=c["fg"])
+            try: btn.config(bg=self.accent_color, fg="#ffffff")
+            except tk.TclError: pass
+            _show_tip(_e)
 
         def on_leave(_e):
-            c = self._tb_colors()
-            btn.config(bg=c["bg"], fg=c["fg"])
+            try: btn.config(bg=self.surface_color, fg=self.text_color)
+            except tk.TclError: pass
+            _hide_tip()
 
         def on_press(_e):
-            c = self._tb_colors()
-            btn.config(bg=c["active"], fg="#FFFFFF")
+            try: btn.config(bg=self.accent_color, fg="#ffffff")
+            except tk.TclError: pass
 
         def on_release(_e):
-            c = self._tb_colors()
-            btn.config(bg=c["hover"], fg=c["fg"])
+            try: btn.config(bg=self.accent_color, fg="#ffffff")
+            except tk.TclError: pass
+            _hide_tip()
             self._toggle_theme_menu()
 
         btn.bind("<Enter>", on_enter)
@@ -1346,19 +1388,39 @@ class ThemeSelector:
             return
         self._ensure_play_toolbar_fonts()
 
+        _tip_win = [None]
+
+        def _show_tip(e):
+            if _tip_win[0]: return
+            x = btn.winfo_rootx() + btn.winfo_width() + 6
+            y = btn.winfo_rooty() + 4
+            tw = tk.Toplevel(btn)
+            tw.wm_overrideredirect(True)
+            tw.wm_geometry(f"+{x}+{y}")
+            tk.Label(tw, text="Play Videos", bg=self.console_bg, fg=self.console_fg,
+                     font=("Segoe UI", 9), padx=8, pady=4, relief="flat").pack()
+            _tip_win[0] = tw
+
+        def _hide_tip(e):
+            if _tip_win[0]:
+                try: _tip_win[0].destroy()
+                except: pass
+                _tip_win[0] = None
+
         def on_enter(_e):
             self._apply_play_toolbar_hover()
+            _show_tip(_e)
 
         def on_leave(_e):
             self._apply_play_toolbar_idle()
+            _hide_tip(_e)
 
         def on_press(_e):
-            c = self._tb_colors()
-            btn.config(
-                bg=c["bg"],
-                fg=c.get("play_text_active", c["play_text"]),
-                font=self._play_toolbar_font_active(),
-            )
+            try:
+                btn.config(bg="#27ae60", fg="#ffffff",
+                           font=self._play_toolbar_font_active())
+            except tk.TclError:
+                pass
 
         def on_release(_e):
             self.global_play()
@@ -1387,40 +1449,54 @@ class ThemeSelector:
         btn.bind("<Leave>", on_leave)
 
     def _fix_toolbar_colors(self):
-        if not hasattr(self, 'toolbar') or not hasattr(self, '_tb_colors'):
+        if not hasattr(self, '_tb_colors'):
             return
         cc = self._tb_colors()
-        self.toolbar.configure(bg=cc["bg"])
+        if hasattr(self, 'toolbar'):
+            try:
+                self.toolbar.configure(bg=cc["bg"])
+            except tk.TclError:
+                pass
         if hasattr(self, '_toolbar_btns'):
             menus = getattr(self, '_toolbar_menus', {})
             commands = getattr(self, '_toolbar_commands', {})
             for text, btn in self._toolbar_btns.items():
-                play = getattr(btn, '_toolbar_play', False)
-                btn.config(bg=cc["bg"], fg=cc["play_fg"] if play else cc["fg"])
-                self._bind_toolbar_label_hover(
-                    btn, play=play,
-                    menu=menus.get(text),
-                    command=commands.get(text),
-                )
+                try:
+                    btn.config(bg=self.surface_color, fg=self.text_color)
+                except tk.TclError:
+                    pass
         if hasattr(self, 'play_toolbar_btn'):
+            try:
+                self.play_toolbar_btn.config(bg=self.surface_color, fg=self.accent_secondary)
+            except tk.TclError:
+                pass
             self._bind_play_toolbar_hover()
         if hasattr(self, 'theme_toolbar_btn'):
-            self.theme_toolbar_btn.config(
-                text="☀" if self.dark_mode else "🌙",
-                bg=cc["bg"], fg=cc["fg"])
+            try:
+                self.theme_toolbar_btn.config(
+                    text="☀" if self.dark_mode else "🌙",
+                    bg=self.surface_color, fg=self.text_color)
+            except tk.TclError:
+                pass
             self._bind_theme_toolbar_hover()
         if hasattr(self, 'loop_toolbar_btn'):
-            self.loop_toolbar_btn.config(bg=cc["bg"], fg=cc["fg"])
-            self._bind_toolbar_label_hover(self.loop_toolbar_btn, play=False)
+            try:
+                self.loop_toolbar_btn.config(bg=cc["bg"], fg=cc["fg"])
+                self._bind_toolbar_label_hover(self.loop_toolbar_btn, play=False)
+            except tk.TclError:
+                pass
         if hasattr(self, 'sleep_countdown_label'):
-            self.sleep_countdown_label.config(bg=cc["bg"], fg=cc["fg"])
-        for child in self.toolbar.winfo_children():
-            if isinstance(child, tk.Frame):
-                child.configure(bg=cc["border"])
+            try:
+                self.sleep_countdown_label.config(bg=cc["bg"], fg=cc["fg"])
+            except tk.TclError:
+                pass
         if hasattr(self, '_media_pill_btns'):
             for lbl, btn in self._media_pill_btns.items():
-                btn.config(bg=self.bg_color)
-                self._bind_media_pill_hover(btn, lbl)
+                try:
+                    btn.config(bg=self.bg_color)
+                    self._bind_media_pill_hover(btn, lbl)
+                except tk.TclError:
+                    pass
 
     def _fix_pill_colors_initial(self):
         self._fix_toolbar_colors()
