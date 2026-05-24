@@ -341,6 +341,8 @@ class GridViewManager:
         self._page = 0
         self._pages_cache = None
         self._active_tag_filters.clear()
+        if hasattr(self, 'all_items'):
+            del self.all_items
 
         self._build_ui(videos, t)
         self._update_tag_filter_btn()
@@ -380,6 +382,8 @@ class GridViewManager:
         self._page = 0
         self._pages_cache = None
         self._active_tag_filters.clear()
+        if hasattr(self, 'all_items'):
+            del self.all_items
 
         self._closing = False
         self._build_ui(videos, t)
@@ -439,6 +443,19 @@ class GridViewManager:
                  font=("Segoe UI", 15, "bold"),
                  bg=t['header_bg'], fg=t['text']).pack(side=tk.LEFT, pady=14)
 
+        self.selection_label = tk.Label(
+            title_box, text="Nothing selected",
+            font=("Segoe UI", 8),
+            bg=t['surface2'], fg=t['text_muted'],
+            padx=8, pady=3
+        )
+        self.selection_label.pack(side=tk.LEFT, padx=(12, 0), pady=14)
+
+        self.drag_mode_label = tk.Label(title_box, text="",
+            font=("Segoe UI", 8, "italic"),
+            bg=t['header_bg'], fg=t['text_muted'])
+        self.drag_mode_label.pack(side=tk.LEFT, padx=(6, 0), pady=14)
+
         if self._embedded and self.close_callback:
             close_btn = tk.Label(
                 h_inner, text="✕", font=("Segoe UI", 14),
@@ -455,8 +472,8 @@ class GridViewManager:
 
         # ── Toolbar strip ───────────────────────────────────────────────────────
         toolbar_bg = t['surface2']
-        toolbar = tk.Frame(gw, bg=toolbar_bg, height=46)
-        toolbar.pack(fill=tk.X, padx=0)
+        toolbar = tk.Frame(gw, bg=toolbar_bg, height=54)
+        toolbar.pack(fill=tk.X, padx=0, pady=(6, 0))
         toolbar.pack_propagate(False)
 
         inner_tb = tk.Frame(toolbar, bg=toolbar_bg)
@@ -479,7 +496,7 @@ class GridViewManager:
             relief=tk.FLAT, bd=0,
             insertbackground=t['text']
         )
-        search_entry.pack(side=tk.LEFT, ipady=4, padx=(0, 7))
+        search_entry.pack(side=tk.LEFT, ipady=7, padx=(0, 7))
 
         tk.Frame(inner_tb, bg=t['border'], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=8, padx=2)
 
@@ -535,6 +552,11 @@ class GridViewManager:
         )
         spin.pack(side=tk.LEFT, pady=12)
 
+        # Pagination — centered between left controls and right controls
+        self._pagination_frame = tk.Frame(inner_tb, bg=toolbar_bg)
+        self._pagination_frame.pack(side=tk.LEFT, expand=True, fill=tk.X)
+        self._build_pagination_bar()
+
         tk.Frame(gw, bg=t['divider'], height=1).pack(fill=tk.X)
 
         # ── Canvas / scrollable grid ───────────────────────────────────────────
@@ -588,49 +610,6 @@ class GridViewManager:
 
         if hasattr(gw, "protocol"):
             gw.protocol("WM_DELETE_WINDOW", _on_closing)
-
-        # ── Slim status strip (pagination centered, selection left, hint right) ─
-        tk.Frame(gw, bg=t['divider'], height=1).pack(fill=tk.X, side=tk.BOTTOM)
-        status_strip = tk.Frame(gw, bg=t['surface2'], height=26)
-        status_strip.pack(fill=tk.X, side=tk.BOTTOM)
-        status_strip.pack_propagate(False)
-        status_strip.columnconfigure(0, weight=1)
-        status_strip.columnconfigure(1, weight=0)
-        status_strip.columnconfigure(2, weight=1)
-
-        # Left: selection badge + drag label
-        left_st = tk.Frame(status_strip, bg=t['surface2'])
-        left_st.grid(row=0, column=0, sticky='w', padx=14, pady=0)
-
-        self.selection_label = tk.Label(
-            left_st, text="Nothing selected",
-            font=("Segoe UI", 8),
-            bg=t['surface2'], fg=t['text_muted'],
-        )
-        self.selection_label.pack(side=tk.LEFT, pady=0)
-
-        self.drag_mode_label = tk.Label(
-            left_st, text="",
-            font=("Segoe UI", 8, "italic"),
-            bg=t['surface2'], fg=t['text_muted'],
-        )
-        self.drag_mode_label.pack(side=tk.LEFT, padx=(8, 0), pady=0)
-
-        # Center: pagination controls
-        self._pagination_frame = tk.Frame(status_strip, bg=t['surface2'])
-        self._pagination_frame.grid(row=0, column=1, pady=0, ipady=0)
-        self._build_pagination_bar()
-
-        # Right: keyboard hint
-        right_st = tk.Frame(status_strip, bg=t['surface2'])
-        right_st.grid(row=0, column=2, sticky='e', padx=14, pady=0)
-
-        tk.Label(
-            right_st,
-            text="Double-click · Right-click · Drag to reorder",
-            font=("Segoe UI", 8),
-            bg=t['surface2'], fg=t['text_muted'],
-        ).pack(side=tk.RIGHT, pady=0)
 
         # Start loading videos (unchanged)
         ManagedThread(target=self._load_videos, args=(videos,), name="LoadGridVideos").start()
@@ -829,7 +808,11 @@ class GridViewManager:
                 if grid_videos:
                     self.video_preview_manager.prioritize_for_grid(grid_videos)
 
-            self.root.after(0, self._rebuild_grid)
+            term = self.search_var.get().lower() if hasattr(self, 'search_var') else ""
+            if term or self._active_tag_filters:
+                self.root.after(0, self._filter_directories)
+            else:
+                self.root.after(0, self._rebuild_grid)
         except Exception as e:
             with self.loading_lock:
                 self.is_loading = False
@@ -933,12 +916,16 @@ class GridViewManager:
         total_pages = self._total_pages()
         total_videos = sum(1 for i in self.items if i['type'] == 'video')
 
-        pg = self._pagination_frame
         bar_bg = t['surface2']
+
+        tk.Frame(self._pagination_frame, bg=bar_bg).pack(side=tk.LEFT, expand=True, fill=tk.X)
+        pg = tk.Frame(self._pagination_frame, bg=bar_bg)
+        pg.pack(side=tk.LEFT)
+        tk.Frame(self._pagination_frame, bg=bar_bg).pack(side=tk.LEFT, expand=True, fill=tk.X)
 
         def _nav(text, cmd, active):
             fg = t['text_sub'] if active else t['border']
-            lbl = tk.Label(pg, text=text, font=("Segoe UI", 11),
+            lbl = tk.Label(pg, text=text, font=("Segoe UI", 14),
                            bg=bar_bg, fg=fg,
                            cursor="hand2" if active else "arrow", padx=3)
             if active:
@@ -952,21 +939,21 @@ class GridViewManager:
         pill = tk.Frame(pg, bg=t['border_soft'], padx=6, pady=0)
         pill.pack(side=tk.LEFT, padx=4)
         tk.Label(pill, text=f"{self._page + 1} / {total_pages}",
-                 font=("Segoe UI", 8), bg=t['border_soft'], fg=t['text_sub']).pack(pady=2)
+                 font=("Segoe UI", 10), bg=t['border_soft'], fg=t['text_sub']).pack(pady=2)
 
         _nav("›", self._next_page, self._page < total_pages - 1).pack(side=tk.LEFT, padx=(2, 8))
 
-        tk.Label(pg, text="·", font=("Segoe UI", 8), bg=bar_bg, fg=t['border']).pack(side=tk.LEFT, padx=3)
+        tk.Label(pg, text="·", font=("Segoe UI", 10), bg=bar_bg, fg=t['border']).pack(side=tk.LEFT, padx=3)
         tk.Label(pg, text=f"{total_videos:,} videos",
-                 font=("Segoe UI", 7), bg=bar_bg, fg=t['text_muted']).pack(side=tk.LEFT, padx=(4, 8))
-        tk.Label(pg, text="·", font=("Segoe UI", 8), bg=bar_bg, fg=t['border']).pack(side=tk.LEFT, padx=3)
+                 font=("Segoe UI", 9), bg=bar_bg, fg=t['text_muted']).pack(side=tk.LEFT, padx=(4, 8))
+        tk.Label(pg, text="·", font=("Segoe UI", 10), bg=bar_bg, fg=t['border']).pack(side=tk.LEFT, padx=3)
 
-        tk.Label(pg, text="go", font=("Segoe UI", 8),
+        tk.Label(pg, text="Go", font=("Segoe UI", 10),
                  bg=bar_bg, fg=t['text_muted']).pack(side=tk.LEFT, padx=(4, 2))
         self._jump_var = tk.StringVar(value=str(self._page + 1))
         jump_entry = tk.Entry(
             pg, textvariable=self._jump_var, width=3,
-            font=("Segoe UI", 8),
+            font=("Segoe UI", 10),
             bg=t['surface'], fg=t['text'],
             relief=tk.FLAT, bd=0,
             highlightthickness=1, highlightbackground=t['border'],
@@ -1470,11 +1457,11 @@ class GridViewManager:
             self.selection_label.config(text="Nothing selected",
                                         bg=t['surface2'], fg=t['text_muted'])
         elif n == 1:
-            self.selection_label.config(text="1 video selected",
-                                        bg=t['surface2'], fg=t['accent'])
+            self.selection_label.config(text="1 selected",
+                                        bg=t['accent_dim'], fg=t['accent'])
         else:
-            self.selection_label.config(text=f"{n} videos selected",
-                                        bg=t['surface2'], fg=t['accent'])
+            self.selection_label.config(text=f"{n} selected",
+                                        bg=t['accent_dim'], fg=t['accent'])
 
     # ─────────────────────────────────────────────────────────────────────────
     # Playback (original)
