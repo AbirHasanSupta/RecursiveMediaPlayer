@@ -399,12 +399,13 @@ class SettingsUI:
                 pass
         badge_bg = getattr(tp, 'badge_bg', tp.surface_color)
         badge_fg = getattr(tp, 'badge_fg', tp.text_color)
+        badge_border = getattr(tp, 'border_color', '#E2E8F0')
         for btn in self._hotkey_btn_map.values():
             try:
                 if btn.winfo_exists():
                     active_bg = getattr(tp, 'accent_color', '')
                     if btn.cget('bg') != active_bg:
-                        btn.configure(bg=badge_bg, fg=badge_fg)
+                        btn.configure(bg=badge_bg, fg=badge_fg, highlightbackground=badge_border)
             except tk.TclError:
                 pass
 
@@ -783,6 +784,7 @@ class SettingsUI:
         badge_bg = getattr(tp, 'badge_bg', tp.surface_color)
         badge_fg = getattr(tp, 'badge_fg', tp.text_color)
         active_bg = getattr(tp, 'accent_color', '#5E81F4')
+        badge_border = getattr(tp, 'border_color', '#E2E8F0')
 
         KEY_COL_W = 20
 
@@ -791,13 +793,13 @@ class SettingsUI:
                 return
             self._capturing_action = action_id
             self._conflict_label.config(text="")
-            btn.config(bg=active_bg, fg='white', relief=tk.SUNKEN)
+            btn.config(bg=active_bg, fg='white', relief=tk.FLAT, highlightbackground=active_bg)
 
             overlay_parent = self.settings_window.winfo_toplevel()
             overlay = tk.Toplevel(overlay_parent)
             overlay.withdraw()
             overlay.title("Press new key…")
-            overlay.geometry("340x120")
+            overlay.geometry("400x148")
             overlay.configure(bg=tp.bg_color)
             overlay.transient(overlay_parent)
             overlay.grab_set()
@@ -805,10 +807,30 @@ class SettingsUI:
             self._capture_overlay = overlay
 
             action_label = HOTKEY_LABELS.get(action_id, action_id)
-            tk.Label(overlay, text=f"Reassigning:  {action_label}", font=tp.normal_font,
-                     bg=tp.bg_color, fg=tp.text_color, wraplength=300).pack(pady=(18, 6))
-            tk.Label(overlay, text="Press any key or combo  (Esc = cancel)", font=tp.small_font,
-                     bg=tp.bg_color, fg=tp.text_muted).pack()
+
+            tk.Frame(overlay, bg=tp.border_color, height=1).pack(fill=tk.X)
+
+            inner_o = tk.Frame(overlay, bg=tp.bg_color)
+            inner_o.pack(fill=tk.BOTH, expand=True, padx=20, pady=16)
+
+            tk.Label(
+                inner_o, text="Reassigning shortcut",
+                font=("Segoe UI", 9, "bold"),
+                bg=tp.bg_color, fg=tp.text_muted,
+            ).pack(anchor='w')
+
+            tk.Label(
+                inner_o, text=HOTKEY_LABELS.get(action_id, action_id),
+                font=tp.normal_font,
+                bg=tp.bg_color, fg=tp.text_color,
+                wraplength=360,
+            ).pack(anchor='w', pady=(2, 10))
+
+            tk.Label(
+                inner_o, text="Press any key or combo  ·  Esc to cancel",
+                font=tp.small_font,
+                bg=tp.bg_color, fg=tp.text_muted,
+            ).pack(anchor='w')
 
             def _finish_capture(event):
                 keysym_raw = event.keysym.lower()
@@ -854,7 +876,7 @@ class SettingsUI:
                     displaced_btn = self._hotkey_btn_map.get(conflict_action)
                     if displaced_btn and displaced_btn.winfo_exists():
                         displaced_btn.config(text=old_combo or '—',
-                                             bg=badge_bg, fg=badge_fg, relief=tk.GROOVE)
+                                             bg=badge_bg, fg=badge_fg, relief=tk.FLAT, highlightbackground=badge_border)
                     try:
                         self._conflict_label.config(
                             text=f"↔  Swapped: '{displaced_label}' is now '{old_combo or '—'}'"
@@ -865,7 +887,7 @@ class SettingsUI:
                 self._hotkeys_draft[action_id] = combo
                 try:
                     if btn.winfo_exists():
-                        btn.config(text=combo, bg=badge_bg, fg=badge_fg, relief=tk.GROOVE)
+                        btn.config(text=combo, bg=badge_bg, fg=badge_fg, relief=tk.FLAT, highlightbackground=badge_border)
                     if not conflict_action:
                         self._conflict_label.config(text="")
                 except Exception:
@@ -875,7 +897,7 @@ class SettingsUI:
 
             def _cancel(revert=True):
                 if revert:
-                    btn.config(bg=badge_bg, fg=badge_fg, relief=tk.GROOVE)
+                    btn.config(bg=badge_bg, fg=badge_fg, relief=tk.FLAT, highlightbackground=badge_border)
                 _close_overlay()
                 self._capturing_action = None
 
@@ -919,17 +941,29 @@ class SettingsUI:
 
                 btn = tk.Button(
                     row, text=current_key,
-                    font=tp.normal_font,
+                    font=("Consolas", 9),
                     bg=badge_bg, fg=badge_fg,
-                    relief=tk.GROOVE, bd=1,
-                    padx=6, pady=2,
+                    relief=tk.FLAT, bd=0,
+                    padx=10, pady=5,
                     width=KEY_COL_W, anchor='w',
                     cursor='hand2',
-                    activebackground=getattr(tp, 'hover_color', tp.surface_color),
-                    activeforeground=badge_fg,
-                    highlightthickness=0,
+                    activebackground=tp.accent_color,
+                    activeforeground='#ffffff',
+                    highlightthickness=1,
+                    highlightbackground=badge_border,
                 )
                 btn.config(command=lambda aid=action_id, b=btn: _start_capture(aid, b))
+
+                def _badge_enter(e, b=btn):
+                    if b.cget('bg') != active_bg:
+                        b.config(bg=tp.hover_color, highlightbackground=tp.accent_color)
+
+                def _badge_leave(e, b=btn):
+                    if b.cget('bg') != active_bg:
+                        b.config(bg=badge_bg, fg=badge_fg, highlightbackground=badge_border)
+
+                btn.bind('<Enter>', _badge_enter)
+                btn.bind('<Leave>', _badge_leave)
                 btn.pack(side=tk.LEFT, padx=(0, 10))
                 self._hotkey_btn_map[action_id] = btn
 
@@ -952,7 +986,7 @@ class SettingsUI:
                 self._conflict_label.config(text="")
                 for aid, b in self._hotkey_btn_map.items():
                     b.config(text=self._hotkeys_draft.get(aid, '—'),
-                             bg=badge_bg, fg=badge_fg, relief=tk.GROOVE)
+                             bg=badge_bg, fg=badge_fg, relief=tk.FLAT, highlightbackground=badge_border)
 
         tp.create_button(
             reset_frame, "Reset Shortcuts to Defaults", _reset_shortcuts, "warning", "sm"
@@ -962,26 +996,15 @@ class SettingsUI:
 
     def _create_action_buttons(self):
         tp = self.theme_provider
-        sep = tk.Frame(self.settings_window, bg=tp.border_color, height=1)
-        sep.pack(fill=tk.X, side=tk.BOTTOM)
 
-        button_frame = tk.Frame(self.settings_window, bg=tp.bg_color)
-        button_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=20, pady=15)
+        tk.Frame(self.settings_window, bg=tp.border_color, height=1).pack(fill=tk.X, side=tk.BOTTOM)
 
-        reset_btn = tp.create_button(
-            button_frame, "Reset to Defaults", self._reset_to_defaults, "warning", "md"
-        )
-        reset_btn.pack(side=tk.LEFT)
+        bar = tk.Frame(self.settings_window, bg=tp.bg_color)
+        bar.pack(fill=tk.X, side=tk.BOTTOM, padx=20, pady=14)
 
-        cancel_btn = tp.create_button(
-            button_frame, "Cancel", self._close_settings, "secondary", "md"
-        )
-        cancel_btn.pack(side=tk.RIGHT, padx=(5, 0))
-
-        save_btn = tp.create_button(
-            button_frame, "Save Settings", self._save_settings, "primary", "md"
-        )
-        save_btn.pack(side=tk.RIGHT)
+        tp.create_button(bar, "↺  Reset to Defaults", self._reset_to_defaults, "warning",   "md").pack(side=tk.LEFT)
+        tp.create_button(bar, "✓  Save Settings",      self._save_settings,     "primary",   "md").pack(side=tk.RIGHT, padx=(6, 0))
+        tp.create_button(bar, "Cancel",                 self._close_settings,    "secondary", "md").pack(side=tk.RIGHT)
 
     # ── Data actions ───────────────────────────────────────────────────────────
 
@@ -1171,9 +1194,10 @@ class SettingsUI:
             self._hotkeys_draft = dict(settings.hotkeys)
             badge_bg = getattr(self.theme_provider, 'badge_bg', self.theme_provider.surface_color)
             badge_fg = getattr(self.theme_provider, 'badge_fg', self.theme_provider.text_color)
+            badge_border = getattr(self.theme_provider, 'border_color', '#E2E8F0')
             for aid, btn in self._hotkey_btn_map.items():
                 btn.config(text=self._hotkeys_draft.get(aid, '—'),
-                           bg=badge_bg, fg=badge_fg, relief=tk.GROOVE)
+                           bg=badge_bg, fg=badge_fg, relief=tk.FLAT, highlightbackground=badge_border)
         self._update_index_info()
 
     def _apply_current_settings(self):
