@@ -353,6 +353,7 @@ class WatchHistoryUI:
         self.add_to_favourites_callback = None
         self.remove_from_favourites_callback = None
         self.is_favourite_callback = None
+        self.locate_in_panel_callback = None
         self.theme_provider.register_manager_ui(self)
 
     def _get_design_tokens(self):
@@ -858,6 +859,11 @@ class WatchHistoryUI:
                 label="Properties",
                 command=lambda: self._show_properties(entry)
             )
+            if self.locate_in_panel_callback and os.path.isfile(entry.video_path):
+                context_menu.add_command(
+                    label="Show in Panel",
+                    command=lambda p=entry.video_path: self.locate_in_panel_callback(p)
+                )
 
         try:
             context_menu.tk_popup(event.x_root, event.y_root)
@@ -1184,6 +1190,9 @@ class WatchHistoryManager:
 
     def set_is_favourite_callback(self, cb):
         self.ui.is_favourite_callback = cb
+
+    def set_locate_in_panel_callback(self, cb):
+        self.ui.locate_in_panel_callback = cb
 
     def _should_track_history(self) -> bool:
         """Check if history tracking is enabled in settings"""

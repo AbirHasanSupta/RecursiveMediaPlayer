@@ -337,6 +337,7 @@ class QueueUI:
         self.grid_view_manager = None
         self.add_to_favorites_callback = None
         self.add_to_playlist_callback = None
+        self.locate_in_panel_callback = None
         self._embedded = False
         self._close_callback = None
         self.theme_provider.register_manager_ui(self)
@@ -519,6 +520,8 @@ class QueueUI:
 
     def _refresh_queue(self):
         def refresh():
+            if not self.queue_listbox or not self.queue_listbox.winfo_exists():
+                return
             tp = self.theme_provider
             t = self._get_design_tokens()
             ACCENT = t["queue_accent"]
@@ -628,6 +631,11 @@ class QueueUI:
                 label="Open File Location",
                 command=lambda: self._open_location(entry.video_path)
             )
+            if self.locate_in_panel_callback and os.path.isfile(entry.video_path):
+                context_menu.add_command(
+                    label="Show in Panel",
+                    command=lambda p=entry.video_path: self.locate_in_panel_callback(p)
+                )
 
         try:
             context_menu.tk_popup(event.x_root, event.y_root)
@@ -971,3 +979,6 @@ class VideoQueueManager:
 
     def set_add_to_playlist_callback(self, callback):
         self.ui.add_to_playlist_callback = callback
+
+    def set_locate_in_panel_callback(self, callback):
+        self.ui.locate_in_panel_callback = callback

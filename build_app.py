@@ -393,12 +393,11 @@ def select_multiple_folders_and_play():
             self.grid_view_manager.set_exclude_video_callback(self._grid_exclude_video)
             self.grid_view_manager.set_remove_exclusion_video_callback(self._grid_remove_exclusion_video)
             self.grid_view_manager.set_locate_in_panel_callback(self.locate_in_directory_panel)
-
-            # self.playlist_manager.set_locate_in_panel_callback(self.locate_in_directory_panel)
-            # self.watch_history_manager.set_locate_in_panel_callback(self.locate_in_directory_panel)
-            # self.favorites_manager.set_locate_in_panel_callback(self.locate_in_directory_panel)
-            # self.queue_manager.set_locate_in_panel_callback(self.locate_in_directory_panel)
-            # self.annotation_browser.set_locate_in_panel_callback(self.locate_in_directory_panel)
+            self.playlist_manager.set_locate_in_panel_callback(self.locate_in_directory_panel)
+            self.watch_history_manager.set_locate_in_panel_callback(self.locate_in_directory_panel)
+            self.favorites_manager.set_locate_in_panel_callback(self.locate_in_directory_panel)
+            self.queue_manager.set_locate_in_panel_callback(self.locate_in_directory_panel)
+            self.annotation_browser.set_locate_in_panel_callback(self.locate_in_directory_panel)
 
             self.settings_manager.ui.cleanup_resume_callback = lambda: self.resume_manager.service.cleanup_old_positions(
                 self.settings_manager.get_settings().auto_cleanup_days)

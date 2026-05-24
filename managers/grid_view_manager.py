@@ -1802,7 +1802,7 @@ class GridViewManager:
             context_menu.add_command(label="Properties",
                                      command=lambda: self._context_show_properties(single))
             if self.locate_in_panel_callback:
-                context_menu.add_command(label="Reveal in Directory Panel",
+                context_menu.add_command(label="Show in Panel",
                                          command=lambda: self.locate_in_panel_callback(single))
 
         try:

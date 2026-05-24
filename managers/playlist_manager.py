@@ -169,6 +169,7 @@ class PlaylistUI:
         self.grid_view_manager = None
         self.add_to_favorites_callback = None
         self.add_to_queue_callback = None
+        self.locate_in_panel_callback = None
         self.video_mapping = {}
 
         self.dragging_index = None
@@ -651,6 +652,11 @@ class PlaylistUI:
                 label="Open File Location",
                 command=lambda: self._open_location(video_path)
             )
+            if self.locate_in_panel_callback and os.path.isfile(video_path):
+                context_menu.add_command(
+                    label="Show in Panel",
+                    command=lambda p=video_path: self.locate_in_panel_callback(p)
+                )
 
         try:
             context_menu.tk_popup(event.x_root, event.y_root)
@@ -756,6 +762,8 @@ class PlaylistUI:
 
     def _refresh_playlist_list(self):
         def refresh():
+            if not self.playlist_listbox or not self.playlist_listbox.winfo_exists():
+                return
             current_selection = self.playlist_listbox.curselection()
             current_playlist_id = None
             if current_selection and self.current_playlist:
@@ -1100,6 +1108,9 @@ class PlaylistManager:
 
     def set_add_to_queue_callback(self, callback):
         self.ui.add_to_queue_callback = callback
+
+    def set_locate_in_panel_callback(self, callback):
+        self.ui.locate_in_panel_callback = callback
 
     def show_manager(self):
         self.ui.show_playlist_manager()

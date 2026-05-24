@@ -223,6 +223,7 @@ class AnnotationBrowserManager:
         self.add_to_favourites_callback = None
         self.remove_from_favourites_callback = None
         self.is_favourite_callback = None
+        self.locate_in_panel_callback = None
         self._annotation_listener = None
         self._embedded = False
         self._close_callback = None
@@ -287,6 +288,9 @@ class AnnotationBrowserManager:
 
     def set_is_favourite_callback(self, cb):
         self.is_favourite_callback = cb
+
+    def set_locate_in_panel_callback(self, cb):
+        self.locate_in_panel_callback = cb
 
     # ── Async Loading ────────────────────────────────────────────────────────
 
@@ -1657,6 +1661,9 @@ class AnnotationBrowserManager:
                              command=lambda: self._copy_path(path))
             menu.add_command(label="📂  Open file location",
                              command=lambda: self._open_location(path))
+            if self.locate_in_panel_callback and os.path.isfile(path):
+                menu.add_command(label="Show in Panel",
+                                 command=lambda p=path: self.locate_in_panel_callback(p))
 
         paths = [self._filtered_videos[i] for i in sel if i < len(self._filtered_videos)]
         has_rating = any(self.svc.get_rating(p) > 0 for p in paths)
