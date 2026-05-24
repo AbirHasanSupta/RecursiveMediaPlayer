@@ -1503,6 +1503,20 @@ def select_multiple_folders_and_play():
                                              font=self.header_font, bg=self.bg_color, fg=self.text_color)
             self.dir_header_label.pack(side=tk.LEFT, anchor='w')
 
+            _tree_actions = [
+                ("▤", "Toggle Videos", self.toggle_videos_visibility),
+                ("⊟", "Collapse All", self._collapse_all_tree_nodes),
+                ("⊞", "Expand All", self._expand_all_tree_nodes),
+                ("−", "Hide Panel", self._toggle_directory_panel),
+            ]
+            self._dir_action_btns = {}
+            for icon, tip, cmd in reversed(_tree_actions):
+                b = self._create_panel_action_btn(dir_header_frame, icon, cmd, tip)
+                b.pack(side=tk.RIGHT, padx=(0, 2))
+                self._dir_action_btns[tip] = b
+
+            self._refresh_dir_action_states()
+
             # Search bar
             search_wrap = tk.Frame(
                 self.dir_section,
@@ -1510,7 +1524,7 @@ def select_multiple_folders_and_play():
                 highlightbackground=self.entry_border,
                 highlightthickness=1,
             )
-            search_wrap.pack(fill=tk.X, pady=(0, 6))
+            search_wrap.pack(fill=tk.X, pady=(0, 6), padx=6)
 
             search_icon = tk.Label(
                 search_wrap, text="⌕",
@@ -1892,6 +1906,71 @@ def select_multiple_folders_and_play():
                 # Delegate to existing exclusion tree context menu
                 self._show_context_menu(event)
 
+        def _create_panel_action_btn(self, parent, icon, command, tooltip=None):
+            btn = tk.Label(
+                parent, text=icon,
+                bg=self.bg_color, fg=self.text_muted,
+                font=("Segoe UI", 12), pady=3, padx=4,
+                cursor="hand2", relief=tk.FLAT, bd=0,
+            )
+            btn._active = False
+
+            def _on_enter(_e):
+                btn.config(bg=self.hover_color, fg=self.accent_color)
+
+            def _on_leave(_e):
+                if btn._active:
+                    btn.config(bg=self.hover_color, fg=self.accent_color)
+                else:
+                    btn.config(bg=self.bg_color, fg=self.text_muted)
+
+            def _on_click(_e):
+                command()
+                self._refresh_dir_action_states()
+
+            btn.bind("<Enter>", _on_enter)
+            btn.bind("<Leave>", _on_leave)
+            btn.bind("<Button-1>", _on_click)
+
+            if tooltip:
+                import tkinter as _tk
+                _tip = [None]
+
+                def _show(e):
+                    if _tip[0]: return
+                    x = btn.winfo_rootx()
+                    y = btn.winfo_rooty() + btn.winfo_height() + 2
+                    tw = _tk.Toplevel(btn)
+                    tw.wm_overrideredirect(True)
+                    tw.wm_geometry(f"+{x}+{y}")
+                    _tk.Label(tw, text=tooltip, bg=self.console_bg, fg=self.console_fg,
+                              font=("Segoe UI", 9), padx=7, pady=3).pack()
+                    _tip[0] = tw
+
+                def _hide(e):
+                    if _tip[0]:
+                        try:
+                            _tip[0].destroy()
+                        except:
+                            pass
+                        _tip[0] = None
+
+                btn.bind("<Enter>", lambda e: (_show(e), _on_enter(e)))
+                btn.bind("<Leave>", lambda e: (_hide(e), _on_leave(e)))
+            return btn
+
+        def _refresh_dir_action_states(self):
+            if not hasattr(self, '_dir_action_btns'):
+                return
+            btn = self._dir_action_btns.get("Toggle Videos")
+            if btn:
+                active = getattr(self, 'show_videos', True)
+                btn._active = active
+                btn.config(
+                    fg=self.accent_color if active else self.text_muted,
+                    bg=self.hover_color if active else self.bg_color,
+                )
+
         def shrink_directory_panel(self):
             self._set_directory_panel_mode("compact")
 
@@ -1954,52 +2033,12 @@ def select_multiple_folders_and_play():
             self._reapply_tree_columns()
             self._configure_tree_style()
 
-            checkboxes_row = tk.Frame(self.exclusion_buttons_frame, bg=self.bg_color)
-            checkboxes_row.pack(fill=tk.X, pady=(0, 5))
-
             self.show_videos_var = tk.BooleanVar(value=self.show_videos)
             self.excluded_only_var = tk.BooleanVar(value=self.show_only_excluded)
             self.expand_all_var = tk.BooleanVar(value=self.expand_all_default)
             self.save_directories_var = tk.BooleanVar(value=True)
-
-            self.toggle_videos_check = ttk.Checkbutton(
-                checkboxes_row, text="Show Videos",
-                style="Modern.TCheckbutton", variable=self.show_videos_var,
-                command=self.toggle_videos_visibility
-            )
-            self.toggle_videos_check.pack(side=tk.LEFT, padx=(0, 10))
-
-            self.expand_all_check = ttk.Checkbutton(
-                checkboxes_row, text="Expand All",
-                style="Modern.TCheckbutton", variable=self.expand_all_var,
-                command=self.toggle_expand_all
-            )
-            self.expand_all_check.pack(side=tk.LEFT, padx=(0, 10))
-
-            # self.toggle_excluded_only_check = ttk.Checkbutton(
-            #     checkboxes_row, text="Excluded Only",
-            #     style="Modern.TCheckbutton", variable=self.excluded_only_var,
-            #     command=self.toggle_excluded_only
-            # )
-            # self.toggle_excluded_only_check.pack(side=tk.LEFT, padx=(0, 10))
-
-            # self.save_directories_check = ttk.Checkbutton(
-            #     checkboxes_row, text="Save Directories",
-            #     style="Modern.TCheckbutton", variable=self.save_directories_var,
-            #     command=self.toggle_save_directories
-            # )
-            # self.save_directories_check.pack(side=tk.LEFT, padx=(0, 10))
-
-            self.smart_resume_var = tk.BooleanVar(value=self.smart_resume_enabled)
+            # self.smart_resume_var = tk.BooleanVar(value=self.smart_resume_enabled)
             self.speed_var = tk.DoubleVar(value=1.0)
-
-            self.smart_resume_check = ttk.Checkbutton(
-                checkboxes_row, text="Smart Resume",
-                style="Modern.TCheckbutton", variable=self.smart_resume_var,
-                command=self.toggle_smart_resume
-            )
-            self.smart_resume_check.pack(side=tk.LEFT, padx=(0, 10))
-
         # ------------------------------------------------------------------
         # Treeview expand/collapse event handlers
         # ------------------------------------------------------------------
@@ -3598,10 +3637,16 @@ def select_multiple_folders_and_play():
                 new_query = ""
             if new_query == self.search_query:
                 return
-            self.search_query = new_query
-            selected_dir = self.get_current_selected_directory()
-            if selected_dir:
-                self.load_subdirectories(selected_dir)
+            if hasattr(self, '_search_debounce_id'):
+                self.root.after_cancel(self._search_debounce_id)
+
+            def _do_search():
+                self.search_query = new_query
+                selected_dir = self.get_current_selected_directory()
+                if selected_dir:
+                    self.load_subdirectories(selected_dir)
+
+            self._search_debounce_id = self.root.after(300, _do_search)
 
         def clear_search(self):
             if hasattr(self, 'search_entry'):
@@ -4133,7 +4178,10 @@ def select_multiple_folders_and_play():
             if not selected_dir:
                 messagebox.showinfo("Information", "Please select a directory first.")
                 return
-            self.show_videos = bool(self.show_videos_var.get())
+            self.show_videos = not self.show_videos  # flip directly
+            if hasattr(self, 'show_videos_var'):
+                self.show_videos_var.set(self.show_videos)  # keep var in sync
+            self._refresh_dir_action_states()
             self.save_preferences()
             self.load_subdirectories(selected_dir, max_depth=self.current_max_depth)
 
@@ -5470,6 +5518,14 @@ def select_multiple_folders_and_play():
                                     activeforeground=c["fg"],
                                     relief="flat", bd=1, font=("Segoe UI", 10))
             playback_menu.add_cascade(label="Loop Mode", menu=loop_sub)
+            playback_menu.add_separator()
+            self.smart_resume_var = tk.BooleanVar(value=self.smart_resume_enabled)
+            playback_menu.add_checkbutton(
+                label="Smart Resume",
+                variable=self.smart_resume_var,
+                command=self.toggle_smart_resume,
+                selectcolor=_sel_color,
+            )
             make_toolbar_btn("Playback", menu=playback_menu)
 
             make_toolbar_btn("Settings", command=self._show_settings)
