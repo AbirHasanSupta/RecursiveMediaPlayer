@@ -506,6 +506,14 @@ class WatchHistoryUI:
                  font=("Segoe UI", 15, "bold"),
                  bg=t['header_bg'], fg=t['text']).pack(side=tk.LEFT, pady=14)
 
+        if self._embedded and self._close_callback:
+            close_btn = tk.Label(h_inner, text="✕", font=("Segoe UI", 14),
+                                 bg=t['header_bg'], fg=t['text_muted'], cursor="hand2", padx=10)
+            close_btn.pack(side=tk.RIGHT, pady=14)
+            close_btn.bind("<Button-1>", lambda e: self._close_history())
+            close_btn.bind("<Enter>", lambda e: close_btn.config(fg=t['accent_secondary']))
+            close_btn.bind("<Leave>", lambda e: close_btn.config(fg=t['text_muted']))
+
         self.stats_label = tk.Label(h_inner, text="",
                                     font=tp.small_font, bg=t['header_bg'], fg=t['text_muted'])
         self.stats_label.pack(side=tk.RIGHT, padx=(10, 0))

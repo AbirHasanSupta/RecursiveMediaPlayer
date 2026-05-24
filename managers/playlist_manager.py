@@ -257,7 +257,6 @@ class PlaylistUI:
         tp = self.theme_provider
         t = self._get_design_tokens()
 
-        # ── Header (icon + title + play button) ──────────────────────────────
         header = tk.Frame(self.playlist_window, bg=t['header_bg'], height=58)
         header._manager_role = "header"
         self._pl_header = header
@@ -266,7 +265,6 @@ class PlaylistUI:
         h_inner = tk.Frame(header, bg=t['header_bg'])
         h_inner.pack(fill=tk.BOTH, expand=True, padx=20, pady=0)
 
-        # left: icon + title
         title_box = tk.Frame(h_inner, bg=t['header_bg'])
         title_box.pack(side=tk.LEFT, fill=tk.Y)
         tk.Label(title_box, text="🎵", font=("Segoe UI Emoji", 18),
@@ -275,15 +273,21 @@ class PlaylistUI:
                  font=("Segoe UI", 15, "bold"),
                  bg=t['header_bg'], fg=t['text']).pack(side=tk.LEFT, pady=14)
 
+        if self._embedded and self._close_callback:
+            close_btn = tk.Label(h_inner, text="✕", font=("Segoe UI", 14),
+                                 bg=t['header_bg'], fg=t['text_muted'], cursor="hand2", padx=10)
+            close_btn.pack(side=tk.RIGHT, pady=14)
+            close_btn.bind("<Button-1>", lambda e: self._on_close())
+            close_btn.bind("<Enter>", lambda e: close_btn.config(fg=t['accent_secondary']))
+            close_btn.bind("<Leave>", lambda e: close_btn.config(fg=t['text_muted']))
+
         tk.Frame(self.playlist_window, bg=t['divider'], height=1).pack(fill=tk.X)
 
-        # ── Body (unchanged, but use t colours) ──────────────────────────────
         cols = tk.Frame(self.playlist_window, bg=t['bg'])
         cols._manager_role = "body"
         self._pl_cols = cols
         cols.pack(fill=tk.BOTH, expand=True, padx=20, pady=14)
 
-        # LEFT sidebar (width 310)
         left_card = tk.Frame(cols, bg=t['surface2'], width=310,
                              highlightbackground=t['border'], highlightthickness=1)
         left_card._manager_role = "surface2"
@@ -323,15 +327,10 @@ class PlaylistUI:
         pl_right = tk.Frame(pl_act, bg=t['surface2'])
         pl_right.pack(side=tk.RIGHT)
 
-        # self.delete_playlist_btn = tp.create_button(
-        #     pl_left, "Delete", self._delete_playlist, "danger", "md")
-        # self.delete_playlist_btn.pack(side=tk.LEFT)
-
         self.new_playlist_btn = tp.create_manager_action_link(
             pl_right, "＋  New playlist", self._create_new_playlist, style="playlist")
         self.new_playlist_btn.pack(side=tk.LEFT, padx=(0, 4))
 
-        # RIGHT area
         right_area = tk.Frame(cols, bg=t['bg'])
         right_area._manager_role = "body"
         self._pl_right_area = right_area
@@ -344,7 +343,6 @@ class PlaylistUI:
             font=tp.small_font, bg=t['bg'], fg=t['text_muted'])
         self.playlist_info_label.pack(side=tk.LEFT, anchor="w")
 
-        # Video list card
         right_card = tk.Frame(right_area, bg=t['surface'],
                               highlightbackground=t['border'], highlightthickness=1)
         right_card._manager_role = "surface"
@@ -383,11 +381,8 @@ class PlaylistUI:
         self.video_listbox.bind("<Leave>", self._on_mouse_leave)
         vid_sb.config(command=self.video_listbox.yview)
 
-        # ── Bottom bar (no Close) ────────────────────────────────────────────
         action = tk.Frame(self.playlist_window, bg=t['bg'])
         action.pack(fill=tk.X, padx=20, pady=(0, 14))
-        # No buttons here – the Playlist has no secondary actions that need a bottom bar.
-        # (Delete, New, Play are already in the sidebar.)
 
     def _select_all(self, event=None):
         self.video_listbox.selection_set(0, tk.END)
@@ -405,19 +400,7 @@ class PlaylistUI:
             return
         self._on_video_right_click(event)
 
-    def _on_close(self):
-        try:
-            if hasattr(self, '_right_click_binding') and self._right_click_binding:
-                self.video_listbox.unbind_all('<Button-3>')
-        except Exception:
-            pass
-
-        if self.playlist_window and self.playlist_window.winfo_exists():
-            self.playlist_window.destroy()
-        self.playlist_window = None
-
     def _on_playlist_right_click(self, event):
-        """Show context menu for selected playlists."""
         selection = self.playlist_listbox.curselection()
         if not selection:
             return
@@ -437,11 +420,9 @@ class PlaylistUI:
 
         menu = self.theme_provider.create_manager_context_menu(self.playlist_window)
 
-        # Grid View – works for any number of playlists
         menu.add_command(label="⊞  Open in Gallery",
                          command=lambda: self._open_grid_view_for_playlists(selected_playlists))
 
-        # Edit Info – only for single selection
         if len(selected_playlists) == 1:
             menu.add_separator()
             menu.add_command(label="✎  Edit Info", command=self._edit_playlist_info)
@@ -455,7 +436,6 @@ class PlaylistUI:
             menu.grab_release()
 
     def _open_grid_view_for_playlists(self, playlists):
-        """Collect videos from one or more playlists, deduplicate, and open in grid view."""
         if not self.grid_view_manager:
             messagebox.showwarning("Warning", "Grid view not available", parent=self.playlist_window)
             return
@@ -847,16 +827,6 @@ class PlaylistUI:
             refresh()
         else:
             self.parent.after(0, refresh)
-
-    def _on_close(self):
-        try:
-            self.video_listbox.unbind_all('<Button-3>')
-        except Exception:
-            pass
-
-        if self.playlist_window and self.playlist_window.winfo_exists():
-            self.playlist_window.destroy()
-        self.playlist_window = None
 
     def _on_playlist_select(self, event):
         # Prevent recursive calls

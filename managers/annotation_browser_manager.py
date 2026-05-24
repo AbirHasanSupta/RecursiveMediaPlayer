@@ -599,6 +599,13 @@ class AnnotationBrowserManager:
                  font=("Segoe UI Semibold", 15) if tp.dark_mode else ("Segoe UI", 15, "bold"),
                  bg=P["header_bg"], fg=tp.text_color).pack(side=tk.LEFT, pady=14)
 
+        if self._embedded and self._close_callback:
+            close_btn = tk.Label(h_inner, text="✕", font=("Segoe UI", 14),
+                                 bg=P["header_bg"], fg=P["text_muted"], cursor="hand2", padx=10)
+            close_btn.pack(side=tk.RIGHT, pady=14)
+            close_btn.bind("<Button-1>", lambda e: self._on_close())
+            close_btn.bind("<Enter>", lambda e: close_btn.config(fg=P["accent"]))
+            close_btn.bind("<Leave>", lambda e: close_btn.config(fg=P["text_muted"]))
 
         tk.Frame(win, bg=P["sep"], height=1).pack(fill=tk.X)
 
