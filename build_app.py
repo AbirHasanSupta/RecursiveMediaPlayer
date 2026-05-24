@@ -19,7 +19,7 @@ import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 
-from key_press import listen_keys, cleanup_hotkeys, reload_hotkeys
+from key_press import reload_hotkeys
 from managers.favorites_manager import FavoritesManager
 from managers.filter_sort_manager import AdvancedFilterSortManager
 from managers.filter_sort_ui import FilterSortUI
@@ -1984,6 +1984,7 @@ def select_multiple_folders_and_play():
                     self._dir_resizer.pack_forget()
                 if hasattr(self, '_sb_toggle_btn'):
                     self._sb_toggle_btn.config(text="▷")
+                self.workspace_frame.pack_configure(padx=(10, 0))
                 return
 
             if not self.dir_section.winfo_ismapped():
@@ -1993,6 +1994,7 @@ def select_multiple_folders_and_play():
                 self._dir_resizer.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10), before=self.workspace_frame)
             if hasattr(self, '_sb_toggle_btn'):
                 self._sb_toggle_btn.config(text="◁")
+            self.workspace_frame.pack_configure(padx=(0, 0))
 
         def on_directory_focus_out(self, event):
             selection = self.dir_listbox.curselection()
@@ -2004,10 +2006,6 @@ def select_multiple_folders_and_play():
                 self.dir_listbox.selection_clear(0, tk.END)
                 self.dir_listbox.selection_set(self.current_selected_dir_index)
                 self.dir_listbox.activate(self.current_selected_dir_index)
-
-        # ------------------------------------------------------------------
-        # Treeview setup — replaces tk.Listbox for the exclusion panel
-        # ------------------------------------------------------------------
 
         def _configure_tree_style(self):
             self._configure_directory_ttk_styles()
