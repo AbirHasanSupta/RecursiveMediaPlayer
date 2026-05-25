@@ -239,6 +239,21 @@ class WatchHistoryService:
             self.storage.save_history(self._history)
             return entry
 
+    def update_entry(self, entry_id: str, duration_watched: int, total_duration: int) -> bool:
+        with self._lock:
+            for entry in self._history:
+                if entry.id == entry_id:
+                    entry.duration_watched = duration_watched
+                    entry.total_duration = total_duration
+                    if total_duration > 0:
+                        entry.completion_percentage = (duration_watched / total_duration) * 100
+                    entry.watched_at = datetime.now().isoformat()
+                    self._history.remove(entry)
+                    self._history.insert(0, entry)
+                    self.storage.save_history(self._history)
+                    return True
+            return False
+
     def remove_entry(self, entry_id: str) -> bool:
         with self._lock:
             for entry in self._history:
@@ -1112,6 +1127,12 @@ class WatchHistoryManager:
 
         self._last_video_path = None
         self._last_start_time = None
+        self._resume_entry_id = None
+        self._resume_video_path = None
+
+    def set_resume_entry(self, video_path: str, entry_id: str):
+        self._resume_video_path = os.path.normpath(video_path)
+        self._resume_entry_id = entry_id
 
     def set_settings_manager(self, settings_manager):
         self.settings_manager = settings_manager
@@ -1162,14 +1183,18 @@ class WatchHistoryManager:
     def track_video_end(self, video_path: str, duration_watched: int = 0, total_duration: int = 0):
         if not self._should_track_history():
             return
-        if video_path and os.path.exists(video_path):
+        if not video_path or not os.path.exists(video_path):
+            return
+        norm_path = os.path.normpath(video_path)
+        if self._resume_entry_id and self._resume_video_path == norm_path:
+            self.service.update_entry(self._resume_entry_id, duration_watched, total_duration)
+            self._resume_entry_id = None
+            self._resume_video_path = None
+        else:
             self.service.add_watch_entry(video_path, duration_watched, total_duration)
 
     def track_video_playback(self, video_path: str, duration_watched: int = 0, total_duration: int = 0):
-        if not self._should_track_history():
-            return
-        if video_path and os.path.exists(video_path):
-            self.service.add_watch_entry(video_path, duration_watched, total_duration)
+        self.track_video_end(video_path, duration_watched, total_duration)
 
     def get_recent_videos(self, count: int = 10) -> List[WatchHistoryEntry]:
         all_history = self.service.get_all_history()

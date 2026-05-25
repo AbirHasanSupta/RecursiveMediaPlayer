@@ -4914,18 +4914,16 @@ def select_multiple_folders_and_play():
 
             norm_path = os.path.normpath(video_path)
 
-            # 1. Try the resume service directly (bypasses the enabled flag)
             saved_pos = self.resume_manager.service.get_resume_position(norm_path)
 
-            # 2. Fall back: derive position from watch history
             if saved_pos is None and hasattr(self, 'watch_history_manager'):
                 try:
                     all_hist = self.watch_history_manager.service.get_all_history()
                     for _he in sorted(all_hist, key=lambda x: x.watched_at, reverse=True):
                         if os.path.normpath(_he.video_path) == norm_path:
                             if _he.duration_watched > 0 and _he.total_duration > 0:
-                                _pos_ms  = int(_he.duration_watched * 1000)
-                                _dur_ms  = int(_he.total_duration * 1000)
+                                _pos_ms = int(_he.duration_watched * 1000)
+                                _dur_ms = int(_he.total_duration * 1000)
                                 self.resume_manager.service.update_position(
                                     norm_path, _pos_ms, _dur_ms)
                                 saved_pos = self.resume_manager.service.get_resume_position(
@@ -4934,21 +4932,29 @@ def select_multiple_folders_and_play():
                 except Exception:
                     pass
 
+            if hasattr(self, 'watch_history_manager'):
+                try:
+                    all_hist = self.watch_history_manager.service.get_all_history()
+                    for _he in sorted(all_hist, key=lambda x: x.watched_at, reverse=True):
+                        if os.path.normpath(_he.video_path) == norm_path:
+                            self.watch_history_manager.set_resume_entry(norm_path, _he.id)
+                            break
+                except Exception:
+                    pass
+
             vdir = os.path.dirname(video_path)
             player = self._make_player(
                 [video_path], {video_path: vdir}, [vdir], 0)
 
-            # 3. Temporarily force resume on so the player seeks on start
             _orig_enabled = self.resume_manager._resume_enabled
             if saved_pos is not None:
                 self.resume_manager.set_resume_enabled(True)
 
             self._launch_player(player)
 
-            # 4. Restore original flag after player has had time to seek
             if saved_pos is not None and not _orig_enabled:
                 self.root.after(3000,
-                    lambda: self.resume_manager.set_resume_enabled(_orig_enabled))
+                                lambda: self.resume_manager.set_resume_enabled(_orig_enabled))
 
         def _play_history_videos(self, videos):
             if not videos:
