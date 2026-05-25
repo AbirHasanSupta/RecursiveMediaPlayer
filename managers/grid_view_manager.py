@@ -1936,24 +1936,32 @@ class GridViewManager:
         except Exception as e:
             if self.console_callback:
                 self.console_callback(f"Error showing properties: {e}")
+            self.theme_provider.toast.error("Error", f"Could not show properties: {e}")
 
     # ─────────────────────────────────────────────────────────────────────────
     # Exclude / include (original)
     # ─────────────────────────────────────────────────────────────────────────
 
     def _exclude_selected(self):
-        for vp in list(self.selected_items):
+        vs = list(self.selected_items)
+        for vp in vs:
             self.excluded_items.add(vp)
             self._update_card_selection(vp)
             if self.exclude_video_callback:
                 self.exclude_video_callback(vp)
+        if vs:
+            self.theme_provider.toast.warning("Excluded", f"{len(vs)} video{'s' if len(vs) != 1 else ''} excluded")
 
     def _remove_exclusion_selected(self):
-        for vp in list(self.selected_items):
+        vs = list(self.selected_items)
+        for vp in vs:
             self.excluded_items.discard(vp)
             self._update_card_selection(vp)
             if self.remove_exclusion_video_callback:
                 self.remove_exclusion_video_callback(vp)
+        if vs:
+            self.theme_provider.toast.success("Included",
+                                              f"{len(vs)} video{'s' if len(vs) != 1 else ''} exclusion removed")
 
     def get_excluded_items(self):
         return set(self.excluded_items)

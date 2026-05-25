@@ -961,6 +961,7 @@ class PlaylistUI:
             if self.log_callback:
                 self.log_callback(f"Playlist '{name}' created")
             self._refresh_playlist_list()
+            self.theme_provider.toast.success("Playlist Created", f"'{name}' created")
 
     def _edit_playlist_info(self):
         if not self.current_playlist:
@@ -990,7 +991,6 @@ class PlaylistUI:
         if not self.current_playlist:
             self.theme_provider.toast.warning("Warning", "Please select a playlist to delete")
             return
-
         result = messagebox.askyesno(
             "Confirm Deletion",
             f"Are you sure you want to delete playlist '{self.current_playlist.name}'?",
@@ -1006,6 +1006,7 @@ class PlaylistUI:
             self._refresh_playlist_list()
             self._refresh_video_list()
             self.playlist_info_label.config(text="Select a playlist to view videos")
+            self.theme_provider.toast.success("Deleted", f"Playlist '{deleted_name}' deleted")
 
     def _remove_selected_videos(self):
         if not self.current_playlist:
@@ -1023,6 +1024,8 @@ class PlaylistUI:
                 f"Removed {len(selection)} video{'s' if len(selection) > 1 else ''} from '{self.current_playlist.name}'")
         self._refresh_video_list()
         self._refresh_playlist_list()
+        self.theme_provider.toast.success("Removed",
+                                          f"{len(selection)} video{'s' if len(selection) > 1 else ''} removed from '{self.current_playlist.name}'")
 
     def _play_playlist(self):
         if not self.current_playlist or not self.current_playlist.videos:

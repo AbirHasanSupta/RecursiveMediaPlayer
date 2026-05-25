@@ -971,8 +971,11 @@ class QueueUI:
 
     def _remove_selected(self):
         selection = self._get_tv_selected_indices()
-        if selection and self.queue_service.remove_from_queue(selection) > 0:
+        removed = self.queue_service.remove_from_queue(selection) if selection else 0
+        if removed > 0:
             self._refresh_queue()
+            self.theme_provider.toast.success("Removed",
+                                              f"{removed} video{'s' if removed != 1 else ''} removed from queue")
 
     def _clear_played(self):
         removed = self.queue_service.clear_played()
@@ -981,13 +984,17 @@ class QueueUI:
             self.theme_provider.toast.info("Success", f"Removed {removed} played videos from queue")
 
     def _clear_queue(self):
+        count = len(self.queue_service.get_queue())
+        if count == 0:
+            return
         result = messagebox.askyesno(
             "Confirm Clear",
             "Clear entire queue?",
             parent=self.queue_window
         )
         if result:
-            self.theme_provider.toast.success("Empty Queue", "Queue Cleared")
+            self.theme_provider.toast.success("Queue Cleared",
+                                              f"Cleared {count} video{'s' if count != 1 else ''} from queue")
             self.queue_service.clear_queue()
             self._refresh_queue()
 

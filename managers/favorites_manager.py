@@ -992,6 +992,7 @@ class FavoritesUI:
             removed += self.favorite_service.remove_multiple_from_favorites(video_paths, directory)
         if removed > 0:
             self._refresh_favorites_list()
+            self.theme_provider.toast.success("Removed", f"{removed} favorite{'s' if removed != 1 else ''} removed")
             if self._on_removed_callback:
                 self._on_removed_callback()
 
@@ -1006,6 +1007,8 @@ class FavoritesUI:
         )
 
         if result:
+            count = len(self.favorite_entries)
+            self.theme_provider.toast.success("Cleared", f"Removed all {count} favorite{'s' if count != 1 else ''}")
             for directory in self.current_directories:
                 self.favorite_service.clear_favorites_for_directory(directory)
             self._refresh_favorites_list()

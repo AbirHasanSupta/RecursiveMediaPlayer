@@ -1086,6 +1086,8 @@ class WatchHistoryUI:
         removed_count = self.history_service.remove_entries(entry_ids)
         if removed_count > 0:
             self._refresh_history_list()
+            self.theme_provider.toast.success("Removed",
+                                              f"{removed_count} entr{'ies' if removed_count != 1 else 'y'} removed from history")
 
     def _clear_all_history(self):
         total_entries = len(self.history_service.get_all_history())
@@ -1100,7 +1102,7 @@ class WatchHistoryUI:
 
         if result:
             self.history_service.clear_all_history()
-            self.theme_provider.toast.info("Success", "All watch history has been cleared")
+            self.theme_provider.toast.success("Cleared", f"All {total_entries} history entries cleared")
             self._refresh_history_list()
 
     def _on_history_double_click(self, event):

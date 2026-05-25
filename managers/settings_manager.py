@@ -994,6 +994,7 @@ class SettingsUI:
                 for aid, b in self._hotkey_btn_map.items():
                     b.config(text=self._hotkeys_draft.get(aid, '—'),
                              bg=badge_bg, fg=badge_fg, relief=tk.FLAT, highlightbackground=badge_border)
+                self.theme_provider.toast.success("Shortcuts Reset", "All shortcuts restored to defaults")
 
         tp.create_modern_button(
             reset_frame, "Reset Shortcuts to Defaults", _reset_shortcuts, "warning", "sm"
@@ -1172,6 +1173,7 @@ class SettingsUI:
         result = messagebox.askyesno("Confirm Reset", "Reset all settings to default values?")
         if result:
             self._populate_ui_from_settings(SettingsData())
+            self.theme_provider.toast.success("Settings Reset", "All settings restored to defaults")
 
     def _populate_ui_from_settings(self, settings: SettingsData):
         if self.ai_index_path_var:

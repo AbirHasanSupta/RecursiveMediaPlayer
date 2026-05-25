@@ -423,6 +423,8 @@ class AnnotationBrowserManager:
                 self.svc.add_tag(path, tag)
             dlg.destroy()
             self.refresh()
+            self.tp.toast.success("Tag Added",
+                                  f'"{tag}" added to {len(targets)} video{"s" if len(targets) != 1 else ""}')
 
         tp.create_modern_button(btns, "Create", do_save, "primary", "md").pack(side=tk.RIGHT, padx=(8, 0))
         tp.create_modern_button(btns, "Cancel", dlg.destroy, "secondary", "md").pack(side=tk.RIGHT)
@@ -479,6 +481,7 @@ class AnnotationBrowserManager:
             self.svc.create_empty_tag(tag)
             dlg.destroy()
             self.refresh()
+            self.tp.toast.success("Tag Created", f'Tag: "{tag}" created')
 
         tp.create_button(btns, "Create", do_save, "primary", "md").pack(side=tk.RIGHT, padx=(8, 0))
         tp.create_button(btns, "Cancel", dlg.destroy, "secondary", "md").pack(side=tk.RIGHT)
@@ -1106,6 +1109,7 @@ class AnnotationBrowserManager:
             self.svc._schedule_save()
         self._selected_tags.discard(tag)
         self.refresh()
+        self.tp.toast.success("Tag Deleted", f'"{tag}" removed from {count} video{"s" if count != 1 else ""}')
 
     def _rename_tag(self, old_tag):
         tp = self.tp
@@ -1165,6 +1169,7 @@ class AnnotationBrowserManager:
                 self._selected_tags.add(new_tag)
             dlg.destroy()
             self.refresh()
+            self.tp.toast.success("Tag Renamed", f'Tag Renamed: "{old_tag}" → "{new_tag}"')
 
         tp.create_modern_button(btns, "Rename", do_rename, "primary", "md").pack(side=tk.RIGHT, padx=(8, 0))
         tp.create_modern_button(btns, "Cancel", dlg.destroy, "secondary", "md").pack(side=tk.RIGHT)
@@ -1690,6 +1695,12 @@ class AnnotationBrowserManager:
                 for bm in list(self.svc.get_bookmarks(path)):
                     self.svc.remove_bookmark(path, bm["ms"])
         self.refresh()
+        parts = []
+        if rating: parts.append("ratings")
+        if tags: parts.append("tags")
+        if bookmarks: parts.append("bookmarks")
+        self.tp.toast.success("Cleared",
+                              f"Removed {', '.join(parts)} from {len(paths)} video{'s' if len(paths) != 1 else ''}")
 
     def _open_grid_view_from_selection(self, selection):
         if not self.grid_view_manager:
@@ -1707,6 +1718,7 @@ class AnnotationBrowserManager:
         try:
             self.root.clipboard_clear()
             self.root.clipboard_append(path)
+            self.tp.toast.info("Copied", f"Path copied to clipboard")
         except Exception:
             pass
 

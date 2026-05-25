@@ -567,6 +567,7 @@ def select_multiple_folders_and_play():
                 self._play_grid_videos(played)
             if added:
                 self.update_console(f"Dropped {added} director{'ies' if added > 1 else 'y'}")
+                self.toast.success("Dropped", f"{added} director{'ies' if added > 1 else 'y'} Dropped")
 
         def setup_theme(self):
             # Dashboard-aligned palette (apply_theme refines for dark mode)
@@ -1444,6 +1445,7 @@ def select_multiple_folders_and_play():
                         )
                 except Exception as e:
                     self.update_console(f"Error scanning {dir_path}: {e}")
+                    self.toast.error("Scan Failed", f"Error scanning '{os.path.basename(dir_path)}'")
                 finally:
                     with self._pending_scans_lock:
                         self.pending_scans.discard(dir_path)
@@ -4043,6 +4045,8 @@ def select_multiple_folders_and_play():
                 if messagebox.askyesno("Confirm", f"Clear all exclusions for {os.path.basename(selected_dir)}?"):
                     if had_subdir: del self.excluded_subdirs[selected_dir]
                     if had_video:  del self.excluded_videos[selected_dir]
+                    self.toast.success("Exclusions Cleared",
+                                       f"Cleared {count} exclusion{'s' if count != 1 else ''} for '{os.path.basename(selected_dir)}'")
                     self.update_console(f"Cleared all {count} exclusions for '{os.path.basename(selected_dir)}'")
                     if self.save_directories:
                         self.save_preferences()
@@ -4429,6 +4433,8 @@ def select_multiple_folders_and_play():
                                 selected_videos.append(full)
             if selected_videos:
                 count = self.favorites_manager.add_to_favorites(selected_videos, selected_dir)
+                if count > 0:
+                    self.toast.success("Favorites", f"{count} video{'s' if count != 1 else ''} added to favorites")
                 self.update_console(f"Added {count} video(s) to favorites")
                 scroll_pos = self._tree_yview()
                 self.load_subdirectories(selected_dir, restore_scroll=scroll_pos)
@@ -4453,6 +4459,8 @@ def select_multiple_folders_and_play():
             if selected_videos:
                 count = self.favorites_manager.remove_from_favorites(selected_videos, selected_dir)
                 self.update_console(f"Removed {count} video(s) from favorites")
+                if count > 0:
+                    self.toast.success("Favorites", f"{count} video{'s' if count != 1 else ''} removed from favorites")
                 scroll_pos = self._tree_yview()
                 self.load_subdirectories(selected_dir, max_depth=self.current_max_depth, restore_scroll=scroll_pos)
 
@@ -4484,6 +4492,8 @@ def select_multiple_folders_and_play():
                                 selected_videos.append(full)
             if selected_videos:
                 self.playlist_manager.add_videos_to_playlist([], selected_videos)
+                self.toast.success("Playlist",
+                                   f"{len(selected_videos)} video{'s' if len(selected_videos) != 1 else ''} added to playlist")
 
         def _context_copy_selected(self, selection):
             paths_to_copy = [self.current_subdirs_mapping[iid]
@@ -4501,16 +4511,21 @@ def select_multiple_folders_and_play():
                     wcb.SetClipboardData(win32con.CF_HDROP, data)
                     wcb.CloseClipboard()
                     self.update_console(f"Copied {len(paths_to_copy)} item(s) to clipboard")
+                    self.toast.success("Copied",
+                                       f"{len(paths_to_copy)} item{'s' if len(paths_to_copy) != 1 else ''} copied to clipboard")
                 except Exception as e:
                     self.update_console(f"Error copying to clipboard: {e}")
+                    self.toast.error("Copy Failed", f"Could not copy to clipboard: {e}")
 
         def _context_copy_path(self, file_path):
             try:
                 self.root.clipboard_clear()
                 self.root.clipboard_append(file_path)
                 self.update_console(f"Copied path: {file_path}")
+                self.toast.success("Copied", "Path copied to clipboard")
             except Exception as e:
                 self.update_console(f"Error copying path: {e}")
+                self.toast.error("Copy Failed", f"Could not copy path: {e}")
 
         def locate_in_directory_panel(self, video_path):
             if not video_path or not os.path.isfile(video_path):
@@ -4755,8 +4770,10 @@ def select_multiple_folders_and_play():
                 if mode == "next":
                     count = self.queue_manager.play_next(final_videos, added_from="selection")
                     self.update_console(f"Added {count} videos to play next in queue")
+                    self.toast.success("Play Next", f"{count} video{'s' if count != 1 else ''} added to play next")
                 else:
                     count = self.queue_manager.add_to_queue(final_videos, added_from="selection")
+                    self.toast.success("Queue", f"{count} video{'s' if count != 1 else ''} added to queue")
                     self.update_console(f"Added {count} videos to queue")
             else:
                 self.toast.warning("Warning", "No valid videos found in selection")
@@ -5149,6 +5166,7 @@ def select_multiple_folders_and_play():
                 self.update_console(f"Added directory: {directory}")
                 self.update_console(f"Scanning '{os.path.basename(directory)}' for videos…")
                 self._submit_scan(directory)
+                self.toast.success("Directory Added", f"'{os.path.basename(directory)}' added — scanning…")
                 self.update_video_count()
                 self.save_preferences()
                 new_idx = len(self.selected_dirs) - 1
@@ -5197,6 +5215,8 @@ def select_multiple_folders_and_play():
                 if self.current_selected_dir_index >= len(self.selected_dirs):
                     self.current_selected_dir_index = None
 
+            self.toast.success("Removed",
+                               f"Removed {len(selected_indices)} director{'ies' if len(selected_indices) > 1 else 'y'}")
             self.update_video_count()
             self.clear_exclusion_list()
             self.save_preferences()
