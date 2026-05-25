@@ -911,25 +911,23 @@ class VideoPreviewManager:
         self.current_listbox = None
         self.current_mapping = None
         self.right_clicked_item = None
-
+        self._position_preview_cache: Dict[str, str] = {}
+        self._position_preview_lock = threading.Lock()
 
         self._load_thumbnails()
 
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
 
     def _cleanup(self):
         try:
             self._prefetch.stop()
             self._cancel_save_timer()
             self.seek_preview.clear()
-            # Always flush index on exit — even if not dirty — so any
-            # blobs written this session are indexed for next startup.
             self._flush_index()
             if hasattr(self, "tooltip"):
                 self.tooltip.hide_preview()
             self.lru_cache.clear()
+            with self._position_preview_lock:
+                self._position_preview_cache.clear()
             with self._lock:
                 self._thumbnails.clear()
                 self._generation_queue.clear()
@@ -1233,6 +1231,90 @@ class VideoPreviewManager:
             already_queued = norm in self._generation_queue
         if not already_queued:
             self._generate_thumbnail_async(norm, x, y)
+
+    def show_preview_at_position(self, video_path: str, position_sec: float, x: int, y: int):
+        norm = os.path.normpath(video_path)
+        cache_key = f"{norm}@{int(position_sec)}"
+
+        with self._position_preview_lock:
+            cached_td = self._position_preview_cache.get(cache_key)
+        if cached_td:
+            self.tooltip.show_preview(video_path, cached_td, x, y)
+            return
+
+        def _work():
+            try:
+                import tempfile, base64
+                from pathlib import Path as _Path
+
+                cap = cv2.VideoCapture(norm)
+                if not cap.isOpened():
+                    return
+                fps          = cap.get(cv2.CAP_PROP_FPS) or 25
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                vid_w        = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                vid_h        = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+                start_frame = max(0, min(int(position_sec * fps), total_frames - 1))
+                cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+                MAX_DIM = 480
+                if vid_w >= vid_h:
+                    tw     = MAX_DIM
+                    th_dim = max(2, int(vid_h * MAX_DIM / vid_w) & ~1)
+                else:
+                    th_dim = MAX_DIM
+                    tw     = max(2, int(vid_w * MAX_DIM / vid_h) & ~1)
+
+                out_fps    = max(6.0, min(fps / 2.0, 15.0))
+                max_frames = int(fps * 10)
+
+                fd, tmp_path = tempfile.mkstemp(suffix=".mp4")
+                os.close(fd)
+                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                out = cv2.VideoWriter(tmp_path, fourcc, out_fps, (tw, th_dim))
+                if not out.isOpened():
+                    cap.release()
+                    _safe_unlink(tmp_path)
+                    return
+
+                captured = 0
+                read_count = 0
+                while read_count < max_frames:
+                    ret, frame = cap.read()
+                    if not ret or frame is None:
+                        break
+                    read_count += 1
+                    if read_count % 2 != 0:
+                        continue
+                    small = cv2.resize(frame, (tw, th_dim), interpolation=cv2.INTER_AREA)
+                    out.write(small)
+                    captured += 1
+
+                cap.release()
+                out.release()
+
+                if captured < 3:
+                    _safe_unlink(tmp_path)
+                    return
+
+                raw = _Path(tmp_path).read_bytes()
+                _safe_unlink(tmp_path)
+
+                if len(raw) > 5 * 1024 * 1024:
+                    return
+
+                td = "VIDEO:" + base64.b64encode(raw).decode("ascii")
+
+                with self._position_preview_lock:
+                    self._position_preview_cache[cache_key] = td
+
+                self.parent.after(0, lambda: self.tooltip.show_preview(video_path, td, x, y))
+            except Exception as ex:
+                if self.console_callback:
+                    self.console_callback(f"[PositionPreview] {ex}")
+
+        ManagedThread(target=_work, name="CWPositionPreview").start()
 
     def _generate_thumbnail_async(self, video_path: str, x: int, y: int):
         with self._lock:

@@ -514,10 +514,12 @@ class AnnotationBrowserManager:
 
         # ── Header ────────────────────────────────────────────────────────────
         header = tk.Frame(win, bg=P["header_bg"], height=58)
+        header._ann_role = "header"
         header.pack(fill=tk.X)
         header.pack_propagate(False)
 
         h_inner = tk.Frame(header, bg=P["header_bg"])
+        h_inner._ann_role = "header"
         h_inner.pack(fill=tk.BOTH, expand=True, padx=20, pady=0)
 
         title_box = tk.Frame(h_inner, bg=P["header_bg"])
@@ -543,12 +545,15 @@ class AnnotationBrowserManager:
 
         # ── Filter bar ────────────────────────────────────────────────────────
         fbar = tk.Frame(win, bg=P["sidebar"])
+        fbar._ann_role = "filter"
         fbar.pack(fill=tk.X)
 
         fb = tk.Frame(fbar, bg=P["sidebar"])
+        fb._ann_role = "filter"
         fb.pack(fill=tk.X, padx=20, pady=10)
 
         search_wrap = tk.Frame(fb, bg=P["sidebar"])
+        search_wrap._ann_role = "filter"
         search_wrap.pack(side=tk.LEFT, padx=(0, 20))
 
         tk.Label(search_wrap, text="SEARCH TAGS", font=("Segoe UI", 7, "bold"),
@@ -557,6 +562,8 @@ class AnnotationBrowserManager:
         search_entry_frame = tk.Frame(search_wrap, bg=P["search_bg"],
                                       highlightbackground=P["sep"],
                                       highlightthickness=1)
+        search_entry_frame._ann_role = "search"
+        self._search_entry_frame = search_entry_frame
         search_entry_frame.pack(fill=tk.X, pady=(2, 0))
 
         self._search_var = tk.StringVar()
@@ -575,12 +582,14 @@ class AnnotationBrowserManager:
                       lambda e: search_entry_frame.config(highlightbackground=P["sep"]))
 
         rating_wrap = tk.Frame(fb, bg=P["sidebar"])
+        rating_wrap._ann_role = "filter"
         rating_wrap.pack(side=tk.LEFT, padx=(0, 20))
 
         tk.Label(rating_wrap, text="MIN RATING", font=("Segoe UI", 7, "bold"),
                  bg=P["sidebar"], fg=tp.muted_fg).pack(anchor="w")
 
         rb_row = tk.Frame(rating_wrap, bg=P["sidebar"])
+        rb_row._ann_role = "filter"
         rb_row.pack(pady=(2, 0))
 
         self._rating_var = tk.IntVar(value=0)
@@ -638,10 +647,12 @@ class AnnotationBrowserManager:
 
         # ── Body: sidebar + main ──────────────────────────────────────────────
         body = tk.Frame(win, bg=P["panel"])
+        body._ann_role = "panel"
         body.pack(fill=tk.BOTH, expand=True)
 
         # ── LEFT sidebar ──────────────────────────────────────────────────────
         sidebar = tk.Frame(body, bg=P["sidebar"], width=220)
+        sidebar._ann_role = "sidebar"
         sidebar.pack(side=tk.LEFT, fill=tk.Y)
         sidebar.pack_propagate(False)
 
@@ -822,24 +833,47 @@ class AnnotationBrowserManager:
             P = _p(tp.dark_mode, tp)
             self._win.configure(bg=P["panel"])
 
+            _role_bg = {
+                "header": P["header_bg"],
+                "filter": P["sidebar"],
+                "search": P["search_bg"],
+                "sidebar": P["sidebar"],
+                "detail":  P["detail_bg"],
+                "status":  P["status_bg"],
+                "panel":   P["panel"],
+            }
+
             def _walk(widget):
                 try:
                     if isinstance(widget, tk.Frame):
                         role = getattr(widget, "_ann_role", None)
-                        if role == "header":
-                            widget.configure(bg=P["header_bg"])
-                        elif role == "sidebar":
-                            widget.configure(bg=P["sidebar"])
-                        elif role == "detail":
-                            widget.configure(bg=P["detail_bg"])
-                        elif role == "status":
-                            widget.configure(bg=P["status_bg"])
-                        elif role == "panel":
-                            widget.configure(bg=P["panel"])
-                        elif role == "filter":
-                            widget.configure(bg=P["sidebar"])
-                        else:
-                            pass
+                        if role in _role_bg:
+                            hl = widget.cget("highlightthickness")
+                            if role == "search" and hl:
+                                widget.configure(bg=P["search_bg"],
+                                                 highlightbackground=P["sep"])
+                            else:
+                                widget.configure(bg=_role_bg[role])
+
+                    elif isinstance(widget, tk.Label):
+                        # skip pills and special-colored labels
+                        if getattr(widget, "_modern_btn", False):
+                            return
+                        parent_role = getattr(widget.master, "_ann_role", None)
+                        if parent_role in _role_bg and parent_role != "search":
+                            bg = _role_bg[parent_role]
+                            try:
+                                widget.configure(bg=bg)
+                            except tk.TclError:
+                                pass
+
+                    elif isinstance(widget, tk.Entry):
+                        parent_role = getattr(widget.master, "_ann_role", None)
+                        if parent_role == "search":
+                            widget.configure(
+                                bg=P["search_bg"], fg=tp.entry_fg,
+                                insertbackground=tp.entry_fg)
+
                     for child in widget.winfo_children():
                         _walk(child)
                 except tk.TclError:
@@ -849,6 +883,13 @@ class AnnotationBrowserManager:
             tp.restyle_manager_buttons(self._win)
             tp.restyle_manager_action_links(self._win)
             self._update_rb_visuals(P)
+            # re-sync search entry frame border if stored
+            if hasattr(self, '_search_entry_frame'):
+                try:
+                    self._search_entry_frame.configure(
+                        bg=P["search_bg"], highlightbackground=P["sep"])
+                except tk.TclError:
+                    pass
             self._start_async_load()
         except Exception:
             pass

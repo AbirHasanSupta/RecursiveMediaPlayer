@@ -728,18 +728,17 @@ def select_multiple_folders_and_play():
                 child.destroy()
             frame.pack(fill=tk.BOTH, expand=True)
 
-            bg      = self.bg_color
+            bg = self.bg_color
             surface = self.surface_color
             surface2 = self.alt_row_color
-            border  = self.border_color
+            border = self.border_color
             text_pri = self.text_color
             text_sec = self.text_muted
-            accent  = self.accent_color
+            accent = self.accent_color
             accent2 = self.accent_secondary
 
             frame.configure(bg=bg)
 
-            # ── shared helpers ────────────────────────────────────────────
             def _bind_hover(card_f, inner_f, cmd, col):
                 def _enter(e):
                     card_f.config(bg=self.hover_color, highlightbackground=col)
@@ -767,18 +766,17 @@ def select_multiple_folders_and_play():
                     except Exception:
                         pass
 
-            # ── gather analytics data ─────────────────────────────────────
             hist_stats = {}
             all_history = []
             if hasattr(self, 'watch_history_manager'):
                 try:
-                    hist_stats  = self.watch_history_manager.get_history_stats()
+                    hist_stats = self.watch_history_manager.get_history_stats()
                     all_history = self.watch_history_manager.service.get_all_history()
                 except Exception:
                     pass
 
-            today_n  = hist_stats.get('today_count', 0)
-            week_n   = hist_stats.get('week_count', 0)
+            today_n = hist_stats.get('today_count', 0)
+            week_n = hist_stats.get('week_count', 0)
             unique_n = hist_stats.get('unique_videos', 0)
 
             avg_pct = 0.0
@@ -810,11 +808,7 @@ def select_multiple_folders_and_play():
 
             pct_watched = (unique_n / total_lib_vids * 100) if total_lib_vids > 0 else 0
 
-            # ── scrollable root ───────────────────────────────────────────
             canvas = tk.Canvas(frame, bg=bg, highlightthickness=0, bd=0)
-            # vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=canvas.yview)
-            # canvas.configure(yscrollcommand=vsb.set)
-            # vsb.pack(side=tk.RIGHT, fill=tk.Y)
             canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
             inner = tk.Frame(canvas, bg=bg)
@@ -868,10 +862,10 @@ def select_multiple_folders_and_play():
             total_vids = total_lib_vids
 
             stat_data = [
-                ("📁", str(total_dirs),       "Directories",    accent,    None),
-                ("🎬", str(total_vids),        "Videos",         accent2,   None),
-                ("📅", str(today_n),           "Watched Today",  "#06b6d4", self._show_watch_history),
-                ("✓",  f"{avg_pct:.0f}%",      "Avg Completion", "#34c98a", self._show_watch_history),
+                ("📁", str(total_dirs), "Directories", accent, None),
+                ("🎬", str(total_vids), "Videos", accent2, None),
+                ("📅", str(today_n), "Watched Today", "#06b6d4", self._show_watch_history),
+                ("✓", f"{avg_pct:.0f}%", "Avg Completion", "#34c98a", self._show_watch_history),
             ]
 
             stats_row = tk.Frame(left_col, bg=bg)
@@ -903,14 +897,13 @@ def select_multiple_folders_and_play():
                         w.bind("<Enter>", lambda e, f=card: f.config(bg=self.hover_color, highlightbackground=accent))
                         w.bind("<Leave>", lambda e, f=card: f.config(bg=surface, highlightbackground=border))
 
-            # ── left: quick actions (3, daily-rotating) ──────────────────
             all_actions = [
-                ("🖼", "Gallery",      "Browse as grid",      accent,            self._show_grid_view),
-                ("🎵", "Playlist",     "Manage playlists",    "#7c3aed",         self._manage_playlists),
-                ("⭐", "Favourites",   "Your starred videos", "#f5a623",         self._show_favorites_manager),
-                ("🕐", "History",      "Recently watched",    "#34c98a",         self._show_watch_history),
-                ("📋", "Queue",        "Up next",             "#06b6d4",         self._show_queue_manager),
-                ("🏷", "Tags & Ratings","Annotate & filter",  accent2,           self._show_annotation_browser),
+                ("🖼", "Gallery", "Browse as grid", accent, self._show_grid_view),
+                ("🎵", "Playlist", "Manage playlists", "#7c3aed", self._manage_playlists),
+                ("⭐", "Favourites", "Your starred videos", "#f5a623", self._show_favorites_manager),
+                ("🕐", "History", "Recently watched", "#34c98a", self._show_watch_history),
+                ("📋", "Queue", "Up next", "#06b6d4", self._show_queue_manager),
+                ("🏷", "Tags & Ratings", "Annotate & filter", accent2, self._show_annotation_browser),
             ]
             rng = _random.Random(self._qa_seed)
             actions = rng.sample(all_actions, 3)
@@ -946,7 +939,6 @@ def select_multiple_folders_and_play():
                          bg=surface, fg=text_sec).pack(anchor="w", pady=(2, 0))
                 _bind_hover(card, inner_card, cmd, col)
 
-            # ── right: analytics panel ────────────────────────────────────
             analytics_card = tk.Frame(right_col, bg=surface,
                                       highlightbackground=border, highlightthickness=1)
             analytics_card.pack(fill=tk.BOTH, expand=True)
@@ -958,15 +950,14 @@ def select_multiple_folders_and_play():
                      font=Font(family="Segoe UI", size=10, weight="bold"),
                      bg=surface, fg=text_pri).pack(anchor="w", pady=(0, 10))
 
-            # mini stats: week + coverage
             ms_row = tk.Frame(ac_inner, bg=surface)
             ms_row.pack(fill=tk.X, pady=(0, 12))
             ms_row.columnconfigure(0, weight=1)
             ms_row.columnconfigure(1, weight=1)
 
             for mci, (mv, ml, mc) in enumerate([
-                (str(week_n),            "This week",  "#7c3aed"),
-                (f"{pct_watched:.0f}%",  "Coverage",   accent2),
+                (str(week_n), "This week", "#7c3aed"),
+                (f"{pct_watched:.0f}%", "Coverage", accent2),
             ]):
                 mf = tk.Frame(ms_row, bg=surface2)
                 mf.grid(row=0, column=mci, padx=(0 if mci == 0 else 6, 0), sticky="nsew")
@@ -977,7 +968,6 @@ def select_multiple_folders_and_play():
                          font=Font(family="Segoe UI", size=8),
                          bg=surface2, fg=text_sec).pack(padx=10, pady=(0, 8), anchor="w")
 
-            # 7-day activity bar
             tk.Label(ac_inner, text="Last 7 days",
                      font=Font(family="Segoe UI", size=8, weight="bold"),
                      bg=surface, fg=text_sec).pack(anchor="w", pady=(0, 4))
@@ -1011,7 +1001,6 @@ def select_multiple_folders_and_play():
             bar_canvas.bind("<Configure>", lambda e: _draw_bars())
             bar_canvas.after(60, _draw_bars)
 
-            # top dirs
             tk.Frame(ac_inner, bg=border, height=1).pack(fill=tk.X, pady=(0, 8))
             tk.Label(ac_inner, text="Top directories",
                      font=Font(family="Segoe UI", size=8, weight="bold"),
@@ -1078,7 +1067,7 @@ def select_multiple_folders_and_play():
 
                 for _cw_ci, _cw_entry in enumerate(_cw_entries):
                     _cw_fname = os.path.splitext(os.path.basename(_cw_entry.video_path))[0]
-                    _cw_name_disp = (_cw_fname[:24] + "…") if len(_cw_fname) > 24 else _cw_fname
+                    _cw_name_disp = (_cw_fname[:26] + "…") if len(_cw_fname) > 26 else _cw_fname
                     _cw_pct = min(100.0, max(0.0, float(_cw_entry.completion_percentage or 0)))
                     _cw_dur = _cw_entry.get_duration_formatted() if _cw_entry.duration_watched else ""
                     try:
@@ -1102,18 +1091,22 @@ def select_multiple_folders_and_play():
                                         cursor="hand2")
                     _cw_card.grid(row=0, column=_cw_ci,
                                   padx=(0 if _cw_ci == 0 else 8, 0), sticky="nsew")
+                    _cw_card.pack_propagate(False)
+                    _cw_card.configure(height=110)
 
-                    tk.Frame(_cw_card, bg=_cw_bar_col, height=3).pack(fill=tk.X, side=tk.TOP)
+                    _accent_bar = tk.Frame(_cw_card, bg=_cw_bar_col, width=4)
+                    _accent_bar.pack(side=tk.LEFT, fill=tk.Y)
 
                     _cw_body = tk.Frame(_cw_card, bg=surface)
-                    _cw_body.pack(fill=tk.BOTH, expand=True, padx=10, pady=8)
+                    _cw_body.pack(side=tk.LEFT, fill=tk.BOTH, expand=True,
+                                  padx=(10, 10), pady=10)
 
                     tk.Label(_cw_body, text=_cw_name_disp,
                              font=Font(family="Segoe UI", size=9, weight="bold"),
                              bg=surface, fg=text_pri, anchor="w").pack(fill=tk.X)
 
                     _cw_meta = tk.Frame(_cw_body, bg=surface)
-                    _cw_meta.pack(fill=tk.X, pady=(2, 5))
+                    _cw_meta.pack(fill=tk.X, pady=(2, 6))
                     tk.Label(_cw_meta, text=_cw_time,
                              font=Font(family="Segoe UI", size=8),
                              bg=surface, fg=text_sec).pack(side=tk.LEFT)
@@ -1122,44 +1115,65 @@ def select_multiple_folders_and_play():
                                  font=Font(family="Segoe UI", size=8),
                                  bg=surface, fg=text_sec).pack(side=tk.LEFT)
 
-                    _cw_prog_bg = tk.Frame(_cw_body, bg=surface2, height=5)
+                    _cw_prog_bg = tk.Frame(_cw_body, bg=surface2, height=4)
                     _cw_prog_bg.pack(fill=tk.X)
                     _cw_prog_bg.pack_propagate(False)
 
                     def _fill_cw_prog(p=_cw_prog_bg, r=_cw_pct / 100, c=_cw_bar_col):
                         p.update_idletasks()
                         pw = p.winfo_width() or 80
-                        tk.Frame(p, bg=c, width=max(2, int(pw * r)), height=5).place(x=0, y=0)
+                        tk.Frame(p, bg=c, width=max(2, int(pw * r)), height=4).place(x=0, y=0)
+
                     _cw_prog_bg.after(130, _fill_cw_prog)
 
                     _cw_bot = tk.Frame(_cw_body, bg=surface)
-                    _cw_bot.pack(fill=tk.X, pady=(4, 0))
+                    _cw_bot.pack(fill=tk.X, pady=(6, 0))
                     tk.Label(_cw_bot, text=f"{_cw_pct:.0f}%",
                              font=Font(family="Segoe UI", size=8, weight="bold"),
-                             bg=surface, fg=_cw_bar_col).pack(side=tk.LEFT)
+                             bg=surface, fg=_cw_bar_col).pack(side=tk.LEFT, anchor="center")
                     _cw_resume = tk.Label(_cw_bot, text="▶  Resume",
                                           font=Font(family="Segoe UI", size=8, weight="bold"),
                                           bg=_cw_bar_col, fg="#ffffff",
-                                          padx=8, pady=2, cursor="hand2")
-                    _cw_resume.pack(side=tk.RIGHT)
+                                          padx=10, pady=3, cursor="hand2")
+                    _cw_resume.pack(side=tk.RIGHT, anchor="center")
 
                     def _do_play_cw(path=_cw_entry.video_path):
                         self._play_continue_watching_video(path)
 
-                    for _cw_w in (_cw_card, _cw_body, _cw_resume):
+                    for _cw_w in (_cw_card, _cw_body, _cw_resume, _accent_bar):
                         _cw_w.bind("<Button-1>", lambda e, fn=_do_play_cw: fn())
 
-                    def _cw_card_enter(e, c=_cw_card, b=_cw_body, bc=_cw_bar_col,
-                                       sf=surface, hc=self.hover_color, bd=border):
-                        c.config(bg=hc, highlightbackground=bc)
-                        b.config(bg=hc)
-                        for _w in b.winfo_children():
+                    def _cw_right_click(e, path=_cw_entry.video_path, entry=_cw_entry):
+                        if not hasattr(self, 'video_preview_manager'):
+                            return
+                        vpm = self.video_preview_manager
+
+                        resume_sec = 0.0
+                        try:
+                            if entry.duration_watched:
+                                resume_sec = float(entry.duration_watched)
+                        except Exception:
+                            pass
+
+                        vpm.show_preview_at_position(path, resume_sec, e.x_root, e.y_root)
+
+                    def _cw_hide_tooltip(e):
+                        if hasattr(self, 'video_preview_manager'):
+                            self.video_preview_manager.tooltip.hide_preview()
+
+                    for _cw_w in (_cw_card, _cw_body, _accent_bar):
+                        _cw_w.bind("<Button-3>", _cw_right_click)
+
+                    def _cw_enter(e, card=_cw_card, body=_cw_body,
+                                  bc=_cw_bar_col, sf=surface, hc=self.hover_color):
+                        card.config(bg=hc, highlightbackground=bc, highlightthickness=2)
+                        body.config(bg=hc)
+                        for _w in body.winfo_children():
                             try:
                                 if isinstance(_w, (tk.Label, tk.Frame)) and _w.cget("bg") == sf:
                                     _w.config(bg=hc)
                             except Exception:
                                 pass
-                        for _w in b.winfo_children():
                             if isinstance(_w, tk.Frame):
                                 for _ww in _w.winfo_children():
                                     try:
@@ -1168,17 +1182,17 @@ def select_multiple_folders_and_play():
                                     except Exception:
                                         pass
 
-                    def _cw_card_leave(e, c=_cw_card, b=_cw_body,
-                                       sf=surface, hc=self.hover_color, bd=border):
-                        c.config(bg=sf, highlightbackground=bd)
-                        b.config(bg=sf)
-                        for _w in b.winfo_children():
+                    def _cw_leave(e, card=_cw_card, body=_cw_body,
+                                  bd=border, sf=surface, hc=self.hover_color):
+                        _cw_hide_tooltip(e)
+                        card.config(bg=sf, highlightbackground=bd, highlightthickness=1)
+                        body.config(bg=sf)
+                        for _w in body.winfo_children():
                             try:
                                 if isinstance(_w, (tk.Label, tk.Frame)) and _w.cget("bg") == hc:
                                     _w.config(bg=sf)
                             except Exception:
                                 pass
-                        for _w in b.winfo_children():
                             if isinstance(_w, tk.Frame):
                                 for _ww in _w.winfo_children():
                                     try:
@@ -1187,12 +1201,10 @@ def select_multiple_folders_and_play():
                                     except Exception:
                                         pass
 
-                    _cw_card.bind("<Enter>", _cw_card_enter)
-                    _cw_card.bind("<Leave>", _cw_card_leave)
-                    _cw_body.bind("<Enter>", _cw_card_enter)
-                    _cw_body.bind("<Leave>", _cw_card_leave)
+                    for _cw_w in (_cw_card, _cw_body, _accent_bar):
+                        _cw_w.bind("<Enter>", _cw_enter)
+                        _cw_w.bind("<Leave>", _cw_leave)
 
-            # ── tip ───────────────────────────────────────────────────────
             tip_bg = surface2
             tip = tk.Frame(pad, bg=tip_bg,
                            highlightbackground=border, highlightthickness=1)
@@ -1278,22 +1290,22 @@ def select_multiple_folders_and_play():
             active_label = self._view_tab_labels.get(active_view, "Home")
             for lbl, btn in self._media_pill_btns.items():
                 is_active = (lbl == active_label)
-                # Remove existing underline frames (children of the parent nav frame)
-                for child in btn.master.winfo_children():
+                container = getattr(btn, '_pill_container', btn.master)
+                for child in container.winfo_children():
                     if isinstance(child, tk.Frame) and getattr(child, '_underline', False):
                         child.destroy()
                 if is_active:
                     btn.config(
                         bg=self.bg_color, fg=self.accent_color,
                         font=("Segoe UI", 10, "bold"))
-                    underline = tk.Frame(btn.master, bg=self.accent_color, height=2)
+                    underline = tk.Frame(container, bg=self.accent_color, height=2)
                     underline._underline = True
-                    # Place under the button
-                    underline.place(relx=0.5, rely=1, anchor="s", relwidth=0.7)
+                    underline.pack(fill=tk.X)
                 else:
                     btn.config(
                         bg=self.bg_color, fg=self.text_muted,
                         font=("Segoe UI", 10, "normal"))
+                container.configure(bg=self.bg_color)
                 self._bind_media_pill_hover(btn, lbl)
 
         def global_play(self):
@@ -5422,11 +5434,15 @@ def select_multiple_folders_and_play():
         # ------------------------------------------------------------------
 
         def _make_media_pill(self, label):
-            btn = tk.Label(self.workspace_nav, text=label,
+            container = tk.Frame(self.workspace_nav, bg=self.bg_color)
+            container.pack(side=tk.LEFT, padx=2)
+
+            btn = tk.Label(container, text=label,
                            bg=self.bg_color, fg=self.text_muted,
                            font=("Segoe UI", 10, "normal"),
                            padx=14, pady=3, cursor="hand2")
-            btn.pack(side=tk.LEFT, padx=2)
+            btn.pack(fill=tk.X)
+            btn._pill_container = container
 
             def on_press(_e):
                 btn.config(fg=self.accent_color, font=("Segoe UI", 10, "bold"))

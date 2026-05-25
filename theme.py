@@ -1555,6 +1555,7 @@ class ThemeSelector:
             for lbl, btn in self._media_pill_btns.items():
                 try:
                     btn.config(bg=self.bg_color)
+                    getattr(btn, '_pill_container', btn.master).configure(bg=self.bg_color)
                     self._bind_media_pill_hover(btn, lbl)
                 except tk.TclError:
                     pass
