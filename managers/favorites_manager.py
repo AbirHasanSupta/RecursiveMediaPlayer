@@ -325,7 +325,7 @@ class FavoritesUI:
         t = self._get_design_tokens()
         tp = self.theme_provider
         win.configure(bg=t["bg"])
-        for attr in ("_fav_header", "_fav_body", "_fav_card", "_fav_col_hdr", "_fav_lb_row", "_fav_btn_row", "_fav_chip_bar"):
+        for attr in ("_fav_header", "_fav_body", "_fav_card", "_fav_col_hdr", "_fav_lb_row", "_fav_btn_row"):
             w = getattr(self, attr, None)
             if w is None:
                 continue
