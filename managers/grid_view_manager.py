@@ -523,6 +523,12 @@ class GridViewManager:
         om.configure(font=("Segoe UI", 8), bg=t['surface'], fg=t['text'],
                      relief=tk.FLAT, highlightthickness=1, highlightbackground=t['border'],
                      activebackground=t['surface2'])
+        self._page_size_menu = om["menu"]
+        self._page_size_menu.configure(
+            bg=t['surface'], fg=t['text'],
+            activebackground=t['surface2'], activeforeground=t['text'],
+            relief=tk.FLAT, bd=0
+        )
         om.pack(side=tk.LEFT, padx=(5, 16), pady=12)
 
         tk.Frame(right_tb, bg=t['border'], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=8)
@@ -724,6 +730,15 @@ class GridViewManager:
         tp.restyle_manager_buttons(self.grid_window)
         self._update_tag_filter_btn()
         self._rebuild_grid()
+        if hasattr(self, '_page_size_menu') and self._page_size_menu.winfo_exists():
+            t = self._tok()
+            try:
+                self._page_size_menu.configure(
+                    bg=t['surface'], fg=t['text'],
+                    activebackground=t['surface2'], activeforeground=t['text']
+                )
+            except tk.TclError:
+                pass
 
     def play_from_global(self):
         """Play selected videos, or all videos if nothing selected."""
