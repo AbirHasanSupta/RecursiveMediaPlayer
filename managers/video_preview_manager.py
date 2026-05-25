@@ -1462,16 +1462,17 @@ class ContinueWatchingPreviewCache:
 
     def _generate(self, video_path: str, resume_sec: float):
         import base64, tempfile as _tf
-        norm = self._cache_key(video_path, resume_sec)
+        key = self._cache_key(video_path, resume_sec)
+        norm_path = os.path.normpath(video_path)
         tmp_path = None
         try:
-            cap = cv2.VideoCapture(norm)
+            cap = cv2.VideoCapture(norm_path)
             if not cap.isOpened():
                 return
-            fps          = cap.get(cv2.CAP_PROP_FPS) or 25
+            fps = cap.get(cv2.CAP_PROP_FPS) or 25
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            vid_w        = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            vid_h        = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            vid_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            vid_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             if vid_w == 0 or vid_h == 0 or total_frames < 10:
                 cap.release()
                 return
@@ -1479,8 +1480,8 @@ class ContinueWatchingPreviewCache:
             start_frame = max(0, min(int(resume_sec * fps), total_frames - 1))
             cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
-            scale  = min(self.PREVIEW_W / vid_w, self.PREVIEW_H / vid_h)
-            tw     = max(2, int(vid_w * scale) & ~1)
+            scale = min(self.PREVIEW_W / vid_w, self.PREVIEW_H / vid_h)
+            tw = max(2, int(vid_w * scale) & ~1)
             th_dim = max(2, int(vid_h * scale) & ~1)
 
             fd, tmp_path = _tf.mkstemp(suffix=".mp4")
@@ -1493,9 +1494,9 @@ class ContinueWatchingPreviewCache:
                 _safe_unlink(tmp_path)
                 return
 
-            target_frames = self.PREVIEW_DUR * self.PREVIEW_FPS   # 24
-            frame_step    = max(1, int(fps / self.PREVIEW_FPS))
-            captured      = 0
+            target_frames = self.PREVIEW_DUR * self.PREVIEW_FPS
+            frame_step = max(1, int(fps / self.PREVIEW_FPS))
+            captured = 0
             while captured < target_frames:
                 ret, frame = cap.read()
                 if not ret or frame is None:
@@ -1520,14 +1521,14 @@ class ContinueWatchingPreviewCache:
                 return
 
             with self._lock:
-                self._cache[norm] = "VIDEO:" + base64.b64encode(raw).decode("ascii")
+                self._cache[key] = "VIDEO:" + base64.b64encode(raw).decode("ascii")
         except Exception as e:
             print(f"[CWPreviewCache] {e}")
         finally:
             if tmp_path:
                 _safe_unlink(tmp_path)
             with self._lock:
-                self._generating.discard(norm)
+                self._generating.discard(key)
 
     def clear(self):
         with self._lock:
