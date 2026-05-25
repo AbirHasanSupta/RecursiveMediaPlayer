@@ -1,3 +1,5 @@
+import multiprocessing
+
 from embedded_player import EmbeddedPlayer
 from icon_helper import apply_icon
 from managers.annotation_browser_manager import AnnotationBrowserManager
@@ -5966,4 +5968,5 @@ def select_multiple_folders_and_play():
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     select_multiple_folders_and_play()
