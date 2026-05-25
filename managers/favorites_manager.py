@@ -684,7 +684,6 @@ class FavoritesUI:
             return
         if 0 <= index < len(self.favorite_entries):
             favorite = self.favorite_entries[index]
-            self.favorites_tree.selection_set(iid)
             if os.path.isfile(favorite.video_path) and self.video_preview_manager:
                 self.video_preview_manager.tooltip.hide_preview()
                 self.video_preview_manager.right_clicked_item = index
@@ -814,7 +813,8 @@ class FavoritesUI:
                     rows.sort(key=_dk, reverse=self._sort_rev)
                 else:
                     ki = {"num": 1, "name": 2, "directory": 3}[self._sort_col]
-                    rows.sort(key=lambda r: str(r[ki]).lower(), reverse=self._sort_rev)
+                    rows.sort(key=lambda r: int(r[ki]) if self._sort_col == "num" else str(r[ki]).lower(),
+                              reverse=self._sort_rev)
 
             arrow = {True: " ▼", False: " ▲"}
             for cid, lbl in [("num", "#"), ("name", "Video Name"), ("directory", "Directory"),
