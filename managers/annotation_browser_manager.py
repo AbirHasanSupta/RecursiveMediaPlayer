@@ -3,6 +3,7 @@ import threading
 import tkinter as tk
 from tkinter import ttk
 from typing import Optional, Callable, Dict, List, Any
+from collections import Counter
 
 try:
     from icon_helper import apply_icon
@@ -248,11 +249,12 @@ class AnnotationBrowserManager:
             if self._cancel_load.is_set():
                 return
 
-            tag_counts = {}
-            for tag in all_tags:
+            # Efficient tag counting – single pass O(V) instead of O(T×V)
+            tag_counts = Counter()
+            for _, (_, tags, _) in data_snapshot.items():
+                tag_counts.update(tags)
                 if self._cancel_load.is_set():
                     return
-                tag_counts[tag] = sum(1 for _, (_, tags, _) in data_snapshot.items() if tag in tags)
 
             annotated_videos = [
                 k for k, (rating, tags, bookmarks) in data_snapshot.items()

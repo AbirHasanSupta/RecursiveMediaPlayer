@@ -31,8 +31,124 @@ from PIL import Image, ImageTk
 import pickle
 
 from managers.resource_manager import get_resource_manager, ManagedThread
+import multiprocessing
 
 
+def generate_thumbnail_worker(
+    video_path: str,
+    use_video: bool = True,
+    jpeg_quality: int = 72,
+    fallback_to_static: bool = True,
+):
+    import cv2 as _cv2
+    import os as _os
+    import tempfile as _tf
+    from pathlib import Path as _Path
+
+    def _static():
+        try:
+            cap = _cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                return None
+            total_frames = int(cap.get(_cv2.CAP_PROP_FRAME_COUNT))
+            seek_to = max(30, int(total_frames * 0.1))
+            cap.set(_cv2.CAP_PROP_POS_FRAMES, seek_to)
+            ret, frame = cap.read()
+            cap.release()
+            if not ret or frame is None:
+                return None
+            fh, fw = frame.shape[:2]
+            MAX_DIM = 240
+            if fw >= fh:
+                tw, th_dim = MAX_DIM, max(2, int(fh * MAX_DIM / fw) & ~1)
+            else:
+                th_dim, tw = MAX_DIM, max(2, int(fw * MAX_DIM / fh) & ~1)
+            frame_small = _cv2.resize(frame, (tw, th_dim), interpolation=_cv2.INTER_AREA)
+            ok, buf = _cv2.imencode(".jpg", frame_small,
+                                    [_cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
+            return (buf.tobytes(), False) if ok else None
+        except Exception:
+            return None
+
+    def _video():
+        tmp_path = None
+        try:
+            cap = _cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                return None
+            total_frames = int(cap.get(_cv2.CAP_PROP_FRAME_COUNT))
+            src_fps = cap.get(_cv2.CAP_PROP_FPS) or 25
+            w = int(cap.get(_cv2.CAP_PROP_FRAME_WIDTH))
+            h = int(cap.get(_cv2.CAP_PROP_FRAME_HEIGHT))
+            if w == 0 or h == 0 or total_frames < 20:
+                cap.release()
+                return None
+            MAX_DIM = 240
+            if w >= h:
+                tw, th_dim = MAX_DIM, max(2, int(h * MAX_DIM / w) & ~1)
+            else:
+                th_dim, tw = MAX_DIM, max(2, int(w * MAX_DIM / h) & ~1)
+            out_fps = max(6.0, min(src_fps / 2.0, 15.0))
+            max_frames = int(src_fps * 10)
+            start_frame = max(0, int(total_frames * 0.02))
+            cap.set(_cv2.CAP_PROP_POS_FRAMES, start_frame)
+            fd, tmp_path = _tf.mkstemp(suffix=".mp4")
+            _os.close(fd)
+            out = _cv2.VideoWriter(tmp_path, _cv2.VideoWriter_fourcc(*"mp4v"),
+                                   out_fps, (tw, th_dim))
+            if not out.isOpened():
+                cap.release()
+                try: _os.unlink(tmp_path)
+                except OSError: pass
+                return None
+            captured = read_count = 0
+            while read_count < max_frames:
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    break
+                read_count += 1
+                if read_count % 2 != 0:
+                    continue
+                out.write(_cv2.resize(frame, (tw, th_dim), interpolation=_cv2.INTER_AREA))
+                captured += 1
+            cap.release()
+            out.release()
+            if captured < 3:
+                try: _os.unlink(tmp_path)
+                except OSError: pass
+                return None
+            raw = _Path(tmp_path).read_bytes()
+            try: _os.unlink(tmp_path)
+            except OSError: pass
+            tmp_path = None
+            return (raw, True) if len(raw) <= 5 * 1024 * 1024 else None
+        except Exception:
+            if tmp_path:
+                try: _os.unlink(tmp_path)
+                except OSError: pass
+            return None
+
+    if use_video:
+        result = _video()
+        if result:
+            return result
+        return _static() if fallback_to_static else None
+    return _static()
+
+
+_THUMB_POOL: Optional[multiprocessing.Pool] = None
+_THUMB_POOL_LOCK = threading.Lock()
+
+
+def get_thumb_pool() -> multiprocessing.Pool:
+    global _THUMB_POOL
+    with _THUMB_POOL_LOCK:
+        if _THUMB_POOL is None:
+            _THUMB_POOL = multiprocessing.Pool(
+                processes=min(4, os.cpu_count() // 2 or 1),
+                maxtasksperchild=200,
+            )
+        return _THUMB_POOL
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -727,6 +843,7 @@ class PrefetchQueue:
         self._workers: List[threading.Thread] = []
         self._batch_done_cb: Optional[Callable] = None  # called when queue drains
         self._start_workers()
+        self._pool = get_thumb_pool()
 
     def _start_workers(self):
         for i in range(self._num_workers):
@@ -818,7 +935,11 @@ class PrefetchQueue:
                 if not os.path.isfile(video_path):
                     continue
 
-                result = self._generator_ref.generate_thumbnail(video_path)
+                gen = self._generator_ref
+                result = self._pool.apply_async(
+                    generate_thumbnail_worker,
+                    args=(video_path, gen.use_video_preview, gen.JPEG_QUALITY, gen.fallback_to_static),
+                ).get(timeout=60)
                 if result is None:
                     continue
 

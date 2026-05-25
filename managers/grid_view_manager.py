@@ -8,6 +8,8 @@ import multiprocessing
 
 from managers.resource_manager import ManagedExecutor, get_resource_manager, ManagedThread
 from utils import _responsive_geometry
+from managers.video_preview_manager import get_thumb_pool, generate_thumbnail_worker
+
 
 # ── Design tokens (override per-theme in _get_design_tokens) ─────────────────
 _CARD_RADIUS        = 10
@@ -2354,7 +2356,11 @@ class GridViewManager:
                         self._display_thumbnail_from_data(label, th.thumbnail_data, item, video_path_norm)
                         return
 
-                result = vpm.generator.generate_thumbnail(video_path_norm)
+                gen = vpm.generator
+                result = get_thumb_pool().apply_async(
+                    generate_thumbnail_worker,
+                    args=(video_path_norm, gen.use_video_preview, gen.JPEG_QUALITY, gen.fallback_to_static),
+                ).get(timeout=60)
                 if result:
                     raw_bytes, is_vid = result
                     try:
