@@ -1070,7 +1070,7 @@ class SettingsUI:
                 self.select_preprocess_btn.pack_forget()
                 self.stop_preprocess_btn.pack(side=tk.LEFT)
             else:
-                messagebox.showerror("Error", "Failed to start preprocessing - another process may be running")
+                self.theme_provider.toast.error("Error", "Failed to start preprocessing - another process may be running")
 
     def _stop_preprocessing(self):
         result = messagebox.askyesno("Confirm Stop", "Stop AI preprocessing?")
@@ -1089,13 +1089,13 @@ class SettingsUI:
                 try:
                     self._apply_current_settings()
                     count = self.cleanup_resume_callback()
-                    messagebox.showinfo("Cleanup Complete", f"Cleaned up {count} old resume entries")
+                    self.theme_provider.toast.info("Cleanup Complete", f"Cleaned up {count} old resume entries")
                     if self.console_callback:
                         self.console_callback(f"Cleaned up {count} old resume position entries")
                 except Exception as e:
-                    messagebox.showerror("Error", f"Failed to cleanup resume data: {e}")
+                    self.theme_provider.toast.error("Error", f"Failed to cleanup resume data: {e}")
             else:
-                messagebox.showwarning("Warning", "Resume cleanup function not available")
+                self.theme_provider.toast.warning("Warning", "Resume cleanup function not available")
 
     def _cleanup_watch_history(self):
         result = messagebox.askyesno(
@@ -1106,11 +1106,11 @@ class SettingsUI:
             if self.cleanup_history_callback:
                 try:
                     count = self.cleanup_history_callback()
-                    messagebox.showinfo("Cleanup Complete", f"Cleaned up {count} old history entries")
+                    self.theme_provider.toast.info("Cleanup Complete", f"Cleaned up {count} old history entries")
                 except Exception as e:
-                    messagebox.showerror("Error", f"Failed to cleanup watch history: {e}")
+                    self.theme_provider.toast.error("Error", f"Failed to cleanup watch history: {e}")
             else:
-                messagebox.showwarning("Warning", "History cleanup function not available")
+                self.theme_provider.toast.warning("Warning", "History cleanup function not available")
 
     def _clear_metadata_cache(self):
         result = messagebox.askyesno(
@@ -1122,13 +1122,13 @@ class SettingsUI:
                 try:
                     count = self.clear_metadata_callback()
                     self._update_metadata_info()
-                    messagebox.showinfo("Cache Cleared", f"Cleared {count} metadata cache entries")
+                    self.theme_provider.toast.info("Cache Cleared", f"Cleared {count} metadata cache entries")
                     if self.console_callback:
                         self.console_callback(f"Cleared {count} video metadata cache entries")
                 except Exception as e:
-                    messagebox.showerror("Error", f"Failed to clear metadata cache: {e}")
+                    self.theme_provider.toast.error("Error", f"Failed to clear metadata cache: {e}")
             else:
-                messagebox.showwarning("Warning", "Metadata cache manager not available")
+                self.theme_provider.toast.warning("Warning", "Metadata cache manager not available")
 
     def _update_metadata_info(self):
         try:
@@ -1151,13 +1151,13 @@ class SettingsUI:
             if hasattr(self, 'clear_thumbnails_callback') and self.clear_thumbnails_callback:
                 self.clear_thumbnails_callback()
                 self._update_thumbnail_info()
-                messagebox.showinfo("Cache Cleared", "Thumbnail cache has been cleared")
+                self.theme_provider.toast.info("Cache Cleared", "Thumbnail cache has been cleared")
             else:
                 if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
                     self.video_preview_manager.clear_cache()
                     self._update_thumbnail_info()
                 else:
-                    messagebox.showwarning("Warning", "Thumbnail cache manager not available")
+                    self.theme_provider.toast.warning("Warning", "Thumbnail cache manager not available")
 
     def _update_thumbnail_info(self):
         try:
@@ -1245,7 +1245,7 @@ class SettingsUI:
         self._apply_current_settings()
         if self.on_settings_changed:
             self.on_settings_changed(self.settings)
-        messagebox.showinfo("Success", "Settings saved successfully!")
+        self.theme_provider.toast.info("Success", "Settings saved successfully!")
         self._close_settings()
 
 

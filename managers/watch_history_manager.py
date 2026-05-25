@@ -922,19 +922,17 @@ class WatchHistoryUI:
                 missing_files.append(entry.video_name)
 
         if missing_files:
-            messagebox.showwarning(
+            self.theme_provider.toast.warning(
                 "Missing Files",
-                f"{len(missing_files)} file(s) not found",
-                parent=self.history_window
+                f"{len(missing_files)} file(s) not found"
             )
 
         if videos_to_play and hasattr(self, 'play_callback') and self.play_callback:
             self.play_callback(videos_to_play)
         elif not videos_to_play:
-            messagebox.showwarning(
+            self.theme_provider.toast.warning(
                 "No Valid Files",
-                "No valid video files found",
-                parent=self.history_window
+                "No valid video files found"
             )
 
     def _copy_path(self, file_path):
@@ -995,7 +993,7 @@ class WatchHistoryUI:
 
             messagebox.showinfo("Properties", info, parent=self.history_window)
         except Exception as e:
-            messagebox.showerror("Error", f"Could not retrieve properties: {e}", parent=self.history_window)
+            self.theme_provider.toast.error("Error", f"Could not retrieve properties: {e}")
 
     def _apply_filter(self):
         filter_value = self.filter_var.get()
@@ -1037,11 +1035,11 @@ class WatchHistoryUI:
     def _play_selected_video(self):
         selection = self.history_tree.selection()
         if not selection:
-            messagebox.showwarning("Warning", "Please select a video to play")
+            self.theme_provider.toast.warning("Warning", "Please select a video to play")
             return
 
         if len(selection) > 1:
-            messagebox.showwarning("Warning", "Please select only one video to play")
+            self.theme_provider.toast.warning("Warning", "Please select only one video to play")
             return
 
         item = selection[0]
@@ -1058,22 +1056,22 @@ class WatchHistoryUI:
                 break
 
         if not selected_entry:
-            messagebox.showerror("Error", "Could not find selected video entry")
+            self.theme_provider.toast.error("Error", "Could not find selected video entry")
             return
 
         if not os.path.exists(selected_entry.video_path):
-            messagebox.showerror("Error", f"Video file not found:\n{selected_entry.video_path}")
+            self.theme_provider.toast.error("Error", f"Video file not found:\n{selected_entry.video_path}")
             return
 
         if hasattr(self, 'play_callback') and self.play_callback:
             self.play_callback([selected_entry.video_path])
         else:
-            messagebox.showinfo("Info", f"Would play: {selected_entry.video_name}")
+            self.theme_provider.toast.info("Info", f"Would play: {selected_entry.video_name}")
 
     def _remove_selected(self):
         selection = self.history_tree.selection()
         if not selection:
-            messagebox.showwarning("Warning", "Please select entries to remove")
+            self.theme_provider.toast.warning("Warning", "Please select entries to remove")
             return
 
         entry_ids = []
@@ -1102,7 +1100,7 @@ class WatchHistoryUI:
 
         if result:
             self.history_service.clear_all_history()
-            messagebox.showinfo("Success", "All watch history has been cleared")
+            self.theme_provider.toast.info("Success", "All watch history has been cleared")
             self._refresh_history_list()
 
     def _on_history_double_click(self, event):
@@ -1127,10 +1125,9 @@ class WatchHistoryUI:
             return
 
         if not os.path.exists(selected_entry.video_path):
-            messagebox.showerror(
+            self.theme_provider.toast.error(
                 "File Not Found",
-                f"Video file not found:\n{selected_entry.video_path}",
-                parent=self.history_window
+                f"Video file not found:\n{selected_entry.video_path}"
             )
             return
 

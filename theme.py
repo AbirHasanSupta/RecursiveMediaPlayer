@@ -125,6 +125,7 @@ class ConfigHandler:
 class ThemeSelector:
     def __init__(self):
         self.config = ConfigHandler()
+        self.toast = None
 
     def save_preferences(self):
         encoded_excluded_subdirs = {}

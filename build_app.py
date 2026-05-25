@@ -3,6 +3,7 @@ import multiprocessing
 from embedded_player import EmbeddedPlayer
 from icon_helper import apply_icon
 from managers.annotation_browser_manager import AnnotationBrowserManager
+from managers.toast_manager import Toast
 from managers.video_metadata_manager import VideoAnnotationService
 from splash import show_splash
 import random as _random
@@ -155,6 +156,7 @@ def select_multiple_folders_and_play():
             self.setup_console_section()
             self.setup_action_buttons()
             self.settings_manager = SettingsManager(self.root, self, self.update_console, enable_ai=False)
+            self.toast = Toast(self.root, self)
             self.setup_exclusion_section()
 
             def start_ipc_server():
@@ -3000,7 +3002,7 @@ def select_multiple_folders_and_play():
                 messagebox.showinfo("Folder Properties", info)
             except Exception as e:
                 self.update_console(f"Error getting folder properties: {e}")
-                messagebox.showerror("Error", f"Could not get folder properties: {e}")
+                self.toast.error("Error", f"Could not get folder properties: {e}")
 
         def _context_open_folder_location(self, folder_path):
             try:
@@ -3015,7 +3017,7 @@ def select_multiple_folders_and_play():
                 self.update_console(f"Opened location: {os.path.dirname(folder_path)}")
             except Exception as e:
                 self.update_console(f"Error opening location: {e}")
-                messagebox.showerror("Error", f"Could not open folder location: {e}")
+                self.toast.error("Error", f"Could not open folder location: {e}")
 
         # ------------------------------------------------------------------
         # Now-playing indicator
@@ -3061,7 +3063,7 @@ def select_multiple_folders_and_play():
         def _apply_filters_and_refresh(self):
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
-                messagebox.showwarning("Warning", "Please select a directory first")
+                self.toast.warning("Warning", "Please select a directory first")
                 return
 
             progress_window = tk.Toplevel(self.root)
@@ -3096,7 +3098,7 @@ def select_multiple_folders_and_play():
                         def show_warning():
                             try: progress_window.destroy()
                             except: pass
-                            messagebox.showwarning("Warning", "Directory not scanned yet")
+                            self.toast.warning("Warning", "Directory not scanned yet")
                         self.root.after(0, show_warning)
                         return
 
@@ -3164,7 +3166,7 @@ def select_multiple_folders_and_play():
                     def show_error():
                         try: progress_window.destroy()
                         except: pass
-                        messagebox.showerror("Error", f"Filter error: {e}")
+                        self.toast.error("Error", f"Filter error: {e}")
                     self.root.after(0, show_error)
 
             threading.Thread(target=process_in_thread, daemon=True).start()
@@ -3796,7 +3798,7 @@ def select_multiple_folders_and_play():
         def exclude_all_subdirectories(self):
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
-                messagebox.showinfo("Information", "Please select a directory first.")
+                self.toast.info("Information", "Please select a directory first.")
                 return
 
             is_filtered_mode = getattr(self, '_is_filtered_mode', False)
@@ -3861,12 +3863,12 @@ def select_multiple_folders_and_play():
         def exclude_subdirectories(self):
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
-                messagebox.showinfo("Information", "Please select a directory first.")
+                self.toast.info("Information", "Please select a directory first.")
                 return
 
             selection = self._tree_selection_indices()
             if not selection:
-                messagebox.showinfo("Information", "Please select items to exclude.")
+                self.toast.info("Information", "Please select items to exclude.")
                 return
 
             is_filtered_mode = getattr(self, '_is_filtered_mode', False)
@@ -3899,7 +3901,7 @@ def select_multiple_folders_and_play():
                             vids_to_exclude.add(target_path)
                         names.append(os.path.basename(target_path))
                 except Exception as e:
-                    self.root.after(0, lambda: messagebox.showerror("Error", f"Error excluding: {e}"))
+                    self.root.after(0, lambda: self.toast.error("Error", f"Error excluding: {e}"))
                     return
 
                 def apply_and_refresh():
@@ -3943,12 +3945,12 @@ def select_multiple_folders_and_play():
         def include_subdirectories(self):
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
-                messagebox.showinfo("Information", "Please select a directory first.")
+                self.toast.info("Information", "Please select a directory first.")
                 return
 
             selection = self._tree_selection_indices()
             if not selection:
-                messagebox.showinfo("Information", "Please select items to include.")
+                self.toast.info("Information", "Please select items to include.")
                 return
 
             if selected_dir not in self.excluded_subdirs and selected_dir not in self.excluded_videos:
@@ -3984,7 +3986,7 @@ def select_multiple_folders_and_play():
                             vids_to_include.add(target_path)
                         names.append(os.path.basename(target_path))
                 except Exception as e:
-                    self.root.after(0, lambda: messagebox.showerror("Error", f"Error including: {e}"))
+                    self.root.after(0, lambda: self.toast.error("Error", f"Error including: {e}"))
                     return
 
                 def apply_and_refresh():
@@ -4028,7 +4030,7 @@ def select_multiple_folders_and_play():
         def clear_all_exclusions(self):
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
-                messagebox.showinfo("Information", "Please select a directory first.")
+                self.toast.info("Information", "Please select a directory first.")
                 return
 
             is_filtered_mode = getattr(self, '_is_filtered_mode', False)
@@ -4181,7 +4183,7 @@ def select_multiple_folders_and_play():
         def toggle_videos_visibility(self):
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
-                messagebox.showinfo("Information", "Please select a directory first.")
+                self.toast.info("Information", "Please select a directory first.")
                 return
             self.show_videos = not self.show_videos  # flip directly
             if hasattr(self, 'show_videos_var'):
@@ -4193,7 +4195,7 @@ def select_multiple_folders_and_play():
         def toggle_excluded_only(self):
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
-                messagebox.showinfo("Information", "Please select a directory first.")
+                self.toast.info("Information", "Please select a directory first.")
                 return
             self.show_only_excluded = bool(self.excluded_only_var.get())
             self.load_subdirectories(selected_dir, max_depth=self.current_max_depth)
@@ -4336,7 +4338,7 @@ def select_multiple_folders_and_play():
                     all_video_to_dir.update({v: video_to_dir.get(v, os.path.dirname(v)) for v in filtered})
 
             if not all_videos:
-                messagebox.showinfo("Information", "No videos found in selected directories.")
+                self.toast.info("Information", "No videos found in selected directories.")
                 return
 
             all_directories = sorted(list(dict.fromkeys(all_video_to_dir[v] for v in all_videos)))
@@ -4372,7 +4374,7 @@ def select_multiple_folders_and_play():
                                           if not self.is_video_excluded(root_dir, v))
 
                 if not all_videos:
-                    messagebox.showinfo("Information", "No videos found in selected directories.")
+                    self.toast.info("Information", "No videos found in selected directories.")
                     return
                 self._open_grid_view(all_videos)
 
@@ -4388,7 +4390,7 @@ def select_multiple_folders_and_play():
                 return
             final_videos = self._resolve_iids_to_paths(selection)
             if not final_videos:
-                messagebox.showwarning("No Videos", "No valid non-excluded videos found in selection.")
+                self.toast.warning("No Videos", "No valid non-excluded videos found in selection.")
                 return
             self.dual_player_manager.load_videos_into_slot(win_id, slot, final_videos)
             self.update_console(f"Sent {len(final_videos)} video(s) to Window {win_id} · Player {slot}")
@@ -4608,7 +4610,7 @@ def select_multiple_folders_and_play():
                 self.update_console(f"Opened location: {os.path.dirname(file_path)}")
             except Exception as e:
                 self.update_console(f"Error opening location: {e}")
-                messagebox.showerror("Error", f"Could not open file location: {e}")
+                self.toast.error("Error", f"Could not open file location: {e}")
 
         def _context_show_properties(self, file_path):
             try:
@@ -4636,7 +4638,7 @@ def select_multiple_folders_and_play():
                     pass
                 messagebox.showinfo("Properties", info)
             except Exception as e:
-                messagebox.showerror("Error", f"Could not retrieve properties: {e}")
+                self.toast.error("Error", f"Could not retrieve properties: {e}")
 
         def _add_videos_to_favorites_smart(self, videos):
             cur_dir = self.get_current_selected_directory()
@@ -4757,7 +4759,7 @@ def select_multiple_folders_and_play():
                     count = self.queue_manager.add_to_queue(final_videos, added_from="selection")
                     self.update_console(f"Added {count} videos to queue")
             else:
-                messagebox.showwarning("Warning", "No valid videos found in selection")
+                self.toast.warning("Warning", "No valid videos found in selection")
 
         # ------------------------------------------------------------------
         # Playlist / Queue / History play callbacks
@@ -4765,7 +4767,7 @@ def select_multiple_folders_and_play():
 
         def _play_playlist_videos(self, videos):
             if not videos:
-                messagebox.showwarning("Warning", "Playlist is empty")
+                self.toast.warning("Warning", "Playlist is empty")
                 return
             self.update_console("=" * 60)
             self.update_console("STARTING PLAYLIST PLAYBACK")
@@ -4782,7 +4784,7 @@ def select_multiple_folders_and_play():
             all_directories.sort()
             valid_videos = list(all_video_to_dir.keys())
             if not valid_videos:
-                messagebox.showwarning("Warning", "No valid videos found in playlist")
+                self.toast.warning("Warning", "No valid videos found in playlist")
                 return
             self.update_console(f"Playing playlist with {len(valid_videos)} videos")
             self._launch_player(self._make_player(valid_videos, all_video_to_dir, all_directories, 0))
@@ -4811,7 +4813,7 @@ def select_multiple_folders_and_play():
             all_directories.sort()
             valid_videos = list(all_video_to_dir.keys())
             if not valid_videos:
-                messagebox.showwarning("Warning", "No valid videos found")
+                self.toast.warning("Warning", "No valid videos found")
                 return
             self.update_console(f"Playing queue with {len(valid_videos)} videos")
             player = self._make_player(valid_videos, all_video_to_dir, all_directories, 0)
@@ -4927,7 +4929,7 @@ def select_multiple_folders_and_play():
 
         def _play_history_videos(self, videos):
             if not videos:
-                messagebox.showwarning("Warning", "No videos to play")
+                self.toast.warning("Warning", "No videos to play")
                 return
             self.update_console("=" * 60)
             self.update_console("STARTING HISTORY VIDEO PLAYBACK")
@@ -4944,7 +4946,7 @@ def select_multiple_folders_and_play():
             all_directories.sort()
             valid_videos = list(all_video_to_dir.keys())
             if not valid_videos:
-                messagebox.showwarning("Warning", "No valid videos found")
+                self.toast.warning("Warning", "No valid videos found")
                 return
             self.update_console(f"Playing {len(valid_videos)} videos from history")
             self._launch_player(self._make_player(valid_videos, all_video_to_dir, all_directories, 0))
@@ -5004,7 +5006,7 @@ def select_multiple_folders_and_play():
                     if final:
                         self.root.after(0, lambda: self._open_grid_view(final))
                     else:
-                        self.root.after(0, lambda: messagebox.showwarning("Warning", "No videos found in selection"))
+                        self.root.after(0, lambda: self.toast.warning("Warning", "No videos found in selection"))
 
                 relevant_dirs = list({os.path.dirname(self.current_subdirs_mapping.get(i, ''))
                                       for i in selection})
@@ -5036,13 +5038,13 @@ def select_multiple_folders_and_play():
                     if all_videos:
                         self.root.after(0, lambda: self._open_grid_view(all_videos))
                     else:
-                        self.root.after(0, lambda: messagebox.showwarning("Warning", "No videos found"))
+                        self.root.after(0, lambda: self.toast.warning("Warning", "No videos found"))
 
                 self._wait_for_scans_then(selected_dirs,
                                           lambda: threading.Thread(target=collect_all, daemon=True).start())
         def _open_grid_view(self, videos):
             if not videos:
-                messagebox.showwarning("Warning", "No videos to display")
+                self.toast.warning("Warning", "No videos to display")
                 return
             self.grid_view_manager.video_preview_manager = self.video_preview_manager
             self._show_embedded_view(
@@ -5074,7 +5076,7 @@ def select_multiple_folders_and_play():
         def _add_to_playlist(self):
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
-                messagebox.showwarning("Warning", "Please select a directory first")
+                self.toast.warning("Warning", "Please select a directory first")
                 return
             selection = self._tree_selection_indices()
             if selection:
@@ -5083,7 +5085,7 @@ def select_multiple_folders_and_play():
                     self.playlist_manager.add_videos_to_playlist([], selected_videos)
                     self.update_console(f"Added {len(selected_videos)} selected videos to playlist")
                 else:
-                    messagebox.showwarning("Warning", "No videos found in selected items")
+                    self.toast.warning("Warning", "No videos found in selected items")
             else:
                 search_active = hasattr(self, 'search_query') and self.search_query
 
@@ -5105,11 +5107,11 @@ def select_multiple_folders_and_play():
                                 self.playlist_manager.add_videos_to_playlist([], all_videos)
                                 self.update_console(f"Added all {len(all_videos)} videos to playlist")
                             else:
-                                messagebox.showwarning("Warning", "No videos found to add to playlist")
+                                self.toast.warning("Warning", "No videos found to add to playlist")
 
                         self.root.after(0, finish)
                     except Exception as e:
-                        self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to collect videos: {e}"))
+                        self.root.after(0, lambda: self.toast.error("Error", f"Failed to collect videos: {e}"))
 
                 threading.Thread(target=collect_all_videos, daemon=True).start()
 
@@ -5164,7 +5166,7 @@ def select_multiple_folders_and_play():
         def remove_directory(self):
             selected_indices = self.dir_listbox.curselection()
             if not selected_indices:
-                messagebox.showinfo("Information", "Please select a directory to remove.")
+                self.toast.info("Information", "Please select a directory to remove.")
                 return
 
             for i in sorted(selected_indices, reverse=True):
@@ -5785,7 +5787,7 @@ def select_multiple_folders_and_play():
 
         def add_drive_link(self):
             if not self.drive_manager:
-                messagebox.showerror("Google Drive", "Google Drive integration is unavailable.")
+                self.toast.error("Google Drive", "Google Drive integration is unavailable.")
                 return
 
             url = self._ask_drive_link_dialog()
@@ -5836,7 +5838,7 @@ def select_multiple_folders_and_play():
                     raise ValueError("Unrecognized Google Drive link.")
             except Exception as e:
                 finish_cleanup()
-                messagebox.showerror("Google Drive", str(e))
+                self.toast.error("Google Drive", str(e))
                 self.update_console(f"Google Drive error: {e}")
                 return
 
@@ -5887,7 +5889,7 @@ def select_multiple_folders_and_play():
                 except Exception as e:
                     def on_err():
                         finish_cleanup()
-                        messagebox.showerror("Google Drive", f"Failed to add link: {e}")
+                        self.toast.error("Google Drive", f"Failed to add link: {e}")
                         self.update_console(f"Google Drive error: {e}")
                     self.root.after(0, on_err)
 

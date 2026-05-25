@@ -10,6 +10,7 @@ import uuid
 from tkinter import ttk
 
 from managers.resource_manager import get_resource_manager
+from managers.toast_manager import Toast
 from utils import _responsive_geometry
 
 
@@ -566,7 +567,7 @@ class PlaylistUI:
 
     def _open_grid_view_for_playlists(self, playlists):
         if not self.grid_view_manager:
-            messagebox.showwarning("Warning", "Grid view not available", parent=self.playlist_window)
+            self.theme_provider.toast.warning("Warning", "Grid view not available")
             return
 
         all_videos = []
@@ -582,7 +583,7 @@ class PlaylistUI:
                 unique_videos.append(v)
 
         if not unique_videos:
-            messagebox.showwarning("Warning", "No videos found in selected playlists", parent=self.playlist_window)
+            self.theme_provider.toast.warning("Warning", "No videos found in selected playlists")
             return
 
         self.grid_view_manager.show_grid_view(unique_videos, self.video_preview_manager)
@@ -761,18 +762,18 @@ class PlaylistUI:
     def _open_grid_view(self):
         """Open grid view with all playlist videos"""
         if not self.current_playlist or not self.current_playlist.videos:
-            messagebox.showwarning("Warning", "No videos in playlist", parent=self.playlist_window)
+            self.theme_provider.toast.warning("Warning", "No videos in playlist")
             return
 
         if not hasattr(self, 'grid_view_manager') or not self.grid_view_manager:
-            messagebox.showwarning("Warning", "Grid view not available", parent=self.playlist_window)
+            self.theme_provider.toast.warning("Warning", "Grid view not available")
             return
 
         valid_videos = [v for v in self.current_playlist.videos if os.path.exists(v)]
         if valid_videos:
             self.grid_view_manager.show_grid_view(valid_videos, self.video_preview_manager)
         else:
-            messagebox.showwarning("Warning", "No valid videos found", parent=self.playlist_window)
+            self.theme_provider.toast.warning("Warning", "No valid videos found")
 
     def _shuffle_current_playlist(self):
         if not self.current_playlist:
@@ -851,8 +852,7 @@ class PlaylistUI:
         if 0 <= index < len(self.current_playlist.videos):
             video_path = self.current_playlist.videos[index]
             if not os.path.exists(video_path):
-                messagebox.showwarning("File Not Found", f"Video file not found:\n{video_path}",
-                                       parent=self.playlist_window)
+                self.theme_provider.toast.warning("File Not Found", f"Video file not found:\n{video_path}")
                 return
             if self.on_play_callback:
                 self.on_play_callback(self.current_playlist.videos[index:])
@@ -988,7 +988,7 @@ class PlaylistUI:
 
     def _delete_playlist(self):
         if not self.current_playlist:
-            messagebox.showwarning("Warning", "Please select a playlist to delete", parent=self.playlist_window)
+            self.theme_provider.toast.warning("Warning", "Please select a playlist to delete")
             return
 
         result = messagebox.askyesno(
@@ -1012,7 +1012,7 @@ class PlaylistUI:
             return
         selection = self._get_tv_selected_indices()
         if not selection:
-            messagebox.showwarning("Warning", "Please select videos to remove", parent=self.playlist_window)
+            self.theme_provider.toast.warning("Warning", "Please select videos to remove")
             return
         for index in sorted(selection, reverse=True):
             if 0 <= index < len(self.current_playlist.videos):
@@ -1026,7 +1026,7 @@ class PlaylistUI:
 
     def _play_playlist(self):
         if not self.current_playlist or not self.current_playlist.videos:
-            messagebox.showwarning("Warning", "Playlist is empty or not selected", parent=self.playlist_window)
+            self.theme_provider.toast.warning("Warning", "Playlist is empty or not selected")
             return
 
         if self.on_play_callback:
@@ -1120,7 +1120,7 @@ class PlaylistInfoDialog:
     def _ok(self):
         name = self.name_entry.get().strip()
         if not name:
-            messagebox.showwarning("Warning", "Please enter a playlist name", parent=self.dialog)
+            self.theme_provider.toast.warning("Warning", "Please enter a playlist name")
             return
 
         description = self.description_entry.get("1.0", tk.END).strip()
@@ -1180,7 +1180,7 @@ class PlaylistManager:
 
     def add_videos_to_playlist(self, videos: List[str], selected_videos: List[str] = None):
         if not videos and not selected_videos:
-            messagebox.showwarning("Warning", "No videos to add to playlist", parent=self.ui.parent)
+            self.ui.theme_provider.toast.warning("Warning", "No videos to add to playlist")
             return
 
         videos_to_add = selected_videos if selected_videos else videos
@@ -1279,7 +1279,7 @@ class PlaylistManager:
         def add_to_existing():
             sel = playlist_listbox.curselection()
             if not sel:
-                messagebox.showwarning("Warning", "Please select a playlist", parent=dialog)
+                self.ui.theme_provider.toast.warning("Warning", "Please select a playlist")
                 return
             chosen = playlists[sel[0]]
             self.service.add_videos_to_playlist(chosen.id, videos)

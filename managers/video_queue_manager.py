@@ -7,6 +7,7 @@ from tkinter import ttk
 from typing import List, Optional, Callable
 import uuid
 
+from managers.toast_manager import Toast
 from utils import _responsive_geometry
 
 
@@ -814,11 +815,11 @@ class QueueUI:
         queue = self.queue_service.get_queue()
 
         if not queue:
-            messagebox.showwarning("Warning", "Queue is empty", parent=self.queue_window)
+            self.theme_provider.toast.warning("Warning", "Queue is empty")
             return
 
         if not hasattr(self, 'grid_view_manager') or not self.grid_view_manager:
-            messagebox.showwarning("Warning", "Grid view not available", parent=self.queue_window)
+            self.theme_provider.toast.warning("Warning", "Grid view not available")
             return
 
         video_paths = [entry.video_path for entry in queue if os.path.exists(entry.video_path)]
@@ -826,7 +827,7 @@ class QueueUI:
         if video_paths:
             self.grid_view_manager.show_grid_view(video_paths, self.video_preview_manager)
         else:
-            messagebox.showwarning("No Valid Files", "No valid video files in queue", parent=self.queue_window)
+            self.theme_provider.toast.warning("No Valid Files", "No valid video files in queue")
 
     def _open_grid_view_from_selection(self, selection):
         """Open grid view with selected queue items"""
@@ -977,7 +978,7 @@ class QueueUI:
         removed = self.queue_service.clear_played()
         if removed > 0:
             self._refresh_queue()
-            messagebox.showinfo("Success", f"Removed {removed} played videos from queue")
+            self.theme_provider.toast.info("Success", f"Removed {removed} played videos from queue")
 
     def _clear_queue(self):
         result = messagebox.askyesno(
@@ -986,13 +987,14 @@ class QueueUI:
             parent=self.queue_window
         )
         if result:
+            self.theme_provider.toast.success("Empty Queue", "Queue Cleared")
             self.queue_service.clear_queue()
             self._refresh_queue()
 
     def _play_queue(self):
         queue = self.queue_service.get_queue()
         if not queue:
-            messagebox.showwarning("Empty Queue", "Queue is empty", parent=self.queue_window)
+            self.theme_provider.toast.warning("Empty Queue", "Queue is empty")
             return
 
         current_index = self.queue_service.get_current_index()

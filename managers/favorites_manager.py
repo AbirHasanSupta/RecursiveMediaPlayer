@@ -696,11 +696,11 @@ class FavoritesUI:
     def _open_grid_view(self):
         """Open grid view with all favorites"""
         if not self.favorite_entries:
-            messagebox.showwarning("Warning", "No favorites to display", parent=self.favorites_window)
+            self.theme_provider.toast.warning("Warning", "No favorites to display")
             return
 
         if not hasattr(self, 'grid_view_manager') or not self.grid_view_manager:
-            messagebox.showwarning("Warning", "Grid view not available", parent=self.favorites_window)
+            self.theme_provider.toast.warning("Warning", "Grid view not available")
             return
 
         video_paths = []
@@ -713,16 +713,15 @@ class FavoritesUI:
                 missing_files.append(favorite.video_name)
 
         if missing_files:
-            messagebox.showwarning(
+            self.theme_provider.toast.warning(
                 "Missing Files",
                 f"{len(missing_files)} file(s) not found",
-                parent=self.favorites_window
             )
 
         if video_paths:
             self.grid_view_manager.show_grid_view(video_paths, self.video_preview_manager)
         else:
-            messagebox.showwarning("No Valid Files", "No valid video files found", parent=self.favorites_window)
+            self.theme_provider.toast.warning("No Valid Files", "No valid video files found")
 
     def _open_grid_view_from_selection(self, selection):
         if not hasattr(self, 'grid_view_manager') or not self.grid_view_manager:
@@ -853,9 +852,9 @@ class FavoritesUI:
                 if self.on_play_callback:
                     self.on_play_callback([favorite.video_path])
             else:
-                messagebox.showwarning("File Not Found",
+                self.theme_provider.toast.warning("File Not Found",
                                        f"Video file not found:\n{favorite.video_path}",
-                                       parent=self.favorites_window)
+                                       )
 
     def _on_mouse_down(self, event):
         if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
@@ -923,8 +922,8 @@ class FavoritesUI:
     def _play_selected(self):
         selection = self._get_tv_selected_indices()
         if not selection or not self.favorite_entries:
-            messagebox.showwarning("Warning", "Please select favorites to play",
-                                   parent=self.favorites_window)
+            self.theme_provider.toast.warning("Warning", "Please select favorites to play",
+                                   )
             return
         video_paths, missing_files = [], []
         for index in selection:
@@ -935,21 +934,20 @@ class FavoritesUI:
                 else:
                     missing_files.append(fav.video_name)
         if missing_files:
-            messagebox.showwarning("Missing Files",
+            self.theme_provider.toast.warning("Missing Files",
                                    "The following files were not found:\n" + "\n".join(missing_files[:5]),
-                                   parent=self.favorites_window)
+                                   )
         if video_paths and self.on_play_callback:
             self.on_play_callback(video_paths)
         elif not video_paths:
-            messagebox.showwarning("No Valid Files", "No valid video files found in selection",
-                                   parent=self.favorites_window)
+            self.theme_provider.toast.warning("No Valid Files", "No valid video files found in selection",
+                                   )
 
     def _play_all(self):
         if not self.favorite_entries:
-            messagebox.showwarning(
+            self.theme_provider.toast.warning(
                 "Warning",
                 "No favorites to play",
-                parent=self.favorites_window
             )
             return
 
@@ -963,26 +961,23 @@ class FavoritesUI:
                 missing_files.append(favorite.video_name)
 
         if missing_files:
-            messagebox.showwarning(
+            self.theme_provider.toast.warning(
                 "Missing Files",
                 f"{len(missing_files)} file(s) not found",
-                parent=self.favorites_window
             )
 
         if video_paths and self.on_play_callback:
             self.on_play_callback(video_paths)
         elif not video_paths:
-            messagebox.showwarning(
+            self.theme_provider.toast.warning(
                 "No Valid Files",
                 "No valid video files found",
-                parent=self.favorites_window
             )
 
     def _remove_selected(self):
         selection = self._get_tv_selected_indices()
         if not selection or not self.favorite_entries:
-            messagebox.showwarning("Warning", "Please select favorites to remove",
-                                   parent=self.favorites_window)
+            self.theme_provider.toast.warning("Warning", "Please select favorites to remove")
             return
         if not messagebox.askyesno("Confirm Remove", f"Remove {len(selection)} favorite(s)?",
                                    parent=self.favorites_window):
