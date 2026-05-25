@@ -681,7 +681,7 @@ def select_multiple_folders_and_play():
             self.content_frame = tk.Frame(self.main_frame, bg=self.bg_color)
             self.content_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
 
-            self._sidebar_panel = tk.Frame(self.content_frame, bg=self.surface_color, width=52)
+            self._sidebar_panel = tk.Frame(self.content_frame, bg=self.surface_color, width=48)
             self._sidebar_panel.pack(side=tk.LEFT, fill=tk.Y)
             self._sidebar_panel.pack_propagate(False)
             self._sidebar_divider = tk.Frame(self.content_frame, bg=self.border_color, width=1)
@@ -5578,22 +5578,6 @@ def select_multiple_folders_and_play():
             self._toolbar_btns["Playback"] = _sb_btn("↺", "Playback", menu=playback_menu)
 
             _sb_sep()
-
-            self._toolbar_btns["Settings"] = _sb_btn("⚙", "Settings", command=self._show_settings)
-
-            _sb_sep()
-
-            self.theme_toolbar_btn = tk.Label(
-                sb, text="🌙" if not self.dark_mode else "☀",
-                bg=self.surface_color, fg=self.text_color,
-                font=("Segoe UI", 15, "bold"), pady=10, cursor="hand2",
-                relief=tk.FLAT, bd=0, highlightthickness=0, anchor="center"
-            )
-            self.theme_toolbar_btn.pack(fill=tk.X, pady=(2, 0))
-            self._bind_theme_toolbar_hover()
-
-            _sb_sep()
-
             self._ensure_play_toolbar_fonts()
             self.play_toolbar_btn = tk.Label(
                 sb, text="▶",
@@ -5601,7 +5585,24 @@ def select_multiple_folders_and_play():
                 font=("Segoe UI", 20, "bold"), pady=12, cursor="hand2",
                 relief=tk.FLAT, bd=0, highlightthickness=0, anchor="center"
             )
-            self.play_toolbar_btn.pack(fill=tk.X, pady=(6, 10))
+            self.play_toolbar_btn.pack(fill=tk.X, pady=(6, 0))
+            self._bind_play_toolbar_hover()
+
+            _sb_sep()
+
+            self._toolbar_btns["Settings"] = _sb_btn("⚙", "Settings", command=self._show_settings)
+            self._toolbar_btns["Settings"].pack_forget()
+
+            self.theme_toolbar_btn = tk.Label(
+                sb, text="🌙" if not self.dark_mode else "☀",
+                bg=self.surface_color, fg=self.text_color,
+                font=("Segoe UI", 15, "bold"), pady=10, cursor="hand2",
+                relief=tk.FLAT, bd=0, highlightthickness=0, anchor="center"
+            )
+            self._bind_theme_toolbar_hover()
+
+            self.theme_toolbar_btn.pack(fill=tk.X, side=tk.BOTTOM, pady=(2, 10))
+            self._toolbar_btns["Settings"].pack(fill=tk.X, side=tk.BOTTOM, pady=(18, 2))
             self._bind_play_toolbar_hover()
 
             self.button_frame = tk.Frame(self.main_frame, bg=self.bg_color)
