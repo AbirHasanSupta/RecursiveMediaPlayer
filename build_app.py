@@ -2394,60 +2394,7 @@ def select_multiple_folders_and_play():
             self.root.after(100, lambda: self._play_from_double_click(target_path))
             return "break"
 
-        # ------------------------------------------------------------------
-        # Context menu
-        # ------------------------------------------------------------------
-
-        def _make_context_menu(self):
-            if self.dark_mode:
-                return tk.Menu(self.root, tearoff=0,
-                               bg="#313335", fg="#A9B7C6",
-                               activebackground="#2D5A8E", activeforeground="#FFFFFF",
-                               relief="flat", bd=1, font=("Segoe UI", 9))
-            else:
-                return tk.Menu(self.root, tearoff=0,
-                               bg="#f5f5f5", fg="#333333",
-                               activebackground="#3498db", activeforeground="#FFFFFF",
-                               relief="flat", bd=1, font=("Segoe UI", 9))
-
-        def _tree_remove_annotation(self, paths, rating=False, tags=False, tag=None, bookmarks=False):
-            for p in paths:
-                if rating:
-                    self.annotation_service.set_rating(p, 0)
-                if tags:
-                    for t in list(self.annotation_service.get_tags(p)):
-                        self.annotation_service.remove_tag(p, t)
-                if tag:
-                    self.annotation_service.remove_tag(p, tag)
-                if bookmarks:
-                    for bm in list(self.annotation_service.get_bookmarks(p)):
-                        self.annotation_service.remove_bookmark(p, bm["ms"])
-            selected_dir = self.get_current_selected_directory()
-            if selected_dir:
-                self.load_subdirectories(selected_dir)
-
-        def _set_rating_for_path(self, path, rating):
-            self.annotation_service.set_rating(path, rating)
-            self._refresh_video_row(path)
-
-        def _remove_tag_from_path(self, path, tag):
-            self.annotation_service.remove_tag(path, tag)
-            self._refresh_video_row(path)
-
-        def _remove_bookmark_from_path(self, path, ms):
-            self.annotation_service.remove_bookmark(path, ms)
-            self._refresh_video_row(path)
-
-        def _add_current_bookmark(self, path):
-            if self._active_player and hasattr(self._active_player, 'current_time_ms'):
-                ms = self._active_player.current_time_ms()
-                if ms is not None:
-                    self.annotation_service.add_bookmark(path, ms)
-                    self._refresh_video_row(path)
-                    self.update_console(f"Bookmark added at {self._fmt_ms(ms)}")
-
         def _on_any_annotation_changed(self):
-            # Refresh only visible rows (performance)
             if hasattr(self, 'current_subdirs_mapping'):
                 for iid, path in list(self.current_subdirs_mapping.items()):
                     if os.path.isfile(path):
@@ -2479,7 +2426,7 @@ def select_multiple_folders_and_play():
             first_iid  = selection[0]
             first_path = self.current_subdirs_mapping.get(first_iid)
 
-            context_menu = self._make_context_menu()
+            context_menu = self.create_manager_context_menu(self.root)
             context_menu.add_command(label="Play Selected", command=self.play_selected_videos)
             context_menu.add_separator()
 
@@ -2739,12 +2686,8 @@ def select_multiple_folders_and_play():
                         if self._subdir_load_token is not token:
                             return
 
-                    # Each item: (parent_iid, path, is_dir, depth)
-                    # We do a single os.walk and build a flat list that maps
-                    # path -> iid so we can attach children to the right parent.
-                    path_to_iid = {}   # norm_path -> iid assigned in this batch
-                    items       = []   # (parent_iid, path, is_dir)
-
+                    path_to_iid = {}
+                    items       = []
                     def next_iid():
                         self._tree_iid_counter += 1
                         return f"t{self._tree_iid_counter}"
@@ -4363,7 +4306,7 @@ def select_multiple_folders_and_play():
             self._show_main_dir_context_menu_for_index(event, selection[0])
 
         def _show_main_dir_context_menu_for_index(self, event, index):
-            context_menu = self._make_context_menu()
+            context_menu = self.create_manager_context_menu(self.root)
             context_menu.add_command(label="Play Selected",      command=self._play_selected_main_dirs)
             context_menu.add_command(label="Open in Gallery",  command=self._open_grid_view_main_dirs)
             context_menu.add_separator()
