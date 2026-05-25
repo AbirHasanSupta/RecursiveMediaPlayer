@@ -472,16 +472,15 @@ class FavoritesUI:
         info_lbl.pack(side=tk.RIGHT, padx=(0, 10))
         self.info_label = info_lbl
 
-        tk.Frame(self.favorites_window, bg=t['divider'], height=1).pack(fill=tk.X)
+        self.directory_label = tk.Label(
+            h_inner, text="",
+            font=tp.small_font,
+            bg=t['surface2'], fg=t['text_muted'],
+            padx=8, pady=3
+        )
+        self.directory_label.pack(side=tk.LEFT, padx=(12, 0), pady=14)
 
-        chip_bar = tk.Frame(self.favorites_window, bg=t['bg'])
-        chip_bar._manager_role = "body"
-        self._fav_chip_bar = chip_bar
-        chip_bar.pack(fill=tk.X, padx=20, pady=(12, 0))
-        self.directory_label = tk.Label(chip_bar, text="", font=tp.small_font,
-                                        bg=t['surface2'], fg=t['text_muted'],
-                                        padx=10, pady=4, relief=tk.FLAT)
-        self.directory_label.pack(side=tk.LEFT)
+        tk.Frame(self.favorites_window, bg=t['divider'], height=1).pack(fill=tk.X)
 
         body = tk.Frame(self.favorites_window, bg=t['bg'])
         body._manager_role = "body"
@@ -772,7 +771,7 @@ class FavoritesUI:
                 dir_name = f"{len(self.current_directories)} directories"
             else:
                 dir_name = os.path.basename(self.current_directory)
-            self.directory_label.config(text=f"  📁  {dir_name}  ")
+            self.directory_label.config(text=f"  {dir_name}  ")
 
             if not self.favorite_entries:
                 self.favorites_tree.insert("", tk.END, iid="empty",

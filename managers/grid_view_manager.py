@@ -444,16 +444,16 @@ class GridViewManager:
                  bg=t['header_bg'], fg=t['text']).pack(side=tk.LEFT, pady=14)
 
         self.selection_label = tk.Label(
-            title_box, text="Nothing selected",
+            h_inner, text="Nothing selected",
             font=("Segoe UI", 8),
             bg=t['surface2'], fg=t['text_muted'],
             padx=8, pady=3
         )
         self.selection_label.pack(side=tk.LEFT, padx=(12, 0), pady=14)
 
-        self.drag_mode_label = tk.Label(title_box, text="",
-            font=("Segoe UI", 8, "italic"),
-            bg=t['header_bg'], fg=t['text_muted'])
+        self.drag_mode_label = tk.Label(h_inner, text="",
+                                        font=("Segoe UI", 8, "italic"),
+                                        bg=t['header_bg'], fg=t['text_muted'])
         self.drag_mode_label.pack(side=tk.LEFT, padx=(6, 0), pady=14)
 
         if self._embedded and self.close_callback:
