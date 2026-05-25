@@ -5212,13 +5212,7 @@ def select_multiple_folders_and_play():
             self.save_preferences()
 
         def _show_settings(self):
-            self._show_embedded_view(
-                "settings",
-                lambda frame: self.settings_manager.show_embedded(
-                    frame,
-                    close_callback=self._show_home_view
-                )
-            )
+            self.settings_manager.show_settings()
 
         def _open_dual_player(self, win_id=1):
             selected_dir = self.get_current_selected_directory()
