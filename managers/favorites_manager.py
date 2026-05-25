@@ -789,7 +789,7 @@ class FavoritesUI:
             rows = []
             for i, fav in enumerate(self.favorite_entries):
                 prefix = f"{os.path.basename(fav.directory_path)} / " if self._is_multi_directory_scope() else ""
-                dir_str = os.path.dirname(fav.video_path)
+                dir_str = os.path.normpath(os.path.dirname(fav.video_path))
                 size_str = self._get_file_size(fav.video_path)
                 dur_str = self._duration_cache.get(fav.video_path, "—")
                 rows.append((i, i + 1, prefix + fav.video_name, dir_str, size_str, dur_str, fav))
@@ -906,7 +906,7 @@ class FavoritesUI:
                 size_s = self._get_file_size(fav.video_path)
                 dur_s = self._duration_cache.get(fav.video_path, "—")
                 self.favorites_tree.insert("", tk.END, iid=str(i),
-                                           values=(i + 1, fav.video_name, os.path.dirname(fav.video_path), size_s,
+                                           values=(i + 1, fav.video_name, os.path.normpath(os.path.dirname(fav.video_path)), size_s,
                                                    dur_s),
                                            tags=(tag,))
             self.dragging_index = current_index

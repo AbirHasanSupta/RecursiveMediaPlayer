@@ -657,7 +657,7 @@ class PlaylistUI:
                 dur_s = self._duration_cache.get(video, "—")
                 tag = "normal" if os.path.isfile(video) else "missing"
                 self.video_tree.insert("", tk.END, iid=str(i),
-                                       values=(i + 1, os.path.basename(video), os.path.dirname(video), size_s, dur_s),
+                                       values=(i + 1, os.path.basename(video), os.path.normpath(os.path.dirname(video)), size_s, dur_s),
                                        tags=(tag,))
                 self.video_mapping[i] = video
             self.dragging_index = current_index
@@ -891,7 +891,7 @@ class PlaylistUI:
             for i, video in enumerate(videos):
                 size_str = self._get_file_size(video)
                 dur_str = self._duration_cache.get(video, "—")
-                rows.append((i, i + 1, os.path.basename(video), os.path.dirname(video),
+                rows.append((i, i + 1, os.path.basename(video), os.path.normpath(os.path.dirname(video)),
                              size_str, dur_str))
                 self.video_mapping[i] = video
 

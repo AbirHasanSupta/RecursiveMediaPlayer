@@ -655,7 +655,7 @@ class QueueUI:
 
             rows = []
             for i, entry in enumerate(queue):
-                dir_str = os.path.dirname(entry.video_path)
+                dir_str = os.path.normpath(os.path.dirname(entry.video_path))
                 size_str = self._get_file_size(entry.video_path)
                 dur_str = self._duration_cache.get(entry.video_path, "—")
                 rows.append((i, i + 1, entry.video_name, dir_str, size_str, dur_str, entry))
