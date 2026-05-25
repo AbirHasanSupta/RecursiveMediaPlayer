@@ -287,7 +287,7 @@ class PlaylistUI:
         cols = tk.Frame(self.playlist_window, bg=t['bg'])
         cols._manager_role = "body"
         self._pl_cols = cols
-        cols.pack(fill=tk.BOTH, expand=True, padx=20, pady=14)
+        cols.pack(fill=tk.BOTH, expand=True, padx=20, pady=12)
 
         left_card = tk.Frame(cols, bg=t['surface2'], width=310,
                              highlightbackground=t['border'], highlightthickness=1)
@@ -381,7 +381,7 @@ class PlaylistUI:
         vid_sb.config(command=self.video_listbox.yview)
 
         action = tk.Frame(self.playlist_window, bg=t['bg'])
-        action.pack(fill=tk.X, padx=20, pady=(0, 14))
+        action.pack(fill=tk.X, padx=20, pady=(0, 12))
 
     def _select_all(self, event=None):
         self.video_listbox.selection_set(0, tk.END)

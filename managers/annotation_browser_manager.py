@@ -614,7 +614,7 @@ class AnnotationBrowserManager:
         fbar.pack(fill=tk.X)
 
         fb = tk.Frame(fbar, bg=P["sidebar"])
-        fb.pack(fill=tk.X, padx=18, pady=10)
+        fb.pack(fill=tk.X, padx=20, pady=10)
 
         search_wrap = tk.Frame(fb, bg=P["sidebar"])
         search_wrap.pack(side=tk.LEFT, padx=(0, 20))

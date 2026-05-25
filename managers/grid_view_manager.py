@@ -428,7 +428,7 @@ class GridViewManager:
         gw = self.grid_window
 
         # ── Header (icon + title + optional close button) ──────────────────────
-        header = tk.Frame(gw, bg=t['header_bg'], height=54)
+        header = tk.Frame(gw, bg=t['header_bg'], height=58)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
         h_inner = tk.Frame(header, bg=t['header_bg'])

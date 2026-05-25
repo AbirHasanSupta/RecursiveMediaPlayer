@@ -612,7 +612,7 @@ class WatchHistoryUI:
         body = tk.Frame(self.history_window, bg=t['bg'])
         body._manager_role = "body"
         self._hist_body = body
-        body.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        body.pack(fill=tk.BOTH, expand=True, padx=20, pady=12)
 
         card = tk.Frame(body, bg=t['surface'],
                         highlightbackground=t['border'], highlightthickness=1)
