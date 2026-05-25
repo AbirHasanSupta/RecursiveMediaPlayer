@@ -1268,27 +1268,43 @@ class AnnotationBrowserManager:
     def _rebuild_vid_rows(self):
         if not hasattr(self, '_vid_inner') or not self._vid_inner:
             return
-        tp = self.tp
-        P = _p(tp.dark_mode, tp)
 
         for w in self._vid_inner.winfo_children():
             w.destroy()
         self._vid_rows = []
 
-        col_w = self._col_weights
+        if not self._filtered_videos:
+            self._vid_inner.update_idletasks()
+            self._vid_canvas.configure(scrollregion=self._vid_canvas.bbox("all"))
+            return
 
-        for i, path in enumerate(self._filtered_videos):
-            rating  = self.svc.get_rating(path)
-            tags    = self.svc.get_tags(path)
-            bm_cnt  = len(self.svc.get_bookmarks(path))
-            name    = os.path.basename(path)
-            stars   = "★" * rating if rating else ""
+        self._vid_canvas.configure(scrollregion=f"0 0 1 {len(self._filtered_videos) * self._row_height}")
+        self._render_chunk(0, list(self._filtered_videos), id(self._filtered_videos))
+
+    def _render_chunk(self, start: int, snapshot: list, snapshot_id: int, chunk: int = 30):
+        if not hasattr(self, '_vid_inner') or not self._vid_inner:
+            return
+        if id(self._filtered_videos) != snapshot_id:
+            return
+
+        tp = self.tp
+        P = _p(tp.dark_mode, tp)
+        col_w = self._col_weights
+        end = min(start + chunk, len(snapshot))
+
+        for i in range(start, end):
+            path = snapshot[i]
+            rating = self.svc.get_rating(path)
+            tags = self.svc.get_tags(path)
+            bm_cnt = len(self.svc.get_bookmarks(path))
+            name = os.path.basename(path)
+            stars = "★" * rating if rating else ""
             bm_text = f"🔖 {bm_cnt}" if bm_cnt else "—"
-            is_sel  = i in self._vid_selection
-            row_bg  = P["accent"] if is_sel else (P["item_alt"] if i % 2 else P["panel"])
-            fg      = "white" if is_sel else tp.text_color
-            muted   = "white" if is_sel else tp.muted_fg
-            gold    = "white" if is_sel else P["star_on"]
+            is_sel = i in self._vid_selection
+            row_bg = P["accent"] if is_sel else (P["item_alt"] if i % 2 else P["panel"])
+            fg = "white" if is_sel else tp.text_color
+            muted = "white" if is_sel else tp.muted_fg
+            gold = "white" if is_sel else P["star_on"]
 
             row = tk.Frame(self._vid_inner, bg=row_bg, height=self._row_height)
             row.pack(fill=tk.X)
@@ -1316,18 +1332,15 @@ class AnnotationBrowserManager:
                     x_btn.bind("<Enter>", lambda e, b=x_btn: b.config(fg="#e17055"))
                     x_btn.bind("<Leave>", lambda e, b=x_btn, P_=P_: b.config(fg=P_["pill_fg"]))
                 if len(tags_) > 4:
-                    tk.Label(tc, text=f"+{len(tags_)-4}", font=("Segoe UI", 8),
+                    tk.Label(tc, text=f"+{len(tags_) - 4}", font=("Segoe UI", 8),
                              bg=row_bg_, fg=muted_).pack(side=tk.LEFT, padx=2)
 
             _build_tag_cell(tag_cell, path, tags, row_bg, muted, P)
 
             cells = [
-                tk.Label(row, text=f"  {name}", font=("Segoe UI", 10), bg=row_bg, fg=fg,
-                         anchor="w"),
-                tk.Label(row, text=stars or "—", font=("Segoe UI", 10), bg=row_bg, fg=gold,
-                         anchor="w"),
-                tk.Label(row, text=bm_text, font=("Segoe UI", 10), bg=row_bg, fg=muted,
-                         anchor="w"),
+                tk.Label(row, text=f"  {name}", font=("Segoe UI", 10), bg=row_bg, fg=fg, anchor="w"),
+                tk.Label(row, text=stars or "—", font=("Segoe UI", 10), bg=row_bg, fg=gold, anchor="w"),
+                tk.Label(row, text=bm_text, font=("Segoe UI", 10), bg=row_bg, fg=muted, anchor="w"),
                 tag_cell,
             ]
             for j, cell in enumerate(cells):
@@ -1337,9 +1350,11 @@ class AnnotationBrowserManager:
             def _bind_row(r, idx_, cells_):
                 def on_click(e):
                     if self.video_preview_manager and hasattr(self.video_preview_manager, 'tooltip'):
-                        try: self.video_preview_manager.tooltip.hide_preview()
-                        except Exception: pass
-                    ctrl  = bool(e.state & 0x4)
+                        try:
+                            self.video_preview_manager.tooltip.hide_preview()
+                        except Exception:
+                            pass
+                    ctrl = bool(e.state & 0x4)
                     shift = bool(e.state & 0x1)
                     if shift and self._vid_selection:
                         anchor = max(self._vid_selection)
@@ -1378,17 +1393,13 @@ class AnnotationBrowserManager:
                     if idx_ not in self._vid_selection:
                         r.config(bg=P["item_hover"])
                         for c in cells_:
-                            if isinstance(c, tk.Label):
-                                c.config(bg=P["item_hover"])
-                            else:
-                                c.config(bg=P["item_hover"])
+                            c.config(bg=P["item_hover"])
 
                 def on_leave(e):
                     if idx_ not in self._vid_selection:
                         bg_ = P["item_alt"] if idx_ % 2 else P["panel"]
                         r.config(bg=bg_)
-                        for c in cells_:
-                            c.config(bg=bg_)
+                        for c in cells_: c.config(bg=bg_)
 
                 def on_drag(e):
                     if self._selected_tags or (self._search_var and self._search_var.get().strip()):
@@ -1415,12 +1426,12 @@ class AnnotationBrowserManager:
 
                 bindable = [r] + [c for c in cells_ if not isinstance(c, tk.Frame)]
                 for w in bindable:
-                    w.bind("<Button-1>",        on_click)
+                    w.bind("<Button-1>", on_click)
                     w.bind("<Double-Button-1>", on_dbl)
-                    w.bind("<Button-3>",        on_right)
-                    w.bind("<Enter>",           on_enter)
-                    w.bind("<Leave>",           on_leave)
-                    w.bind("<B1-Motion>",       on_drag)
+                    w.bind("<Button-3>", on_right)
+                    w.bind("<Enter>", on_enter)
+                    w.bind("<Leave>", on_leave)
+                    w.bind("<B1-Motion>", on_drag)
                     w.bind("<ButtonRelease-1>", on_release)
                     w.bind("<MouseWheel>",
                            lambda e: self._vid_canvas.yview_scroll(-1 if e.delta > 0 else 1, "units"))
@@ -1428,8 +1439,10 @@ class AnnotationBrowserManager:
             _bind_row(row, i, cells)
             self._vid_rows.append(row)
 
-        self._vid_inner.update_idletasks()
         self._vid_canvas.configure(scrollregion=self._vid_canvas.bbox("all"))
+
+        if end < len(snapshot):
+            self._vid_canvas.after(0, lambda: self._render_chunk(end, snapshot, snapshot_id, chunk))
 
     def _remove_tag_from_video(self, path, tag):
         self.svc.remove_tag(path, tag)
