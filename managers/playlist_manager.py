@@ -380,8 +380,7 @@ class PlaylistUI:
         self.video_listbox.bind("<Leave>", self._on_mouse_leave)
         vid_sb.config(command=self.video_listbox.yview)
 
-        action = tk.Frame(self.playlist_window, bg=t['bg'])
-        action.pack(fill=tk.X, padx=20, pady=(0, 12))
+
 
     def _select_all(self, event=None):
         self.video_listbox.selection_set(0, tk.END)

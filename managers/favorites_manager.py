@@ -390,7 +390,7 @@ class FavoritesUI:
         body = tk.Frame(self.favorites_window, bg=t['bg'])
         body._manager_role = "body"
         self._fav_body = body
-        body.pack(fill=tk.BOTH, expand=True, padx=20, pady=12)
+        body.pack(fill=tk.BOTH, expand=True, padx=20, pady=(12, 0))
 
         card = tk.Frame(body, bg=t['surface'],
                         highlightbackground=t['border'], highlightthickness=1)
@@ -437,7 +437,7 @@ class FavoritesUI:
         btn_container = tk.Frame(body, bg=t['bg'])
         btn_container._manager_role = "body"
         self._fav_btn_row = btn_container
-        btn_container.pack(fill=tk.X, pady=(8, 0))
+        btn_container.pack(fill=tk.X, pady=(4, 8))
 
         fav_actions = tk.Frame(btn_container, bg=t["bg"])
         fav_actions.pack(side=tk.RIGHT)

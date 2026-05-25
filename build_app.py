@@ -5485,7 +5485,7 @@ def select_multiple_folders_and_play():
             self._toolbar_menus = {}
             self._toolbar_commands = {}
 
-            for pill_label in ["Home", "Gallery", "Playlist", "Queue", "Favourites", "Tags & Ratings", "History"]:
+            for pill_label in ["Home", "Gallery", "Tags & Ratings", "Playlist", "Favourites", "Queue", "History"]:
                 self._make_media_pill(pill_label)
 
             sb = self._sidebar_panel

@@ -455,7 +455,7 @@ class QueueUI:
         body = tk.Frame(self.queue_window, bg=t['bg'])
         body._manager_role = "body"
         self._queue_body = body
-        body.pack(fill=tk.BOTH, expand=True, padx=20, pady=12)
+        body.pack(fill=tk.BOTH, expand=True, padx=20, pady=(12, 0))
 
         card = tk.Frame(body, bg=t['surface'],
                         highlightbackground=t['border'], highlightthickness=1)
@@ -502,15 +502,13 @@ class QueueUI:
         btn_container = tk.Frame(body, bg=t['bg'])
         btn_container._manager_role = "body"
         self._queue_btn_row = btn_container
-        btn_container.pack(fill=tk.X, pady=(8, 0))
+        btn_container.pack(fill=tk.X, pady=(4, 8))
 
         queue_actions = tk.Frame(btn_container, bg=t["bg"])
         queue_actions.pack(side=tk.RIGHT)
         self._clear_played_btn = tp.create_manager_action_link(
             queue_actions, "↺  Clear played", self._clear_played, style="queue")
         self._clear_played_btn.pack(side=tk.LEFT)
-        tk.Label(queue_actions, text="·", bg=t["bg"], fg=t["text_muted"],
-                 font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=10)
         self._clear_queue_btn = tp.create_manager_action_link(
             queue_actions, "✕  Clear all", self._clear_queue, style="warning")
         self._clear_queue_btn.pack(side=tk.LEFT)
