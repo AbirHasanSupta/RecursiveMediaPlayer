@@ -174,12 +174,100 @@ class PlaylistUI:
         self.video_mapping = {}
 
         self.dragging_index = None
+        self._sort_col = None
+        self._sort_rev = False
+        self._duration_cache = {}
+        self.video_tree = None
         self._embedded = False
         self._close_callback = None
         self.theme_provider.register_manager_ui(self)
 
     def _get_design_tokens(self):
         return self.theme_provider.get_manager_design_tokens()
+
+    def _configure_pl_video_tree_style(self):
+        t = self._get_design_tokens()
+        tp = self.theme_provider
+        style = ttk.Style()
+        try:
+            style.configure("PlTree.Treeview",
+                            background=t["surface"], foreground=t["listbox_fg"],
+                            fieldbackground=t["surface"], rowheight=28,
+                            borderwidth=0, relief="flat", font=tp.normal_font)
+            style.map("PlTree.Treeview",
+                      background=[("selected", t["listbox_select"])],
+                      foreground=[("selected", "#FFFFFF")],
+                      fieldbackground=[("!disabled", t["surface"])])
+            style.configure("PlTree.Treeview.Heading",
+                            background=t["surface2"], foreground=t["text_muted"],
+                            relief="flat", borderwidth=0, font=("Segoe UI", 9, "bold"))
+            style.map("PlTree.Treeview.Heading",
+                      background=[("active", t["surface2"]), ("pressed", t["surface2"])],
+                      foreground=[("active", t["text"]), ("pressed", t["text"])])
+        except Exception:
+            pass
+
+    def _get_file_size(self, path):
+        try:
+            s = os.path.getsize(path)
+            if s >= 1_073_741_824: return f"{s / 1_073_741_824:.1f} GB"
+            if s >= 1_048_576: return f"{s / 1_048_576:.1f} MB"
+            if s >= 1024: return f"{s / 1024:.0f} KB"
+            return f"{s} B"
+        except:
+            return "—"
+
+    def _get_duration(self, path):
+        if path in self._duration_cache:
+            return self._duration_cache[path]
+        try:
+            import subprocess
+            r = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", path],
+                capture_output=True, text=True, timeout=5)
+            secs = float(r.stdout.strip())
+            h, rem = divmod(int(secs), 3600)
+            m, s = divmod(rem, 60)
+            dur = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+        except:
+            dur = "—"
+        self._duration_cache[path] = dur
+        return dur
+
+    def _fetch_duration_async(self, path, iid):
+        def _fetch():
+            dur = self._get_duration(path)
+            try:
+                if self.video_tree and self.video_tree.winfo_exists():
+                    self.video_tree.after(0, lambda: self._update_tree_duration(iid, dur))
+            except:
+                pass
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _update_tree_duration(self, iid, dur):
+        try:
+            if self.video_tree and self.video_tree.winfo_exists() and self.video_tree.exists(iid):
+                vals = list(self.video_tree.item(iid, "values"))
+                if len(vals) >= 5:
+                    vals[4] = dur
+                    self.video_tree.item(iid, values=vals)
+        except:
+            pass
+
+    def _sort_by_col(self, col):
+        if self._sort_col == col:
+            self._sort_rev = not self._sort_rev
+        else:
+            self._sort_col = col
+            self._sort_rev = False
+        self._refresh_video_list()
+
+    def _get_tv_selected_indices(self):
+        if not self.video_tree:
+            return []
+        return [int(iid) for iid in self.video_tree.selection() if iid != "empty"]
 
     def apply_theme(self):
         win = self.playlist_window
@@ -208,10 +296,25 @@ class PlaylistUI:
                 pass
         if hasattr(self, "playlist_info_label"):
             self.playlist_info_label.configure(bg=t["bg"], fg=t["text_muted"])
-        for lb_name in ("playlist_listbox", "video_listbox"):
-            lb = getattr(self, lb_name, None)
-            if lb is not None:
-                tp.configure_manager_listbox(lb, t)
+        lb = getattr(self, "playlist_listbox", None)
+        if lb is not None:
+            tp.configure_manager_listbox(lb, t)
+        sb = getattr(self, "_pl_list_scrollbar", None)
+        if sb is not None:
+            tp.configure_manager_scrollbar(sb, t)
+        if hasattr(self, "video_tree") and self.video_tree:
+            try:
+                self.video_tree.winfo_exists()
+            except tk.TclError:
+                pass
+            else:
+                self._configure_pl_video_tree_style()
+                t2 = self._get_design_tokens()
+                self.video_tree.tag_configure("normal", foreground=t2["listbox_fg"])
+                self.video_tree.tag_configure("missing", foreground=t2["text_muted"])
+        sb2 = getattr(self, "_pl_video_scrollbar", None)
+        if sb2 is not None:
+            tp.configure_manager_scrollbar(sb2, t)
         for sb_name in ("_pl_list_scrollbar", "_pl_video_scrollbar"):
             sb = getattr(self, sb_name, None)
             if sb is not None:
@@ -364,45 +467,65 @@ class PlaylistUI:
                  font=tp.small_font, bg=t['surface2'], fg=t['text_muted'],
                  pady=6, anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
         tk.Frame(right_card, bg=t['divider'], height=1).pack(fill=tk.X)
+
         vid_body = tk.Frame(right_card, bg=t['surface'])
         vid_body._manager_role = "surface"
         self._pl_vid_body = vid_body
         vid_body.pack(fill=tk.BOTH, expand=True)
-        vid_sb = ttk.Scrollbar(vid_body, orient=tk.VERTICAL,
-                               style="ExclusionTree.Vertical.TScrollbar")
+
+        vid_sb = ttk.Scrollbar(vid_body, orient=tk.VERTICAL, style="ExclusionTree.Vertical.TScrollbar")
         self._pl_video_scrollbar = vid_sb
         vid_sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
-        self.video_listbox = tk.Listbox(
-            vid_body, yscrollcommand=vid_sb.set, font=tp.normal_font,
-            bg=t['surface'], fg=t['listbox_fg'], selectbackground=t['listbox_select'],
-            selectforeground="white", selectmode=tk.MULTIPLE,
-            activestyle="none", relief=tk.FLAT, bd=0, highlightthickness=0)
-        self.video_listbox.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-        self.video_listbox.bind("<Double-Button-1>", self._on_video_double_click)
-        self._right_click_binding = self.video_listbox.bind_all(
+
+        self._configure_pl_video_tree_style()
+        self.video_tree = ttk.Treeview(
+            vid_body,
+            columns=("num", "name", "directory", "size", "duration"),
+            show="headings",
+            style="PlTree.Treeview",
+            selectmode="extended",
+            yscrollcommand=vid_sb.set,
+        )
+        self.video_listbox = self.video_tree
+
+        for cid, heading, width, anchor, stretch in [
+            ("num", "#", 52, tk.CENTER, False),
+            ("name", "Video Name", 200, tk.W, True),
+            ("directory", "Directory", 340, tk.CENTER, True),
+            ("size", "Size", 80, tk.CENTER, False),
+            ("duration", "Duration", 75, tk.CENTER, False),
+        ]:
+            self.video_tree.heading(cid, text=heading, command=lambda c=cid: self._sort_by_col(c))
+            self.video_tree.column(cid, width=width, anchor=anchor, minwidth=30, stretch=stretch)
+
+        t2 = self._get_design_tokens()
+        self.video_tree.tag_configure("normal", foreground=t2["listbox_fg"])
+        self.video_tree.tag_configure("missing", foreground=t2["text_muted"])
+
+        self.video_tree.pack(fill=tk.BOTH, expand=True)
+        self.video_tree.bind("<Double-Button-1>", self._on_video_double_click)
+        self.video_tree.bind("<Button-1>", self._on_mouse_down)
+        self.video_tree.bind("<B1-Motion>", self._on_mouse_drag)
+        self.video_tree.bind("<ButtonRelease-1>", self._on_mouse_release)
+        self.video_tree.bind("<Motion>", self._on_mouse_motion)
+        self.video_tree.bind("<Leave>", self._on_mouse_leave)
+        self._right_click_binding = self.video_tree.bind_all(
             "<Button-3>", self._on_video_right_click_wrapper)
-        self.video_listbox.bind("<Button-1>", self._on_mouse_down)
-        self.video_listbox.bind("<B1-Motion>", self._on_mouse_drag)
-        self.video_listbox.bind("<ButtonRelease-1>", self._on_mouse_release)
-        self.video_listbox.bind("<Motion>", self._on_mouse_motion)
-        self.video_listbox.bind("<Leave>", self._on_mouse_leave)
-        vid_sb.config(command=self.video_listbox.yview)
-
-
+        vid_sb.config(command=self.video_tree.yview)
 
     def _select_all(self, event=None):
-        self.video_listbox.selection_set(0, tk.END)
+        self.video_tree.selection_set(*self.video_tree.get_children())
         return "break"
 
     def _unselect_all(self, event=None):
-        self.video_listbox.selection_clear(0, tk.END)
+        self.video_tree.selection_remove(*self.video_tree.get_children())
 
     def _on_video_right_click_wrapper(self, event):
         if not hasattr(self, 'playlist_window') or not self.playlist_window:
             return
         if not self.playlist_window.winfo_exists():
             return
-        if event.widget != self.video_listbox:
+        if event.widget is not self.video_tree:
             return
         self._on_video_right_click(event)
 
@@ -472,7 +595,7 @@ class PlaylistUI:
     def _on_close(self):
         try:
             if hasattr(self, '_right_click_binding') and self._right_click_binding:
-                self.video_listbox.unbind_all('<Button-3>')
+                self.video_tree.unbind_all('<Button-3>')
         except Exception:
             pass
 
@@ -485,226 +608,154 @@ class PlaylistUI:
     def _on_mouse_down(self, event):
         if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
             self.video_preview_manager.tooltip.hide_preview()
-
-        index = self.video_listbox.nearest(event.y)
-
-        if not self.current_playlist or index < 0 or index >= len(self.current_playlist.videos):
+        if self.video_tree.identify_region(event.x, event.y) == "heading":
             return
-
+        iid = self.video_tree.identify_row(event.y)
+        if not self.current_playlist or not iid or iid == "empty":
+            return
+        index = int(iid)
+        if index >= len(self.current_playlist.videos):
+            return
         ctrl_held = bool(event.state & 0x4)
         shift_held = bool(event.state & 0x1)
-
-        current_selection = list(self.video_listbox.curselection())
-
+        current_selection = list(self.video_tree.selection())
         if shift_held and current_selection:
-            self.video_listbox.selection_clear(0, tk.END)
-
-            anchor = current_selection[-1] if current_selection else 0
-
-            start = min(anchor, index)
-            end = max(anchor, index)
-
-            for i in range(start, end + 1):
-                self.video_listbox.selection_set(i)
-
+            anchor = int(current_selection[-1])
+            start, end = min(anchor, index), max(anchor, index)
+            self.video_tree.selection_set(*[str(i) for i in range(start, end + 1)
+                                            if self.video_tree.exists(str(i))])
             return "break"
-
         elif ctrl_held:
-            if index in current_selection:
-                self.video_listbox.selection_clear(index)
+            if iid in current_selection:
+                self.video_tree.selection_remove(iid)
             else:
-                self.video_listbox.selection_set(index)
-
+                self.video_tree.selection_add(iid)
             return "break"
-
         else:
-            self.video_listbox.selection_clear(0, tk.END)
-            self.video_listbox.selection_set(index)
-
-            if 0 <= index < len(self.current_playlist.videos):
-                self.dragging_index = index
-
+            self.video_tree.selection_set(iid)
+            self.dragging_index = index
             return "break"
 
     def _on_mouse_drag(self, event):
-        """Handle mouse drag for reordering videos"""
-        if self.dragging_index is None or not self.current_playlist:
+        if self.dragging_index is None or not self.current_playlist or self._sort_col is not None:
             return
-
-        current_index = self.video_listbox.nearest(event.y)
-        if (current_index != self.dragging_index and
-                0 <= current_index < len(self.current_playlist.videos)):
-
+        iid = self.video_tree.identify_row(event.y)
+        if not iid or iid == "empty":
+            return
+        current_index = int(iid)
+        if current_index != self.dragging_index and 0 <= current_index < len(self.current_playlist.videos):
             videos = self.current_playlist.videos
-            videos[self.dragging_index], videos[current_index] = \
-                videos[current_index], videos[self.dragging_index]
-
-            self.video_listbox.delete(0, tk.END)
+            videos[self.dragging_index], videos[current_index] = videos[current_index], videos[self.dragging_index]
+            self.video_tree.delete(*self.video_tree.get_children())
             self.video_mapping = {}
-            for i, video in enumerate(self.current_playlist.videos):
-                display_name = os.path.basename(video)
-                self.video_listbox.insert(tk.END, display_name)
+            for i, video in enumerate(videos):
+                size_s = self._get_file_size(video)
+                dur_s = self._duration_cache.get(video, "—")
+                tag = "normal" if os.path.isfile(video) else "missing"
+                self.video_tree.insert("", tk.END, iid=str(i),
+                                       values=(i + 1, os.path.basename(video), os.path.dirname(video), size_s, dur_s),
+                                       tags=(tag,))
                 self.video_mapping[i] = video
-
             self.dragging_index = current_index
-            self.video_listbox.selection_set(current_index)
-
-            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
-                self.video_preview_manager.attach_to_listbox(self.video_listbox, self.video_mapping)
+            if self.video_tree.exists(str(current_index)):
+                self.video_tree.selection_set(str(current_index))
 
     def _on_mouse_release(self, event):
-        """Handle mouse release to save reordered playlist"""
         if self.dragging_index is not None and self.current_playlist:
-            # Save the reordered playlist
             self.playlist_service.update_playlist(
-                self.current_playlist.id,
-                videos=self.current_playlist.videos
-            )
-            self.dragging_index = None
+                self.current_playlist.id, videos=self.current_playlist.videos)
+        self.dragging_index = None
 
     def _on_mouse_motion(self, event):
         if not hasattr(self, 'video_preview_manager') or not self.video_preview_manager:
             return
-
         if not self.video_preview_manager.tooltip.is_visible:
             return
-
-        listbox = event.widget
-        current_index = listbox.nearest(event.y)
-
+        iid = self.video_tree.identify_row(event.y)
+        current_index = int(iid) if (iid and iid != "empty") else None
         if current_index != self.video_preview_manager.right_clicked_item:
             self.video_preview_manager.tooltip.hide_preview()
             self.video_preview_manager.right_clicked_item = None
-
-    def _show_video_context_menu(self, event):
-        """Show context menu for selected videos in the playlist."""
-        selection = self.video_listbox.curselection()
-        if not selection:
-            return
-
-        context_menu = self.theme_provider.create_manager_context_menu(self.playlist_window)
-
-        context_menu.add_command(
-            label=f"Play Selected ({len(selection)} video{'s' if len(selection) > 1 else ''})",
-            command=lambda: self._play_selected_from_context(selection)
-        )
-
-        context_menu.add_separator()
-        context_menu.add_command(label="Select All", command=self._select_all)
-        context_menu.add_command(label="Clear Selection", command=self._unselect_all)
-
-        context_menu.add_separator()
-
-        context_menu.add_command(
-            label="Open in Gallery",
-            command=lambda: self._open_grid_view_from_selection(selection)
-        )
-
-        if self.current_playlist:
-            selected_videos = [
-                self.current_playlist.videos[i]
-                for i in selection
-                if 0 <= i < len(self.current_playlist.videos)
-                   and os.path.isfile(self.current_playlist.videos[i])
-            ]
-
-            if self.add_to_favorites_callback and selected_videos:
-                context_menu.add_command(
-                    label="Add to Favourites",
-                    command=lambda v=selected_videos: self.add_to_favorites_callback(v)
-                )
-
-            if self.add_to_queue_callback and selected_videos:
-                context_menu.add_command(
-                    label="Add to Queue",
-                    command=lambda v=selected_videos: self.add_to_queue_callback(v)
-                )
-
-        context_menu.add_separator()
-
-        context_menu.add_command(
-            label="Remove from Playlist",
-            command=self._remove_selected_videos
-        )
-
-        if len(selection) == 1:
-            video_path = self.current_playlist.videos[selection[0]]
-            context_menu.add_separator()
-            context_menu.add_command(
-                label="Copy Path",
-                command=lambda: self._copy_path(video_path)
-            )
-            context_menu.add_command(
-                label="Open File Location",
-                command=lambda: self._open_location(video_path)
-            )
-            if self.locate_in_panel_callback and os.path.isfile(video_path):
-                context_menu.add_command(
-                    label="Show in Panel",
-                    command=lambda p=video_path: self.locate_in_panel_callback(p)
-                )
-
-        try:
-            context_menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            context_menu.grab_release()
 
     def _on_mouse_leave(self, event):
         if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
             self.video_preview_manager.tooltip.hide_preview()
 
-    # Replace _on_video_right_click with:
+    def _show_video_context_menu(self, event):
+        selection = self._get_tv_selected_indices()
+        if not selection:
+            return
+        context_menu = self.theme_provider.create_manager_context_menu(self.playlist_window)
+        context_menu.add_command(
+            label=f"Play Selected ({len(selection)} video{'s' if len(selection) > 1 else ''})",
+            command=lambda: self._play_selected_from_context(selection))
+        context_menu.add_separator()
+        context_menu.add_command(label="Select All", command=self._select_all)
+        context_menu.add_command(label="Clear Selection", command=self._unselect_all)
+        context_menu.add_separator()
+        context_menu.add_command(label="Open in Gallery",
+                                 command=lambda: self._open_grid_view_from_selection(selection))
+        if self.current_playlist:
+            selected_videos = [self.current_playlist.videos[i] for i in selection
+                               if 0 <= i < len(self.current_playlist.videos)
+                               and os.path.isfile(self.current_playlist.videos[i])]
+            if self.add_to_favorites_callback and selected_videos:
+                context_menu.add_command(label="Add to Favourites",
+                                         command=lambda v=selected_videos: self.add_to_favorites_callback(v))
+            if self.add_to_queue_callback and selected_videos:
+                context_menu.add_command(label="Add to Queue",
+                                         command=lambda v=selected_videos: self.add_to_queue_callback(v))
+        context_menu.add_separator()
+        context_menu.add_command(label="Remove from Playlist", command=self._remove_selected_videos)
+        if len(selection) == 1 and self.current_playlist:
+            video_path = self.current_playlist.videos[selection[0]]
+            context_menu.add_separator()
+            context_menu.add_command(label="Copy Path",
+                                     command=lambda: self._copy_path(video_path))
+            context_menu.add_command(label="Open File Location",
+                                     command=lambda: self._open_location(video_path))
+            if self.locate_in_panel_callback and os.path.isfile(video_path):
+                context_menu.add_command(label="Show in Panel",
+                                         command=lambda p=video_path: self.locate_in_panel_callback(p))
+        try:
+            context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            context_menu.grab_release()
+
     def _on_video_right_click(self, event):
         if not self.current_playlist:
             return
-
-        listbox = event.widget
-        index = listbox.nearest(event.y)
-        selection = listbox.curselection()
-
-        # If clicked index is in selection -> context menu
-        if selection and index in selection:
-            self._show_video_context_menu(event)  # rename existing menu code to this method
+        iid = self.video_tree.identify_row(event.y)
+        if not iid or iid == "empty":
             return
-
-        # Otherwise -> preview
+        index = int(iid)
+        selection = self._get_tv_selected_indices()
+        if selection and index in selection:
+            self._show_video_context_menu(event)
+            return
         if 0 <= index < len(self.current_playlist.videos):
             video_path = self.current_playlist.videos[index]
-            if os.path.isfile(video_path):
-                if self.video_preview_manager:
-                    self.video_preview_manager.tooltip.hide_preview()
-                    self.video_preview_manager.right_clicked_item = index
-                    self.video_preview_manager._show_video_preview(
-                        video_path, event.x_root, event.y_root
-                    )
+            self.video_tree.selection_set(iid)
+            if os.path.isfile(video_path) and self.video_preview_manager:
+                self.video_preview_manager.tooltip.hide_preview()
+                self.video_preview_manager.right_clicked_item = index
+                self.video_preview_manager._show_video_preview(video_path, event.x_root, event.y_root)
 
     def _play_selected_from_context(self, selection):
-        """Play selected videos from context menu"""
         if not self.current_playlist:
             return
-
-        videos_to_play = []
-        for index in selection:
-            if 0 <= index < len(self.current_playlist.videos):
-                video_path = self.current_playlist.videos[index]
-                if os.path.exists(video_path):
-                    videos_to_play.append(video_path)
-
+        videos_to_play = [self.current_playlist.videos[i] for i in selection
+                          if 0 <= i < len(self.current_playlist.videos)
+                          and os.path.exists(self.current_playlist.videos[i])]
         if videos_to_play and self.on_play_callback:
             self.on_play_callback(videos_to_play)
 
     def _open_grid_view_from_selection(self, selection):
-        """Open grid view with selected videos"""
         if not self.current_playlist or not hasattr(self, 'grid_view_manager') or not self.grid_view_manager:
             return
-
-        videos = []
-        for index in selection:
-            if 0 <= index < len(self.current_playlist.videos):
-                video_path = self.current_playlist.videos[index]
-                if os.path.exists(video_path):
-                    videos.append(video_path)
-
+        videos = [self.current_playlist.videos[i] for i in selection
+                  if 0 <= i < len(self.current_playlist.videos)
+                  and os.path.exists(self.current_playlist.videos[i])]
         if videos:
             self.grid_view_manager.show_grid_view(videos, self.video_preview_manager)
 
@@ -801,52 +852,81 @@ class PlaylistUI:
     def _on_video_double_click(self, event):
         if not self.current_playlist:
             return
-
-        selection = self.video_listbox.curselection()
-        if not selection:
+        if self.video_tree.identify_region(event.x, event.y) != "cell":
             return
-
-        index = selection[0]
+        iid = self.video_tree.identify_row(event.y)
+        if not iid or iid == "empty":
+            return
+        index = int(iid)
         if 0 <= index < len(self.current_playlist.videos):
             video_path = self.current_playlist.videos[index]
-
             if not os.path.exists(video_path):
-                messagebox.showwarning(
-                    "File Not Found",
-                    f"Video file not found:\n{video_path}",
-                    parent=self.playlist_window
-                )
+                messagebox.showwarning("File Not Found", f"Video file not found:\n{video_path}",
+                                       parent=self.playlist_window)
                 return
-
             if self.on_play_callback:
-                videos_to_play = self.current_playlist.videos[index:]
-                self.on_play_callback(videos_to_play)
+                self.on_play_callback(self.current_playlist.videos[index:])
 
     def _refresh_video_list(self):
-        """Refresh the video list for current playlist"""
-
         def refresh():
-            current_selection = list(self.video_listbox.curselection())
-
-            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
-                self.video_preview_manager.detach_from_listbox(self.video_listbox)
-
-            self.video_listbox.delete(0, tk.END)
+            if not self.video_tree or not self.video_tree.winfo_exists():
+                return
+            self.video_tree.delete(*self.video_tree.get_children())
+            self.video_mapping = {}
 
             if not self.current_playlist:
                 return
 
-            self.video_mapping = {}
-            for i, video in enumerate(self.current_playlist.videos):
-                display_name = os.path.basename(video)
-                self.video_listbox.insert(tk.END, display_name)
+            videos = self.current_playlist.videos
+            if not videos:
+                self.video_tree.insert("", tk.END, iid="empty",
+                                       values=("", "No videos in this playlist.", "", "", ""),
+                                       tags=("missing",))
+                return
+
+            rows = []
+            for i, video in enumerate(videos):
+                size_str = self._get_file_size(video)
+                dur_str = self._duration_cache.get(video, "—")
+                rows.append((i, i + 1, os.path.basename(video), os.path.dirname(video),
+                             size_str, dur_str))
                 self.video_mapping[i] = video
 
-                if i in current_selection:
-                    self.video_listbox.selection_set(i)
+            if self._sort_col:
+                if self._sort_col == "size":
+                    def _sk(r):
+                        try:
+                            return os.path.getsize(videos[r[0]])
+                        except:
+                            return 0
 
-            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
-                self.video_preview_manager.attach_to_listbox(self.video_listbox, self.video_mapping)
+                    rows.sort(key=_sk, reverse=self._sort_rev)
+                elif self._sort_col == "duration":
+                    def _dk(r):
+                        d = r[5]
+                        if d == "—": return -1
+                        try:
+                            p = list(map(int, d.split(":")))
+                            return p[0] * 3600 + p[1] * 60 + p[2] if len(p) == 3 else p[0] * 60 + p[1]
+                        except:
+                            return -1
+
+                    rows.sort(key=_dk, reverse=self._sort_rev)
+                else:
+                    ki = {"num": 1, "name": 2, "directory": 3}[self._sort_col]
+                    rows.sort(key=lambda r: str(r[ki]).lower(), reverse=self._sort_rev)
+
+            arrow = {True: " ▼", False: " ▲"}
+            for cid, lbl in [("num", "#"), ("name", "Video Name"), ("directory", "Directory"),
+                             ("size", "Size"), ("duration", "Duration")]:
+                self.video_tree.heading(cid, text=lbl + (arrow[self._sort_rev] if self._sort_col == cid else ""))
+
+            for orig_idx, num, name, dirpath, size_s, dur_s in rows:
+                tag = "normal" if os.path.isfile(videos[orig_idx]) else "missing"
+                self.video_tree.insert("", tk.END, iid=str(orig_idx),
+                                       values=(num, name, dirpath, size_s, dur_s), tags=(tag,))
+                if videos[orig_idx] not in self._duration_cache:
+                    self._fetch_duration_async(videos[orig_idx], str(orig_idx))
 
         if threading.current_thread() is threading.main_thread():
             refresh()
@@ -939,24 +1019,17 @@ class PlaylistUI:
     def _remove_selected_videos(self):
         if not self.current_playlist:
             return
-
-        selection = self.video_listbox.curselection()
+        selection = self._get_tv_selected_indices()
         if not selection:
             messagebox.showwarning("Warning", "Please select videos to remove", parent=self.playlist_window)
             return
-
-        for index in reversed(selection):
+        for index in sorted(selection, reverse=True):
             if 0 <= index < len(self.current_playlist.videos):
                 self.current_playlist.videos.pop(index)
-
-        self.playlist_service.update_playlist(
-            self.current_playlist.id,
-            videos=self.current_playlist.videos
-        )
+        self.playlist_service.update_playlist(self.current_playlist.id, videos=self.current_playlist.videos)
         if self.log_callback:
             self.log_callback(
                 f"Removed {len(selection)} video{'s' if len(selection) > 1 else ''} from '{self.current_playlist.name}'")
-
         self._refresh_video_list()
         self._refresh_playlist_list()
 

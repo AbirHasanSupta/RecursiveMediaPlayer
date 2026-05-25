@@ -340,6 +340,10 @@ class QueueUI:
         self.locate_in_panel_callback = None
         self._embedded = False
         self._close_callback = None
+        self._sort_col = None
+        self._sort_rev = False
+        self._duration_cache = {}
+        self.queue_tree = None
         self.theme_provider.register_manager_ui(self)
 
     def show_queue_manager(self):
@@ -382,6 +386,90 @@ class QueueUI:
         if self._embedded and self._close_callback:
             self._close_callback()
 
+    def _configure_queue_tree_style(self):
+        t = self._get_design_tokens()
+        tp = self.theme_provider
+        style = ttk.Style()
+        try:
+            style.configure("QueueTree.Treeview",
+                            background=t["surface"], foreground=t["listbox_fg"],
+                            fieldbackground=t["surface"], rowheight=28,
+                            borderwidth=0, relief="flat", font=tp.normal_font)
+            style.map("QueueTree.Treeview",
+                      background=[("selected", t["listbox_select"])],
+                      foreground=[("selected", "#FFFFFF")],
+                      fieldbackground=[("!disabled", t["surface"])])
+            style.configure("QueueTree.Treeview.Heading",
+                            background=t["surface2"], foreground=t["text_muted"],
+                            relief="flat", borderwidth=0, font=("Segoe UI", 9, "bold"))
+            style.map("QueueTree.Treeview.Heading",
+                      background=[("active", t["surface2"]), ("pressed", t["surface2"])],
+                      foreground=[("active", t["text"]), ("pressed", t["text"])])
+        except Exception:
+            pass
+
+    def _get_file_size(self, path):
+        try:
+            s = os.path.getsize(path)
+            if s >= 1_073_741_824: return f"{s / 1_073_741_824:.1f} GB"
+            if s >= 1_048_576: return f"{s / 1_048_576:.1f} MB"
+            if s >= 1024: return f"{s / 1024:.0f} KB"
+            return f"{s} B"
+        except:
+            return "—"
+
+    def _get_duration(self, path):
+        if path in self._duration_cache:
+            return self._duration_cache[path]
+        try:
+            import subprocess
+            r = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", path],
+                capture_output=True, text=True, timeout=5)
+            secs = float(r.stdout.strip())
+            h, rem = divmod(int(secs), 3600)
+            m, s = divmod(rem, 60)
+            dur = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+        except:
+            dur = "—"
+        self._duration_cache[path] = dur
+        return dur
+
+    def _fetch_duration_async(self, path, iid):
+        def _fetch():
+            dur = self._get_duration(path)
+            try:
+                if self.queue_tree and self.queue_tree.winfo_exists():
+                    self.queue_tree.after(0, lambda: self._update_tree_duration(iid, dur))
+            except:
+                pass
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _update_tree_duration(self, iid, dur):
+        try:
+            if self.queue_tree and self.queue_tree.winfo_exists() and self.queue_tree.exists(iid):
+                vals = list(self.queue_tree.item(iid, "values"))
+                if len(vals) >= 5:
+                    vals[4] = dur
+                    self.queue_tree.item(iid, values=vals)
+        except:
+            pass
+
+    def _sort_by_col(self, col):
+        if self._sort_col == col:
+            self._sort_rev = not self._sort_rev
+        else:
+            self._sort_col = col
+            self._sort_rev = False
+        self._refresh_queue()
+
+    def _get_tv_selected_indices(self):
+        if not self.queue_tree:
+            return []
+        return [int(iid) for iid in self.queue_tree.selection() if iid != "empty"]
+
     def _get_design_tokens(self):
         return self.theme_provider.get_manager_design_tokens()
 
@@ -409,8 +497,17 @@ class QueueUI:
                 pass
         if hasattr(self, "queue_info_label"):
             self.queue_info_label.configure(bg=t["header_bg"], fg=t["text_muted"])
-        if hasattr(self, "queue_listbox"):
-            tp.configure_manager_listbox(self.queue_listbox, t)
+        if hasattr(self, "queue_tree") and self.queue_tree:
+            try:
+                self.queue_tree.winfo_exists()
+            except tk.TclError:
+                pass
+            else:
+                self._configure_queue_tree_style()
+                t2 = self._get_design_tokens()
+                self.queue_tree.tag_configure("playing", foreground=t2["queue_accent"])
+                self.queue_tree.tag_configure("played", foreground=t2["text_muted"])
+                self.queue_tree.tag_configure("normal", foreground=t2["listbox_fg"])
         if hasattr(self, "_queue_scrollbar"):
             tp.configure_manager_scrollbar(self._queue_scrollbar, t)
         tp.restyle_manager_buttons(win)
@@ -463,40 +560,51 @@ class QueueUI:
         self._queue_card = card
         card.pack(fill=tk.BOTH, expand=True)
 
-        col_hdr = tk.Frame(card, bg=t['surface2'])
-        col_hdr._manager_role = "surface2"
-        self._queue_col_hdr = col_hdr
-        col_hdr.pack(fill=tk.X)
-        tk.Label(col_hdr, text="  #    VIDEO", font=tp.small_font,
-                 bg=t['surface2'], fg=t['text_muted'], pady=6, anchor="w"
-                 ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
-        tk.Label(col_hdr, text="▶ = now playing   ✓ = played  ",
-                 font=tp.small_font, bg=t['surface2'], fg=t['text_muted'], pady=6
-                 ).pack(side=tk.RIGHT)
-        tk.Frame(card, bg=t['divider'], height=1).pack(fill=tk.X)
+        tree_frame = tk.Frame(card, bg=t['surface'])
+        tree_frame._manager_role = "surface"
+        self._queue_col_hdr = tree_frame
+        self._queue_lb_row = tree_frame
+        tree_frame.pack(fill=tk.BOTH, expand=True)
 
-        lb_row = tk.Frame(card, bg=t['surface'])
-        lb_row._manager_role = "surface"
-        self._queue_lb_row = lb_row
-        lb_row.pack(fill=tk.BOTH, expand=True)
-        sb = ttk.Scrollbar(lb_row, orient=tk.VERTICAL,
-                           style="ExclusionTree.Vertical.TScrollbar")
+        sb = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, style="ExclusionTree.Vertical.TScrollbar")
         self._queue_scrollbar = sb
         sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
-        self.queue_listbox = tk.Listbox(
-            lb_row, selectmode=tk.MULTIPLE, yscrollcommand=sb.set,
-            font=tp.normal_font, bg=t['surface'], fg=t['listbox_fg'],
-            selectbackground=t['listbox_select'], selectforeground="white",
-            activestyle="none", relief=tk.FLAT, bd=0, highlightthickness=0)
-        self.queue_listbox.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-        sb.config(command=self.queue_listbox.yview)
 
-        self.queue_listbox.bind("<Double-Button-1>", self._on_double_click)
-        self.queue_listbox.bind("<Button-1>", self._on_drag_start)
-        self.queue_listbox.bind("<Button-3>", self._on_right_click)
-        self.queue_listbox.bind("<B1-Motion>", self._on_drag_motion)
-        self.queue_listbox.bind("<ButtonRelease-1>", self._on_drag_release)
-        self.queue_listbox.bind("<Leave>", self._on_mouse_leave)
+        self._configure_queue_tree_style()
+        self.queue_tree = ttk.Treeview(
+            tree_frame,
+            columns=("num", "name", "directory", "size", "duration"),
+            show="headings",
+            style="QueueTree.Treeview",
+            selectmode="extended",
+            yscrollcommand=sb.set,
+        )
+        self.queue_listbox = self.queue_tree
+
+        for cid, heading, width, anchor, stretch in [
+            ("num", "#", 52, tk.CENTER, False),
+            ("name", "Video Name", 200, tk.W, True),
+            ("directory", "Directory", 340, tk.CENTER, True),
+            ("size", "Size", 80, tk.CENTER, False),
+            ("duration", "Duration", 75, tk.CENTER, False),
+        ]:
+            self.queue_tree.heading(cid, text=heading, command=lambda c=cid: self._sort_by_col(c))
+            self.queue_tree.column(cid, width=width, anchor=anchor, minwidth=30, stretch=stretch)
+
+        t2 = self._get_design_tokens()
+        self.queue_tree.tag_configure("playing", foreground=t2["queue_accent"])
+        self.queue_tree.tag_configure("played", foreground=t2["text_muted"])
+        self.queue_tree.tag_configure("normal", foreground=t2["listbox_fg"])
+
+        self.queue_tree.pack(fill=tk.BOTH, expand=True)
+        sb.config(command=self.queue_tree.yview)
+
+        self.queue_tree.bind("<Double-Button-1>", self._on_double_click)
+        self.queue_tree.bind("<Button-1>", self._on_drag_start)
+        self.queue_tree.bind("<Button-3>", self._on_right_click)
+        self.queue_tree.bind("<B1-Motion>", self._on_drag_motion)
+        self.queue_tree.bind("<ButtonRelease-1>", self._on_drag_release)
+        self.queue_tree.bind("<Leave>", self._on_mouse_leave)
 
         # ---- Buttons placed directly on body, no extra bar ----
         btn_container = tk.Frame(body, bg=t['bg'])
@@ -525,44 +633,73 @@ class QueueUI:
 
     def _refresh_queue(self):
         def refresh():
-            if not self.queue_listbox or not self.queue_listbox.winfo_exists():
+            if not self.queue_tree or not self.queue_tree.winfo_exists():
                 return
-            tp = self.theme_provider
             t = self._get_design_tokens()
             ACCENT = t["queue_accent"]
 
-            self.queue_listbox.delete(0, tk.END)
+            self.queue_tree.delete(*self.queue_tree.get_children())
             queue = self.queue_service.get_queue()
             current_index = self.queue_service.get_current_index()
 
             if not queue:
-                self.queue_listbox.configure(fg=tp.muted_fg)
-                self.queue_listbox.insert(tk.END, "")
-                self.queue_listbox.insert(tk.END, "   Queue is empty.")
-                self.queue_listbox.insert(tk.END, "   Right-click a video to add it to the queue.")
+                self.queue_tree.insert("", tk.END, iid="empty",
+                                       values=("", "Queue is empty. Right-click a video to add.", "", "", ""),
+                                       tags=("played",))
                 self.queue_info_label.config(text="0 videos")
                 return
 
-            self.queue_listbox.configure(fg=tp.listbox_fg)
-            video_mapping = {}
+            rows = []
             for i, entry in enumerate(queue):
-                if i == current_index:
-                    marker, row_fg = "▶", ACCENT
-                elif entry.played:
-                    marker, row_fg = "✓", tp.muted_fg
-                else:
-                    marker, row_fg = "  ", tp.listbox_fg
+                dir_str = os.path.dirname(entry.video_path)
+                size_str = self._get_file_size(entry.video_path)
+                dur_str = self._duration_cache.get(entry.video_path, "—")
+                rows.append((i, i + 1, entry.video_name, dir_str, size_str, dur_str, entry))
 
-                self.queue_listbox.insert(tk.END, f"   {marker}  {i + 1}.   {entry.video_name}")
-                self.queue_listbox.itemconfig(i, fg=row_fg)
-                video_mapping[i] = entry.video_path
+            if self._sort_col:
+                if self._sort_col == "size":
+                    def _sk(r):
+                        try:
+                            return os.path.getsize(r[6].video_path)
+                        except:
+                            return 0
+
+                    rows.sort(key=_sk, reverse=self._sort_rev)
+                elif self._sort_col == "duration":
+                    def _dk(r):
+                        d = r[5]
+                        if d == "—": return -1
+                        try:
+                            p = list(map(int, d.split(":")))
+                            return p[0] * 3600 + p[1] * 60 + p[2] if len(p) == 3 else p[0] * 60 + p[1]
+                        except:
+                            return -1
+
+                    rows.sort(key=_dk, reverse=self._sort_rev)
+                else:
+                    ki = {"num": 1, "name": 2, "directory": 3}[self._sort_col]
+                    rows.sort(key=lambda r: str(r[ki]).lower(), reverse=self._sort_rev)
+
+            arrow = {True: " ▼", False: " ▲"}
+            for cid, lbl in [("num", "#"), ("name", "Video Name"), ("directory", "Directory"),
+                             ("size", "Size"), ("duration", "Duration")]:
+                self.queue_tree.heading(cid, text=lbl + (arrow[self._sort_rev] if self._sort_col == cid else ""))
+
+            for orig_idx, num, name, dirpath, size_s, dur_s, entry in rows:
+                if orig_idx == current_index:
+                    tag = "playing"
+                elif entry.played:
+                    tag = "played"
+                else:
+                    tag = "normal"
+                self.queue_tree.insert("", tk.END, iid=str(orig_idx),
+                                       values=(num, name, dirpath, size_s, dur_s), tags=(tag,))
+                if entry.video_path not in self._duration_cache:
+                    self._fetch_duration_async(entry.video_path, str(orig_idx))
 
             unplayed = sum(1 for e in queue if not e.played)
             self.queue_info_label.config(
                 text=f"{len(queue)} videos  •  {unplayed} unplayed  •  #{current_index + 1} playing")
-
-            if hasattr(self, "video_preview_manager") and self.video_preview_manager:
-                self.video_preview_manager.attach_to_listbox(self.queue_listbox, video_mapping)
 
         if threading.current_thread() is threading.main_thread():
             refresh()
@@ -570,115 +707,76 @@ class QueueUI:
             self.parent.after(0, refresh)
 
     def _show_queue_context_menu(self, event):
-        """Show context menu for selected queue items."""
-        selection = self.queue_listbox.curselection()
+        selection = self._get_tv_selected_indices()
         if not selection:
             return
-
         queue = self.queue_service.get_queue()
-        selected_videos = []
-        for idx in selection:
-            if 0 <= idx < len(queue):
-                entry = queue[idx]
-                if os.path.exists(entry.video_path):
-                    selected_videos.append(entry.video_path)
+        selected_videos = [queue[idx].video_path for idx in selection
+                           if 0 <= idx < len(queue) and os.path.exists(queue[idx].video_path)]
 
         context_menu = self.theme_provider.create_manager_context_menu(self.queue_window)
-
         context_menu.add_command(
             label=f"Play Selected ({len(selection)} item{'s' if len(selection) > 1 else ''})",
-            command=lambda v=selected_videos: self._play_from_context(v)
-        )
-
-        context_menu.add_command(
-            label="Jump to Selected",
-            command=lambda: self._jump_to_first_selected(selection)
-        )
-
+            command=lambda v=selected_videos: self._play_from_context(v))
+        context_menu.add_command(label="Jump to Selected",
+                                 command=lambda: self._jump_to_first_selected(selection))
         context_menu.add_separator()
         context_menu.add_command(label="Select All", command=self._select_all)
         context_menu.add_command(label="Clear Selection", command=self._unselect_all)
-
         context_menu.add_separator()
-
-        context_menu.add_command(
-            label="Open in Gallery",
-            command=lambda: self._open_grid_view_from_selection(selection)
-        )
-
+        context_menu.add_command(label="Open in Gallery",
+                                 command=lambda: self._open_grid_view_from_selection(selection))
         if self.add_to_favorites_callback and selected_videos:
-            context_menu.add_command(
-                label="Add to Favourites",
-                command=lambda v=selected_videos: self.add_to_favorites_callback(v)
-            )
-
+            context_menu.add_command(label="Add to Favourites",
+                                     command=lambda v=selected_videos: self.add_to_favorites_callback(v))
         if self.add_to_playlist_callback and selected_videos:
-            context_menu.add_command(
-                label="Add to Playlist",
-                command=lambda v=selected_videos: self.add_to_playlist_callback(v)
-            )
-
+            context_menu.add_command(label="Add to Playlist",
+                                     command=lambda v=selected_videos: self.add_to_playlist_callback(v))
         context_menu.add_separator()
-
-        context_menu.add_command(
-            label="Remove from Queue",
-            command=self._remove_selected
-        )
-
+        context_menu.add_command(label="Remove from Queue", command=self._remove_selected)
         if len(selection) == 1:
             entry = queue[selection[0]]
             context_menu.add_separator()
-            context_menu.add_command(
-                label="Copy Path",
-                command=lambda: self._copy_path(entry.video_path)
-            )
-            context_menu.add_command(
-                label="Open File Location",
-                command=lambda: self._open_location(entry.video_path)
-            )
+            context_menu.add_command(label="Copy Path",
+                                     command=lambda: self._copy_path(entry.video_path))
+            context_menu.add_command(label="Open File Location",
+                                     command=lambda: self._open_location(entry.video_path))
             if self.locate_in_panel_callback and os.path.isfile(entry.video_path):
-                context_menu.add_command(
-                    label="Show in Panel",
-                    command=lambda p=entry.video_path: self.locate_in_panel_callback(p)
-                )
-
+                context_menu.add_command(label="Show in Panel",
+                                         command=lambda p=entry.video_path: self.locate_in_panel_callback(p))
         try:
             context_menu.tk_popup(event.x_root, event.y_root)
         finally:
             context_menu.grab_release()
 
     def _select_all(self, event=None):
-        self.queue_listbox.selection_set(0, tk.END)
+        self.queue_tree.selection_set(*self.queue_tree.get_children())
         return "break"
 
     def _unselect_all(self, event=None):
-        self.queue_listbox.selection_clear(0, tk.END)
+        self.queue_tree.selection_remove(*self.queue_tree.get_children())
 
     def _on_mouse_leave(self, event):
         if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
             self.video_preview_manager.tooltip.hide_preview()
 
     def _on_right_click(self, event):
-        listbox = event.widget
-        index = listbox.nearest(event.y)
-        selection = listbox.curselection()
-        queue = self.queue_service.get_queue()
-
-        # If clicked index is in selection -> context menu
-        if selection and index in selection:
-            self._show_queue_context_menu(event)  # move existing menu code here
+        iid = self.queue_tree.identify_row(event.y)
+        if not iid or iid == "empty":
             return
-
-        # Otherwise -> preview
+        index = int(iid)
+        selection = self._get_tv_selected_indices()
+        queue = self.queue_service.get_queue()
+        if selection and index in selection:
+            self._show_queue_context_menu(event)
+            return
         if 0 <= index < len(queue):
             entry = queue[index]
-            if os.path.isfile(entry.video_path):
-                if self.video_preview_manager:
-                    self.video_preview_manager.tooltip.hide_preview()
-                    self.video_preview_manager.right_clicked_item = index
-                    self.video_preview_manager._show_video_preview(
-                        entry.video_path, event.x_root, event.y_root
-                    )
+            self.queue_tree.selection_set(iid)
+            if os.path.isfile(entry.video_path) and self.video_preview_manager:
+                self.video_preview_manager.tooltip.hide_preview()
+                self.video_preview_manager.right_clicked_item = index
+                self.video_preview_manager._show_video_preview(entry.video_path, event.x_root, event.y_root)
 
     def _play_from_context(self, videos):
         if videos and self.on_play_callback:
@@ -766,131 +864,110 @@ class QueueUI:
             print(f"Error opening location: {e}")
 
     def _on_double_click(self, event):
-        selection = self.queue_listbox.curselection()
-        if selection:
-            index = selection[0]
+        if self.queue_tree.identify_region(event.x, event.y) != "cell":
+            return
+        iid = self.queue_tree.identify_row(event.y)
+        if iid and iid != "empty":
+            index = int(iid)
             video_path = self.queue_service.jump_to_index(index)
             if video_path and self.on_jump_callback:
                 self.on_jump_callback(video_path)
             self._refresh_queue()
 
     def _on_drag_start(self, event):
-        index = self.queue_listbox.nearest(event.y)
-
-        queue = self.queue_service.get_queue()
-
-        if index < 0 or index >= len(queue):
+        if self.queue_tree.identify_region(event.x, event.y) == "heading":
             return
-
+        if self._sort_col is not None:
+            self.drag_start_index = None
+            return
+        iid = self.queue_tree.identify_row(event.y)
+        if not iid or iid == "empty":
+            return
+        index = int(iid)
         ctrl_held = bool(event.state & 0x4)
         shift_held = bool(event.state & 0x1)
-
-        current_selection = list(self.queue_listbox.curselection())
-
+        current_selection = list(self.queue_tree.selection())
         if shift_held and current_selection:
-            self.queue_listbox.selection_clear(0, tk.END)
-
-            anchor = current_selection[-1] if current_selection else 0
-
-            start = min(anchor, index)
-            end = max(anchor, index)
-
-            for i in range(start, end + 1):
-                self.queue_listbox.selection_set(i)
-
+            anchor = int(current_selection[-1])
+            start, end = min(anchor, index), max(anchor, index)
+            self.queue_tree.selection_set(*[str(i) for i in range(start, end + 1)
+                                            if self.queue_tree.exists(str(i))])
             self.drag_start_index = None
             return "break"
-
         elif ctrl_held:
-            if index in current_selection:
-                self.queue_listbox.selection_clear(index)
+            if iid in current_selection:
+                self.queue_tree.selection_remove(iid)
             else:
-                self.queue_listbox.selection_set(index)
-
+                self.queue_tree.selection_add(iid)
             self.drag_start_index = None
             return "break"
-
         else:
-            self.queue_listbox.selection_clear(0, tk.END)
-            self.queue_listbox.selection_set(index)
-
+            self.queue_tree.selection_set(iid)
             self.drag_start_index = index
             self.drag_data = None
-
             return "break"
 
     def _on_drag_motion(self, event):
         if self.drag_start_index is None:
             return
-
-        current_index = self.queue_listbox.nearest(event.y)
-        if current_index != self.drag_start_index:
-            self.drag_data = current_index
+        iid = self.queue_tree.identify_row(event.y)
+        if iid and iid != "empty":
+            idx = int(iid)
+            if idx != self.drag_start_index:
+                self.drag_data = idx
 
     def _on_drag_release(self, event):
         if self.drag_start_index is None or self.drag_data is None:
             self.drag_start_index = None
             self.drag_data = None
             return
-
-        selection = list(self.queue_listbox.curselection())
+        selection = self._get_tv_selected_indices()
         if not selection:
             self.drag_start_index = None
             self.drag_data = None
             return
-
         target = self.drag_data
         if target > max(selection):
-            direction = 'down'
-            moves = target - max(selection)
+            direction, moves = 'down', target - max(selection)
         elif target < min(selection):
-            direction = 'up'
-            moves = min(selection) - target
+            direction, moves = 'up', min(selection) - target
         else:
             self.drag_start_index = None
             self.drag_data = None
             return
-
         for _ in range(moves):
             self.queue_service.move_items(selection, direction)
-            if direction == 'up':
-                selection = [s - 1 for s in selection]
-            else:
-                selection = [s + 1 for s in selection]
-
+            selection = [s + (-1 if direction == 'up' else 1) for s in selection]
         self._refresh_queue()
-
         for idx in selection:
-            if 0 <= idx < self.queue_listbox.size():
-                self.queue_listbox.selection_set(idx)
-
+            if self.queue_tree.exists(str(idx)):
+                self.queue_tree.selection_add(str(idx))
         self.drag_start_index = None
         self.drag_data = None
 
     def _move_up(self):
-        selection = list(self.queue_listbox.curselection())
-        if selection:
-            if self.queue_service.move_items(selection, 'up'):
-                self._refresh_queue()
-                for idx in selection:
-                    if idx > 0:
-                        self.queue_listbox.selection_set(idx - 1)
+        selection = self._get_tv_selected_indices()
+        if selection and self.queue_service.move_items(selection, 'up'):
+            self._refresh_queue()
+            for idx in selection:
+                new = max(0, idx - 1)
+                if self.queue_tree.exists(str(new)):
+                    self.queue_tree.selection_add(str(new))
 
     def _move_down(self):
-        selection = list(self.queue_listbox.curselection())
-        if selection:
-            if self.queue_service.move_items(selection, 'down'):
-                self._refresh_queue()
-                for idx in selection:
-                    if idx < self.queue_listbox.size() - 1:
-                        self.queue_listbox.selection_set(idx + 1)
+        selection = self._get_tv_selected_indices()
+        if selection and self.queue_service.move_items(selection, 'down'):
+            self._refresh_queue()
+            q_len = len(self.queue_service.get_queue())
+            for idx in selection:
+                new = min(q_len - 1, idx + 1)
+                if self.queue_tree.exists(str(new)):
+                    self.queue_tree.selection_add(str(new))
 
     def _remove_selected(self):
-        selection = list(self.queue_listbox.curselection())
-        if selection:
-            removed = self.queue_service.remove_from_queue(selection)
-            if removed > 0:
-                self._refresh_queue()
+        selection = self._get_tv_selected_indices()
+        if selection and self.queue_service.remove_from_queue(selection) > 0:
+            self._refresh_queue()
 
     def _clear_played(self):
         removed = self.queue_service.clear_played()
