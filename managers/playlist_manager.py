@@ -438,10 +438,6 @@ class PlaylistUI:
             pl_left, "⇄  Shuffle", self._shuffle_current_playlist, style="secondary")
         self.shuffle_playlist_btn.pack(side=tk.LEFT, padx=(0, 2))
 
-        self.sort_playlist_btn = tp.create_manager_action_link(
-            pl_left, "↑↓  Sort A–Z", self._sort_current_playlist, style="secondary")
-        self.sort_playlist_btn.pack(side=tk.LEFT, padx=(0, 2))
-
         self.new_playlist_btn = tp.create_manager_action_link(
             pl_right, "＋  New playlist", self._create_new_playlist, style="playlist")
         self.new_playlist_btn.pack(side=tk.LEFT, padx=(0, 4))
@@ -787,15 +783,6 @@ class PlaylistUI:
         self.playlist_service.update_playlist(self.current_playlist.id, videos=videos)
         self.current_playlist.videos = videos
         self._refresh_video_list()
-
-    def _sort_current_playlist(self):
-        if not self.current_playlist:
-            return
-        videos = sorted(self.current_playlist.videos, key=lambda p: os.path.basename(p).lower())
-        self.playlist_service.update_playlist(self.current_playlist.id, videos=videos)
-        self.current_playlist.videos = videos
-        self._refresh_video_list()
-
 
     def _copy_path(self, file_path):
         """Copy file path to clipboard"""
