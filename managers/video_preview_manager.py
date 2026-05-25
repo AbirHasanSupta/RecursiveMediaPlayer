@@ -913,6 +913,7 @@ class VideoPreviewManager:
         self.right_clicked_item = None
         self._position_preview_cache: Dict[str, str] = {}
         self._position_preview_lock = threading.Lock()
+        self.cw_preview_cache = ContinueWatchingPreviewCache()
 
         self._load_thumbnails()
 
@@ -928,6 +929,7 @@ class VideoPreviewManager:
             self.lru_cache.clear()
             with self._position_preview_lock:
                 self._position_preview_cache.clear()
+                self.cw_preview_cache.clear()
             with self._lock:
                 self._thumbnails.clear()
                 self._generation_queue.clear()
@@ -986,6 +988,9 @@ class VideoPreviewManager:
     # ------------------------------------------------------------------
     # Prefetch — called by the application when videos become known
     # ------------------------------------------------------------------
+    def prefetch_cw_previews(self, entries: List[tuple]):
+        """entries: [(video_path, resume_sec), …]  — starts background prefetch."""
+        self.cw_preview_cache.prefetch(entries)
 
     def prefetch_for_videos(self, video_paths: List[str]):
         """
@@ -1001,7 +1006,6 @@ class VideoPreviewManager:
         ]
         if needed:
             self._prefetch.enqueue_batch(needed)
-        # If needed is empty, all blobs already exist — nothing to do.
 
     def prefetch_for_directory(self, dir_path: str, video_paths: List[str]):
         """
@@ -1411,6 +1415,124 @@ class VideoPreviewManager:
                     f"Evicted {len(to_remove)} cached thumbnails for "
                     f"'{os.path.basename(dir_path)}'"
                 )
+
+
+class ContinueWatchingPreviewCache:
+    """
+    Pre-generates 3-second, 160×90, 8-fps animated previews for the
+    Continue Watching cards.  Generation starts in the background when
+    the home dashboard renders, so right-click shows instantly.
+    Max 4 entries; stale entries evicted when the card list changes.
+    """
+
+    PREVIEW_W = 240
+    PREVIEW_H = 135
+    PREVIEW_FPS = 10
+    PREVIEW_DUR = 3   # seconds
+
+    def __init__(self):
+        self._cache: Dict[str, str] = {}   # norm_path -> "VIDEO:…" b64
+        self._generating: set = set()
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _cache_key(video_path: str, resume_sec: float) -> str:
+        return f"{os.path.normpath(video_path)}::{round(resume_sec)}"
+
+    def get(self, video_path: str, resume_sec: float) -> Optional[str]:
+        with self._lock:
+            return self._cache.get(self._cache_key(video_path, resume_sec))
+
+    def prefetch(self, entries: List[tuple]):
+        """entries: [(video_path, resume_sec), …]"""
+        keys = {self._cache_key(vp, rs) for vp, rs in entries}
+        with self._lock:
+            for k in [k for k in self._cache if k not in keys]:
+                del self._cache[k]
+            needed = [
+                (vp, rs) for vp, rs in entries
+                if self._cache_key(vp, rs) not in self._cache
+                   and self._cache_key(vp, rs) not in self._generating
+            ]
+            for vp, rs in needed:
+                self._generating.add(self._cache_key(vp, rs))
+        for vp, rs in needed:
+            ManagedThread(target=self._generate, args=(vp, rs),
+                          name="CWPreviewPrefetch").start()
+
+    def _generate(self, video_path: str, resume_sec: float):
+        import base64, tempfile as _tf
+        norm = self._cache_key(video_path, resume_sec)
+        tmp_path = None
+        try:
+            cap = cv2.VideoCapture(norm)
+            if not cap.isOpened():
+                return
+            fps          = cap.get(cv2.CAP_PROP_FPS) or 25
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            vid_w        = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            vid_h        = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            if vid_w == 0 or vid_h == 0 or total_frames < 10:
+                cap.release()
+                return
+
+            start_frame = max(0, min(int(resume_sec * fps), total_frames - 1))
+            cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+            scale  = min(self.PREVIEW_W / vid_w, self.PREVIEW_H / vid_h)
+            tw     = max(2, int(vid_w * scale) & ~1)
+            th_dim = max(2, int(vid_h * scale) & ~1)
+
+            fd, tmp_path = _tf.mkstemp(suffix=".mp4")
+            os.close(fd)
+            out = cv2.VideoWriter(tmp_path,
+                                  cv2.VideoWriter_fourcc(*"mp4v"),
+                                  float(self.PREVIEW_FPS), (tw, th_dim))
+            if not out.isOpened():
+                cap.release()
+                _safe_unlink(tmp_path)
+                return
+
+            target_frames = self.PREVIEW_DUR * self.PREVIEW_FPS   # 24
+            frame_step    = max(1, int(fps / self.PREVIEW_FPS))
+            captured      = 0
+            while captured < target_frames:
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    break
+                small = cv2.resize(frame, (tw, th_dim), interpolation=cv2.INTER_AREA)
+                out.write(small)
+                captured += 1
+                for _ in range(frame_step - 1):
+                    cap.grab()
+
+            cap.release()
+            out.release()
+
+            if captured < 3:
+                _safe_unlink(tmp_path)
+                return
+
+            raw = Path(tmp_path).read_bytes()
+            _safe_unlink(tmp_path)
+            tmp_path = None
+            if len(raw) > 5 * 1024 * 1024:
+                return
+
+            with self._lock:
+                self._cache[norm] = "VIDEO:" + base64.b64encode(raw).decode("ascii")
+        except Exception as e:
+            print(f"[CWPreviewCache] {e}")
+        finally:
+            if tmp_path:
+                _safe_unlink(tmp_path)
+            with self._lock:
+                self._generating.discard(norm)
+
+    def clear(self):
+        with self._lock:
+            self._cache.clear()
+            self._generating.clear()
 
 
 class SeekPreviewCache:

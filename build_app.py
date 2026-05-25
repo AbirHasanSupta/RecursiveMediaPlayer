@@ -1045,6 +1045,10 @@ def select_multiple_folders_and_play():
                     break
 
             if _cw_entries:
+                if hasattr(self, 'video_preview_manager') and _cw_entries:
+                    self.video_preview_manager.prefetch_cw_previews(
+                        [(e.video_path, float(e.duration_watched or 0)) for e in _cw_entries]
+                    )
                 cw_hdr = tk.Frame(pad, bg=bg)
                 cw_hdr.pack(fill=tk.X, pady=(16, 8))
                 tk.Label(cw_hdr, text="Continue Watching",
@@ -1155,14 +1159,22 @@ def select_multiple_folders_and_play():
                         except Exception:
                             pass
 
-                        vpm.show_preview_at_position(path, resume_sec, e.x_root, e.y_root)
+                        cached_td = vpm.cw_preview_cache.get(path, resume_sec)
+                        if cached_td:
+                            vpm.tooltip.show_preview(path, cached_td, e.x_root, e.y_root)
+                        else:
+                            vpm.show_preview_at_position(path, resume_sec, e.x_root, e.y_root)
 
                     def _cw_hide_tooltip(e):
                         if hasattr(self, 'video_preview_manager'):
                             self.video_preview_manager.tooltip.hide_preview()
 
-                    for _cw_w in (_cw_card, _cw_body, _accent_bar):
-                        _cw_w.bind("<Button-3>", _cw_right_click)
+                    def _bind_cw_rc(w):
+                        w.bind("<Button-3>", _cw_right_click)
+                        for _ch in w.winfo_children():
+                            _bind_cw_rc(_ch)
+
+                    _bind_cw_rc(_cw_card)
 
                     def _cw_enter(e, card=_cw_card, body=_cw_body,
                                   bc=_cw_bar_col, sf=surface, hc=self.hover_color):
