@@ -207,9 +207,11 @@ class FilterSortUI:
 
         btn_area = tk.Frame(hdr, bg=tp.bg_color)
         btn_area.pack(side=tk.RIGHT)
-        tp.create_button(btn_area, "↺  Reset All",  self._reset_filters,          "warning",   "sm").pack(side=tk.LEFT, padx=(0, 6))
-        tp.create_button(btn_area, "Cancel",         self.filter_window.destroy,   "secondary", "sm").pack(side=tk.LEFT, padx=(0, 6))
-        tp.create_button(btn_area, "✓  Apply",       self._apply_filters,          "success",   "sm").pack(side=tk.LEFT)
+        tp.create_modern_button(btn_area, "↺  Reset All", self._reset_filters, "warning", "sm").pack(side=tk.LEFT,
+                                                                                                     padx=(0, 6))
+        tp.create_modern_button(btn_area, "Cancel", self.filter_window.destroy, "secondary", "sm").pack(side=tk.LEFT,
+                                                                                                        padx=(0, 6))
+        tp.create_modern_button(btn_area, "✓  Apply", self._apply_filters, "success", "sm").pack(side=tk.LEFT)
 
         tk.Frame(main, bg=tp.border_color, height=1).pack(fill=tk.X, pady=(14, 0))
 
@@ -382,8 +384,7 @@ class FilterSortUI:
         hdr_row = tk.Frame(container, bg=tp.bg_color)
         hdr_row.pack(fill=tk.X, pady=(0, 4))
         tk.Label(hdr_row, text="Collection Statistics", font=tp.header_font, bg=tp.bg_color, fg=tp.text_color).pack(side=tk.LEFT)
-        tp.create_button(hdr_row, "↻  Refresh", self._refresh_statistics, "primary", "sm").pack(side=tk.RIGHT)
-
+        tp.create_modern_button(hdr_row, "↻  Refresh", self._refresh_statistics, "primary", "sm").pack(side=tk.RIGHT)
         tk.Label(
             container,
             text="Detailed statistics about your video collection — size, duration, resolution, and playback data.",

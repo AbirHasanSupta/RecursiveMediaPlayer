@@ -510,7 +510,7 @@ class SettingsUI:
         )
         path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
 
-        browse_btn = tp.create_button(path_frame, "Browse", self._browse_index_path, "secondary", "sm")
+        browse_btn = tp.create_modern_button(path_frame, "Browse", self._browse_index_path, "secondary", "sm")
         browse_btn.pack(side=tk.RIGHT)
 
         self.index_info_label = tk.Label(
@@ -579,13 +579,13 @@ class SettingsUI:
         action_frame = tk.Frame(action_body, bg=tp.bg_color)
         action_frame.pack(fill=tk.X)
 
-        self.select_preprocess_btn = tp.create_button(
+        self.select_preprocess_btn = tp.create_modern_button(
             action_frame, "Select Directory & Start Preprocessing",
             self._start_preprocessing, "primary", "md"
         )
         self.select_preprocess_btn.pack(side=tk.LEFT, padx=(0, 10))
 
-        self.stop_preprocess_btn = tp.create_button(
+        self.stop_preprocess_btn = tp.create_modern_button(
             action_frame, "Stop Preprocessing",
             self._stop_preprocessing, "danger", "md"
         )
@@ -638,7 +638,7 @@ class SettingsUI:
 
         thumbnail_btn_frame = tk.Frame(preview_body, bg=tp.bg_color)
         thumbnail_btn_frame.pack(fill=tk.X, pady=(8, 0))
-        self.clear_thumbnails_btn = tp.create_button(
+        self.clear_thumbnails_btn = tp.create_modern_button(
             thumbnail_btn_frame, "Clear Preview Cache",
             self._clear_thumbnail_cache, "warning", "sm"
         )
@@ -676,7 +676,7 @@ class SettingsUI:
 
         cache_btn_frame = tk.Frame(cache_body, bg=tp.bg_color)
         cache_btn_frame.pack(fill=tk.X)
-        self.clear_metadata_btn = tp.create_button(
+        self.clear_metadata_btn = tp.create_modern_button(
             cache_btn_frame, "Clear Metadata Cache",
             self._clear_metadata_cache, "warning", "sm"
         )
@@ -713,13 +713,13 @@ class SettingsUI:
 
         cleanup_btn_frame = tk.Frame(manual_body, bg=tp.bg_color)
         cleanup_btn_frame.pack(fill=tk.X)
-        self.cleanup_resume_btn = tp.create_button(
+        self.cleanup_resume_btn = tp.create_modern_button(
             cleanup_btn_frame, "Clean Resume Data",
             self._cleanup_resume_data, "warning", "sm"
         )
         self.cleanup_resume_btn.pack(side=tk.LEFT, padx=(0, 10))
 
-        self.cleanup_history_btn = tp.create_button(
+        self.cleanup_history_btn = tp.create_modern_button(
             cleanup_btn_frame, "Clean Watch History",
             self._cleanup_watch_history, "warning", "sm"
         )
@@ -989,7 +989,7 @@ class SettingsUI:
                     b.config(text=self._hotkeys_draft.get(aid, '—'),
                              bg=badge_bg, fg=badge_fg, relief=tk.FLAT, highlightbackground=badge_border)
 
-        tp.create_button(
+        tp.create_modern_button(
             reset_frame, "Reset Shortcuts to Defaults", _reset_shortcuts, "warning", "sm"
         ).pack(side=tk.LEFT)
 
@@ -1003,9 +1003,11 @@ class SettingsUI:
         bar = tk.Frame(self.settings_window, bg=tp.bg_color)
         bar.pack(fill=tk.X, side=tk.BOTTOM, padx=20, pady=14)
 
-        tp.create_button(bar, "↺  Reset to Defaults", self._reset_to_defaults, "warning",   "md").pack(side=tk.LEFT)
-        tp.create_button(bar, "✓  Save Settings",      self._save_settings,     "primary",   "md").pack(side=tk.RIGHT, padx=(6, 0))
-        tp.create_button(bar, "Cancel",                 self._close_settings,    "secondary", "md").pack(side=tk.RIGHT)
+        tp.create_modern_button(bar, "↺  Reset to Defaults", self._reset_to_defaults, "warning", "md").pack(
+            side=tk.LEFT)
+        tp.create_modern_button(bar, "✓  Save Settings", self._save_settings, "primary", "md").pack(side=tk.RIGHT,
+                                                                                                    padx=(6, 0))
+        tp.create_modern_button(bar, "Cancel", self._close_settings, "secondary", "md").pack(side=tk.RIGHT)
 
     # ── Data actions ───────────────────────────────────────────────────────────
 

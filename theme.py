@@ -1046,6 +1046,66 @@ class ThemeSelector:
         btn.bind("<ButtonRelease-1>", on_release)
         apply_idle()
 
+    def create_modern_button(self, parent, text, command, style="primary", size="sm"):
+        tokens = self.get_manager_design_tokens()
+        dark = self.dark_mode
+        try:
+            parent_bg = parent.cget("bg")
+        except tk.TclError:
+            parent_bg = tokens["bg"]
+
+        if style == "primary":
+            bg_idle, bg_hover, bg_press = tokens["accent"], ("#9BB5FF" if dark else "#4A6CD4"), (
+                "#6B8FE8" if dark else "#3d5fc4")
+            fg, border = "#FFFFFF", tokens["accent"]
+        elif style == "success":
+            bg_idle, bg_hover, bg_press = tokens["queue_accent"], ("#5eead4" if dark else "#0d9488"), (
+                "#2dd4bf" if dark else "#0f766e")
+            fg, border = "#FFFFFF", tokens["queue_accent"]
+        elif style == "warning":
+            bg_idle, bg_hover, bg_press = parent_bg, ("#3a2020" if dark else "#FFF0F0"), (
+                "#4a1818" if dark else "#FFE0E0")
+            fg, border = tokens["accent_secondary"], tokens["accent_secondary"]
+        elif style == "danger":
+            bg_idle, bg_hover, bg_press = parent_bg, ("#3a2020" if dark else "#FFF0F0"), (
+                "#4a1818" if dark else "#FFE0E0")
+            fg, border = ("#FF6B6B" if dark else "#D93025"), ("#FF6B6B" if dark else "#D93025")
+        else:  # secondary
+            bg_idle, bg_hover, bg_press = parent_bg, tokens["surface2"], tokens["surface"]
+            fg, border = tokens["text_muted"], tokens["border"]
+
+        from tkinter.font import Font
+        font = Font(family="Segoe UI", size=(9 if size == "sm" else 10), weight="bold")
+        padx, pady = (12, 5) if size == "sm" else (16, 7)
+
+        btn = tk.Label(
+            parent, text=text, bg=bg_idle, fg=fg, font=font,
+            padx=padx, pady=pady, cursor="hand2",
+            highlightbackground=border, highlightthickness=1, relief=tk.FLAT,
+        )
+        btn._modern_btn = True
+        btn._mb_style = style
+        btn._mb_command = command
+
+        def _idle():
+            if btn.winfo_exists(): btn.config(bg=bg_idle, highlightbackground=border)
+
+        def _hover():
+            if btn.winfo_exists(): btn.config(bg=bg_hover, highlightbackground=border)
+
+        def _press():
+            if btn.winfo_exists(): btn.config(bg=bg_press)
+
+        def _release(_e):
+            if command: command()
+            btn.after(20, lambda: _hover() if self._pointer_over_widget(btn) else _idle())
+
+        btn.bind("<Enter>", lambda e: _hover())
+        btn.bind("<Leave>", lambda e: _idle())
+        btn.bind("<ButtonPress-1>", lambda e: _press())
+        btn.bind("<ButtonRelease-1>", _release)
+        return btn
+
     def create_manager_action_link(self, parent, text, command, style="primary"):
         tokens = self.get_manager_design_tokens()
         idle, hover, active = self._manager_action_link_colors(style, tokens)
