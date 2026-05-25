@@ -754,7 +754,7 @@ class SettingsUI:
         canvas_frame = tk.Frame(main_container, bg=tp.bg_color)
         canvas_frame.pack(fill=tk.BOTH, expand=True)
 
-        canvas = tk.Canvas(canvas_frame, bg=tp.bg_color, highlightthickness=0)
+        canvas = tk.Canvas(canvas_frame, bg=tp.bg_color, highlightthickness=0, bd=0)
         scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview,
                                   style="ExclusionTree.Vertical.TScrollbar")
         canvas.configure(yscrollcommand=scrollbar.set)
@@ -762,10 +762,16 @@ class SettingsUI:
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         inner = tk.Frame(canvas, bg=tp.bg_color)
-        canvas_window = canvas.create_window((0, 0), window=inner, anchor='nw')
+        canvas_window = canvas.create_window((0, 0), window=inner, anchor='nw', tags='inner')
 
-        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas_window, width=e.width))
+        def _on_inner_configure(e):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_canvas_configure(e):
+            canvas.itemconfig('inner', width=e.width)
+
+        inner.bind("<Configure>", _on_inner_configure)
+        canvas.bind("<Configure>", _on_canvas_configure)
 
         def _on_mousewheel(event):
             try:

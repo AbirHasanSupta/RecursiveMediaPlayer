@@ -25,154 +25,86 @@ def _fmt_ms(ms: int) -> str:
 
 # ── Palette helpers ────────────────────────────────────────────────────────────
 
+def _hex_blend(fg: str, bg: str, alpha: float) -> str:
+    def _p(h):
+        h = h.lstrip('#')
+        return [int(h[i:i+2], 16) for i in (0, 2, 4)]
+    a, b = _p(fg), _p(bg)
+    r = [int(a[i] * alpha + b[i] * (1 - alpha)) for i in range(3)]
+    return '#{:02x}{:02x}{:02x}'.format(*r)
+
+
 def _p(dark_mode, tp=None):
-    if tp is not None:
-        t = tp.get_manager_design_tokens()
-        accent = t["accent"]
-        gold = t["favorites_accent"]
-        panel = t["surface"]
-        sidebar = t["surface2"]
-        header_bg = t["header_bg"]
-        sep = t["divider"]
-        border = t["border"]
-        text = t["text"]
-        muted = t["text_muted"]
+    if tp is None:
         if dark_mode:
-            tag_sel_bg  = "#1c3557"
-            tag_sel_fg  = accent
-            tag_norm_fg = muted
-            tag_hover   = "#2a2b30"
-            item_hover  = "#2a2b30"
-            item_alt    = t.get("surface2", "#252628")
-            pill_bg     = "#1c3557"
-            pill_fg     = accent
-            star_on     = gold
-            star_off    = "#3a3b3f"
-            rb_sel      = "#1c3557"
-            rb_sel_fg   = accent
-            rb_nor      = sidebar
-            rb_nor_fg   = muted
-            count_bg    = "#1c3557"
-            count_fg    = accent
-            bm_bg       = "#1c2e48"
-            bm_fg       = accent
-            bm_border   = "#1c3557"
-            detail_bg   = panel
-            status_bg   = t.get("surface2", "#16171a")
-            search_bg   = t.get("surface2", "#2a2b30")
-            search_hl   = accent
-        else:
-            tag_sel_bg  = "#dceeff"
-            tag_sel_fg  = "#1a6dc8"
-            tag_norm_fg = muted
-            tag_hover   = t.get("surface2", "#ebedf0")
-            item_hover  = "#f0f6ff"
-            item_alt    = t.get("surface2", "#f9f9fb")
-            pill_bg     = "#dceeff"
-            pill_fg     = "#1a6dc8"
-            star_on     = gold
-            star_off    = "#d0d5de"
-            rb_sel      = "#dceeff"
-            rb_sel_fg   = "#1a6dc8"
-            rb_nor      = sidebar
-            rb_nor_fg   = "#888"
-            count_bg    = "#dceeff"
-            count_fg    = "#1a6dc8"
-            bm_bg       = "#e8f3ff"
-            bm_fg       = "#1a6dc8"
-            bm_border   = "#b8d4f5"
-            detail_bg   = panel
-            status_bg   = sidebar
-            search_bg   = t["surface"]
-            search_hl   = accent
+            return {
+                "accent": "#4A9EFF", "gold": "#f5c518", "gold_dim": "#b8920f",
+                "panel": "#1e1f22", "sidebar": "#27282c", "header_bg": "#1a1b1e",
+                "tag_sel_bg": "#1c3557", "tag_sel_fg": "#4A9EFF",
+                "tag_norm_fg": "#8b9ab0", "tag_hover": "#2a2b30",
+                "item_hover": "#2a2b30", "item_alt": "#252628",
+                "pill_bg": "#1c3557", "pill_fg": "#4A9EFF",
+                "star_on": "#f5c518", "star_off": "#3a3b3f",
+                "rb_sel": "#1c3557", "rb_sel_fg": "#4A9EFF",
+                "rb_nor": "#27282c", "rb_nor_fg": "#6b7a8a",
+                "sep": "#2d2e33", "border": "#2d2e33",
+                "count_bg": "#1c3557", "count_fg": "#4A9EFF",
+                "bm_bg": "#1c2e48", "bm_fg": "#4A9EFF", "bm_border": "#1c3557",
+                "detail_bg": "#1e1f22", "status_bg": "#16171a",
+                "search_bg": "#2a2b30", "search_hl": "#4A9EFF",
+                "text": "#e4e7ee", "text_muted": "#8b9ab0",
+            }
         return {
-            "accent": accent, "gold": gold, "gold_dim": gold,
-            "panel": panel, "sidebar": sidebar, "header_bg": header_bg,
-            "tag_sel_bg": tag_sel_bg, "tag_sel_fg": tag_sel_fg,
-            "tag_norm_fg": tag_norm_fg, "tag_hover": tag_hover,
-            "item_hover": item_hover, "item_alt": item_alt,
-            "pill_bg": pill_bg, "pill_fg": pill_fg,
-            "star_on": star_on, "star_off": star_off,
-            "rb_sel": rb_sel, "rb_sel_fg": rb_sel_fg,
-            "rb_nor": rb_nor, "rb_nor_fg": rb_nor_fg,
-            "sep": sep, "border": border,
-            "count_bg": count_bg, "count_fg": count_fg,
-            "bm_bg": bm_bg, "bm_fg": bm_fg, "bm_border": bm_border,
-            "detail_bg": detail_bg, "status_bg": status_bg,
-            "search_bg": search_bg, "search_hl": search_hl,
-            "text": text, "text_muted": muted,
+            "accent": "#2d89ef", "gold": "#c8a000", "gold_dim": "#8a6d0a",
+            "panel": "#ffffff", "sidebar": "#f4f5f7", "header_bg": "#ebedf0",
+            "tag_sel_bg": "#dceeff", "tag_sel_fg": "#2d89ef",
+            "tag_norm_fg": "#555e6e", "tag_hover": "#ebedf0",
+            "item_hover": "#f0f6ff", "item_alt": "#f9f9fb",
+            "pill_bg": "#dceeff", "pill_fg": "#2d89ef",
+            "star_on": "#c8a000", "star_off": "#d0d5de",
+            "rb_sel": "#dceeff", "rb_sel_fg": "#2d89ef",
+            "rb_nor": "#ebedf0", "rb_nor_fg": "#888",
+            "sep": "#e0e2e8", "border": "#e0e2e8",
+            "count_bg": "#dceeff", "count_fg": "#2d89ef",
+            "bm_bg": "#e8f3ff", "bm_fg": "#2d89ef", "bm_border": "#b8d4f5",
+            "detail_bg": "#f4f5f7", "status_bg": "#ebedf0",
+            "search_bg": "#ffffff", "search_hl": "#2d89ef",
+            "text": "#1a2035", "text_muted": "#555e6e",
         }
-    # fallback (no tp) – original hardcoded values
-    if dark_mode:
-        return {
-            "accent":      "#4A9EFF",
-            "gold":        "#f5c518",
-            "gold_dim":    "#b8920f",
-            "panel":       "#1e1f22",
-            "sidebar":     "#27282c",
-            "header_bg":   "#1a1b1e",
-            "tag_sel_bg":  "#1c3557",
-            "tag_sel_fg":  "#4A9EFF",
-            "tag_norm_fg": "#8b9ab0",
-            "tag_hover":   "#2a2b30",
-            "item_hover":  "#2a2b30",
-            "item_alt":    "#252628",
-            "pill_bg":     "#1c3557",
-            "pill_fg":     "#4A9EFF",
-            "star_on":     "#f5c518",
-            "star_off":    "#3a3b3f",
-            "rb_sel":      "#1c3557",
-            "rb_sel_fg":   "#4A9EFF",
-            "rb_nor":      "#27282c",
-            "rb_nor_fg":   "#6b7a8a",
-            "sep":         "#2d2e33",
-            "border":      "#2d2e33",
-            "count_bg":    "#1c3557",
-            "count_fg":    "#4A9EFF",
-            "bm_bg":       "#1c2e48",
-            "bm_fg":       "#4A9EFF",
-            "bm_border":   "#1c3557",
-            "detail_bg":   "#1e1f22",
-            "status_bg":   "#16171a",
-            "search_bg":   "#2a2b30",
-            "search_hl":   "#4A9EFF",
-            "text":        "#e4e7ee",
-            "text_muted":  "#8b9ab0",
-        }
+
+    t = tp.get_manager_design_tokens()
+    accent  = t["accent"]
+    gold    = t["favorites_accent"]
+    panel   = t["surface"]
+    sidebar = t["surface2"]
+    header_bg = t["header_bg"]
+    sep     = t["divider"]
+    border  = t["border"]
+    text    = t["text"]
+    muted   = t["text_muted"]
+
+    _sel_bg   = _hex_blend(accent, panel,   0.18)
+    _hover_bg = _hex_blend(accent, panel,   0.07)
+    _bm_bg    = _hex_blend(accent, panel,   0.12)
+    _bm_bdr   = _hex_blend(accent, border,  0.35)
+    _star_off = border
+
     return {
-        "accent":      "#2d89ef",
-        "gold":        "#c8a000",
-        "gold_dim":    "#8a6d0a",
-        "panel":       "#ffffff",
-        "sidebar":     "#f4f5f7",
-        "header_bg":   "#ebedf0",
-        "tag_sel_bg":  "#dceeff",
-        "tag_sel_fg":  "#1a6dc8",
-        "tag_norm_fg": "#555e6e",
-        "tag_hover":   "#ebedf0",
-        "item_hover":  "#f0f6ff",
-        "item_alt":    "#f9f9fb",
-        "pill_bg":     "#dceeff",
-        "pill_fg":     "#1a6dc8",
-        "star_on":     "#c8a000",
-        "star_off":    "#d0d5de",
-        "rb_sel":      "#dceeff",
-        "rb_sel_fg":   "#1a6dc8",
-        "rb_nor":      "#ebedf0",
-        "rb_nor_fg":   "#888",
-        "sep":         "#e0e2e8",
-        "border":      "#e0e2e8",
-        "count_bg":    "#dceeff",
-        "count_fg":    "#1a6dc8",
-        "bm_bg":       "#e8f3ff",
-        "bm_fg":       "#1a6dc8",
-        "bm_border":   "#b8d4f5",
-        "detail_bg":   "#f4f5f7",
-        "status_bg":   "#ebedf0",
-        "search_bg":   "#ffffff",
-        "search_hl":   "#2d89ef",
-        "text":        "#1a2035",
-        "text_muted":  "#555e6e",
+        "accent": accent, "gold": gold, "gold_dim": gold,
+        "panel": panel, "sidebar": sidebar, "header_bg": header_bg,
+        "tag_sel_bg":  _sel_bg,   "tag_sel_fg":  accent,
+        "tag_norm_fg": muted,     "tag_hover":   sidebar,
+        "item_hover":  _hover_bg, "item_alt":    sidebar,
+        "pill_bg":     _sel_bg,   "pill_fg":     accent,
+        "star_on":     gold,      "star_off":    _star_off,
+        "rb_sel":      _sel_bg,   "rb_sel_fg":   accent,
+        "rb_nor":      sidebar,   "rb_nor_fg":   muted,
+        "sep": sep, "border": border,
+        "count_bg": _sel_bg, "count_fg": accent,
+        "bm_bg": _bm_bg, "bm_fg": accent, "bm_border": _bm_bdr,
+        "detail_bg": panel, "status_bg": sidebar,
+        "search_bg": t["surface"], "search_hl": accent,
+        "text": text, "text_muted": muted,
     }
 
 
@@ -490,8 +422,8 @@ class AnnotationBrowserManager:
             dlg.destroy()
             self.refresh()
 
-        tp.create_button(btns, "Add", do_save, "primary", "md").pack(side=tk.RIGHT, padx=(8, 0))
-        tp.create_button(btns, "Cancel", dlg.destroy, "secondary", "md").pack(side=tk.RIGHT)
+        tp.create_modern_button(btns, "Create", do_save, "primary", "md").pack(side=tk.RIGHT, padx=(8, 0))
+        tp.create_modern_button(btns, "Cancel", dlg.destroy, "secondary", "md").pack(side=tk.RIGHT)
         entry.bind("<Return>", lambda e: do_save())
         entry.bind("<Escape>", lambda e: dlg.destroy())
 
@@ -1191,8 +1123,8 @@ class AnnotationBrowserManager:
             dlg.destroy()
             self.refresh()
 
-        tp.create_button(btns, "Rename", do_rename, "primary", "md").pack(side=tk.RIGHT, padx=(8, 0))
-        tp.create_button(btns, "Cancel", dlg.destroy, "secondary", "md").pack(side=tk.RIGHT)
+        tp.create_modern_button(btns, "Rename", do_rename, "primary", "md").pack(side=tk.RIGHT, padx=(8, 0))
+        tp.create_modern_button(btns, "Cancel", dlg.destroy, "secondary", "md").pack(side=tk.RIGHT)
 
         entry.bind("<Return>", lambda e: do_rename())
         entry.bind("<Escape>", lambda e: dlg.destroy())

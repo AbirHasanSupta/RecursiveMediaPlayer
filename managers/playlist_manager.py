@@ -1019,8 +1019,8 @@ class PlaylistInfoDialog:
         right = tk.Frame(btn_row, bg=tp.bg_color)
         right.pack(side=tk.RIGHT)
 
-        tp.create_button(right, "Cancel", self._cancel, "secondary", "md").pack(side=tk.LEFT, padx=(0, 8))
-        tp.create_button(right, "Save", self._ok, "primary", "md").pack(side=tk.LEFT)
+        tp.create_modern_button(right, "Cancel", self._cancel, "secondary", "md").pack(side=tk.LEFT, padx=(0, 8))
+        tp.create_modern_button(right, "Save", self._ok, "primary", "md").pack(side=tk.LEFT)
 
         self.name_entry.focus_set()
         self.dialog.bind("<Return>", lambda e: self._ok())
@@ -1196,10 +1196,11 @@ class PlaylistManager:
             dialog.destroy()
             self.ui._refresh_playlist_list()
 
-        tp.create_button(left, "+ New Playlist", create_new, "primary", "md").pack(side=tk.LEFT)
+        tp.create_modern_button(left, "+ New Playlist", create_new, "primary", "md").pack(side=tk.LEFT)
 
-        tp.create_button(right, "Add to Selected", add_to_existing, "success", "md").pack(side=tk.LEFT, padx=(0, 8))
-        tp.create_button(right, "Cancel", dialog.destroy, "secondary", "md").pack(side=tk.LEFT)
+        tp.create_modern_button(right, "Add to Selected", add_to_existing, "success", "md").pack(side=tk.LEFT,
+                                                                                                 padx=(0, 8))
+        tp.create_modern_button(right, "Cancel", dialog.destroy, "secondary", "md").pack(side=tk.LEFT)
 
         from icon_helper import apply_icon
         apply_icon(dialog)
