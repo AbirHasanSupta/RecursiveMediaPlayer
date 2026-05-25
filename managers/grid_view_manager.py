@@ -552,8 +552,8 @@ class GridViewManager:
         body.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
 
         self.canvas = tk.Canvas(body, bg=t['bg'], highlightthickness=0)
-        scrollbar = tk.Scrollbar(body, orient=tk.VERTICAL, command=self.canvas.yview)
-        self.theme_provider.configure_manager_scrollbar(scrollbar, t)
+        scrollbar = ttk.Scrollbar(body, orient=tk.VERTICAL, command=self.canvas.yview,
+                                  style="ExclusionTree.Vertical.TScrollbar")
         self.canvas.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 4))
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)

@@ -7,6 +7,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Callable
 import uuid
+from tkinter import ttk
 
 from managers.resource_manager import get_resource_manager
 from utils import _responsive_geometry
@@ -413,10 +414,9 @@ class FavoritesUI:
         lb_row._manager_role = "surface"
         self._fav_lb_row = lb_row
         lb_row.pack(fill=tk.BOTH, expand=True)
-        sb = tk.Scrollbar(lb_row, width=10, relief=tk.FLAT, bd=0,
-                          troughcolor=t['bg'], bg=t['divider'])
+        sb = ttk.Scrollbar(lb_row, orient=tk.VERTICAL,
+                           style="ExclusionTree.Vertical.TScrollbar")
         self._fav_scrollbar = sb
-        tp.configure_manager_scrollbar(sb, t)
         sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
         self.favorites_listbox = tk.Listbox(
             lb_row, selectmode=tk.MULTIPLE, yscrollcommand=sb.set,

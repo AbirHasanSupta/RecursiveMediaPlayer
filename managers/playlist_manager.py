@@ -7,6 +7,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Optional, Callable
 import uuid
+from tkinter import ttk
 
 from managers.resource_manager import get_resource_manager
 from utils import _responsive_geometry
@@ -302,10 +303,9 @@ class PlaylistUI:
 
         pl_body = tk.Frame(left_card, bg=t['surface'])
         pl_body.pack(fill=tk.BOTH, expand=True)
-        pl_sb = tk.Scrollbar(pl_body, width=10, relief=tk.FLAT, bd=0,
-                             troughcolor=t['bg'], bg=t['divider'])
+        pl_sb = ttk.Scrollbar(pl_body, orient=tk.VERTICAL,
+                              style="ExclusionTree.Vertical.TScrollbar")
         self._pl_list_scrollbar = pl_sb
-        tp.configure_manager_scrollbar(pl_sb, t)
         pl_sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
         self.playlist_listbox = tk.Listbox(
             pl_body, yscrollcommand=pl_sb.set, font=tp.normal_font,
@@ -360,10 +360,9 @@ class PlaylistUI:
         vid_body._manager_role = "surface"
         self._pl_vid_body = vid_body
         vid_body.pack(fill=tk.BOTH, expand=True)
-        vid_sb = tk.Scrollbar(vid_body, width=10, relief=tk.FLAT, bd=0,
-                              troughcolor=t['bg'], bg=t['divider'])
+        vid_sb = ttk.Scrollbar(vid_body, orient=tk.VERTICAL,
+                               style="ExclusionTree.Vertical.TScrollbar")
         self._pl_video_scrollbar = vid_sb
-        tp.configure_manager_scrollbar(vid_sb, t)
         vid_sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
         self.video_listbox = tk.Listbox(
             vid_body, yscrollcommand=vid_sb.set, font=tp.normal_font,
@@ -1150,8 +1149,8 @@ class PlaylistManager:
                         highlightbackground=tp.frame_border, highlightthickness=1)
         card.pack(fill=tk.BOTH, expand=True, pady=(0, 14))
 
-        sb = tk.Scrollbar(card, width=10, relief=tk.FLAT, bd=0)
-        tp.configure_manager_scrollbar(sb, t)
+        sb = ttk.Scrollbar(card, orient=tk.VERTICAL,
+                           style="ExclusionTree.Vertical.TScrollbar")
         sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
 
         playlist_listbox = tk.Listbox(

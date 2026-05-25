@@ -3,7 +3,7 @@ import os
 import threading
 import tkinter as tk
 from tkinter import messagebox
-from pathlib import Path
+from tkinter import ttk
 from typing import List, Optional, Callable
 import uuid
 
@@ -479,10 +479,9 @@ class QueueUI:
         lb_row._manager_role = "surface"
         self._queue_lb_row = lb_row
         lb_row.pack(fill=tk.BOTH, expand=True)
-        sb = tk.Scrollbar(lb_row, width=10, relief=tk.FLAT, bd=0,
-                          troughcolor=t['bg'], bg=t['divider'])
+        sb = ttk.Scrollbar(lb_row, orient=tk.VERTICAL,
+                           style="ExclusionTree.Vertical.TScrollbar")
         self._queue_scrollbar = sb
-        tp.configure_manager_scrollbar(sb, t)
         sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
         self.queue_listbox = tk.Listbox(
             lb_row, selectmode=tk.MULTIPLE, yscrollcommand=sb.set,

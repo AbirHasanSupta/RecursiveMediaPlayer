@@ -1,7 +1,7 @@
 import os
 import threading
 import tkinter as tk
-from tkinter import font as tkfont
+from tkinter import ttk
 from typing import Optional, Callable, Dict, List, Any
 
 try:
@@ -735,8 +735,8 @@ class AnnotationBrowserManager:
         tag_scroll_area = tk.Frame(sidebar, bg=P["sidebar"])
         tag_scroll_area.pack(fill=tk.BOTH, expand=True)
 
-        tag_sb = tk.Scrollbar(tag_scroll_area, width=6, relief=tk.FLAT, bd=0,
-                              troughcolor=P["sidebar"], bg=P["sep"])
+        tag_sb = ttk.Scrollbar(tag_scroll_area, orient=tk.VERTICAL,
+                               style="ExclusionTree.Vertical.TScrollbar")
         tag_sb.pack(side=tk.RIGHT, fill=tk.Y, pady=4)
 
         self._tag_canvas = tk.Canvas(tag_scroll_area, bg=P["sidebar"],
@@ -811,8 +811,8 @@ class AnnotationBrowserManager:
         vid_body = tk.Frame(list_outer, bg=P["panel"])
         vid_body.pack(fill=tk.BOTH, expand=True)
 
-        vid_sb = tk.Scrollbar(vid_body, width=6, relief=tk.FLAT, bd=0,
-                              troughcolor=P["panel"], bg=P["sep"])
+        vid_sb = ttk.Scrollbar(vid_body, orient=tk.VERTICAL,
+                               style="ExclusionTree.Vertical.TScrollbar")
         vid_sb.pack(side=tk.RIGHT, fill=tk.Y, pady=4)
 
         self._vid_canvas = tk.Canvas(vid_body, bg=P["panel"],

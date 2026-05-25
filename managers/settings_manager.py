@@ -755,7 +755,8 @@ class SettingsUI:
         canvas_frame.pack(fill=tk.BOTH, expand=True)
 
         canvas = tk.Canvas(canvas_frame, bg=tp.bg_color, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
+        scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview,
+                                  style="ExclusionTree.Vertical.TScrollbar")
         canvas.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
