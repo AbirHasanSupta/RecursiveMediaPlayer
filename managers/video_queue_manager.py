@@ -423,10 +423,14 @@ class QueueUI:
             return self._duration_cache[path]
         try:
             import subprocess
+            import sys
+            kwargs = {}
+            if sys.platform == "win32":
+                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
             r = subprocess.run(
                 ["ffprobe", "-v", "error", "-show_entries", "format=duration",
                  "-of", "default=noprint_wrappers=1:nokey=1", path],
-                capture_output=True, text=True, timeout=5)
+                capture_output=True, text=True, timeout=5, **kwargs)
             secs = float(r.stdout.strip())
             h, rem = divmod(int(secs), 3600)
             m, s = divmod(rem, 60)
