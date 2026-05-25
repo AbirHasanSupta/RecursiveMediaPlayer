@@ -419,6 +419,26 @@ class WatchHistoryUI:
             self.stats_label.configure(bg=t["header_bg"], fg=t["text_muted"])
         self._restyle_filter_buttons()
         self._restyle_treeview()
+        if hasattr(self, '_hist_scrollbar'):
+            try:
+                tp = self.theme_provider
+                trough = tp.bg_color if tp.dark_mode else tp.alt_row_color
+                scroll_bg = tp.border_color
+                scroll_active = tp.hover_color
+                style = ttk.Style()
+                self._hist_scrollbar.configure(style="ExclusionTree.Vertical.TScrollbar")
+                style.configure("ExclusionTree.Vertical.TScrollbar",
+                                background=scroll_bg, troughcolor=trough,
+                                bordercolor=tp.border_color, arrowcolor=tp.text_muted,
+                                darkcolor=tp.border_color, lightcolor=tp.surface_color,
+                                relief="flat", gripcount=0)
+                style.map("ExclusionTree.Vertical.TScrollbar",
+                          background=[("active", scroll_active),
+                                      ("pressed", tp.accent_color),
+                                      ("disabled", scroll_bg)],
+                          arrowcolor=[("active", tp.text_color), ("pressed", "#FFFFFF")])
+            except Exception:
+                pass
         tp.restyle_manager_buttons(win)
         tp.restyle_manager_action_links(win)
 
@@ -648,10 +668,12 @@ class WatchHistoryUI:
             self.history_tree.heading(col, text=heading, anchor=anchor)
             self.history_tree.column(col, width=width, minwidth=70, anchor=anchor)
 
-        vsb = ttk.Scrollbar(card, orient=tk.VERTICAL, command=self.history_tree.yview)
+        vsb = ttk.Scrollbar(card, orient=tk.VERTICAL, command=self.history_tree.yview,
+                            style="ExclusionTree.Vertical.TScrollbar")
         self.history_tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
         self.history_tree.configure(yscrollcommand=vsb.set)
+        self._hist_scrollbar = vsb
         card.grid_rowconfigure(0, weight=1)
         card.grid_columnconfigure(0, weight=1)
 
