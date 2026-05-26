@@ -5974,6 +5974,7 @@ def select_multiple_folders_and_play():
 
     _ready = {"app": False, "splash": False}
     _app_instance = [None]
+    _splash_start_time = None
 
     def _try_show():
         if _ready["app"] and _ready["splash"]:
@@ -5992,8 +5993,9 @@ def select_multiple_folders_and_play():
             n = len(app.pending_scans)
             total = len(app.selected_dirs)
             done = total - n
-            if status_lbl.winfo_exists():
-                status_lbl.config(text=f"Scanning directories… {done}/{total}")
+            if total > 0:
+                progress = 25 + int(70 * (done / total))
+                splash_ctrl.set_progress(progress, f"Scanning… {done}/{total}")
         except:
             pass
         try:
@@ -6004,23 +6006,31 @@ def select_multiple_folders_and_play():
         if pending > 0:
             root.after(150, _wait_for_scans)
         else:
+            splash_ctrl.set_progress(100, "Ready!")
+            elapsed = int((time.time() - _splash_start_time) * 1000)
+            min_duration = 2500
+            if elapsed < min_duration:
+                root.after(min_duration - elapsed, lambda: splash_ctrl.close())
+            else:
+                splash_ctrl.close()
             _ready["app"] = True
             root.after(0, _try_show)
 
-    status_lbl = show_splash(root, on_done=_on_splash_done, duration_ms=1500)
 
     def _build_app():
+        splash_ctrl.set_progress(5, "Initializing UI…")
         _orig_state = root.state
         root.state = lambda s=None: _orig_state() if s is None else None
-        try:
-            status_lbl.config(text="Initializing…")
-        except:
-            pass
+        splash_ctrl.set_progress(15, "Creating main window…")
         _app_instance[0] = DirectorySelector(root)
         root.state = _orig_state
         root.update_idletasks()
         root.withdraw()
+        splash_ctrl.set_progress(25, "Scanning directories…")
         root.after(150, _wait_for_scans)
+
+    splash_ctrl = show_splash(root, on_done=_on_splash_done)
+    _splash_start_time = time.time()
 
     root.after(10, _build_app)
     root.mainloop()
