@@ -5727,6 +5727,11 @@ def select_multiple_folders_and_play():
             except Exception:
                 pass
             try:
+                from managers.video_preview_manager import shutdown_thumb_pool
+                shutdown_thumb_pool()
+            except Exception:
+                pass
+            try:
                 if hasattr(self, 'memory_monitor'):
                     self.memory_monitor.cleanup_if_needed()
                 self.resource_manager.cleanup_all()

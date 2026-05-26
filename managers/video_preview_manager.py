@@ -138,17 +138,32 @@ def generate_thumbnail_worker(
 
 _THUMB_POOL: Optional[multiprocessing.Pool] = None
 _THUMB_POOL_LOCK = threading.Lock()
+_POOL_TERMINATED = False
 
 
-def get_thumb_pool() -> multiprocessing.Pool:
+def get_thumb_pool() -> Optional[multiprocessing.Pool]:
     global _THUMB_POOL
     with _THUMB_POOL_LOCK:
+        if _POOL_TERMINATED:
+            return None
         if _THUMB_POOL is None:
             _THUMB_POOL = multiprocessing.Pool(
                 processes=min(4, os.cpu_count() // 2 or 1),
                 maxtasksperchild=200,
             )
         return _THUMB_POOL
+
+def shutdown_thumb_pool():
+    global _THUMB_POOL, _POOL_TERMINATED
+    with _THUMB_POOL_LOCK:
+        _POOL_TERMINATED = True
+        if _THUMB_POOL is not None:
+            try:
+                _THUMB_POOL.terminate()
+                _THUMB_POOL.join()
+            except Exception:
+                pass
+            _THUMB_POOL = None
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -844,6 +859,28 @@ class PrefetchQueue:
         self._batch_done_cb: Optional[Callable] = None  # called when queue drains
         self._start_workers()
         self._pool = get_thumb_pool()
+        self._cancelled_prefixes: set = set()
+        self._pending_requeue: int = 0
+
+    def cancel_for_prefix(self, norm_prefix: str):
+        with self._lock:
+            self._cancelled_prefixes.add(norm_prefix)
+            self._pending_requeue += 1
+        remaining = []
+        try:
+            while True:
+                item = self._q.get_nowait()
+                _, vp, tok = item
+                if vp is not None and not os.path.normpath(vp).startswith(norm_prefix):
+                    remaining.append(item)
+                else:
+                    self._q.task_done()
+        except queue.Empty:
+            pass
+        for item in remaining:
+            self._q.put(item)
+        with self._lock:
+            self._pending_requeue -= 1
 
     def _start_workers(self):
         for i in range(self._num_workers):
@@ -919,7 +956,6 @@ class PrefetchQueue:
                 if video_path is None:          # stop sentinel
                     break
 
-                # Skip if this batch was cancelled
                 with self._lock:
                     if token is not self._active_token:
                         continue
@@ -928,20 +964,35 @@ class PrefetchQueue:
                     continue
 
                 norm = os.path.normpath(video_path)
+
+                with self._lock:
+                    if any(norm.startswith(p) for p in self._cancelled_prefixes):
+                        continue
+
                 th = self._thumbnails_ref.get(norm)
                 if th and th.is_valid():
-                    continue                     # already have a fresh blob
+                    continue
 
                 if not os.path.isfile(video_path):
                     continue
 
                 gen = self._generator_ref
-                result = self._pool.apply_async(
-                    generate_thumbnail_worker,
-                    args=(video_path, gen.use_video_preview, gen.JPEG_QUALITY, gen.fallback_to_static),
-                ).get(timeout=60)
+                pool = get_thumb_pool()
+                if pool is None:
+                    break
+                try:
+                    result = pool.apply_async(
+                        generate_thumbnail_worker,
+                        args=(video_path, gen.use_video_preview, gen.JPEG_QUALITY, gen.fallback_to_static),
+                    ).get(timeout=60)
+                except (multiprocessing.ProcessError, OSError, EOFError, BrokenPipeError):
+                    break
                 if result is None:
                     continue
+
+                with self._lock:
+                    if any(norm.startswith(p) for p in self._cancelled_prefixes):
+                        continue
 
                 raw_bytes, is_vid = result
                 ext = ".mp4" if is_vid else ".jpg"
@@ -964,8 +1015,9 @@ class PrefetchQueue:
             finally:
                 try:
                     self._q.task_done()
-                    # When queue fully drains, fire the batch-complete callback
-                    if self._q.empty() and self._batch_done_cb:
+                    with self._lock:
+                        requeue_pending = self._pending_requeue
+                    if self._q.empty() and requeue_pending == 0 and self._batch_done_cb:
                         try:
                             self._batch_done_cb()
                         except Exception:
@@ -1458,21 +1510,41 @@ class VideoPreviewManager:
                 raw_bytes, is_vid = result
                 ext = ".mp4" if is_vid else ".jpg"
                 hk = _file_hash_key(video_path)
+
+                with self._lock:
+                    cancelled = any(
+                        video_path.startswith(p)
+                        for p in self._prefetch._cancelled_prefixes
+                    )
+                if cancelled:
+                    with self._lock:
+                        self._generation_queue.discard(video_path)
+                    return
+
                 blob_path = self.storage.write_blob(hk, raw_bytes, ext)
                 th = VideoThumbnail(video_path, blob_path, is_vid, hk)
 
                 with self._lock:
-                    self._thumbnails[video_path] = th   # video_path is already norm (passed from _show_video_preview)
-                    self._generation_queue.discard(video_path)
+                    still_cancelled = any(
+                        video_path.startswith(p)
+                        for p in self._prefetch._cancelled_prefixes
+                    )
+                    if still_cancelled:
+                        self._generation_queue.discard(video_path)
+                    else:
+                        self._thumbnails[video_path] = th
+                        self._generation_queue.discard(video_path)
 
-                self._save_thumbnails()
-
-                if (self.right_clicked_item is not None
-                        and self.current_mapping
-                        and os.path.normpath(self.current_mapping.get(self.right_clicked_item, "")) == video_path):
-                    td = th.thumbnail_data
-                    if td:
-                        self.parent.after(0, lambda: self.tooltip.show_preview(video_path, td, x, y))
+                if not still_cancelled:
+                    self._save_thumbnails()
+                    if (self.right_clicked_item is not None
+                            and self.current_mapping
+                            and os.path.normpath(self.current_mapping.get(self.right_clicked_item, "")) == video_path):
+                        td = th.thumbnail_data
+                        if td:
+                            self.parent.after(0, lambda: self.tooltip.show_preview(video_path, td, x, y))
+                else:
+                    self.storage.delete_blob(blob_path)
 
             except Exception as e:
                 with self._lock:
@@ -1517,6 +1589,9 @@ class VideoPreviewManager:
         """
         prefix = os.path.normpath(dir_path) + os.sep
         root_norm = os.path.normpath(dir_path)
+
+        self._prefetch.cancel_for_prefix(prefix)
+        self._prefetch.cancel_for_prefix(root_norm)
 
         with self._lock:
             to_remove = [

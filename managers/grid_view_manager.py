@@ -2380,10 +2380,17 @@ class GridViewManager:
                         return
 
                 gen = vpm.generator
-                result = get_thumb_pool().apply_async(
-                    generate_thumbnail_worker,
-                    args=(video_path_norm, gen.use_video_preview, gen.JPEG_QUALITY, gen.fallback_to_static),
-                ).get(timeout=60)
+                pool = get_thumb_pool()
+                if pool is None:
+                    self.root.after(0, lambda lbl=label: lbl.winfo_exists() and lbl.configure(text="No Preview"))
+                    return
+                try:
+                    result = pool.apply_async(
+                        generate_thumbnail_worker,
+                        args=(video_path_norm, gen.use_video_preview, gen.JPEG_QUALITY, gen.fallback_to_static),
+                    ).get(timeout=60)
+                except (multiprocessing.ProcessError, OSError, EOFError, BrokenPipeError):
+                    return
                 if result:
                     raw_bytes, is_vid = result
                     try:
