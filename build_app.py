@@ -771,47 +771,12 @@ def select_multiple_folders_and_play():
                     except Exception:
                         pass
 
-            hist_stats = {}
-            all_history = []
-            if hasattr(self, 'watch_history_manager'):
-                try:
-                    hist_stats = self.watch_history_manager.get_history_stats()
-                    all_history = self.watch_history_manager.service.get_all_history()
-                except Exception:
-                    pass
-
-            today_n = hist_stats.get('today_count', 0)
-            week_n = hist_stats.get('week_count', 0)
-            unique_n = hist_stats.get('unique_videos', 0)
-
-            avg_pct = 0.0
-            tracked = [e.completion_percentage for e in all_history if e.completion_percentage > 0]
-            if tracked:
-                avg_pct = sum(tracked) / len(tracked)
-
+            total_dirs = len(self.selected_dirs)
             total_lib_vids = sum(
                 sum(1 for v in (self.scan_cache.get(d) or ([],))[0]
                     if not self.is_video_excluded(d, v))
                 for d in self.selected_dirs
             ) if hasattr(self, 'scan_cache') else 0
-
-            day_counts = [0] * 7
-            today_date = datetime.now().date()
-            for e in all_history:
-                try:
-                    delta = (today_date - datetime.fromisoformat(e.watched_at).date()).days
-                    if 0 <= delta < 7:
-                        day_counts[6 - delta] += 1
-                except Exception:
-                    pass
-
-            dir_counts: dict = {}
-            for e in all_history:
-                dk = os.path.basename(e.directory_path) or e.directory_path
-                dir_counts[dk] = dir_counts.get(dk, 0) + 1
-            top_dirs = sorted(dir_counts.items(), key=lambda x: x[1], reverse=True)[:4]
-
-            pct_watched = (unique_n / total_lib_vids * 100) if total_lib_vids > 0 else 0
 
             canvas = tk.Canvas(frame, bg=bg, highlightthickness=0, bd=0)
             canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -858,19 +823,14 @@ def select_multiple_folders_and_play():
 
             left_col = tk.Frame(body_row, bg=bg)
             left_col.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
-
             right_col = tk.Frame(body_row, bg=bg)
             right_col.grid(row=0, column=1, sticky="nsew")
 
-            # ── left: stats row ───────────────────────────────────────────
-            total_dirs = len(self.selected_dirs)
-            total_vids = total_lib_vids
-
             stat_data = [
                 ("📁", str(total_dirs), "Directories", accent, None),
-                ("🎬", str(total_vids), "Videos", accent2, None),
-                ("📅", str(today_n), "Watched Today", "#06b6d4", self._show_watch_history),
-                ("✓", f"{avg_pct:.0f}%", "Avg Completion", "#34c98a", self._show_watch_history),
+                ("🎬", str(total_lib_vids), "Videos", accent2, None),
+                ("📅", "—", "Watched Today", "#06b6d4", self._show_watch_history),
+                ("✓", "—", "Avg Completion", "#34c98a", self._show_watch_history),
             ]
 
             stats_row = tk.Frame(left_col, bg=bg)
@@ -878,6 +838,7 @@ def select_multiple_folders_and_play():
             for i in range(4):
                 stats_row.columnconfigure(i, weight=1, uniform="sc")
 
+            today_val_lbl = avg_val_lbl = None
             for i, (icon, val, lbl, col, cmd) in enumerate(stat_data):
                 card = tk.Frame(stats_row, bg=surface,
                                 highlightbackground=border, highlightthickness=1,
@@ -896,6 +857,8 @@ def select_multiple_folders_and_play():
                          bg=surface, fg=text_sec).pack(anchor="w")
                 if i == 0: self._home_dirs_label = val_lbl
                 if i == 1: self._home_vids_label = val_lbl
+                if i == 2: today_val_lbl = val_lbl
+                if i == 3: avg_val_lbl = val_lbl
                 if cmd:
                     for w in (card, body, val_lbl):
                         w.bind("<Button-1>", lambda e, c=cmd: c())
@@ -960,18 +923,19 @@ def select_multiple_folders_and_play():
             ms_row.columnconfigure(0, weight=1)
             ms_row.columnconfigure(1, weight=1)
 
-            for mci, (mv, ml, mc) in enumerate([
-                (str(week_n), "This week", "#7c3aed"),
-                (f"{pct_watched:.0f}%", "Coverage", accent2),
-            ]):
+            week_val_lbl = pct_val_lbl = None
+            for mci, (mv, ml, mc) in enumerate([("—", "This week", "#7c3aed"), ("—", "Coverage", accent2)]):
                 mf = tk.Frame(ms_row, bg=surface2)
                 mf.grid(row=0, column=mci, padx=(0 if mci == 0 else 6, 0), sticky="nsew")
-                tk.Label(mf, text=mv,
-                         font=Font(family="Segoe UI", size=14, weight="bold"),
-                         bg=surface2, fg=mc).pack(padx=10, pady=(8, 0), anchor="w")
+                lbl_w = tk.Label(mf, text=mv,
+                                 font=Font(family="Segoe UI", size=14, weight="bold"),
+                                 bg=surface2, fg=mc)
+                lbl_w.pack(padx=10, pady=(8, 0), anchor="w")
                 tk.Label(mf, text=ml,
                          font=Font(family="Segoe UI", size=8),
                          bg=surface2, fg=text_sec).pack(padx=10, pady=(0, 8), anchor="w")
+                if mci == 0: week_val_lbl = lbl_w
+                if mci == 1: pct_val_lbl = lbl_w
 
             tk.Label(ac_inner, text="Last 7 days",
                      font=Font(family="Segoe UI", size=8, weight="bold"),
@@ -982,9 +946,13 @@ def select_multiple_folders_and_play():
                                    highlightthickness=0, bd=0)
             bar_canvas.pack(fill=tk.X, pady=(0, 12))
 
-            def _draw_bars(c=bar_canvas, counts=day_counts):
-                c.delete("all")
-                w = c.winfo_width() or 300
+            _day_counts = [0] * 7
+
+            def _draw_bars(counts=None):
+                if counts is None:
+                    counts = _day_counts
+                bar_canvas.delete("all")
+                w = bar_canvas.winfo_width() or 300
                 max_v = max(counts) if any(counts) else 1
                 n = len(counts)
                 gap = 5
@@ -997,11 +965,11 @@ def select_multiple_folders_and_play():
                     x1 = x0 + bw
                     y1 = 2 + bar_h
                     filled = max(3, int((v / max_v) * bar_h)) if max_v else 3
-                    c.create_rectangle(x0, 2, x1, y1, fill=surface2, outline="", width=0)
+                    bar_canvas.create_rectangle(x0, 2, x1, y1, fill=surface2, outline="", width=0)
                     bcol = accent2 if k == n - 1 else accent
-                    c.create_rectangle(x0, y1 - filled, x1, y1, fill=bcol, outline="", width=0)
-                    c.create_text(x0 + bw // 2, y1 + 9, text=dl,
-                                  fill=text_sec, font=("Segoe UI", 7))
+                    bar_canvas.create_rectangle(x0, y1 - filled, x1, y1, fill=bcol, outline="", width=0)
+                    bar_canvas.create_text(x0 + bw // 2, y1 + 9, text=dl,
+                                           fill=text_sec, font=("Segoe UI", 7))
 
             bar_canvas.bind("<Configure>", lambda e: _draw_bars())
             bar_canvas.after(60, _draw_bars)
@@ -1011,220 +979,17 @@ def select_multiple_folders_and_play():
                      font=Font(family="Segoe UI", size=8, weight="bold"),
                      bg=surface, fg=text_sec).pack(anchor="w", pady=(0, 6))
 
-            bar_colors = [accent, accent2, "#7c3aed", "#06b6d4"]
-            if top_dirs:
-                max_dc = top_dirs[0][1]
-                for ti, (dname, dcount) in enumerate(top_dirs):
-                    rf = tk.Frame(ac_inner, bg=surface)
-                    rf.pack(fill=tk.X, pady=2)
-                    tk.Label(rf, text=dname[:18] + ("…" if len(dname) > 18 else ""),
-                             font=Font(family="Segoe UI", size=8),
-                             bg=surface, fg=text_pri, anchor="w", width=18).pack(side=tk.LEFT)
-                    bg_bar = tk.Frame(rf, bg=surface2, height=8)
-                    bg_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 6))
-                    bg_bar.pack_propagate(False)
-                    _col = bar_colors[ti % len(bar_colors)]
-                    _ratio = dcount / max_dc if max_dc else 0
-                    def _fill(p=bg_bar, r=_ratio, c=_col):
-                        p.update_idletasks()
-                        pw = p.winfo_width() or 80
-                        tk.Frame(p, bg=c, width=max(4, int(pw * r)), height=8).place(x=0, y=0)
-                    bg_bar.after(90, _fill)
-                    tk.Label(rf, text=str(dcount),
-                             font=Font(family="Segoe UI", size=8),
-                             bg=surface, fg=text_sec).pack(side=tk.LEFT)
-            else:
-                tk.Label(ac_inner,
-                         text="No watch history yet.",
-                         font=Font(family="Segoe UI", size=8),
-                         bg=surface, fg=text_sec).pack(anchor="w")
+            top_dirs_frame = tk.Frame(ac_inner, bg=surface)
+            top_dirs_frame.pack(fill=tk.X)
+            tk.Label(top_dirs_frame, text="Loading…",
+                     font=Font(family="Segoe UI", size=8),
+                     bg=surface, fg=text_sec).pack(anchor="w")
 
-            _cw_seen = set()
-            _cw_entries = []
-            for _cw_e in sorted(all_history, key=lambda x: x.watched_at, reverse=True):
-                _cw_e_pct = float(_cw_e.completion_percentage or 0)
-                if _cw_e.video_path not in _cw_seen and os.path.isfile(_cw_e.video_path) and 5 < _cw_e_pct < 95:
-                    _cw_seen.add(_cw_e.video_path)
-                    _cw_entries.append(_cw_e)
-                if len(_cw_entries) >= 4:
-                    break
-
-            if _cw_entries:
-                if hasattr(self, 'video_preview_manager') and _cw_entries:
-                    self.video_preview_manager.prefetch_cw_previews(
-                        [(e.video_path, float(e.duration_watched or 0)) for e in _cw_entries]
-                    )
-                cw_hdr = tk.Frame(pad, bg=bg)
-                cw_hdr.pack(fill=tk.X, pady=(16, 8))
-                tk.Label(cw_hdr, text="Continue Watching",
-                         font=Font(family="Segoe UI", size=11, weight="bold"),
-                         bg=bg, fg=text_pri).pack(side=tk.LEFT)
-                tk.Frame(cw_hdr, bg=border, height=1).pack(
-                    side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 0), pady=6)
-                _see_all_lbl = tk.Label(cw_hdr, text="See all →",
-                                        font=Font(family="Segoe UI", size=9),
-                                        bg=bg, fg=accent, cursor="hand2")
-                _see_all_lbl.pack(side=tk.RIGHT)
-                _see_all_lbl.bind("<Button-1>", lambda e: self._show_watch_history())
-                _see_all_lbl.bind("<Enter>", lambda e: _see_all_lbl.config(fg=accent2))
-                _see_all_lbl.bind("<Leave>", lambda e: _see_all_lbl.config(fg=accent))
-
-                cw_grid = tk.Frame(pad, bg=bg)
-                cw_grid.pack(fill=tk.X)
-                for _cw_ci in range(len(_cw_entries)):
-                    cw_grid.columnconfigure(_cw_ci, weight=1, uniform="cw")
-
-                for _cw_ci, _cw_entry in enumerate(_cw_entries):
-                    _cw_fname = os.path.splitext(os.path.basename(_cw_entry.video_path))[0]
-                    _cw_name_disp = (_cw_fname[:26] + "…") if len(_cw_fname) > 26 else _cw_fname
-                    _cw_pct = min(100.0, max(0.0, float(_cw_entry.completion_percentage or 0)))
-                    _cw_dur = _cw_entry.get_duration_formatted() if _cw_entry.duration_watched else ""
-                    try:
-                        _cw_delta = datetime.now() - datetime.fromisoformat(_cw_entry.watched_at)
-                        if _cw_delta.days == 0:
-                            _cw_hrs = _cw_delta.seconds // 3600
-                            _cw_time = (f"{_cw_delta.seconds // 60}m ago"
-                                        if _cw_hrs == 0 else f"{_cw_hrs}h ago")
-                        elif _cw_delta.days == 1:
-                            _cw_time = "Yesterday"
-                        else:
-                            _cw_time = f"{_cw_delta.days}d ago"
-                    except Exception:
-                        _cw_time = ""
-
-                    _cw_bar_col = ("#34c98a" if _cw_pct >= 80
-                                   else (accent if _cw_pct >= 35 else accent2))
-
-                    _cw_card = tk.Frame(cw_grid, bg=surface,
-                                        highlightbackground=border, highlightthickness=1,
-                                        cursor="hand2")
-                    _cw_card.grid(row=0, column=_cw_ci,
-                                  padx=(0 if _cw_ci == 0 else 8, 0), sticky="nsew")
-                    _cw_card.pack_propagate(False)
-                    _cw_card.configure(height=110)
-
-                    _accent_bar = tk.Frame(_cw_card, bg=_cw_bar_col, width=4)
-                    _accent_bar.pack(side=tk.LEFT, fill=tk.Y)
-
-                    _cw_body = tk.Frame(_cw_card, bg=surface)
-                    _cw_body.pack(side=tk.LEFT, fill=tk.BOTH, expand=True,
-                                  padx=(10, 10), pady=10)
-
-                    tk.Label(_cw_body, text=_cw_name_disp,
-                             font=Font(family="Segoe UI", size=9, weight="bold"),
-                             bg=surface, fg=text_pri, anchor="w").pack(fill=tk.X)
-
-                    _cw_meta = tk.Frame(_cw_body, bg=surface)
-                    _cw_meta.pack(fill=tk.X, pady=(2, 6))
-                    tk.Label(_cw_meta, text=_cw_time,
-                             font=Font(family="Segoe UI", size=8),
-                             bg=surface, fg=text_sec).pack(side=tk.LEFT)
-                    if _cw_dur:
-                        tk.Label(_cw_meta, text=f"  ·  {_cw_dur}",
-                                 font=Font(family="Segoe UI", size=8),
-                                 bg=surface, fg=text_sec).pack(side=tk.LEFT)
-
-                    _cw_prog_bg = tk.Frame(_cw_body, bg=surface2, height=4)
-                    _cw_prog_bg.pack(fill=tk.X)
-                    _cw_prog_bg.pack_propagate(False)
-
-                    def _fill_cw_prog(p=_cw_prog_bg, r=_cw_pct / 100, c=_cw_bar_col):
-                        p.update_idletasks()
-                        pw = p.winfo_width() or 80
-                        tk.Frame(p, bg=c, width=max(2, int(pw * r)), height=4).place(x=0, y=0)
-
-                    _cw_prog_bg.after(130, _fill_cw_prog)
-
-                    _cw_bot = tk.Frame(_cw_body, bg=surface)
-                    _cw_bot.pack(fill=tk.X, pady=(6, 0))
-                    tk.Label(_cw_bot, text=f"{_cw_pct:.0f}%",
-                             font=Font(family="Segoe UI", size=8, weight="bold"),
-                             bg=surface, fg=_cw_bar_col).pack(side=tk.LEFT, anchor="center")
-                    _cw_resume = tk.Label(_cw_bot, text="▶  Resume",
-                                          font=Font(family="Segoe UI", size=8, weight="bold"),
-                                          bg=_cw_bar_col, fg="#ffffff",
-                                          padx=10, pady=3, cursor="hand2")
-                    _cw_resume.pack(side=tk.RIGHT, anchor="center")
-
-                    def _do_play_cw(path=_cw_entry.video_path):
-                        self._play_continue_watching_video(path)
-
-                    for _cw_w in (_cw_card, _cw_body, _cw_resume, _accent_bar):
-                        _cw_w.bind("<Button-1>", lambda e, fn=_do_play_cw: fn())
-
-                    def _cw_right_click(e, path=_cw_entry.video_path, entry=_cw_entry):
-                        if not hasattr(self, 'video_preview_manager'):
-                            return
-                        vpm = self.video_preview_manager
-
-                        resume_sec = 0.0
-                        try:
-                            if entry.duration_watched:
-                                resume_sec = float(entry.duration_watched)
-                        except Exception:
-                            pass
-
-                        cached_td = vpm.cw_preview_cache.get(path, resume_sec)
-                        if cached_td:
-                            vpm.tooltip.show_preview(path, cached_td, e.x_root, e.y_root)
-                        else:
-                            vpm.show_preview_at_position(path, resume_sec, e.x_root, e.y_root)
-
-                    def _cw_hide_tooltip(e):
-                        if hasattr(self, 'video_preview_manager'):
-                            self.video_preview_manager.tooltip.hide_preview()
-
-                    def _bind_cw_rc(w):
-                        w.bind("<Button-3>", _cw_right_click)
-                        for _ch in w.winfo_children():
-                            _bind_cw_rc(_ch)
-
-                    _bind_cw_rc(_cw_card)
-
-                    def _cw_enter(e, card=_cw_card, body=_cw_body,
-                                  bc=_cw_bar_col, sf=surface, hc=self.hover_color):
-                        card.config(bg=hc, highlightbackground=bc, highlightthickness=2)
-                        body.config(bg=hc)
-                        for _w in body.winfo_children():
-                            try:
-                                if isinstance(_w, (tk.Label, tk.Frame)) and _w.cget("bg") == sf:
-                                    _w.config(bg=hc)
-                            except Exception:
-                                pass
-                            if isinstance(_w, tk.Frame):
-                                for _ww in _w.winfo_children():
-                                    try:
-                                        if isinstance(_ww, tk.Label) and _ww.cget("bg") == sf:
-                                            _ww.config(bg=hc)
-                                    except Exception:
-                                        pass
-
-                    def _cw_leave(e, card=_cw_card, body=_cw_body,
-                                  bd=border, sf=surface, hc=self.hover_color):
-                        _cw_hide_tooltip(e)
-                        card.config(bg=sf, highlightbackground=bd, highlightthickness=1)
-                        body.config(bg=sf)
-                        for _w in body.winfo_children():
-                            try:
-                                if isinstance(_w, (tk.Label, tk.Frame)) and _w.cget("bg") == hc:
-                                    _w.config(bg=sf)
-                            except Exception:
-                                pass
-                            if isinstance(_w, tk.Frame):
-                                for _ww in _w.winfo_children():
-                                    try:
-                                        if isinstance(_ww, tk.Label) and _ww.cget("bg") == hc:
-                                            _ww.config(bg=sf)
-                                    except Exception:
-                                        pass
-
-                    for _cw_w in (_cw_card, _cw_body, _accent_bar):
-                        _cw_w.bind("<Enter>", _cw_enter)
-                        _cw_w.bind("<Leave>", _cw_leave)
+            cw_placeholder = tk.Frame(pad, bg=bg)
+            cw_placeholder.pack(fill=tk.X)
 
             tip_bg = surface2
-            tip = tk.Frame(pad, bg=tip_bg,
-                           highlightbackground=border, highlightthickness=1)
+            tip = tk.Frame(pad, bg=tip_bg, highlightbackground=border, highlightthickness=1)
             tip.pack(fill=tk.X, pady=(14, 0))
             tip_inner = tk.Frame(tip, bg=tip_bg)
             tip_inner.pack(fill=tk.X, padx=14, pady=8)
@@ -1236,6 +1001,294 @@ def select_multiple_folders_and_play():
                      font=Font(family="Segoe UI", size=9),
                      bg=tip_bg, fg=text_sec,
                      wraplength=680, justify="left").pack(side=tk.LEFT)
+
+            def _load_stats():
+                try:
+                    h_stats = {}
+                    all_hist = []
+                    if hasattr(self, 'watch_history_manager'):
+                        try:
+                            h_stats = self.watch_history_manager.get_history_stats()
+                            all_hist = self.watch_history_manager.service.get_all_history()
+                        except Exception:
+                            pass
+
+                    t_today = h_stats.get('today_count', 0)
+                    t_week = h_stats.get('week_count', 0)
+                    t_unique = h_stats.get('unique_videos', 0)
+
+                    tracked = [e.completion_percentage for e in all_hist if e.completion_percentage > 0]
+                    t_avg_pct = (sum(tracked) / len(tracked)) if tracked else 0.0
+
+                    t_pct_watched = (t_unique / total_lib_vids * 100) if total_lib_vids > 0 else 0.0
+
+                    t_day_counts = [0] * 7
+                    today_date = datetime.now().date()
+                    for e in all_hist:
+                        try:
+                            delta = (today_date - datetime.fromisoformat(e.watched_at).date()).days
+                            if 0 <= delta < 7:
+                                t_day_counts[6 - delta] += 1
+                        except Exception:
+                            pass
+
+                    dir_counts = {}
+                    for e in all_hist:
+                        dk = os.path.basename(e.directory_path) or e.directory_path
+                        dir_counts[dk] = dir_counts.get(dk, 0) + 1
+                    t_top_dirs = sorted(dir_counts.items(), key=lambda x: x[1], reverse=True)[:4]
+
+                    cw_seen = set()
+                    t_cw_entries = []
+                    for cw_e in sorted(all_hist, key=lambda x: x.watched_at, reverse=True):
+                        cw_pct = float(cw_e.completion_percentage or 0)
+                        if (cw_e.video_path not in cw_seen
+                                and os.path.isfile(cw_e.video_path)
+                                and 5 < cw_pct < 95):
+                            cw_seen.add(cw_e.video_path)
+                            t_cw_entries.append(cw_e)
+                        if len(t_cw_entries) >= 4:
+                            break
+
+                    self.root.after(0, lambda: _apply_stats(
+                        t_today, t_week, t_avg_pct, t_pct_watched,
+                        t_day_counts, t_top_dirs, t_cw_entries
+                    ))
+                except Exception:
+                    pass
+
+            def _apply_stats(t_today, t_week, t_avg_pct, t_pct_watched,
+                             t_day_counts, t_top_dirs, t_cw_entries):
+                try:
+                    if not frame.winfo_exists():
+                        return
+
+                    # stat cards
+                    if today_val_lbl and today_val_lbl.winfo_exists():
+                        today_val_lbl.config(text=str(t_today))
+                    if avg_val_lbl and avg_val_lbl.winfo_exists():
+                        avg_val_lbl.config(text=f"{t_avg_pct:.0f}%")
+                    if week_val_lbl and week_val_lbl.winfo_exists():
+                        week_val_lbl.config(text=str(t_week))
+                    if pct_val_lbl and pct_val_lbl.winfo_exists():
+                        pct_val_lbl.config(text=f"{t_pct_watched:.0f}%")
+
+                    _day_counts[:] = t_day_counts
+                    _draw_bars(counts=t_day_counts)
+
+                    for child in top_dirs_frame.winfo_children():
+                        child.destroy()
+                    bar_colors = [accent, accent2, "#7c3aed", "#06b6d4"]
+                    if t_top_dirs:
+                        max_dc = t_top_dirs[0][1]
+                        for ti, (dname, dcount) in enumerate(t_top_dirs):
+                            rf = tk.Frame(top_dirs_frame, bg=surface)
+                            rf.pack(fill=tk.X, pady=2)
+                            tk.Label(rf,
+                                     text=dname[:18] + ("…" if len(dname) > 18 else ""),
+                                     font=Font(family="Segoe UI", size=8),
+                                     bg=surface, fg=text_pri, anchor="w", width=18).pack(side=tk.LEFT)
+                            bg_bar = tk.Frame(rf, bg=surface2, height=8)
+                            bg_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 6))
+                            bg_bar.pack_propagate(False)
+                            _col = bar_colors[ti % len(bar_colors)]
+                            _ratio = dcount / max_dc if max_dc else 0
+
+                            def _fill(p=bg_bar, r=_ratio, c=_col):
+                                p.update_idletasks()
+                                pw = p.winfo_width() or 80
+                                tk.Frame(p, bg=c, width=max(4, int(pw * r)), height=8).place(x=0, y=0)
+
+                            bg_bar.after(90, _fill)
+                            tk.Label(rf, text=str(dcount),
+                                     font=Font(family="Segoe UI", size=8),
+                                     bg=surface, fg=text_sec).pack(side=tk.LEFT)
+                    else:
+                        tk.Label(top_dirs_frame, text="No watch history yet.",
+                                 font=Font(family="Segoe UI", size=8),
+                                 bg=surface, fg=text_sec).pack(anchor="w")
+
+                    for child in cw_placeholder.winfo_children():
+                        child.destroy()
+
+                    if not t_cw_entries:
+                        return
+
+                    if hasattr(self, 'video_preview_manager'):
+                        self.video_preview_manager.prefetch_cw_previews(
+                            [(e.video_path, float(e.duration_watched or 0)) for e in t_cw_entries]
+                        )
+
+                    cw_hdr = tk.Frame(cw_placeholder, bg=bg)
+                    cw_hdr.pack(fill=tk.X, pady=(16, 8))
+                    tk.Label(cw_hdr, text="Continue Watching",
+                             font=Font(family="Segoe UI", size=11, weight="bold"),
+                             bg=bg, fg=text_pri).pack(side=tk.LEFT)
+                    tk.Frame(cw_hdr, bg=border, height=1).pack(
+                        side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 0), pady=6)
+                    _see_all_lbl = tk.Label(cw_hdr, text="See all →",
+                                            font=Font(family="Segoe UI", size=9),
+                                            bg=bg, fg=accent, cursor="hand2")
+                    _see_all_lbl.pack(side=tk.RIGHT)
+                    _see_all_lbl.bind("<Button-1>", lambda e: self._show_watch_history())
+                    _see_all_lbl.bind("<Enter>", lambda e: _see_all_lbl.config(fg=accent2))
+                    _see_all_lbl.bind("<Leave>", lambda e: _see_all_lbl.config(fg=accent))
+
+                    cw_grid = tk.Frame(cw_placeholder, bg=bg)
+                    cw_grid.pack(fill=tk.X)
+                    for _cw_ci in range(len(t_cw_entries)):
+                        cw_grid.columnconfigure(_cw_ci, weight=1, uniform="cw")
+
+                    for _cw_ci, _cw_entry in enumerate(t_cw_entries):
+                        _cw_fname = os.path.splitext(os.path.basename(_cw_entry.video_path))[0]
+                        _cw_name_disp = (_cw_fname[:26] + "…") if len(_cw_fname) > 26 else _cw_fname
+                        _cw_pct = min(100.0, max(0.0, float(_cw_entry.completion_percentage or 0)))
+                        _cw_dur = _cw_entry.get_duration_formatted() if _cw_entry.duration_watched else ""
+                        try:
+                            _cw_delta = datetime.now() - datetime.fromisoformat(_cw_entry.watched_at)
+                            if _cw_delta.days == 0:
+                                _cw_hrs = _cw_delta.seconds // 3600
+                                _cw_time = (f"{_cw_delta.seconds // 60}m ago"
+                                            if _cw_hrs == 0 else f"{_cw_hrs}h ago")
+                            elif _cw_delta.days == 1:
+                                _cw_time = "Yesterday"
+                            else:
+                                _cw_time = f"{_cw_delta.days}d ago"
+                        except Exception:
+                            _cw_time = ""
+
+                        _cw_bar_col = ("#34c98a" if _cw_pct >= 80
+                                       else (accent if _cw_pct >= 35 else accent2))
+
+                        _cw_card = tk.Frame(cw_grid, bg=surface,
+                                            highlightbackground=border, highlightthickness=1,
+                                            cursor="hand2")
+                        _cw_card.grid(row=0, column=_cw_ci,
+                                      padx=(0 if _cw_ci == 0 else 8, 0), sticky="nsew")
+                        _cw_card.pack_propagate(False)
+                        _cw_card.configure(height=110)
+
+                        _accent_bar = tk.Frame(_cw_card, bg=_cw_bar_col, width=4)
+                        _accent_bar.pack(side=tk.LEFT, fill=tk.Y)
+
+                        _cw_body = tk.Frame(_cw_card, bg=surface)
+                        _cw_body.pack(side=tk.LEFT, fill=tk.BOTH, expand=True,
+                                      padx=(10, 10), pady=10)
+
+                        tk.Label(_cw_body, text=_cw_name_disp,
+                                 font=Font(family="Segoe UI", size=9, weight="bold"),
+                                 bg=surface, fg=text_pri, anchor="w").pack(fill=tk.X)
+
+                        _cw_meta = tk.Frame(_cw_body, bg=surface)
+                        _cw_meta.pack(fill=tk.X, pady=(2, 6))
+                        tk.Label(_cw_meta, text=_cw_time,
+                                 font=Font(family="Segoe UI", size=8),
+                                 bg=surface, fg=text_sec).pack(side=tk.LEFT)
+                        if _cw_dur:
+                            tk.Label(_cw_meta, text=f"  ·  {_cw_dur}",
+                                     font=Font(family="Segoe UI", size=8),
+                                     bg=surface, fg=text_sec).pack(side=tk.LEFT)
+
+                        _cw_prog_bg = tk.Frame(_cw_body, bg=surface2, height=4)
+                        _cw_prog_bg.pack(fill=tk.X)
+                        _cw_prog_bg.pack_propagate(False)
+
+                        def _fill_cw_prog(p=_cw_prog_bg, r=_cw_pct / 100, c=_cw_bar_col):
+                            p.update_idletasks()
+                            pw = p.winfo_width() or 80
+                            tk.Frame(p, bg=c, width=max(2, int(pw * r)), height=4).place(x=0, y=0)
+
+                        _cw_prog_bg.after(130, _fill_cw_prog)
+
+                        _cw_bot = tk.Frame(_cw_body, bg=surface)
+                        _cw_bot.pack(fill=tk.X, pady=(6, 0))
+                        tk.Label(_cw_bot, text=f"{_cw_pct:.0f}%",
+                                 font=Font(family="Segoe UI", size=8, weight="bold"),
+                                 bg=surface, fg=_cw_bar_col).pack(side=tk.LEFT, anchor="center")
+                        _cw_resume = tk.Label(_cw_bot, text="▶  Resume",
+                                              font=Font(family="Segoe UI", size=8, weight="bold"),
+                                              bg=_cw_bar_col, fg="#ffffff",
+                                              padx=10, pady=3, cursor="hand2")
+                        _cw_resume.pack(side=tk.RIGHT, anchor="center")
+
+                        def _do_play_cw(path=_cw_entry.video_path):
+                            self._play_continue_watching_video(path)
+
+                        for _cw_w in (_cw_card, _cw_body, _cw_resume, _accent_bar):
+                            _cw_w.bind("<Button-1>", lambda e, fn=_do_play_cw: fn())
+
+                        def _cw_right_click(e, path=_cw_entry.video_path, entry=_cw_entry):
+                            if not hasattr(self, 'video_preview_manager'):
+                                return
+                            vpm = self.video_preview_manager
+                            resume_sec = 0.0
+                            try:
+                                if entry.duration_watched:
+                                    resume_sec = float(entry.duration_watched)
+                            except Exception:
+                                pass
+                            cached_td = vpm.cw_preview_cache.get(path, resume_sec)
+                            if cached_td:
+                                vpm.tooltip.show_preview(path, cached_td, e.x_root, e.y_root)
+                            else:
+                                vpm.show_preview_at_position(path, resume_sec, e.x_root, e.y_root)
+
+                        def _cw_hide_tooltip(e):
+                            if hasattr(self, 'video_preview_manager'):
+                                self.video_preview_manager.tooltip.hide_preview()
+
+                        def _bind_cw_rc(w):
+                            w.bind("<Button-3>", _cw_right_click)
+                            for _ch in w.winfo_children():
+                                _bind_cw_rc(_ch)
+
+                        _bind_cw_rc(_cw_card)
+
+                        def _cw_enter(e, card=_cw_card, body=_cw_body,
+                                      bc=_cw_bar_col, sf=surface, hc=self.hover_color):
+                            card.config(bg=hc, highlightbackground=bc, highlightthickness=2)
+                            body.config(bg=hc)
+                            for _w in body.winfo_children():
+                                try:
+                                    if isinstance(_w, (tk.Label, tk.Frame)) and _w.cget("bg") == sf:
+                                        _w.config(bg=hc)
+                                except Exception:
+                                    pass
+                                if isinstance(_w, tk.Frame):
+                                    for _ww in _w.winfo_children():
+                                        try:
+                                            if isinstance(_ww, tk.Label) and _ww.cget("bg") == sf:
+                                                _ww.config(bg=hc)
+                                        except Exception:
+                                            pass
+
+                        def _cw_leave(e, card=_cw_card, body=_cw_body,
+                                      bd=border, sf=surface, hc=self.hover_color):
+                            _cw_hide_tooltip(e)
+                            card.config(bg=sf, highlightbackground=bd, highlightthickness=1)
+                            body.config(bg=sf)
+                            for _w in body.winfo_children():
+                                try:
+                                    if isinstance(_w, (tk.Label, tk.Frame)) and _w.cget("bg") == hc:
+                                        _w.config(bg=sf)
+                                except Exception:
+                                    pass
+                                if isinstance(_w, tk.Frame):
+                                    for _ww in _w.winfo_children():
+                                        try:
+                                            if isinstance(_ww, tk.Label) and _ww.cget("bg") == hc:
+                                                _ww.config(bg=sf)
+                                        except Exception:
+                                            pass
+
+                        for _cw_w in (_cw_card, _cw_body, _accent_bar):
+                            _cw_w.bind("<Enter>", _cw_enter)
+                            _cw_w.bind("<Leave>", _cw_leave)
+
+                except Exception:
+                    pass
+
+            ManagedThread(target=_load_stats, name="HomeDashboardStats").start()
 
         def _ensure_embedded_view_frame(self):
             if self.embedded_view_frame and self.embedded_view_frame.winfo_exists():
@@ -1445,7 +1498,8 @@ def select_multiple_folders_and_play():
                         )
                 except Exception as e:
                     self.update_console(f"Error scanning {dir_path}: {e}")
-                    self.toast.error("Scan Failed", f"Error scanning '{os.path.basename(dir_path)}'")
+                    self.root.after(0, lambda: self.toast.error("Scan Failed",
+                                                                f"Error scanning '{os.path.basename(dir_path)}'"))
                 finally:
                     with self._pending_scans_lock:
                         self.pending_scans.discard(dir_path)
@@ -5935,6 +5989,14 @@ def select_multiple_folders_and_play():
     def _wait_for_scans():
         app = _app_instance[0]
         try:
+            n = len(app.pending_scans)
+            total = len(app.selected_dirs)
+            done = total - n
+            if status_lbl.winfo_exists():
+                status_lbl.config(text=f"Scanning directories… {done}/{total}")
+        except:
+            pass
+        try:
             with app._pending_scans_lock:
                 pending = len(app.pending_scans)
         except Exception:
@@ -5945,16 +6007,21 @@ def select_multiple_folders_and_play():
             _ready["app"] = True
             root.after(0, _try_show)
 
+    status_lbl = show_splash(root, on_done=_on_splash_done, duration_ms=1500)
+
     def _build_app():
         _orig_state = root.state
         root.state = lambda s=None: _orig_state() if s is None else None
+        try:
+            status_lbl.config(text="Initializing…")
+        except:
+            pass
         _app_instance[0] = DirectorySelector(root)
         root.state = _orig_state
         root.update_idletasks()
         root.withdraw()
         root.after(150, _wait_for_scans)
 
-    show_splash(root, on_done=_on_splash_done, duration_ms=1500)
     root.after(10, _build_app)
     root.mainloop()
 

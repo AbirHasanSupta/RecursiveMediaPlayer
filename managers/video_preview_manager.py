@@ -1670,43 +1670,43 @@ class SeekPreviewCache:
     JPEG_QUALITY = 60
 
     def __init__(self):
-        self._cache: Dict[str, Dict[int, ImageTk.PhotoImage]] = {}
-        self._lock  = threading.Lock()
+        self._cache: Dict[str, Dict[int, Image.Image]] = {}  # stores PIL Images now
+        self._photo_cache: Dict[str, Dict[int, ImageTk.PhotoImage]] = {}  # PhotoImage kept alive here
+        self._lock = threading.Lock()
         self._generating: set = set()
 
     def get_frame(self, video_path: str, position_ms: int) -> Optional[ImageTk.PhotoImage]:
         norm = os.path.normpath(video_path)
-        idx  = int(position_ms / 1000) // self.INTERVAL_S
+        idx = int(position_ms / 1000) // self.INTERVAL_S
         with self._lock:
             frames = self._cache.get(norm)
-            if frames:
-                if idx in frames:
-                    return frames[idx]
-                best = min(frames.keys(), key=lambda k: abs(k - idx), default=None)
-                if best is not None:
-                    return frames[best]
-        return None
+            if not frames:
+                return None
+            best = idx if idx in frames else min(frames.keys(), key=lambda k: abs(k - idx), default=None)
+            if best is None:
+                return None
+            photos = self._photo_cache.setdefault(norm, {})
+            if best in photos:
+                return photos[best]
+            pil_img = frames[best]  # grab PIL image under lock, then release
 
-    def ensure_generated(self, video_path: str):
-        norm = os.path.normpath(video_path)
+        photo = ImageTk.PhotoImage(pil_img)  # convert outside lock
         with self._lock:
-            if norm in self._cache or norm in self._generating:
-                return
-            self._generating.add(norm)
-        threading.Thread(target=self._generate, args=(norm,), daemon=True).start()
+            self._photo_cache.setdefault(norm, {})[best] = photo
+        return photo
 
     def _generate(self, norm: str):
         try:
             cap = cv2.VideoCapture(norm)
             if not cap.isOpened():
                 return
-            fps         = cap.get(cv2.CAP_PROP_FPS) or 25
+            fps = cap.get(cv2.CAP_PROP_FPS) or 25
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            duration_s  = total_frames / fps
-            frames: Dict[int, ImageTk.PhotoImage] = {}
+            duration_s = total_frames / fps
+            frames: Dict[int, Image.Image] = {}  # PIL Images only — no PhotoImage here
 
             idx = 0
-            t   = 0.0
+            t = 0.0
             while t < duration_s:
                 frame_no = int(t * fps)
                 cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no)
@@ -1714,11 +1714,10 @@ class SeekPreviewCache:
                 if ret and frame is not None:
                     small = cv2.resize(frame, (self.THUMB_W, self.THUMB_H),
                                        interpolation=cv2.INTER_AREA)
-                    rgb   = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
-                    photo = ImageTk.PhotoImage(Image.fromarray(rgb))
-                    frames[idx] = photo
+                    rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+                    frames[idx] = Image.fromarray(rgb)  # PIL Image — thread-safe
                 idx += 1
-                t   += self.INTERVAL_S
+                t += self.INTERVAL_S
 
             cap.release()
             with self._lock:
@@ -1733,7 +1732,17 @@ class SeekPreviewCache:
         norm = os.path.normpath(video_path)
         with self._lock:
             self._cache.pop(norm, None)
+            self._photo_cache.pop(norm, None)  # evict converted photos too
 
     def clear(self):
         with self._lock:
             self._cache.clear()
+            self._photo_cache.clear()
+
+    def ensure_generated(self, video_path: str):
+        norm = os.path.normpath(video_path)
+        with self._lock:
+            if norm in self._cache or norm in self._generating:
+                return
+            self._generating.add(norm)
+        threading.Thread(target=self._generate, args=(norm,), daemon=True).start()

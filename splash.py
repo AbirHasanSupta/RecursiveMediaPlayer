@@ -53,11 +53,6 @@ def show_splash(root: tk.Tk, on_done, duration_ms: int = 1000):
              font=("Segoe UI", 18, "bold"),
              bg=BG, fg=TXT).pack(pady=(0, 4))
 
-    tk.Label(splash,
-             text="Loading…",
-             font=("Segoe UI", 10),
-             bg=BG, fg=TXT_DIM).pack()
-
     bar = tk.Frame(splash, bg=ACCENT, height=4)
     bar.pack(side=tk.BOTTOM, fill=tk.X)
 
@@ -72,3 +67,6 @@ def show_splash(root: tk.Tk, on_done, duration_ms: int = 1000):
 
     splash.after(duration_ms, _finish)
     splash.update()
+    status_lbl = tk.Label(splash, text="Loading…", font=("Segoe UI", 10), bg=BG, fg=TXT_DIM)
+    status_lbl.pack()
+    return status_lbl
