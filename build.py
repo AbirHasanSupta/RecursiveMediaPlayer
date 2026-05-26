@@ -63,7 +63,10 @@ def main():
     print("\n[5/6] Building with PyInstaller...")
     subprocess.run([sys.executable, '-m', 'PyInstaller', 'video_player.spec', '--clean'], check=True)
 
-    print("\n[6/6] Post-build cleanup...")
+    print("\n[6/6] Post-build packaging...")
+    zip_name = f"RecursiveVideoPlayer-{version}"
+    zip_path = shutil.make_archive(zip_name, 'zip', 'dist', 'RecursiveVideoPlayer')
+    print(f"  Package: {os.path.abspath(zip_path)}")
 
     print("\n" + "=" * 60)
     print("Build Complete!")

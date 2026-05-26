@@ -30,7 +30,7 @@ from managers.grid_view_manager import GridViewManager
 from managers.resource_manager import ThreadSafeDict, get_resource_manager, ManagedExecutor, MemoryMonitor, \
     ManagedThread
 from theme import ThemeSelector
-from utils import gather_videos_with_directories, is_video, gather_videos
+from utils import gather_videos_with_directories, is_video, gather_videos, check_vlc, show_vlc_missing_and_exit
 from managers.playlist_manager import PlaylistManager
 from managers.watch_history_manager import WatchHistoryManager
 from managers.resume_playback_manager import ResumePlaybackManager
@@ -6051,4 +6051,6 @@ def select_multiple_folders_and_play():
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
+    if not check_vlc():
+        show_vlc_missing_and_exit()
     select_multiple_folders_and_play()

@@ -1,4 +1,5 @@
 import os
+import sys
 
 VIDEO_SUFFIXES = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv')
 
@@ -75,3 +76,30 @@ def _responsive_geometry(parent, desired_w, desired_h):
     x = (sw - w) // 2
     y = (sh - h) // 2
     return f"{w}x{h}+{x}+{y}"
+
+def check_vlc():
+    try:
+        import vlc
+        inst = vlc.Instance()
+        if inst is None:
+            raise RuntimeError
+        inst.release()
+        return True
+    except Exception:
+        return False
+
+def show_vlc_missing_and_exit():
+    import tkinter as tk
+    from tkinter import messagebox
+    import webbrowser
+    root = tk.Tk()
+    root.withdraw()
+    open_dl = messagebox.askyesno(
+        "VLC Not Found",
+        "VLC media player (64-bit) is required but was not found.\n\n"
+        "Open the VLC download page now?",
+    )
+    if open_dl:
+        webbrowser.open("https://www.videolan.org/vlc/index.html")
+    root.destroy()
+    sys.exit(1)
