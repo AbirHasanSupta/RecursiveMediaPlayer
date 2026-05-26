@@ -134,10 +134,10 @@ def select_multiple_folders_and_play():
             cy = (sh - restore_h) // 2
             root.geometry(f"{restore_w}x{restore_h}+{cx}+{cy}")
 
-            try:
-                root.state('zoomed')
-            except:
-                pass
+            # try:
+            #     root.state('zoomed')
+            # except:
+            #     pass
 
             root.minsize(900, 600)
             root.protocol("WM_DELETE_WINDOW", self.cancel)
@@ -5918,12 +5918,31 @@ def select_multiple_folders_and_play():
     root = TkinterDnD.Tk()
     root.withdraw()
 
-    def _launch():
-        DirectorySelector(root)
-        root.update_idletasks()
-        root.deiconify()
+    _ready = {"app": False, "splash": False}
 
-    show_splash(root, on_done=_launch, duration_ms=1500)
+    def _try_show():
+        if _ready["app"] and _ready["splash"]:
+            try:
+                root.state('zoomed')
+            except Exception:
+                root.deiconify()
+
+    def _on_splash_done():
+        _ready["splash"] = True
+        root.after(0, _try_show)
+
+    def _build_app():
+        _orig_state = root.state
+        root.state = lambda s=None: _orig_state() if s is None else None
+        DirectorySelector(root)
+        root.state = _orig_state
+        root.update_idletasks()
+        root.withdraw()
+        _ready["app"] = True
+        root.after(0, _try_show)
+
+    show_splash(root, on_done=_on_splash_done, duration_ms=1500)
+    root.after(10, _build_app)
     root.mainloop()
 
 
