@@ -1539,17 +1539,10 @@ class VideoPreviewManager:
 
 
 class ContinueWatchingPreviewCache:
-    """
-    Pre-generates 3-second, 160×90, 8-fps animated previews for the
-    Continue Watching cards.  Generation starts in the background when
-    the home dashboard renders, so right-click shows instantly.
-    Max 4 entries; stale entries evicted when the card list changes.
-    """
-
-    PREVIEW_W = 240
-    PREVIEW_H = 135
+    PREVIEW_W = 480
+    PREVIEW_H = 270
     PREVIEW_FPS = 10
-    PREVIEW_DUR = 3   # seconds
+    PREVIEW_DUR = 5
 
     def __init__(self):
         self._cache: Dict[str, str] = {}   # norm_path -> "VIDEO:…" b64
@@ -1664,7 +1657,7 @@ class SeekPreviewCache:
     INTERVAL_S seconds.  Generation runs in a background thread per video.
     """
 
-    INTERVAL_S   = 5      # one frame every N seconds
+    INTERVAL_S   = 4      # one frame every N seconds
     THUMB_W      = 160
     THUMB_H      = 90
     JPEG_QUALITY = 60
