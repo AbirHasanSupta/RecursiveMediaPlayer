@@ -4764,10 +4764,14 @@ def select_multiple_folders_and_play():
             if root_dir not in self.excluded_videos:
                 self.excluded_videos[root_dir] = []
             if norm_vp not in (os.path.normpath(v) for v in self.excluded_videos[root_dir]):
-                self.excluded_videos[root_dir].append(video_path)
+                self.excluded_videos[root_dir].append(norm_vp)
             self.update_console(f"Excluded: {os.path.basename(video_path)}")
             self.update_video_count()
-            self._retag_video_in_tree(video_path, root_dir)
+            scroll_pos = self._tree_yview()
+            if getattr(self, '_is_filtered_mode', False) and hasattr(self, '_filtered_videos'):
+                self._reapply_filtered_view(scroll_pos)
+            else:
+                self.load_subdirectories(root_dir, restore_scroll=scroll_pos)
             if self.save_directories:
                 self.save_preferences()
 
@@ -4775,8 +4779,8 @@ def select_multiple_folders_and_play():
             root_dir = self._find_root_dir_for_video(video_path)
             if not root_dir:
                 return
+            norm_vp = os.path.normpath(video_path)
             if root_dir in self.excluded_videos:
-                norm_vp = os.path.normpath(video_path)
                 self.excluded_videos[root_dir] = [
                     v for v in self.excluded_videos[root_dir]
                     if os.path.normpath(v) != norm_vp
@@ -4785,7 +4789,11 @@ def select_multiple_folders_and_play():
                     del self.excluded_videos[root_dir]
             self.update_console(f"Removed exclusion: {os.path.basename(video_path)}")
             self.update_video_count()
-            self._retag_video_in_tree(video_path, root_dir)
+            scroll_pos = self._tree_yview()
+            if getattr(self, '_is_filtered_mode', False) and hasattr(self, '_filtered_videos'):
+                self._reapply_filtered_view(scroll_pos)
+            else:
+                self.load_subdirectories(root_dir, restore_scroll=scroll_pos)
             if self.save_directories:
                 self.save_preferences()
 
