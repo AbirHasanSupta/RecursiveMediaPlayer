@@ -343,6 +343,8 @@ class WatchHistoryUI:
         self.is_favourite_callback = None
         self.locate_in_panel_callback = None
         self.theme_provider.register_manager_ui(self)
+        self.history_tree = None
+        self._hovered_iid = None
 
     def _get_design_tokens(self):
         return self.theme_provider.get_manager_design_tokens()
@@ -419,6 +421,11 @@ class WatchHistoryUI:
             self.stats_label.configure(bg=t["header_bg"], fg=t["text_muted"])
         self._restyle_filter_buttons()
         self._restyle_treeview()
+        if hasattr(self, "history_tree") and self.history_tree:
+            try:
+                self.history_tree.tag_configure("hover_row", background=self.theme_provider.hover_color)
+            except tk.TclError:
+                pass
         if hasattr(self, '_hist_scrollbar'):
             try:
                 tp = self.theme_provider
@@ -680,7 +687,8 @@ class WatchHistoryUI:
         self.history_tree.bind("<Double-Button-1>", self._on_history_double_click)
         self.history_tree.bind("<Button-3>", self._on_history_right_click)
         self.history_tree.bind("<Button-1>", self._on_history_left_click)
-        self.history_tree.bind("<Leave>", self._on_tree_leave)
+        self.history_tree.bind("<Leave>", self._on_combined_leave)
+        self.history_tree.bind("<Motion>", self._on_tree_hover)
 
         btn_container = tk.Frame(body, bg=t['bg'])
         btn_container._manager_role = "body"
@@ -753,7 +761,35 @@ class WatchHistoryUI:
         if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
             self.video_preview_manager.tooltip.hide_preview()
 
+    def _on_tree_hover(self, event):
+        iid = self.history_tree.identify_row(event.y)
+        if iid == self._hovered_iid:
+            return
+        if self._hovered_iid and self.history_tree.exists(self._hovered_iid):
+            self._restore_row_bg(self._hovered_iid)
+        self._hovered_iid = iid
+        if iid and iid not in self.history_tree.selection():
+            try:
+                self.history_tree.tag_configure("hover_row", background=self.theme_provider.hover_color)
+                current_tags = [tg for tg in self.history_tree.item(iid, "tags") if tg != "hover_row"]
+                self.history_tree.item(iid, tags=(*current_tags, "hover_row"))
+            except (ValueError, tk.TclError):
+                pass
+
     def _on_tree_leave(self, event):
+        if self._hovered_iid and self.history_tree.exists(self._hovered_iid):
+            self._restore_row_bg(self._hovered_iid)
+        self._hovered_iid = None
+
+    def _restore_row_bg(self, iid):
+        try:
+            current_tags = [tg for tg in self.history_tree.item(iid, "tags") if tg != "hover_row"]
+            self.history_tree.item(iid, tags=current_tags)
+        except Exception:
+            pass
+
+    def _on_combined_leave(self, event):
+        self._on_tree_leave(event)
         if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
             self.video_preview_manager.tooltip.hide_preview()
 

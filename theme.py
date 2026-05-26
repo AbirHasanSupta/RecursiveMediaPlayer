@@ -1088,6 +1088,10 @@ class ThemeSelector:
             bg_idle, bg_hover, bg_press = parent_bg, ("#3a2020" if dark else "#FFF0F0"), (
                 "#4a1818" if dark else "#FFE0E0")
             fg, border = ("#FF6B6B" if dark else "#D93025"), ("#FF6B6B" if dark else "#D93025")
+        elif style == "playlist":
+            bg_idle, bg_hover, bg_press = tokens["playlist_accent"], ("#C4B5FD" if dark else "#6d28d9"), (
+                "#A78BFA" if dark else "#5b21b6")
+            fg, border = "#FFFFFF", tokens["playlist_accent"]
         else:  # secondary
             bg_idle, bg_hover, bg_press = parent_bg, tokens["surface2"], tokens["surface"]
             fg, border = tokens["text_muted"], tokens["border"]

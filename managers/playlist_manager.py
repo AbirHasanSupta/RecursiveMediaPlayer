@@ -1078,8 +1078,8 @@ class PlaylistInfoDialog:
         self.description_entry = None
 
         self.dialog = tk.Toplevel(parent)
-        self.dialog.title("Playlist Information")
-        self.dialog.geometry("400x250")
+        self.dialog.title("New Playlist")
+        self.dialog.geometry("460x370")
         self.dialog.configure(bg=theme_provider.bg_color)
         self.dialog.resizable(False, False)
         self.dialog.transient(parent)
@@ -1100,53 +1100,80 @@ class PlaylistInfoDialog:
         tp = self.theme_provider
         t = tp.get_manager_design_tokens()
         ACCENT = t["playlist_accent"]
+        BG = t["bg"]
+        SURFACE = t["surface"]
+        SURFACE2 = t["surface2"]
 
-        self.dialog.geometry("420x280")
+        self.dialog.geometry("460x320")
+        self.dialog.configure(bg=BG)
 
-        # header band
-        band = tk.Frame(self.dialog, bg=ACCENT)
-        band.pack(fill=tk.X)
-        tk.Label(band, text="  Playlist Info", font=tp.header_font,
-                 bg=ACCENT, fg="white", pady=12).pack(side=tk.LEFT, padx=16)
+        # Header
+        header = tk.Frame(self.dialog, bg=SURFACE, height=64)
+        header.pack(fill=tk.X)
+        header.pack_propagate(False)
+        h_inner = tk.Frame(header, bg=SURFACE)
+        h_inner.pack(fill=tk.BOTH, expand=True, padx=20)
+        tk.Label(h_inner, text="♪", font=("Segoe UI Emoji", 16),
+                 bg=SURFACE, fg=ACCENT).pack(side=tk.LEFT, pady=16, padx=(0, 10))
+        title_text = "Edit Playlist" if name else "New Playlist"
+        tk.Label(h_inner, text=title_text, font=("Segoe UI", 13, "bold"),
+                 bg=SURFACE, fg=t["text"]).pack(side=tk.LEFT, pady=16)
+        tk.Frame(self.dialog, bg=t["divider"], height=1).pack(fill=tk.X)
 
-        # body
-        body = tk.Frame(self.dialog, bg=tp.bg_color, padx=20, pady=16)
+        # Body
+        body = tk.Frame(self.dialog, bg=BG, padx=24, pady=20)
         body.pack(fill=tk.BOTH, expand=True)
 
-        tk.Label(body, text="Name", font=tp.small_font,
-                 bg=tp.bg_color, fg=tp.muted_fg).pack(anchor="w", pady=(0, 4))
-        self.name_entry = tk.Entry(body, font=tp.normal_font,
-                                   bg=tp.entry_bg, fg=tp.entry_fg,
-                                   insertbackground=tp.entry_fg,
-                                   relief=tk.FLAT, bd=0,
-                                   highlightthickness=1,
-                                   highlightbackground=tp.entry_border)
-        self.name_entry.pack(fill=tk.X, pady=(0, 12), ipady=6)
+        # Name field
+        tk.Label(body, text="NAME", font=("Segoe UI", 8, "bold"),
+                 bg=BG, fg=t["text_muted"]).pack(anchor="w", pady=(0, 5))
+        name_wrap = tk.Frame(body, bg=SURFACE2,
+                             highlightbackground=t["border"], highlightthickness=1)
+        name_wrap.pack(fill=tk.X, pady=(0, 14))
+        self.name_entry = tk.Entry(name_wrap, font=("Segoe UI", 10),
+                                   bg=SURFACE2, fg=t["text"],
+                                   insertbackground=t["text"],
+                                   relief=tk.FLAT, bd=0)
+        self.name_entry.pack(fill=tk.X, padx=10, pady=8)
         self.name_entry.insert(0, name)
 
-        tk.Label(body, text="Description  (optional)", font=tp.small_font,
-                 bg=tp.bg_color, fg=tp.muted_fg).pack(anchor="w", pady=(0, 4))
-        self.description_entry = tk.Text(body, font=tp.normal_font,
-                                         bg=tp.entry_bg, fg=tp.entry_fg,
-                                         insertbackground=tp.entry_fg,
-                                         relief=tk.FLAT, bd=0,
-                                         highlightthickness=1,
-                                         highlightbackground=tp.entry_border,
-                                         height=3)
-        self.description_entry.pack(fill=tk.BOTH, expand=True, pady=(0, 14))
+        def _on_name_focus_in(e):
+            name_wrap.config(highlightbackground=ACCENT)
+
+        def _on_name_focus_out(e):
+            name_wrap.config(highlightbackground=t["border"])
+
+        self.name_entry.bind("<FocusIn>", _on_name_focus_in)
+        self.name_entry.bind("<FocusOut>", _on_name_focus_out)
+
+        # Description field
+        tk.Label(body, text="DESCRIPTION  (optional)", font=("Segoe UI", 8, "bold"),
+                 bg=BG, fg=t["text_muted"]).pack(anchor="w", pady=(0, 5))
+        desc_wrap = tk.Frame(body, bg=SURFACE2,
+                             highlightbackground=t["border"], highlightthickness=1)
+        desc_wrap.pack(fill=tk.BOTH, expand=True, pady=(0, 16))
+        self.description_entry = tk.Text(desc_wrap, font=("Segoe UI", 10),
+                                         bg=SURFACE2, fg=t["text"],
+                                         insertbackground=t["text"],
+                                         relief=tk.FLAT, bd=0, height=3)
+        self.description_entry.pack(fill=tk.BOTH, expand=True, padx=10, pady=8)
         self.description_entry.insert("1.0", description)
 
-        tk.Frame(body, bg=tp.divider_color, height=1).pack(fill=tk.X, pady=(0, 12))
+        def _on_desc_focus_in(e):
+            desc_wrap.config(highlightbackground=ACCENT)
 
-        # LEFT: (empty)   RIGHT: Cancel  ·  Save
-        btn_row = tk.Frame(body, bg=tp.bg_color)
+        def _on_desc_focus_out(e):
+            desc_wrap.config(highlightbackground=t["border"])
+
+        self.description_entry.bind("<FocusIn>", _on_desc_focus_in)
+        self.description_entry.bind("<FocusOut>", _on_desc_focus_out)
+
+        # Buttons
+        tk.Frame(body, bg=t["divider"], height=1).pack(fill=tk.X, pady=(0, 14))
+        btn_row = tk.Frame(body, bg=BG)
         btn_row.pack(fill=tk.X)
-
-        right = tk.Frame(btn_row, bg=tp.bg_color)
-        right.pack(side=tk.RIGHT)
-
-        tp.create_modern_button(right, "Cancel", self._cancel, "secondary", "md").pack(side=tk.LEFT, padx=(0, 8))
-        tp.create_modern_button(right, "Save", self._ok, "primary", "md").pack(side=tk.LEFT)
+        tp.create_modern_button(btn_row, "Cancel", self._cancel, "secondary", "md").pack(side=tk.RIGHT, padx=(8, 0))
+        tp.create_modern_button(btn_row, "Save Playlist", self._ok, "playlist", "md").pack(side=tk.RIGHT)
 
         self.name_entry.focus_set()
         self.dialog.bind("<Return>", lambda e: self._ok())
@@ -1238,68 +1265,74 @@ class PlaylistManager:
         tp = self.ui.theme_provider
         t = tp.get_manager_design_tokens()
         ACCENT = t["playlist_accent"]
-        PANEL = tp.surface_color
+        BG = t["bg"]
+        SURFACE = t["surface"]
+        SURFACE2 = t["surface2"]
 
         dialog = tk.Toplevel(self.ui.parent)
         dialog.withdraw()
         dialog.title("Add to Playlist")
-        dialog.geometry("420x360")
-        dialog.minsize(360, 300)
-        dialog.configure(bg=tp.bg_color)
+        dialog.geometry("440x400")
+        dialog.minsize(360, 320)
+        dialog.configure(bg=BG)
+        dialog.resizable(False, False)
         dialog.transient(self.ui.parent)
         dialog.grab_set()
 
         dialog.update_idletasks()
-        px = self.ui.parent.winfo_rootx() + (self.ui.parent.winfo_width() - 420) // 2
-        py = self.ui.parent.winfo_rooty() + (self.ui.parent.winfo_height() - 360) // 2
-        dialog.geometry(f"420x360+{max(0, px)}+{max(0, py)}")
+        px = self.ui.parent.winfo_rootx() + (self.ui.parent.winfo_width() - 440) // 2
+        py = self.ui.parent.winfo_rooty() + (self.ui.parent.winfo_height() - 400) // 2
+        dialog.geometry(f"440x400+{max(0, px)}+{max(0, py)}")
 
-        # header band
-        band = tk.Frame(dialog, bg=ACCENT)
-        band.pack(fill=tk.X)
-        tk.Label(band,
-                 text=f"  Add {len(videos)} video{'s' if len(videos) != 1 else ''} to…",
-                 font=tp.header_font, bg=ACCENT, fg="white",
-                 pady=12).pack(side=tk.LEFT, padx=16)
+        # Header
+        header = tk.Frame(dialog, bg=SURFACE, height=64)
+        header.pack(fill=tk.X)
+        header.pack_propagate(False)
+        h_inner = tk.Frame(header, bg=SURFACE)
+        h_inner.pack(fill=tk.BOTH, expand=True, padx=20)
+        tk.Label(h_inner, text="♪", font=("Segoe UI Emoji", 16),
+                 bg=SURFACE, fg=ACCENT).pack(side=tk.LEFT, pady=16, padx=(0, 10))
+        tk.Label(h_inner, text="Add to Playlist", font=("Segoe UI", 13, "bold"),
+                 bg=SURFACE, fg=t["text"]).pack(side=tk.LEFT, pady=16)
+        count_badge = tk.Label(h_inner,
+                               text=f" {len(videos)} video{'s' if len(videos) != 1 else ''} ",
+                               font=("Segoe UI", 9), bg=ACCENT, fg="#FFFFFF",
+                               padx=6, pady=2)
+        count_badge.pack(side=tk.LEFT, padx=(10, 0), pady=20)
+        tk.Frame(dialog, bg=t["divider"], height=1).pack(fill=tk.X)
 
-        # body
-        body = tk.Frame(dialog, bg=tp.bg_color, padx=20, pady=14)
+        # Body
+        body = tk.Frame(dialog, bg=BG, padx=20, pady=16)
         body.pack(fill=tk.BOTH, expand=True)
 
-        tk.Label(body, text="Select a playlist:", font=tp.small_font,
-                 bg=tp.bg_color, fg=tp.muted_fg).pack(anchor="w", pady=(0, 8))
+        tk.Label(body, text="SELECT PLAYLIST", font=("Segoe UI", 8, "bold"),
+                 bg=BG, fg=t["text_muted"]).pack(anchor="w", pady=(0, 8))
 
-        # list card
-        card = tk.Frame(body, bg=PANEL,
-                        highlightbackground=tp.frame_border, highlightthickness=1)
-        card.pack(fill=tk.BOTH, expand=True, pady=(0, 14))
+        # List card
+        card = tk.Frame(body, bg=SURFACE2,
+                        highlightbackground=t["border"], highlightthickness=1)
+        card.pack(fill=tk.BOTH, expand=True, pady=(0, 16))
 
-        sb = ttk.Scrollbar(card, orient=tk.VERTICAL,
-                           style="ExclusionTree.Vertical.TScrollbar")
+        sb = ttk.Scrollbar(card, orient=tk.VERTICAL, style="ExclusionTree.Vertical.TScrollbar")
         sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
 
         playlist_listbox = tk.Listbox(
-            card, yscrollcommand=sb.set, font=tp.normal_font,
-            bg=PANEL, fg=t["listbox_fg"], selectbackground=t["listbox_select"],
-            selectforeground="white", activestyle="none",
-            relief=tk.FLAT, bd=0, highlightthickness=0)
-        playlist_listbox.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+            card, yscrollcommand=sb.set, font=("Segoe UI", 10),
+            bg=SURFACE2, fg=t["listbox_fg"],
+            selectbackground=ACCENT, selectforeground="#FFFFFF",
+            activestyle="none", relief=tk.FLAT, bd=0, highlightthickness=0,
+            cursor="hand2")
+        playlist_listbox.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
         sb.config(command=playlist_listbox.yview)
 
         for pl in playlists:
-            playlist_listbox.insert(tk.END, f"   {pl.name}  ({len(pl.videos)} videos)")
+            count = len(pl.videos)
+            playlist_listbox.insert(tk.END, f"  {pl.name}  ·  {count} video{'s' if count != 1 else ''}")
 
-        tk.Frame(body, bg=tp.divider_color, height=1).pack(fill=tk.X, pady=(0, 10))
+        tk.Frame(body, bg=t["divider"], height=1).pack(fill=tk.X, pady=(0, 12))
 
-        # LEFT: + New Playlist (primary)
-        # RIGHT: Add to Selected (success)  ·  Cancel (secondary)
-        btn_row = tk.Frame(body, bg=tp.bg_color)
+        btn_row = tk.Frame(body, bg=BG)
         btn_row.pack(fill=tk.X)
-
-        left = tk.Frame(btn_row, bg=tp.bg_color)
-        left.pack(side=tk.LEFT)
-        right = tk.Frame(btn_row, bg=tp.bg_color)
-        right.pack(side=tk.RIGHT)
 
         def create_new():
             dialog.destroy()
@@ -1322,11 +1355,9 @@ class PlaylistManager:
             dialog.destroy()
             self.ui._refresh_playlist_list()
 
-        tp.create_modern_button(left, "+ New Playlist", create_new, "primary", "md").pack(side=tk.LEFT)
-
-        tp.create_modern_button(right, "Add to Selected", add_to_existing, "success", "md").pack(side=tk.LEFT,
-                                                                                                 padx=(0, 8))
-        tp.create_modern_button(right, "Cancel", dialog.destroy, "secondary", "md").pack(side=tk.LEFT)
+        tp.create_modern_button(btn_row, "+ New Playlist", create_new, "secondary", "md").pack(side=tk.LEFT)
+        tp.create_modern_button(btn_row, "Cancel", dialog.destroy, "secondary", "md").pack(side=tk.RIGHT, padx=(8, 0))
+        tp.create_modern_button(btn_row, "Add to Selected", add_to_existing, "playlist", "md").pack(side=tk.RIGHT)
 
         from icon_helper import apply_icon
         apply_icon(dialog)
