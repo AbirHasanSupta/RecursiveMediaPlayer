@@ -49,13 +49,19 @@ class Toast:
         toast.update_idletasks()
         w = max(toast.winfo_reqwidth(), 280)
         h = toast.winfo_reqheight()
-        sw = self.root.winfo_screenwidth()
-        sh = self.root.winfo_screenheight()
 
-        # Stack toasts vertically
+        try:
+            root_x = self.root.winfo_rootx()
+            root_y = self.root.winfo_rooty()
+            root_w = self.root.winfo_width()
+            root_h = self.root.winfo_height()
+        except Exception:
+            root_x, root_y, root_w, root_h = 0, 0, 800, 600
+
         offset_y = sum(t[1] + 8 for t in self._stack if t[0].winfo_exists())
-        y_pos = sh - h - 60 - offset_y
-        toast.geometry(f"{w}x{h}+{sw - w - 20}+{y_pos}")
+        x_pos = root_x + root_w - w - 20
+        y_pos = root_y + root_h - h - 20 - offset_y
+        toast.geometry(f"{w}x{h}+{x_pos}+{y_pos}")
 
         entry = [toast, h]
         self._stack.append(entry)
