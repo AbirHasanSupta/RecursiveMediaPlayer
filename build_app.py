@@ -5919,6 +5919,7 @@ def select_multiple_folders_and_play():
     root.withdraw()
 
     _ready = {"app": False, "splash": False}
+    _app_instance = [None]
 
     def _try_show():
         if _ready["app"] and _ready["splash"]:
@@ -5931,15 +5932,27 @@ def select_multiple_folders_and_play():
         _ready["splash"] = True
         root.after(0, _try_show)
 
+    def _wait_for_scans():
+        app = _app_instance[0]
+        try:
+            with app._pending_scans_lock:
+                pending = len(app.pending_scans)
+        except Exception:
+            pending = 0
+        if pending > 0:
+            root.after(150, _wait_for_scans)
+        else:
+            _ready["app"] = True
+            root.after(0, _try_show)
+
     def _build_app():
         _orig_state = root.state
         root.state = lambda s=None: _orig_state() if s is None else None
-        DirectorySelector(root)
+        _app_instance[0] = DirectorySelector(root)
         root.state = _orig_state
         root.update_idletasks()
         root.withdraw()
-        _ready["app"] = True
-        root.after(0, _try_show)
+        root.after(150, _wait_for_scans)
 
     show_splash(root, on_done=_on_splash_done, duration_ms=1500)
     root.after(10, _build_app)
