@@ -345,6 +345,7 @@ class QueueUI:
         self._sort_rev = False
         self._duration_cache = {}
         self.queue_tree = None
+        self._hovered_iid = None
         self.theme_provider.register_manager_ui(self)
 
     def show_queue_manager(self):
@@ -513,11 +514,43 @@ class QueueUI:
                 self.queue_tree.tag_configure("playing", foreground=t2["queue_accent"])
                 self.queue_tree.tag_configure("played", foreground=t2["text_muted"])
                 self.queue_tree.tag_configure("normal", foreground=t2["listbox_fg"])
+                self.queue_tree.tag_configure("hover_row", background=self.theme_provider.hover_color)
         if hasattr(self, "_queue_scrollbar"):
             tp.configure_manager_scrollbar(self._queue_scrollbar, t)
         tp.restyle_manager_buttons(win)
         tp.restyle_manager_action_links(win)
         self._refresh_queue()
+
+    def _on_tree_hover(self, event):
+        iid = self.queue_tree.identify_row(event.y)
+        if iid == self._hovered_iid:
+            return
+        if self._hovered_iid and self.queue_tree.exists(self._hovered_iid):
+            self._restore_row_bg(self._hovered_iid)
+        self._hovered_iid = iid
+        if iid and iid != "empty" and iid not in self.queue_tree.selection():
+            try:
+                self.queue_tree.tag_configure("hover_row", background=self.theme_provider.hover_color)
+                current_tags = [tg for tg in self.queue_tree.item(iid, "tags") if tg != "hover_row"]
+                self.queue_tree.item(iid, tags=(*current_tags, "hover_row"))
+            except (ValueError, tk.TclError):
+                pass
+
+    def _on_tree_leave(self, event):
+        if self._hovered_iid and self.queue_tree.exists(self._hovered_iid):
+            self._restore_row_bg(self._hovered_iid)
+        self._hovered_iid = None
+
+    def _restore_row_bg(self, iid):
+        try:
+            current_tags = [tg for tg in self.queue_tree.item(iid, "tags") if tg != "hover_row"]
+            self.queue_tree.item(iid, tags=current_tags)
+        except Exception:
+            pass
+
+    def _on_combined_leave(self, event):
+        self._on_tree_leave(event)
+        self._on_mouse_leave(event)
 
     def _setup_queue_ui(self):
         tp = self.theme_provider
@@ -609,7 +642,8 @@ class QueueUI:
         self.queue_tree.bind("<Button-3>", self._on_right_click)
         self.queue_tree.bind("<B1-Motion>", self._on_drag_motion)
         self.queue_tree.bind("<ButtonRelease-1>", self._on_drag_release)
-        self.queue_tree.bind("<Leave>", self._on_mouse_leave)
+        self.queue_tree.bind("<Leave>", self._on_combined_leave)
+        self.queue_tree.bind("<Motion>", self._on_tree_hover)
 
         # ---- Buttons placed directly on body, no extra bar ----
         btn_container = tk.Frame(body, bg=t['bg'])

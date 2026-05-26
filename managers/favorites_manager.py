@@ -245,6 +245,7 @@ class FavoritesUI:
         self._duration_cache = {}
         self.favorites_tree = None
         self.theme_provider.register_manager_ui(self)
+        self._hovered_iid = None
 
     def show_favorites_manager(self, selected_directory: str = None):
         if self.favorites_window and self.favorites_window.winfo_exists():
@@ -354,6 +355,10 @@ class FavoritesUI:
         tp.restyle_manager_buttons(win)
         tp.restyle_manager_action_links(win)
         self._refresh_favorites_list()
+
+    def _on_combined_leave(self, event):
+        self._on_tree_leave(event)
+        self._on_mouse_leave(event)
 
     def _configure_fav_tree_style(self):
         t = self._get_design_tokens()
@@ -541,7 +546,9 @@ class FavoritesUI:
         self.favorites_tree.bind("<Button-3>", self._on_right_click)
         self.favorites_tree.bind("<B1-Motion>", self._on_mouse_drag)
         self.favorites_tree.bind("<ButtonRelease-1>", self._on_mouse_release)
-        self.favorites_tree.bind("<Leave>", self._on_mouse_leave)
+        self.favorites_tree.bind("<Leave>", self._on_combined_leave)
+        self.favorites_tree.bind("<Motion>", self._on_tree_hover)
+        self._hovered_iid = None
 
         # ---- Buttons placed directly on body, no extra bar ----
         btn_container = tk.Frame(body, bg=t['bg'])
@@ -554,6 +561,40 @@ class FavoritesUI:
         self._clear_all_btn = tp.create_manager_action_link(
             fav_actions, "✕  Clear all", self._clear_all, style="warning")
         self._clear_all_btn.pack(side=tk.LEFT)
+
+    def _on_tree_hover(self, event):
+        t = self._get_design_tokens()
+        iid = self.favorites_tree.identify_row(event.y)
+        if iid == self._hovered_iid:
+            return
+        if self._hovered_iid and self.favorites_tree.exists(self._hovered_iid):
+            self._restore_row_bg(self._hovered_iid)
+        self._hovered_iid = iid
+        if iid and iid != "empty" and iid not in self.favorites_tree.selection():
+            try:
+                import tkinter as tk
+                self.favorites_tree.tag_configure("hover_row", background=self._blend_hover(t))
+                current_tags = [tg for tg in self.favorites_tree.item(iid, "tags")
+                                if tg not in ("hover_row",)]
+                self.favorites_tree.item(iid, tags=(*current_tags, "hover_row"))
+            except (ValueError, tk.TclError):
+                pass
+
+    def _on_tree_leave(self, event):
+        if self._hovered_iid and self.favorites_tree.exists(self._hovered_iid):
+            self._restore_row_bg(self._hovered_iid)
+        self._hovered_iid = None
+
+    def _restore_row_bg(self, iid):
+        try:
+            current_tags = [tg for tg in self.favorites_tree.item(iid, "tags")
+                            if tg != "hover_row"]
+            self.favorites_tree.item(iid, tags=current_tags)
+        except Exception:
+            pass
+
+    def _blend_hover(self, t):
+        return self.theme_provider.hover_color
 
     def _show_context_menu(self, event):
         selection = self._get_tv_selected_indices()

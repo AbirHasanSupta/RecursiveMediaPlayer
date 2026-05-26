@@ -179,6 +179,7 @@ class PlaylistUI:
         self._sort_rev = False
         self._duration_cache = {}
         self.video_tree = None
+        self._hovered_iid = None
         self._embedded = False
         self._close_callback = None
         self.theme_provider.register_manager_ui(self)
@@ -317,6 +318,7 @@ class PlaylistUI:
                 t2 = self._get_design_tokens()
                 self.video_tree.tag_configure("normal", foreground=t2["listbox_fg"])
                 self.video_tree.tag_configure("missing", foreground=t2["text_muted"])
+                self.video_tree.tag_configure("hover_row", background=self.theme_provider.hover_color)
         sb2 = getattr(self, "_pl_video_scrollbar", None)
         if sb2 is not None:
             tp.configure_manager_scrollbar(sb2, t)
@@ -508,8 +510,8 @@ class PlaylistUI:
         self.video_tree.bind("<Button-1>", self._on_mouse_down)
         self.video_tree.bind("<B1-Motion>", self._on_mouse_drag)
         self.video_tree.bind("<ButtonRelease-1>", self._on_mouse_release)
-        self.video_tree.bind("<Motion>", self._on_mouse_motion)
-        self.video_tree.bind("<Leave>", self._on_mouse_leave)
+        self.video_tree.bind("<Motion>", self._on_tree_hover)
+        self.video_tree.bind("<Leave>", self._on_combined_leave)
         self._right_click_binding = self.video_tree.bind_all(
             "<Button-3>", self._on_video_right_click_wrapper)
         vid_sb.config(command=self.video_tree.yview)
@@ -668,19 +670,49 @@ class PlaylistUI:
         self.dragging_index = None
 
     def _on_mouse_motion(self, event):
-        if not hasattr(self, 'video_preview_manager') or not self.video_preview_manager:
-            return
-        if not self.video_preview_manager.tooltip.is_visible:
-            return
+        if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
+            if self.video_preview_manager.tooltip.is_visible:
+                iid = self.video_tree.identify_row(event.y)
+                current_index = int(iid) if (iid and iid != "empty") else None
+                if current_index != self.video_preview_manager.right_clicked_item:
+                    self.video_preview_manager.tooltip.hide_preview()
+                    self.video_preview_manager.right_clicked_item = None
+
+    def _on_tree_hover(self, event):
+        self._on_mouse_motion(event)
         iid = self.video_tree.identify_row(event.y)
-        current_index = int(iid) if (iid and iid != "empty") else None
-        if current_index != self.video_preview_manager.right_clicked_item:
-            self.video_preview_manager.tooltip.hide_preview()
-            self.video_preview_manager.right_clicked_item = None
+        if iid == self._hovered_iid:
+            return
+        if self._hovered_iid and self.video_tree.exists(self._hovered_iid):
+            self._restore_row_bg(self._hovered_iid)
+        self._hovered_iid = iid
+        if iid and iid != "empty" and iid not in self.video_tree.selection():
+            try:
+                self.video_tree.tag_configure("hover_row", background=self.theme_provider.hover_color)
+                current_tags = [tg for tg in self.video_tree.item(iid, "tags") if tg != "hover_row"]
+                self.video_tree.item(iid, tags=(*current_tags, "hover_row"))
+            except (ValueError, tk.TclError):
+                pass
+
+    def _on_tree_leave(self, event):
+        if self._hovered_iid and self.video_tree.exists(self._hovered_iid):
+            self._restore_row_bg(self._hovered_iid)
+        self._hovered_iid = None
+
+    def _restore_row_bg(self, iid):
+        try:
+            current_tags = [tg for tg in self.video_tree.item(iid, "tags") if tg != "hover_row"]
+            self.video_tree.item(iid, tags=current_tags)
+        except Exception:
+            pass
 
     def _on_mouse_leave(self, event):
         if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
             self.video_preview_manager.tooltip.hide_preview()
+
+    def _on_combined_leave(self, event):
+        self._on_tree_leave(event)
+        self._on_mouse_leave(event)
 
     def _show_video_context_menu(self, event):
         selection = self._get_tv_selected_indices()
