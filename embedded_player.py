@@ -1437,6 +1437,9 @@ class EmbeddedPlayer:
         elif self.loop_mode == "loop_off":
             if self.index < len(self.videos) - 1:
                 self._play_index(self.index + 1)
+            else:
+                time.sleep(0.25)
+                self._close()
         else:
             self._play_index((self.index + 1) % len(self.videos))
 

@@ -925,7 +925,7 @@ class DualPlayerWindow:
 
         self._borderless = False
         self.window.bind("<F>", lambda e: self._toggle_borderless())
-        self.window.bind("<Escape>", lambda e: self._exit_borderless())
+        self.window.bind("<Escape>", lambda e: self._escape())
 
         self._player_area = tk.Frame(self.window, bg=bg)
         self._player_area.pack(fill=tk.BOTH, expand=True)
@@ -944,6 +944,13 @@ class DualPlayerWindow:
         if self._borderless:
             self._borderless = False
             self._apply_borderless()
+
+    def _escape(self):
+        if self._borderless:
+            self._borderless = False
+            self._apply_borderless()
+        else:
+            self._on_close()
 
     def _apply_borderless(self):
         if not self.window or not self.window.winfo_exists():
