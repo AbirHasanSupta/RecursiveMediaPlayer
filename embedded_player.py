@@ -150,6 +150,7 @@ class EmbeddedPlayer:
         self.on_add_to_playlist = None
         self.on_add_to_queue = None
         self.on_add_to_favourites = None
+        self.toast = None
         self.resume_manager = resume_manager
         self.annotation_service = annotation_service
         self._annotation_listener = None
@@ -231,8 +232,12 @@ class EmbeddedPlayer:
         self._gaming_mode = enabled
         if enabled:
             self._start_global_listener()
+            if self.toast and _PYNPUT_AVAILABLE:
+                self.toast.info("Gaming Mode", "Gaming Mode: Global hotkeys enabled")
         else:
             self._stop_global_listener()
+            if self.toast:
+                self.toast.info("Gaming Mode", "Gaming Mode Disabled")
 
     def _mouse_over_player(self) -> bool:
         try:
@@ -323,6 +328,8 @@ class EmbeddedPlayer:
         if not _PYNPUT_AVAILABLE:
             if self.logger:
                 self.logger("Gaming Mode: pynput not installed — run: pip install pynput")
+            if self.toast:
+                self.toast.error("Gaming Mode unavailable", "Gaming Mode Unavailable")
             return
 
         with self._global_listener_lock:
@@ -1171,6 +1178,8 @@ class EmbeddedPlayer:
             self.annotation_service.remove_bookmark(path, bm["ms"])
         if self.logger:
             self.logger("Bookmarks cleared")
+        if self.toast:
+            self.toast.info("Bookmarks", "All bookmarks cleared")
 
     def _show_tag_menu(self):
         if not self.annotation_service or not self.videos:
@@ -1330,9 +1339,13 @@ class EmbeddedPlayer:
                 self._win.clipboard_append(path)
             if self.logger:
                 self.logger(f"Copied: {path}")
+            if self.toast:
+                self.toast.success("Copied","Copied" + os.path.basename(path))
         except Exception as e:
             if self.logger:
                 self.logger(f"Copy error: {e}")
+            if self.toast:
+                self.toast.error("Copy failed", "Copy failed: "+ str(e))
 
     # ═══════════════════════════════════════════════════════════════════
     # CORE EMBED
@@ -1956,6 +1969,8 @@ class EmbeddedPlayer:
             if not shutil.which("ffmpeg"):
                 if self.logger:
                     self.logger("ffmpeg not found — install ffmpeg to save clips")
+                if self.toast:
+                    self.toast.error("ffmpeg missing", "Install ffmpeg to save clips")
                 return
             vid     = self.videos[self.index]
             ext     = os.path.splitext(vid)[1] or ".mp4"
@@ -1985,9 +2000,14 @@ class EmbeddedPlayer:
                     )
                     if self.logger:
                         self._win.after(0, lambda: self.logger(f"Clip saved: {out}"))
+                    if self.toast:
+                        self._win.after(0, lambda o=out: self.toast.success("Clip saved","Clip saved:" + o.name))
+
                 except Exception as ex:
                     if self.logger:
                         self._win.after(0, lambda: self.logger(f"Clip error: {ex}"))
+                    if self.toast:
+                        self._win.after(0, lambda ex=ex: self.toast.error("Clip failed", "Clip failed" + str(ex)))
 
             threading.Thread(target=_run, daemon=True).start()
         except Exception as e:
@@ -2117,6 +2137,8 @@ class EmbeddedPlayer:
         if b <= self._ab_point_a:
             if self.logger:
                 self.logger("A-B: point B must be after A")
+            if self.toast:
+                self.toast.error("A-B loop", "Point B must be after A")
             return
         self._ab_point_b    = b
         self._ab_loop_active = True
@@ -2196,7 +2218,7 @@ class EmbeddedPlayer:
             menu.grab_release()
 
     def _start_sleep_timer(self, seconds: int):
-        self._cancel_sleep_timer()
+        self._cancel_sleep_timer(from_start=True)
         if seconds == -1:
             self._sleep_remaining = -1
             try:
@@ -2205,11 +2227,15 @@ class EmbeddedPlayer:
                 pass
             if self.logger:
                 self.logger("Sleep timer: will pause after current video")
+            if self.toast:
+                self.toast.info("Sleep timer", "Sleep timer: will pause after current video")
         else:
             self._sleep_remaining = seconds
             self._sleep_tick()
             if self.logger:
                 self.logger(f"Sleep timer: {seconds // 60} min")
+            if self.toast:
+                self.toast.info("Sleep timer", f"Sleep Timer Closes in {seconds // 60} min")
 
     def _sleep_tick(self):
         if not self._running or self._sleep_remaining <= 0:
@@ -2239,7 +2265,7 @@ class EmbeddedPlayer:
             self.logger("Sleep timer: closing player")
         self._close()
 
-    def _cancel_sleep_timer(self):
+    def _cancel_sleep_timer(self, from_start=None):
         if self._sleep_timer_job:
             try:
                 self._win.after_cancel(self._sleep_timer_job)
@@ -2251,8 +2277,10 @@ class EmbeddedPlayer:
             self._lbl_sleep.config(text="")
         except Exception:
             pass
-        if self.logger:
+        if self.logger and not from_start:
             self.logger("Sleep timer cancelled")
+        if self.toast and not from_start:
+            self.toast.info("Sleep timer", "Sleep timer Cancelled")
 
     def _show_context_menu_from_btn(self):
         try:

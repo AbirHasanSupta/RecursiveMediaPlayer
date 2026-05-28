@@ -3394,6 +3394,7 @@ def select_multiple_folders_and_play():
             player.on_add_to_favourites  = lambda vids: self.favorites_manager.add_to_favorites(
                 vids, self.get_current_selected_directory() or os.path.dirname(vids[0]))
             player.set_hotkeys(self.settings_manager.get_settings().hotkeys)
+            player.toast = self.toast
             if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
                 player.set_seek_preview_manager(self.video_preview_manager)
             app_settings = self.settings_manager.get_settings()
