@@ -1750,15 +1750,22 @@ class SeekPreviewCache:
             frames = self._cache.get(norm)
             if not frames:
                 return None
-            best = idx if idx in frames else min(frames.keys(), key=lambda k: abs(k - idx), default=None)
+            max_generated = max(frames.keys())
+            if idx > max_generated:
+                return None
+            best = idx if idx in frames else min(
+                (k for k in frames if k <= max_generated),
+                key=lambda k: abs(k - idx),
+                default=None
+            )
             if best is None:
                 return None
             photos = self._photo_cache.setdefault(norm, {})
             if best in photos:
                 return photos[best]
-            pil_img = frames[best]  # grab PIL image under lock, then release
+            pil_img = frames[best]
 
-        photo = ImageTk.PhotoImage(pil_img)  # convert outside lock
+        photo = ImageTk.PhotoImage(pil_img)
         with self._lock:
             self._photo_cache.setdefault(norm, {})[best] = photo
         return photo
@@ -1771,7 +1778,10 @@ class SeekPreviewCache:
             fps = cap.get(cv2.CAP_PROP_FPS) or 25
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             duration_s = total_frames / fps
-            frames: Dict[int, Image.Image] = {}  # PIL Images only — no PhotoImage here
+
+            with self._lock:
+                if norm not in self._cache:
+                    self._cache[norm] = {}
 
             idx = 0
             t = 0.0
@@ -1783,13 +1793,12 @@ class SeekPreviewCache:
                     small = cv2.resize(frame, (self.THUMB_W, self.THUMB_H),
                                        interpolation=cv2.INTER_AREA)
                     rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
-                    frames[idx] = Image.fromarray(rgb)  # PIL Image — thread-safe
+                    with self._lock:
+                        self._cache[norm][idx] = Image.fromarray(rgb)
                 idx += 1
                 t += self.INTERVAL_S
 
             cap.release()
-            with self._lock:
-                self._cache[norm] = frames
         except Exception as e:
             print(f"[SeekPreview] {e}")
         finally:

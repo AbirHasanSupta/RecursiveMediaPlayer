@@ -346,6 +346,9 @@ class DualPlayerSlot:
             if photo:
                 self._seek_preview_lbl.configure(image=photo)
                 self._seek_preview_lbl.image = photo
+            else:
+                self._seek_preview_lbl.configure(image='')
+                self._seek_preview_lbl.image = None
             self._seek_preview_time.configure(text=time_str)
             sx = self.seek_canvas.winfo_rootx() + x - 80
             sy = self.seek_canvas.winfo_rooty() - 115

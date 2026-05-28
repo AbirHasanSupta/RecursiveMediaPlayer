@@ -1530,6 +1530,9 @@ class EmbeddedPlayer:
             if photo:
                 self._seek_preview_lbl.configure(image=photo)
                 self._seek_preview_lbl.image = photo
+            else:
+                self._seek_preview_lbl.configure(image='')
+                self._seek_preview_lbl.image = None
             self._seek_preview_time.configure(text=time_str)
 
             sx = self._seek.winfo_rootx() + x - 80
