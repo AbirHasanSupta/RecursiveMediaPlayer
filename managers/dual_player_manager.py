@@ -72,24 +72,26 @@ class DualPlayerSlot:
         self._build_ui()
 
     def _build_ui(self):
-        _CTRL_BG = "#111111"
-        _CTRL_BG2 = "#161616"
-        _ACCENT = "#e50914"
-        _TXT = "#f0f0f0"
-        _TXT_DIM = "#666666"
-        _TXT_MED = "#aaaaaa"
-        _BTN = "#1e1e1e"
-        _BTN_HVR = "#2c2c2c"
-        _BTN_ACT = "#3a3a3a"
+        _CTRL_BG  = "#0F1217"
+        _CTRL_BG2 = "#1A1E26"
+        _ACCENT   = "#7B9CFF"
+        _TXT      = "#E2E8F0"
+        _TXT_DIM  = "#4A5568"
+        _TXT_MED  = "#8A99B5"
+        _BTN      = "#1A1E26"
+        _BTN_HVR  = "#252C38"
+        _BTN_ACT  = "#2F3849"
+        _BORDER   = "#2A303C"
 
-        F_SM = Font(family="Segoe UI", size=8)
-        F_MD = Font(family="Segoe UI", size=10)
-        F_ICO = Font(family="Segoe UI", size=12)
+        F_SM  = Font(family="Segoe UI", size=8)
+        F_MD  = Font(family="Segoe UI", size=10)
+        F_ICO = Font(family="Segoe UI", size=13)
         F_ACC = Font(family="Segoe UI", size=8, weight="bold")
+        F_XS  = Font(family="Segoe UI", size=7)
 
         self.vid_container = tk.Frame(self.parent_frame, bg="black",
                                       highlightthickness=2,
-                                      highlightbackground="#333333")
+                                      highlightbackground="#2A303C")
         self.vid_container.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
         self.video_canvas = tk.Canvas(self.vid_container, bg="black",
@@ -112,20 +114,29 @@ class DualPlayerSlot:
         self._overlay_visible = False
         self._hide_job = None
 
-        def _btn(parent, text, cmd, font=None, fg=_TXT, padx=8, pady=4):
-            b = tk.Button(parent, text=text, command=cmd,
-                          font=font or F_MD,
-                          bg=_BTN, fg=fg, bd=0, padx=padx, pady=pady,
-                          relief=tk.FLAT, cursor="hand2",
-                          activebackground=_BTN_ACT, activeforeground=_TXT)
-            b.bind("<Enter>", lambda e, w=b: w.configure(bg=_BTN_HVR))
-            b.bind("<Leave>", lambda e, w=b: w.configure(bg=_BTN))
+        def _btn(parent, text, cmd, font=None, fg=_TXT, padx=8, pady=4, accent=False):
+            if accent:
+                b = tk.Button(parent, text=text, command=cmd,
+                              font=font or F_MD,
+                              bg=_ACCENT, fg="#0F1217", bd=0, padx=padx, pady=pady,
+                              relief=tk.FLAT, cursor="hand2",
+                              activebackground="#9BB0FF", activeforeground="#0F1217")
+                b.bind("<Enter>", lambda e, w=b: w.configure(bg="#9BB0FF"))
+                b.bind("<Leave>", lambda e, w=b: w.configure(bg=_ACCENT))
+            else:
+                b = tk.Button(parent, text=text, command=cmd,
+                              font=font or F_MD,
+                              bg=_BTN, fg=fg, bd=0, padx=padx, pady=pady,
+                              relief=tk.FLAT, cursor="hand2",
+                              activebackground=_BTN_ACT, activeforeground=_TXT)
+                b.bind("<Enter>", lambda e, w=b: w.configure(bg=_BTN_HVR))
+                b.bind("<Leave>", lambda e, w=b: w.configure(bg=_BTN))
             b.bind("<Enter>", lambda e: self._on_hover_enter(), add="+")
             b.bind("<Leave>", lambda e: self._on_hover_leave(), add="+")
             return b
 
         def _sep(parent):
-            tk.Frame(parent, width=1, bg="#333333").pack(
+            tk.Frame(parent, width=1, bg=_BORDER).pack(
                 side=tk.LEFT, fill=tk.Y, pady=3, padx=(6, 6))
 
         # ── INFO ROW ────────────────────────────────────────────────────────
@@ -171,7 +182,7 @@ class DualPlayerSlot:
         zone_a.pack(side=tk.LEFT, padx=(8, 0), pady=2)
 
         _btn(zone_a, "⏮", self._prev, font=F_ICO, padx=7).pack(side=tk.LEFT, padx=1)
-        self.play_btn = _btn(zone_a, "▶", self._toggle_pause, font=F_ICO, fg=_ACCENT, padx=7)
+        self.play_btn = _btn(zone_a, "▶", self._toggle_pause, font=F_ICO, padx=10, accent=True)
         self.play_btn.pack(side=tk.LEFT, padx=1)
         _btn(zone_a, "⏭", self._next, font=F_ICO, padx=7).pack(side=tk.LEFT, padx=1)
         _btn(zone_a, "■", self._stop_playback, font=F_ICO, padx=7).pack(side=tk.LEFT, padx=1)
@@ -182,18 +193,8 @@ class DualPlayerSlot:
         zone_b = tk.Frame(btn_row, bg=_CTRL_BG2)
         zone_b.pack(side=tk.LEFT, pady=2)
 
-        self.loop_btn = tk.Button(
-            zone_b, text="↺",
-            font=F_ICO, bg=_BTN, fg=_ACCENT, bd=0, padx=8, pady=4,
-            cursor="hand2", relief=tk.FLAT,
-            activebackground=_BTN_ACT, activeforeground=_ACCENT,
-            command=self._cycle_loop_mode)
+        self.loop_btn = _btn(zone_b, "↺  Loop", self._cycle_loop_mode, font=F_ACC, fg=_ACCENT, padx=8)
         self.loop_btn.pack(side=tk.LEFT)
-        self.loop_btn.bind("<Enter>", lambda e, w=self.loop_btn: w.configure(bg=_BTN_HVR))
-        self.loop_btn.bind("<Leave>", lambda e, w=self.loop_btn: w.configure(bg=_BTN))
-        self.loop_btn.bind("<Enter>", lambda e: self._on_hover_enter(), add="+")
-        self.loop_btn.bind("<Leave>", lambda e: self._on_hover_leave(), add="+")
-
         _sep(btn_row)
 
         # ZONE C: Center (speed · rotate · swap)
@@ -204,7 +205,7 @@ class DualPlayerSlot:
             zone_c, text="1.00×", cursor="hand2",
             font=F_ACC, bg=_BTN, fg=_ACCENT,
             padx=6, pady=2,
-            highlightbackground="#333333", highlightthickness=1)
+            highlightbackground=_BORDER, highlightthickness=1)
         self.spd_label.pack(side=tk.LEFT, padx=(0, 4))
         self.spd_label.bind("<MouseWheel>", self._on_spd_scroll)
         self.spd_label.bind("<Button-1>", lambda e: self._increase_speed())
@@ -218,14 +219,16 @@ class DualPlayerSlot:
 
         self.swap_btn = tk.Button(
             zone_c, text="⇄ Swap",
-            font=Font(family="Segoe UI", size=9, weight="bold"),
-            bg="#1a2a3a", fg="#5bc8f5", bd=0, padx=7, pady=3,
+            font=F_ACC,
+            bg="#0D1F35", fg="#60C8FF", bd=0, padx=7, pady=3,
             cursor="hand2", relief=tk.FLAT,
-            activebackground="#2a4a6a", activeforeground="#8de0ff",
+            activebackground="#1A3A5C", activeforeground="#8DE0FF",
             command=self._show_swap_menu)
         self.swap_btn.pack(side=tk.LEFT, padx=(6, 2))
-        self.swap_btn.bind("<Enter>", lambda e: self._on_hover_enter())
-        self.swap_btn.bind("<Leave>", lambda e: self._on_hover_leave())
+        self.swap_btn.bind("<Enter>", lambda e, w=self.swap_btn: w.configure(bg="#1A3A5C"))
+        self.swap_btn.bind("<Leave>", lambda e, w=self.swap_btn: w.configure(bg="#0D1F35"))
+        self.swap_btn.bind("<Enter>", lambda e: self._on_hover_enter(), add="+")
+        self.swap_btn.bind("<Leave>", lambda e: self._on_hover_leave(), add="+")
 
         _sep(btn_row)
 
@@ -284,13 +287,13 @@ class DualPlayerSlot:
         other_slots = {sid: s for sid, s in all_slots.items() if sid != self.slot_id}
 
         if not other_slots:
-            self.swap_btn.config(fg="#ff9966")
-            self.parent_frame.after(600, lambda: self.swap_btn.config(fg="#5bc8f5"))
+            self.swap_btn.config(fg="#FF8A8A")
+            self.parent_frame.after(600, lambda: self.swap_btn.config(fg="#60C8FF"))
             return
 
         menu = tk.Menu(self.parent_frame, tearoff=0,
-                       bg="#1c1c1c", fg="white",
-                       activebackground="#2a4a6a", activeforeground="#8de0ff",
+                       bg="#1A1E26", fg="#E2E8F0",
+                       activebackground="#0D1F35", activeforeground="#60C8FF",
                        font=Font(family="Segoe UI", size=9))
 
         for sid, slot in sorted(other_slots.items()):
@@ -333,11 +336,11 @@ class DualPlayerSlot:
                 self._seek_preview_win = tk.Toplevel(self.parent_frame)
                 self._seek_preview_win.overrideredirect(True)
                 self._seek_preview_win.attributes('-topmost', True)
-                self._seek_preview_win.configure(bg="#111111")
-                self._seek_preview_lbl = tk.Label(self._seek_preview_win, bg="#111111", bd=0)
+                self._seek_preview_win.configure(bg="#0F1217")
+                self._seek_preview_lbl = tk.Label(self._seek_preview_win, bg="#0F1217", bd=0)
                 self._seek_preview_lbl.pack()
                 self._seek_preview_time = tk.Label(
-                    self._seek_preview_win, bg="#111111", fg="#ffffff",
+                    self._seek_preview_win, bg="#0F1217", fg="#E2E8F0",
                     font=("Segoe UI", 8))
                 self._seek_preview_time.pack(pady=(0, 2))
             if photo:
@@ -800,13 +803,13 @@ class DualPlayerSlot:
             if w <= 1:
                 return
             cy = h // 2
-            c.create_rectangle(0, cy-2, w, cy+2, fill="#2a2a2a", outline="")
+            c.create_rectangle(0, cy-2, w, cy+2, fill="#252C38", outline="")
             cur, dur = 0, 1
             if self.player:
                 cur = max(0, self.player.get_time()   or 0)
                 dur = max(1, self.player.get_length() or 1)
             px = int((cur / dur) * w)
-            c.create_rectangle(0, cy-2, px, cy+2, fill="#e50914", outline="")
+            c.create_rectangle(0, cy-2, px, cy+2, fill="#7B9CFF", outline="")
             r = 7 if getattr(self, '_is_hovering_seek', False) else 5
             c.create_oval(px-r, cy-r, px+r, cy+r, fill="white", outline="")
             try:
@@ -872,7 +875,7 @@ class DualPlayerSlot:
 
     def _cycle_loop_mode(self):
         modes  = ["loop_on", "loop_off", "shuffle"]
-        labels = {"loop_on": "↺", "loop_off": "→", "shuffle": "⇄"}
+        labels = {"loop_on": "↺  Loop", "loop_off": "→  Once", "shuffle": "⇄  Shuffle"}
         self.loop_mode = modes[(modes.index(self.loop_mode) + 1) % len(modes)]
         self.loop_btn.config(text=labels[self.loop_mode])
 
