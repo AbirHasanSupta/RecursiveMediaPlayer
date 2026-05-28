@@ -349,6 +349,8 @@ def select_multiple_folders_and_play():
                 watch_history_callback=self.watch_history_manager.track_video_playback,
                 player_count=3
             )
+            if hasattr(self, 'video_preview_manager'):
+                self.dual_player_manager.set_seek_preview_manager(self.video_preview_manager)
 
             self.filter_sort_manager = AdvancedFilterSortManager(
                 watch_history_manager=self.watch_history_manager

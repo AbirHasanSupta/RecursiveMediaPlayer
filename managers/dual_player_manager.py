@@ -43,6 +43,10 @@ class DualPlayerSlot:
         self.on_empty_callback = on_empty_callback
         # Callback: () -> dict[slot_id -> DualPlayerSlot]
         self.get_other_slots_callback = get_other_slots_callback
+        self._seek_preview_mgr = None
+        self._seek_preview_win = None
+        self._seek_preview_lbl = None
+        self._seek_preview_time = None
 
         # VLC state
         self.instance = None
@@ -68,17 +72,33 @@ class DualPlayerSlot:
         self._build_ui()
 
     def _build_ui(self):
-        bg     = self.theme.bg_color
-        accent = self.theme.accent_color
+        _CTRL_BG = "#111111"
+        _CTRL_BG2 = "#161616"
+        _ACCENT = "#e50914"
+        _TXT = "#f0f0f0"
+        _TXT_DIM = "#666666"
+        _TXT_MED = "#aaaaaa"
+        _BTN = "#1e1e1e"
+        _BTN_HVR = "#2c2c2c"
+        _BTN_ACT = "#3a3a3a"
+
+        F_SM = Font(family="Segoe UI", size=8)
+        F_MD = Font(family="Segoe UI", size=10)
+        F_ICO = Font(family="Segoe UI", size=12)
+        F_ACC = Font(family="Segoe UI", size=8, weight="bold")
 
         self.vid_container = tk.Frame(self.parent_frame, bg="black",
                                       highlightthickness=2,
-                                      highlightbackground=accent)
+                                      highlightbackground="#333333")
         self.vid_container.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
         self.video_canvas = tk.Canvas(self.vid_container, bg="black",
                                       highlightthickness=0)
         self.video_canvas.pack(fill=tk.BOTH, expand=True)
+        self.video_canvas.bind("<Button-1>", lambda e: self._toggle_pause())
+        self.video_canvas.bind("<Double-Button-1>",
+                               lambda e: self._toggle_pause())  # placeholder; fullscreen is window-level
+        self.video_canvas.bind("<MouseWheel>", self._on_vol_scroll)
 
         self._no_video_label = tk.Label(
             self.video_canvas,
@@ -87,133 +107,166 @@ class DualPlayerSlot:
             bg="black", fg="#555555")
         self._no_video_label.place(relx=0.5, rely=0.5, anchor="center")
 
-        # Floating overlay — child of vid_container, NOT video_canvas
-        self._overlay = tk.Frame(self.vid_container, bg="#1c1c1c",
+        self._overlay = tk.Frame(self.vid_container, bg=_CTRL_BG,
                                  highlightthickness=0)
         self._overlay_visible = False
         self._hide_job = None
 
-        PANEL_BG    = "#1c1c1c"
-        ACCENT      = self.theme.accent_color
-        TEXT_DIM    = "#888888"
-        TEXT_BRIGHT = "#dddddd"
-        BTN_BG      = "#2e2e2e"
-        BTN_HOVER   = "#555555"
-        btn_kw = dict(
-            bg=BTN_BG, fg="white", bd=0, padx=8, pady=3,
-            cursor="hand2", relief=tk.FLAT,
-            activebackground=BTN_HOVER, activeforeground="white",
-            font=Font(family="Segoe UI", size=11))
+        def _btn(parent, text, cmd, font=None, fg=_TXT, padx=8, pady=4):
+            b = tk.Button(parent, text=text, command=cmd,
+                          font=font or F_MD,
+                          bg=_BTN, fg=fg, bd=0, padx=padx, pady=pady,
+                          relief=tk.FLAT, cursor="hand2",
+                          activebackground=_BTN_ACT, activeforeground=_TXT)
+            b.bind("<Enter>", lambda e, w=b: w.configure(bg=_BTN_HVR))
+            b.bind("<Leave>", lambda e, w=b: w.configure(bg=_BTN))
+            b.bind("<Enter>", lambda e: self._on_hover_enter(), add="+")
+            b.bind("<Leave>", lambda e: self._on_hover_leave(), add="+")
+            return b
 
-        info_row = tk.Frame(self._overlay, bg=PANEL_BG)
-        info_row.pack(fill=tk.X, padx=12, pady=(8, 2))
+        def _sep(parent):
+            tk.Frame(parent, width=1, bg="#333333").pack(
+                side=tk.LEFT, fill=tk.Y, pady=3, padx=(6, 6))
+
+        # ── INFO ROW ────────────────────────────────────────────────────────
+        info = tk.Frame(self._overlay, bg=_CTRL_BG)
+        info.pack(fill=tk.X, padx=12, pady=(4, 2))
 
         self.video_name_label = tk.Label(
-            info_row, text="", anchor="w",
-            font=Font(family="Segoe UI", size=9),
-            bg=PANEL_BG, fg=TEXT_BRIGHT)
+            info, text="", anchor="w",
+            font=F_SM, bg=_CTRL_BG, fg=_TXT)
         self.video_name_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+        self.time_label = tk.Label(
+            info, text="0:00 / 0:00",
+            font=F_SM, bg=_CTRL_BG, fg=_TXT_MED)
+        self.time_label.pack(side=tk.RIGHT, padx=(4, 0))
+
         self.status_label = tk.Label(
-            info_row, text=f"Player {self.slot_id} · No video",
-            font=Font(family="Segoe UI", size=8),
-            bg=PANEL_BG, fg=TEXT_DIM)
-        self.status_label.pack(side=tk.RIGHT, padx=(6, 0))
+            info, text=f"Player {self.slot_id} · No video",
+            font=F_SM, bg=_CTRL_BG, fg=_TXT_DIM)
+        self.status_label.pack(side=tk.RIGHT, padx=(0, 4))
 
-        self.loop_btn = tk.Button(
-            info_row, text="↺ Loop",
-            font=Font(family="Segoe UI", size=7, weight="bold"),
-            bg=BTN_BG, fg=ACCENT, bd=0, padx=6, pady=2,
-            cursor="hand2", relief=tk.FLAT,
-            activebackground=BTN_HOVER, activeforeground=ACCENT,
-            command=self._cycle_loop_mode)
-        self.loop_btn.pack(side=tk.RIGHT, padx=(8, 0))
-
-        seek_frame = tk.Frame(self._overlay, bg=PANEL_BG)
-        seek_frame.pack(fill=tk.X, padx=12, pady=(2, 4))
+        # ── SEEK ROW ────────────────────────────────────────────────────────
+        seek_row = tk.Frame(self._overlay, bg=_CTRL_BG)
+        seek_row.pack(fill=tk.X, padx=12, pady=(2, 0))
 
         self.seek_canvas = tk.Canvas(
-            seek_frame, height=16, bg=PANEL_BG,
+            seek_row, height=18, bg=_CTRL_BG,
             highlightthickness=0, cursor="hand2")
         self.seek_canvas.pack(fill=tk.X, expand=True)
-        self.seek_canvas.bind("<Button-1>",  self._on_seek_click)
+        self.seek_canvas.bind("<Button-1>", self._on_seek_click)
         self.seek_canvas.bind("<B1-Motion>", self._on_seek_drag)
         self.seek_canvas.bind("<Configure>", lambda e: self._draw_seek_bar())
+        self.seek_canvas.bind("<Enter>", lambda e: self._on_hover_enter())
+        self.seek_canvas.bind("<Leave>", lambda e: (self._hide_seek_preview(), self._on_hover_leave()))
+        self.seek_canvas.bind("<Motion>", lambda e: self._show_seek_preview(e.x))
 
-        ctrl = tk.Frame(self._overlay, bg=PANEL_BG)
-        ctrl.pack(fill=tk.X, padx=12, pady=(0, 8))
+        # ── BUTTON ROW ──────────────────────────────────────────────────────
+        btn_row = tk.Frame(self._overlay, bg=_CTRL_BG2)
+        btn_row.pack(fill=tk.X, pady=(2, 2))
 
-        tk.Button(ctrl, text="⏮", command=self._prev,          **btn_kw).pack(side=tk.LEFT, padx=2)
-        self.play_btn = tk.Button(ctrl, text="▶", command=self._toggle_pause, **btn_kw)
-        self.play_btn.pack(side=tk.LEFT, padx=2)
-        tk.Button(ctrl, text="⏭", command=self._next,          **btn_kw).pack(side=tk.LEFT, padx=2)
-        tk.Button(ctrl, text="■", command=self._stop_playback, **btn_kw).pack(side=tk.LEFT, padx=2)
+        # ZONE A: Transport
+        zone_a = tk.Frame(btn_row, bg=_CTRL_BG2)
+        zone_a.pack(side=tk.LEFT, padx=(8, 0), pady=2)
 
-        self.rotate_btn = tk.Button(ctrl, text="⟳", command=self._rotate, **btn_kw)
-        self.rotate_btn.pack(side=tk.LEFT, padx=2)
+        _btn(zone_a, "⏮", self._prev, font=F_ICO, padx=7).pack(side=tk.LEFT, padx=1)
+        self.play_btn = _btn(zone_a, "▶", self._toggle_pause, font=F_ICO, fg=_ACCENT, padx=7)
+        self.play_btn.pack(side=tk.LEFT, padx=1)
+        _btn(zone_a, "⏭", self._next, font=F_ICO, padx=7).pack(side=tk.LEFT, padx=1)
+        _btn(zone_a, "■", self._stop_playback, font=F_ICO, padx=7).pack(side=tk.LEFT, padx=1)
 
-        tk.Frame(ctrl, width=16, bg=PANEL_BG).pack(side=tk.LEFT)
-        self.mute_btn = tk.Label(
-            ctrl, text="🔊", cursor="hand2",
-            font=Font(family="Segoe UI", size=11),
-            bg=PANEL_BG, fg=TEXT_BRIGHT)
-        self.mute_btn.pack(side=tk.LEFT, padx=(0, 2))
-        self.mute_btn.bind("<Button-1>",   lambda e: self._toggle_mute())
-        self.mute_btn.bind("<MouseWheel>", self._on_vol_scroll)
+        _sep(btn_row)
 
-        self.vol_label = tk.Label(
-            ctrl, text=f"{self.volume}%", width=4,
-            font=Font(family="Segoe UI", size=8),
-            bg=PANEL_BG, fg=TEXT_DIM)
-        self.vol_label.pack(side=tk.LEFT)
-        self.vol_label.bind("<MouseWheel>", self._on_vol_scroll)
+        # ZONE B: Loop
+        zone_b = tk.Frame(btn_row, bg=_CTRL_BG2)
+        zone_b.pack(side=tk.LEFT, pady=2)
 
-        # ── Swap button ────────────────────────────────────────────────────
+        self.loop_btn = tk.Button(
+            zone_b, text="↺",
+            font=F_ICO, bg=_BTN, fg=_ACCENT, bd=0, padx=8, pady=4,
+            cursor="hand2", relief=tk.FLAT,
+            activebackground=_BTN_ACT, activeforeground=_ACCENT,
+            command=self._cycle_loop_mode)
+        self.loop_btn.pack(side=tk.LEFT)
+        self.loop_btn.bind("<Enter>", lambda e, w=self.loop_btn: w.configure(bg=_BTN_HVR))
+        self.loop_btn.bind("<Leave>", lambda e, w=self.loop_btn: w.configure(bg=_BTN))
+        self.loop_btn.bind("<Enter>", lambda e: self._on_hover_enter(), add="+")
+        self.loop_btn.bind("<Leave>", lambda e: self._on_hover_leave(), add="+")
+
+        _sep(btn_row)
+
+        # ZONE C: Center (speed · rotate · swap)
+        zone_c = tk.Frame(btn_row, bg=_CTRL_BG2)
+        zone_c.pack(side=tk.LEFT, expand=True, pady=2)
+
+        self.spd_label = tk.Label(
+            zone_c, text="1.00×", cursor="hand2",
+            font=F_ACC, bg=_BTN, fg=_ACCENT,
+            padx=6, pady=2,
+            highlightbackground="#333333", highlightthickness=1)
+        self.spd_label.pack(side=tk.LEFT, padx=(0, 4))
+        self.spd_label.bind("<MouseWheel>", self._on_spd_scroll)
+        self.spd_label.bind("<Button-1>", lambda e: self._increase_speed())
+        self.spd_label.bind("<Button-3>", lambda e: self._decrease_speed())
+        self.spd_label.bind("<Double-Button-1>", lambda e: self._reset_speed())
+        self.spd_label.bind("<Enter>", lambda e: self._on_hover_enter())
+        self.spd_label.bind("<Leave>", lambda e: self._on_hover_leave())
+
+        self.rotate_btn = _btn(zone_c, "⟳", self._rotate, font=F_ICO, padx=6)
+        self.rotate_btn.pack(side=tk.LEFT, padx=(0, 2))
+
         self.swap_btn = tk.Button(
-            ctrl, text="⇄ Swap",
+            zone_c, text="⇄ Swap",
             font=Font(family="Segoe UI", size=9, weight="bold"),
             bg="#1a2a3a", fg="#5bc8f5", bd=0, padx=7, pady=3,
             cursor="hand2", relief=tk.FLAT,
             activebackground="#2a4a6a", activeforeground="#8de0ff",
             command=self._show_swap_menu)
         self.swap_btn.pack(side=tk.LEFT, padx=(6, 2))
-        # ──────────────────────────────────────────────────────────────────
+        self.swap_btn.bind("<Enter>", lambda e: self._on_hover_enter())
+        self.swap_btn.bind("<Leave>", lambda e: self._on_hover_leave())
 
-        eject_btn = tk.Button(ctrl, text="✕ Close",
-                              font=Font(family="Segoe UI", size=8),
-                              bg="#3a1a1a", fg="#ff6666", bd=0, padx=6, pady=3,
-                              cursor="hand2", relief=tk.FLAT,
-                              activebackground="#551111", activeforeground="#ff9999",
-                              command=self._eject)
-        eject_btn.pack(side=tk.LEFT, padx=(8, 0))
+        _sep(btn_row)
 
-        self.spd_label = tk.Label(
-            ctrl, text="1.00×", cursor="hand2",
-            font=Font(family="Segoe UI", size=8, weight="bold"),
-            bg=PANEL_BG, fg=ACCENT)
-        self.spd_label.pack(side=tk.RIGHT, padx=(4, 0))
-        self.spd_label.bind("<MouseWheel>",      self._on_spd_scroll)
-        self.spd_label.bind("<Button-1>",        lambda e: self._increase_speed())
-        self.spd_label.bind("<Button-3>",        lambda e: self._decrease_speed())
-        self.spd_label.bind("<Double-Button-1>", lambda e: self._reset_speed())
+        # ZONE E: Volume · Close
+        zone_e = tk.Frame(btn_row, bg=_CTRL_BG2)
+        zone_e.pack(side=tk.LEFT, padx=(0, 8), pady=2)
 
-        tk.Label(ctrl, text="", font=Font(family="Segoe UI", size=8),
-                 bg=PANEL_BG, fg=TEXT_DIM).pack(side=tk.RIGHT)
+        self.mute_btn = tk.Label(
+            zone_e, text="🔊", cursor="hand2",
+            font=F_ICO, bg=_CTRL_BG2, fg=_TXT)
+        self.mute_btn.pack(side=tk.LEFT, padx=(0, 1))
+        self.mute_btn.bind("<Button-1>", lambda e: self._toggle_mute())
+        self.mute_btn.bind("<MouseWheel>", self._on_vol_scroll)
+        self.mute_btn.bind("<Enter>", lambda e: self._on_hover_enter())
+        self.mute_btn.bind("<Leave>", lambda e: self._on_hover_leave())
 
-        self.time_label = tk.Label(
-            ctrl, text="0:00 / 0:00",
-            font=Font(family="Segoe UI", size=8),
-            bg=PANEL_BG, fg=TEXT_DIM)
-        self.time_label.pack(side=tk.RIGHT, padx=(0, 12))
+        self.vol_label = tk.Label(
+            zone_e, text=f"{self.volume}%", width=4,
+            font=F_SM, bg=_CTRL_BG2, fg=_TXT_MED)
+        self.vol_label.pack(side=tk.LEFT, padx=(0, 4))
+        self.vol_label.bind("<MouseWheel>", self._on_vol_scroll)
+        self.vol_label.bind("<Enter>", lambda e: self._on_hover_enter())
+        self.vol_label.bind("<Leave>", lambda e: self._on_hover_leave())
 
-        # Hover bindings for grace-period cancellation
-        for widget in [self._overlay, info_row, seek_frame, ctrl,
-                       self.seek_canvas, self.video_name_label, self.status_label,
-                       self.loop_btn, self.swap_btn, self.time_label, self.play_btn,
-                       self.mute_btn, self.spd_label, self.vol_label,
-                       self.rotate_btn]:
-            widget.bind("<Enter>", self._on_hover_enter, add="+")
-            widget.bind("<Leave>", self._on_hover_leave, add="+")
+        eject_btn = tk.Button(
+            zone_e, text="✕",
+            font=F_ICO, bg=_BTN, fg="#ff6666", bd=0, padx=8, pady=4,
+            cursor="hand2", relief=tk.FLAT,
+            activebackground=_BTN_ACT, activeforeground="#ff9999",
+            command=self._eject)
+        eject_btn.pack(side=tk.LEFT, padx=(2, 0))
+        eject_btn.bind("<Enter>", lambda e, w=eject_btn: w.configure(bg="#3a1a1a"))
+        eject_btn.bind("<Leave>", lambda e, w=eject_btn: w.configure(bg=_BTN))
+        eject_btn.bind("<Enter>", lambda e: self._on_hover_enter(), add="+")
+        eject_btn.bind("<Leave>", lambda e: self._on_hover_leave(), add="+")
+
+        for w in [self._overlay, info, seek_row, btn_row,
+                  zone_a, zone_b, zone_c, zone_e,
+                  self.video_name_label, self.status_label, self.time_label]:
+            w.bind("<Enter>", lambda e: self._on_hover_enter(), add="+")
+            w.bind("<Leave>", lambda e: self._on_hover_leave(), add="+")
 
         self.vid_container.bind("<Configure>", self._reposition_overlay, add="+")
 
@@ -258,6 +311,55 @@ class DualPlayerSlot:
             menu.tk_popup(x, y)
         finally:
             menu.grab_release()
+
+    def set_seek_preview_manager(self, manager):
+        self._seek_preview_mgr = manager
+        if manager and self.videos:
+            manager.seek_preview.ensure_generated(self.videos[self.index])
+
+    def _show_seek_preview(self, x: int):
+        if not self._seek_preview_mgr or not self.videos:
+            return
+        try:
+            w = self.seek_canvas.winfo_width()
+            dur = self.player.get_length() if self.player else 0
+            if w <= 1 or dur <= 0:
+                return
+            frac = max(0.0, min(1.0, x / w))
+            pos_ms = int(frac * dur)
+            photo = self._seek_preview_mgr.seek_preview.get_frame(self.videos[self.index], pos_ms)
+            time_str = _fmt_time(pos_ms)
+            if self._seek_preview_win is None or not self._seek_preview_win.winfo_exists():
+                self._seek_preview_win = tk.Toplevel(self.parent_frame)
+                self._seek_preview_win.overrideredirect(True)
+                self._seek_preview_win.attributes('-topmost', True)
+                self._seek_preview_win.configure(bg="#111111")
+                self._seek_preview_lbl = tk.Label(self._seek_preview_win, bg="#111111", bd=0)
+                self._seek_preview_lbl.pack()
+                self._seek_preview_time = tk.Label(
+                    self._seek_preview_win, bg="#111111", fg="#ffffff",
+                    font=("Segoe UI", 8))
+                self._seek_preview_time.pack(pady=(0, 2))
+            if photo:
+                self._seek_preview_lbl.configure(image=photo)
+                self._seek_preview_lbl.image = photo
+            self._seek_preview_time.configure(text=time_str)
+            sx = self.seek_canvas.winfo_rootx() + x - 80
+            sy = self.seek_canvas.winfo_rooty() - 115
+            self._seek_preview_win.geometry(f"160x105+{sx}+{sy}")
+            self._seek_preview_win.deiconify()
+        except Exception:
+            pass
+
+    def _hide_seek_preview(self):
+        if self._seek_preview_win:
+            try:
+                self._seek_preview_win.withdraw()
+                if self._seek_preview_lbl:
+                    self._seek_preview_lbl.configure(image='')
+                    self._seek_preview_lbl.image = None
+            except Exception:
+                pass
 
     def _do_swap(self, other: 'DualPlayerSlot'):
         """
@@ -342,7 +444,7 @@ class DualPlayerSlot:
             h = self.vid_container.winfo_height()
             if w < 2 or h < 2:
                 return
-            oh = 120
+            oh = 100
             if self._overlay_visible:
                 self._overlay.place(x=0, y=max(0, h - oh), width=w, height=oh)
                 self._overlay.lift()
@@ -542,6 +644,8 @@ class DualPlayerSlot:
         if not self.player:
             self._create_player()
         self._play_current()
+        if self._seek_preview_mgr and self.videos:
+            self._seek_preview_mgr.seek_preview.ensure_generated(self.videos[self.index])
         try:
             self._no_video_label.place_forget()
         except Exception:
@@ -696,15 +800,14 @@ class DualPlayerSlot:
             if w <= 1:
                 return
             cy = h // 2
-            c.create_rectangle(0, cy-2, w, cy+2, fill="#404040", outline="")
+            c.create_rectangle(0, cy-2, w, cy+2, fill="#2a2a2a", outline="")
             cur, dur = 0, 1
             if self.player:
                 cur = max(0, self.player.get_time()   or 0)
                 dur = max(1, self.player.get_length() or 1)
             px = int((cur / dur) * w)
-            c.create_rectangle(0, cy-2, px, cy+2,
-                                fill=self.theme.accent_color, outline="")
-            r = 6 if getattr(self, '_is_hovering_seek', False) else 4
+            c.create_rectangle(0, cy-2, px, cy+2, fill="#e50914", outline="")
+            r = 7 if getattr(self, '_is_hovering_seek', False) else 5
             c.create_oval(px-r, cy-r, px+r, cy+r, fill="white", outline="")
             try:
                 self.time_label.config(text=f"{_fmt_time(cur)} / {_fmt_time(dur)}")
@@ -769,7 +872,7 @@ class DualPlayerSlot:
 
     def _cycle_loop_mode(self):
         modes  = ["loop_on", "loop_off", "shuffle"]
-        labels = {"loop_on": "↺ Loop", "loop_off": "→ Once", "shuffle": "⇄ Shuffle"}
+        labels = {"loop_on": "↺", "loop_off": "→", "shuffle": "⇄"}
         self.loop_mode = modes[(modes.index(self.loop_mode) + 1) % len(modes)]
         self.loop_btn.config(text=labels[self.loop_mode])
 
@@ -1165,6 +1268,7 @@ class DualPlayerManager:
                  player_count: int = 2):
         self._root   = root
         self._logger = logger
+        self._seek_preview_mgr = None
 
         # Two independent windows keyed by win_id (1, 2)
         self._windows: dict = {
@@ -1202,6 +1306,7 @@ class DualPlayerManager:
         if not w:
             return
         slot = w.get_or_create_slot(slot_id)
+        slot.set_seek_preview_manager(self._seek_preview_mgr)
         self._root.after(200, lambda s=slot, v=videos: s.load_videos(v))
 
     def cleanup(self):
@@ -1220,3 +1325,9 @@ class DualPlayerManager:
     def _get_window(self, win_id: int = 1) -> Optional[DualPlayerWindow]:
         """Internal access to a window object."""
         return self._windows.get(win_id)
+
+    def set_seek_preview_manager(self, manager):
+        self._seek_preview_mgr = manager
+        for win in self._windows.values():
+            for slot in win._slots.values():
+                slot.set_seek_preview_manager(manager)
