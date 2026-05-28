@@ -2767,6 +2767,8 @@ def select_multiple_folders_and_play():
                         # Expand / collapse logic
                         if norm_root == base_norm:
                             can_show_children = True
+                        elif search_query:
+                            can_show_children = True
                         elif expand_all:
                             can_show_children = norm_root not in collapsed
                             if norm_root in collapsed:
@@ -2875,7 +2877,9 @@ def select_multiple_folders_and_play():
                                 # Determine initial open state for folders
                                 open_state = False
                                 if is_dir:
-                                    if expand_all:
+                                    if search_query:
+                                        open_state = self.matches_search(path, search_query)
+                                    elif expand_all:
                                         open_state = norm_p not in collapsed
                                     else:
                                         open_state = norm_p in expanded
