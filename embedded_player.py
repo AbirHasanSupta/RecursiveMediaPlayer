@@ -666,8 +666,7 @@ class EmbeddedPlayer:
         self._lbl_mute.bind("<Enter>", lambda e: self._cancel_hide())
         self._lbl_mute.bind("<Leave>", lambda e: self._schedule_hide())
 
-        # Volume slider canvas
-        self._vol_canvas = tk.Canvas(zone_e, width=60, height=4, bg=_CTRL_BG2,
+        self._vol_canvas = tk.Canvas(zone_e, width=60, height=6, bg=_CTRL_BG2,
                                      highlightthickness=0, cursor="hand2")
         self._vol_canvas.pack(side=tk.LEFT, padx=(0, 4))
         self._vol_canvas.bind("<Button-1>",   self._vol_click)
@@ -2829,7 +2828,7 @@ class EmbeddedPlayer:
         self._cancel_hide()
         self._hide_bar()
 
-    def _schedule_hide(self, delay: int = 2200):
+    def _schedule_hide(self, delay: int = 2000):
         if self._hide_job or not self._win:
             return
         self._hide_job = self._win.after(delay, self._hide_bar)
@@ -2915,11 +2914,8 @@ class EmbeddedPlayer:
             RAIL = 3 if not self._seek_hover else 4
             r    = RAIL
 
-            # Background track (flat left, rounded right)
-            sc.create_rectangle(0, cy - RAIL, w - r, cy + RAIL,
+            sc.create_rectangle(0, cy - RAIL, w, cy + RAIL,
                                  fill=_TRACK, outline="")
-            sc.create_oval(w - r * 2, cy - RAIL, w, cy + RAIL * 2,
-                           fill=_TRACK, outline="")
 
             cur = max(0, self._player.get_time() or 0)
             dur = max(1, self._player.get_length() or 1)
@@ -2927,10 +2923,8 @@ class EmbeddedPlayer:
 
             # Filled progress
             if px > 0:
-                sc.create_rectangle(r, cy - RAIL, px, cy + RAIL,
+                sc.create_rectangle(0, cy - RAIL, px, cy + RAIL,
                                      fill=_ACCENT, outline="")
-                sc.create_oval(0, cy - RAIL, r * 2, cy + RAIL * 2,
-                               fill=_ACCENT, outline="")
 
             # A-B region
             try:
