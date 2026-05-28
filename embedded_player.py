@@ -80,17 +80,19 @@ def _get_pictures_dir() -> Path:
 # Theme
 # ─────────────────────────────────────────────────────────────────────────────
 
-_BG       = "#0a0a0a"
-_CTRL_BG  = "#111111"
-_CTRL_BG2 = "#161616"
-_ACCENT   = "#e50914"
-_TXT      = "#f0f0f0"
-_TXT_DIM  = "#666666"
-_TXT_MED  = "#aaaaaa"
-_BTN      = "#1e1e1e"
-_BTN_HVR  = "#2c2c2c"
-_BTN_ACT  = "#3a3a3a"
-_TRACK    = "#2a2a2a"
+_BG       = "#0F1217"
+_CTRL_BG  = "#0F1217"
+_CTRL_BG2 = "#1A1E26"
+_ACCENT   = "#7B9CFF"
+_ACCENT2  = "#FF8A8A"
+_TXT      = "#E2E8F0"
+_TXT_DIM  = "#4A5568"
+_TXT_MED  = "#8A99B5"
+_BTN      = "#1A1E26"
+_BTN_HVR  = "#252C38"
+_BTN_ACT  = "#2F3849"
+_TRACK    = "#252C38"
+_BORDER   = "#2A303C"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -104,7 +106,7 @@ class EmbeddedPlayer:
     never opens its own window.
     """
 
-    CTRL_H       = 100           # px — height of the slide-up control bar
+    CTRL_H       = 96           # px — height of the slide-up control bar
     INACTIVITY_S = 2.0           # seconds before auto-hiding the bar
     SEEK_PX      = 200           # ms per arrow-key seek (matches vlc_player_controller)
     VOL_STEP     = 5             # % per scroll / key press
@@ -438,93 +440,113 @@ class EmbeddedPlayer:
         self._schedule_refresh()
         self._win.after(100, lambda: self._refresh_display())
 
+
+
     def _build_bar(self):
         bar = self._bar
+        bar.configure(bg=_CTRL_BG)
 
-        F_SM  = tkfont.Font(family="Segoe UI", size=8)
-        F_MD  = tkfont.Font(family="Segoe UI", size=10)
-        F_ICO = tkfont.Font(family="Segoe UI", size=12)
-        F_ACC = tkfont.Font(family="Segoe UI", size=8, weight="bold")
-        F_XS  = tkfont.Font(family="Segoe UI", size=7)
-        F_AB  = tkfont.Font(family="Segoe UI", size=8, weight="bold")
+        F_TITLE = tkfont.Font(family="Segoe UI", size=9, weight="bold")
+        F_SM    = tkfont.Font(family="Segoe UI", size=8)
+        F_MD    = tkfont.Font(family="Segoe UI", size=10)
+        F_ICO   = tkfont.Font(family="Segoe UI", size=13)
+        F_ACC   = tkfont.Font(family="Segoe UI", size=8, weight="bold")
+        F_XS    = tkfont.Font(family="Segoe UI", size=7)
+        F_AB    = tkfont.Font(family="Segoe UI", size=8, weight="bold")
 
-        def _btn(parent, text, cmd, font=None, fg=_TXT, padx=8, pady=4):
-            b = tk.Button(parent, text=text, command=cmd,
-                          font=font or F_MD,
-                          bg=_BTN, fg=fg, bd=0,
-                          padx=padx, pady=pady,
-                          relief=tk.FLAT, cursor="hand2",
-                          activebackground=_BTN_ACT,
-                          activeforeground=_TXT)
-            b.bind("<Enter>", lambda e, w=b: w.configure(bg=_BTN_HVR))
-            b.bind("<Leave>", lambda e, w=b: w.configure(bg=_BTN))
+        def _btn(parent, text, cmd, font=None, fg=_TXT, padx=8, pady=5,
+                 accent=False, round_accent=False):
+            if accent:
+                b = tk.Button(parent, text=text, command=cmd,
+                              font=font or F_MD,
+                              bg=_ACCENT, fg="#0F1217", bd=0,
+                              padx=padx, pady=pady,
+                              relief=tk.FLAT, cursor="hand2",
+                              activebackground="#9BB0FF",
+                              activeforeground="#0F1217")
+                b.bind("<Enter>", lambda e, w=b: w.configure(bg="#9BB0FF"))
+                b.bind("<Leave>", lambda e, w=b: w.configure(bg=_ACCENT))
+            else:
+                b = tk.Button(parent, text=text, command=cmd,
+                              font=font or F_MD,
+                              bg=_BTN, fg=fg, bd=0,
+                              padx=padx, pady=pady,
+                              relief=tk.FLAT, cursor="hand2",
+                              activebackground=_BTN_ACT,
+                              activeforeground=_TXT)
+                b.bind("<Enter>", lambda e, w=b: w.configure(bg=_BTN_HVR))
+                b.bind("<Leave>", lambda e, w=b: w.configure(bg=_BTN))
             b.bind("<Enter>", lambda e: self._cancel_hide(), add="+")
             b.bind("<Leave>", lambda e: self._schedule_hide(), add="+")
             return b
 
+        def _pill_label(parent, text, bg, fg, cursor=""):
+            return tk.Label(parent, text=text, font=F_XS,
+                            bg=bg, fg=fg, padx=5, pady=2,
+                            relief=tk.FLAT, cursor=cursor or "")
+
         def _sep(parent):
-            tk.Frame(parent, width=1, bg="#333333").pack(side=tk.LEFT, fill=tk.Y, pady=3, padx=(6, 6))
+            tk.Frame(parent, width=1, bg=_BORDER).pack(
+                side=tk.LEFT, fill=tk.Y, pady=4, padx=(5, 5))
 
+        # ── ROW 0: info row ──────────────────────────────────────────────
         info = tk.Frame(bar, bg=_CTRL_BG)
-        info.pack(fill=tk.X, padx=12, pady=(4, 2))
+        info.pack(fill=tk.X, padx=14, pady=(3, 0))
 
-        self._lbl_title = tk.Label(info, text="", anchor="w",
-                                   font=F_SM, bg=_CTRL_BG, fg=_TXT, cursor="hand2")
+        # Left: title + tags
+        info_left = tk.Frame(info, bg=_CTRL_BG)
+        info_left.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self._lbl_title = tk.Label(info_left, text="", anchor="w",
+                                   font=F_TITLE, bg=_CTRL_BG, fg=_TXT, cursor="hand2")
         self._lbl_title.pack(side=tk.LEFT, padx=(0, 6))
         self._lbl_title.bind("<Button-1>", lambda e: self._show_video_picker(e))
         self._lbl_title.bind("<Enter>", lambda e: self._lbl_title.config(fg=_ACCENT))
         self._lbl_title.bind("<Leave>", lambda e: self._lbl_title.config(fg=_TXT))
 
-        self._tag_frame = tk.Frame(info, bg=_CTRL_BG)
+        self._tag_frame = tk.Frame(info_left, bg=_CTRL_BG)
         self._tag_frame.pack(side=tk.LEFT, padx=(0, 6))
 
-        self._lbl_time = tk.Label(info, text="0:00 / 0:00",
-                                  font=F_SM, bg=_CTRL_BG, fg=_TXT_MED)
-        self._lbl_time.pack(side=tk.RIGHT, padx=(4, 0))
+        # Right badges: AB · chapter · gaming · sleep · bm · dir · idx · time
+        info_right = tk.Frame(info, bg=_CTRL_BG)
+        info_right.pack(side=tk.RIGHT)
 
-        self._lbl_idx = tk.Label(info, text="",
+        self._lbl_time = tk.Label(info_right, text="0:00 / 0:00",
+                                  font=F_ACC, bg=_CTRL_BG, fg=_TXT_MED)
+        self._lbl_time.pack(side=tk.RIGHT, padx=(8, 0))
+
+        self._lbl_idx = tk.Label(info_right, text="",
                                  font=F_SM, bg=_CTRL_BG, fg=_TXT_DIM)
         self._lbl_idx.pack(side=tk.RIGHT, padx=(0, 4))
 
-        self._lbl_dir = tk.Label(info, text="",
-                                 font=F_XS, bg="#1a1a1a", fg=_TXT_DIM, cursor="hand2",
-                                 padx=5, pady=1, relief=tk.FLAT)
+        self._lbl_dir = _pill_label(info_right, "", "#1A1E26", _TXT_DIM, cursor="hand2")
         self._lbl_dir.pack(side=tk.RIGHT, padx=(0, 4))
         self._lbl_dir.bind("<Button-1>", lambda e: self._show_dir_picker(e))
         self._lbl_dir.bind("<Enter>", lambda e: self._lbl_dir.config(fg=_ACCENT))
         self._lbl_dir.bind("<Leave>", lambda e: self._lbl_dir.config(fg=_TXT_DIM))
 
-        self._lbl_sleep = tk.Label(info, text="",
-                                   font=F_XS, bg="#2a1e0d", fg="#FFA500",
-                                   padx=4, pady=1, relief=tk.FLAT)
-        self._lbl_sleep.pack(side=tk.RIGHT, padx=(0, 4))
-
-        self._lbl_gaming = tk.Label(info, text="",
-                                    font=F_XS, bg="#1a1a2e", fg="#00FF88",
-                                    padx=4, pady=1, relief=tk.FLAT)
-        self._lbl_gaming.pack(side=tk.RIGHT, padx=(0, 4))
-
-        self._lbl_ab = tk.Label(info, text="",
-                                font=F_AB, bg="#0d1f2d", fg="#00BFFF",
-                                padx=4, pady=1, relief=tk.FLAT)
-        self._lbl_ab.pack(side=tk.RIGHT, padx=(0, 4))
-
-        self._lbl_chapter = tk.Label(info, text="",
-                                     font=F_XS, bg="#1e2a1e", fg="#66cc66",
-                                     padx=4, pady=1, relief=tk.FLAT)
-        self._lbl_chapter.pack(side=tk.RIGHT, padx=(0, 4))
-
-        self._lbl_bm_count = tk.Label(info, text="",
-                                      font=F_XS, bg="#1e2a1e", fg="#FFD700",
-                                      padx=4, pady=1, cursor="hand2")
+        self._lbl_bm_count = _pill_label(info_right, "", "#1A1E26", "#F5C518", cursor="hand2")
         self._lbl_bm_count.pack(side=tk.RIGHT, padx=(0, 4))
         self._lbl_bm_count.bind("<Button-1>", lambda e: self._show_bookmarks_menu())
 
+        self._lbl_chapter = _pill_label(info_right, "", "#1A2E1A", "#6EE7A0")
+        self._lbl_chapter.pack(side=tk.RIGHT, padx=(0, 4))
+
+        self._lbl_ab = _pill_label(info_right, "", "#0D1F35", "#60C8FF", cursor="")
+        self._lbl_ab.config(font=F_AB)
+        self._lbl_ab.pack(side=tk.RIGHT, padx=(0, 4))
+
+        self._lbl_sleep = _pill_label(info_right, "", "#2A1A00", "#FFA94D")
+        self._lbl_sleep.pack(side=tk.RIGHT, padx=(0, 4))
+
+        self._lbl_gaming = _pill_label(info_right, "", "#0A1F0A", "#4ADE80")
+        self._lbl_gaming.pack(side=tk.RIGHT, padx=(0, 4))
+
         # ── ROW 1: seek bar ──────────────────────────────────────────────
         seek_row = tk.Frame(bar, bg=_CTRL_BG)
-        seek_row.pack(fill=tk.X, padx=12, pady=(2, 0))
+        seek_row.pack(fill=tk.X, padx=14, pady=(3, 0))
 
-        self._seek = tk.Canvas(seek_row, height=18, bg=_CTRL_BG,
+        self._seek = tk.Canvas(seek_row, height=20, bg=_CTRL_BG,
                                highlightthickness=0, cursor="hand2")
         self._seek.pack(fill=tk.X, expand=True)
         self._seek.bind("<Button-1>",        self._seek_click)
@@ -543,80 +565,88 @@ class EmbeddedPlayer:
 
         # ── ROW 2: button row ────────────────────────────────────────────
         btn_row = tk.Frame(bar, bg=_CTRL_BG2)
-        btn_row.pack(fill=tk.X, pady=(2, 2))
+        btn_row.pack(fill=tk.X, pady=(3, 0))
 
-        # ZONE A: Transport (⏮ ⏸ ⏭)
+        # ZONE A: Transport (⏮ ▶ ⏭) — accent play button
         zone_a = tk.Frame(btn_row, bg=_CTRL_BG2)
-        zone_a.pack(side=tk.LEFT, padx=(8, 0), pady=2)
+        zone_a.pack(side=tk.LEFT, padx=(10, 0), pady=3)
 
-        btn_prev = _btn(zone_a, "⏮", None, font=F_ICO, padx=7)
-        btn_prev.pack(side=tk.LEFT, padx=1)
-        self._btn_play = _btn(zone_a, "⏸", self._toggle_pause, font=F_ICO, fg=_ACCENT, padx=7)
-        self._btn_play.pack(side=tk.LEFT, padx=1)
-        btn_next = _btn(zone_a, "⏭", None, font=F_ICO, padx=7)
-        btn_next.pack(side=tk.LEFT, padx=1)
+        btn_prev = _btn(zone_a, "⏮", None, font=F_ICO, fg=_TXT_MED, padx=7)
+        btn_prev.pack(side=tk.LEFT, padx=(0, 2))
+        self._btn_play = _btn(zone_a, "⏸", self._toggle_pause, font=F_ICO,
+                              fg="#0F1217", padx=10, accent=True)
+        self._btn_play.pack(side=tk.LEFT, padx=2)
+        btn_next = _btn(zone_a, "⏭", None, font=F_ICO, fg=_TXT_MED, padx=7)
+        btn_next.pack(side=tk.LEFT, padx=(2, 0))
 
         self._setup_hold_button(btn_prev, on_click=self._prev, on_hold=self._rewind)
         self._setup_hold_button(btn_next, on_click=self._next, on_hold=self._fast_forward)
 
         _sep(btn_row)
 
-        # ZONE B: Loop
+        # ZONE B: Loop mode
         zone_b = tk.Frame(btn_row, bg=_CTRL_BG2)
-        zone_b.pack(side=tk.LEFT, pady=2)
+        zone_b.pack(side=tk.LEFT, pady=3)
 
-        self._btn_loop = _btn(zone_b, "↺", self._cycle_loop, font=F_ICO, fg=_ACCENT, padx=8)
+        self._btn_loop = _btn(zone_b, "↺  Loop", self._cycle_loop,
+                              font=F_ACC, fg=_ACCENT, padx=8)
         self._btn_loop.pack(side=tk.LEFT)
 
         _sep(btn_row)
 
-        # ZONE C: Speed · Bookmark · Ch Prev/Next · A · B · ✕  (center, expands)
+        # ZONE C: Speed · Bookmark · Ch nav · A-B loop  (center, expands)
         zone_c = tk.Frame(btn_row, bg=_CTRL_BG2)
-        zone_c.pack(side=tk.LEFT, expand=True, pady=2)
+        zone_c.pack(side=tk.LEFT, expand=True, pady=3)
 
         self._lbl_speed = tk.Label(zone_c, text="1.00×", cursor="hand2",
-                                   font=F_ACC, bg="#1e1e1e", fg=_ACCENT,
-                                   padx=6, pady=2,
-                                   highlightbackground="#333333", highlightthickness=1)
-        self._lbl_speed.pack(side=tk.LEFT, padx=(0, 4))
+                                   font=F_ACC, bg=_BTN, fg=_ACCENT,
+                                   padx=7, pady=3,
+                                   highlightbackground=_BORDER, highlightthickness=1)
+        self._lbl_speed.pack(side=tk.LEFT, padx=(0, 6))
         self._lbl_speed.bind("<Button-1>",        lambda e: self._speed_up())
         self._lbl_speed.bind("<Button-3>",        lambda e: self._speed_down())
         self._lbl_speed.bind("<Double-Button-1>", lambda e: self._speed_reset())
         self._lbl_speed.bind("<MouseWheel>",      lambda e: self._speed_up() if e.delta > 0 else self._speed_down())
-        self._lbl_speed.bind("<Enter>", lambda e: self._cancel_hide())
-        self._lbl_speed.bind("<Leave>", lambda e: self._schedule_hide())
+        self._lbl_speed.bind("<Enter>", lambda e: (self._cancel_hide(), self._lbl_speed.config(bg=_BTN_HVR)))
+        self._lbl_speed.bind("<Leave>", lambda e: (self._schedule_hide(), self._lbl_speed.config(bg=_BTN)))
 
-        self._btn_bookmark = _btn(zone_c, "🔖", self._add_bookmark, font=F_MD, padx=6)
+        self._btn_bookmark = _btn(zone_c, "🔖", self._add_bookmark, font=F_SM,
+                                  fg=_TXT_MED, padx=6)
         self._btn_bookmark.pack(side=tk.LEFT, padx=(0, 2))
 
-        # Chapter nav (shown/hidden dynamically in _refresh_display)
-        self._btn_prev_chapter = _btn(zone_c, "❮Ch", self._prev_chapter, font=F_SM, padx=5)
-        self._btn_next_chapter = _btn(zone_c, "Ch❯", self._next_chapter, font=F_SM, padx=5)
+        # Chapter nav (shown/hidden dynamically)
+        self._btn_prev_chapter = _btn(zone_c, "❮ Ch", self._prev_chapter, font=F_XS,
+                                      fg=_TXT_MED, padx=5)
+        self._btn_next_chapter = _btn(zone_c, "Ch ❯", self._next_chapter, font=F_XS,
+                                      fg=_TXT_MED, padx=5)
         self._divider_before_ab = tk.Frame(zone_c, width=0, bg=_CTRL_BG2)
         self._divider_before_ab.pack(side=tk.LEFT)
         self._chapters_visible = False
 
-        # A-B buttons (always visible per HTML design)
-        self._btn_ab_a   = _btn(zone_c, "A", self._set_ab_a,  font=F_ACC, fg="#00BFFF", padx=6)
-        self._btn_ab_a.pack(side=tk.LEFT, padx=(2, 1))
-        self._btn_ab_b   = _btn(zone_c, "B", self._set_ab_b,  font=F_ACC, fg="#00BFFF", padx=6)
+        # A-B buttons
+        self._btn_ab_a   = _btn(zone_c, "A", self._set_ab_a, font=F_AB,
+                                fg="#60C8FF", padx=7)
+        self._btn_ab_a.pack(side=tk.LEFT, padx=(4, 1))
+        self._btn_ab_b   = _btn(zone_c, "B", self._set_ab_b, font=F_AB,
+                                fg="#60C8FF", padx=7)
         self._btn_ab_b.pack(side=tk.LEFT, padx=(1, 1))
-        self._btn_ab_clr = _btn(zone_c, "✕", self._clear_ab,  font=F_XS,  fg=_TXT_DIM,  padx=5)
+        self._btn_ab_clr = _btn(zone_c, "✕", self._clear_ab, font=F_XS,
+                                fg=_TXT_DIM, padx=5)
         self._btn_ab_clr.pack(side=tk.LEFT, padx=(1, 4))
 
         _sep(btn_row)
 
         # ZONE D: Star rating
         zone_d = tk.Frame(btn_row, bg=_CTRL_BG2)
-        zone_d.pack(side=tk.LEFT, pady=2)
+        zone_d.pack(side=tk.LEFT, pady=3)
 
         self._rating_frame = tk.Frame(zone_d, bg=_CTRL_BG2)
-        self._rating_frame.pack(side=tk.LEFT, padx=(0, 2))
+        self._rating_frame.pack(side=tk.LEFT, padx=(0, 4))
         self._rating_btns = []
         for star_i in range(1, 6):
             s = tk.Label(self._rating_frame, text="☆", font=F_MD,
-                         bg=_CTRL_BG2, fg="#888888", cursor="hand2")
-            s.pack(side=tk.LEFT)
+                         bg=_CTRL_BG2, fg=_TXT_DIM, cursor="hand2")
+            s.pack(side=tk.LEFT, padx=1)
             s.bind("<Button-1>", lambda e, n=star_i: self._set_rating(n))
             s.bind("<Enter>",    lambda e, n=star_i: self._hover_rating(n))
             s.bind("<Leave>",    lambda e: self._refresh_rating_display())
@@ -624,35 +654,49 @@ class EmbeddedPlayer:
 
         _sep(btn_row)
 
-        # ZONE E: Vol · Fullscreen · More  (right-anchored)
+        # ZONE E: Vol · Fullscreen · More
         zone_e = tk.Frame(btn_row, bg=_CTRL_BG2)
-        zone_e.pack(side=tk.LEFT, padx=(0, 8), pady=2)
+        zone_e.pack(side=tk.LEFT, padx=(0, 10), pady=3)
 
         self._lbl_mute = tk.Label(zone_e, text="🔊", cursor="hand2",
-                                  font=F_ICO, bg=_CTRL_BG2, fg=_TXT)
-        self._lbl_mute.pack(side=tk.LEFT, padx=(0, 1))
+                                  font=F_MD, bg=_CTRL_BG2, fg=_TXT_MED)
+        self._lbl_mute.pack(side=tk.LEFT, padx=(0, 2))
         self._lbl_mute.bind("<Button-1>",   lambda e: self._toggle_mute())
         self._lbl_mute.bind("<MouseWheel>", self._vol_scroll)
         self._lbl_mute.bind("<Enter>", lambda e: self._cancel_hide())
         self._lbl_mute.bind("<Leave>", lambda e: self._schedule_hide())
 
+        # Volume slider canvas
+        self._vol_canvas = tk.Canvas(zone_e, width=60, height=4, bg=_CTRL_BG2,
+                                     highlightthickness=0, cursor="hand2")
+        self._vol_canvas.pack(side=tk.LEFT, padx=(0, 4))
+        self._vol_canvas.bind("<Button-1>",   self._vol_click)
+        self._vol_canvas.bind("<B1-Motion>",  self._vol_drag)
+        self._vol_canvas.bind("<MouseWheel>", self._vol_scroll)
+        self._vol_canvas.bind("<Enter>", lambda e: self._cancel_hide())
+        self._vol_canvas.bind("<Leave>", lambda e: self._schedule_hide())
+
         self._lbl_vol = tk.Label(zone_e, text=f"{self.volume}%", width=4,
                                  font=F_SM, bg=_CTRL_BG2, fg=_TXT_MED)
-        self._lbl_vol.pack(side=tk.LEFT, padx=(0, 4))
+        self._lbl_vol.pack(side=tk.LEFT, padx=(0, 6))
         self._lbl_vol.bind("<MouseWheel>", self._vol_scroll)
         self._lbl_vol.bind("<Enter>", lambda e: self._cancel_hide())
         self._lbl_vol.bind("<Leave>", lambda e: self._schedule_hide())
 
-        _btn(zone_e, "⋮", self._show_more_menu, font=F_ICO, padx=7).pack(side=tk.LEFT, padx=(2, 2))
-        _btn(zone_e, "⛶", self._toggle_borderless, font=F_ICO, padx=6).pack(side=tk.LEFT, padx=(2, 0))
+        _btn(zone_e, "⛶", self._toggle_borderless, font=F_ICO,
+             fg=_TXT_MED, padx=7).pack(side=tk.LEFT, padx=(0, 2))
+        _btn(zone_e, "⋮", self._show_more_menu, font=F_ICO,
+             fg=_TXT_MED, padx=7).pack(side=tk.LEFT, padx=(0, 0))
 
-        _all = [bar, info, seek_row, btn_row,
+        _all = [bar, info, info_left, info_right, seek_row, btn_row,
                 zone_a, zone_b, zone_c, zone_d, zone_e,
                 self._lbl_title, self._lbl_dir, self._lbl_idx, self._lbl_time,
                 self._lbl_ab, self._lbl_sleep, self._lbl_chapter, self._lbl_gaming]
         for w in _all:
             w.bind("<Enter>", lambda e: self._cancel_hide(), add="+")
             w.bind("<Leave>", lambda e: self._schedule_hide(), add="+")
+
+        self._draw_vol_slider()
 
     # ═══════════════════════════════════════════════════════════════════
     # KEY BINDINGS — hotkey-driven, live-reloadable
@@ -764,15 +808,6 @@ class EmbeddedPlayer:
                                                self._apply_transforms()))
         menu.add_cascade(label="🔍  Zoom / Rotate", menu=zoom_menu)
 
-        # A-B loop submenu
-        ab_menu = tk.Menu(menu, tearoff=0, bg=_BTN, fg=_TXT,
-                          activebackground=_BTN_HVR, activeforeground=_TXT,
-                          bd=0, relief=tk.FLAT, font=("Segoe UI", 9))
-        ab_menu.add_command(label="A  Set Point A", command=self._set_ab_a)
-        ab_menu.add_command(label="B  Set Point B", command=self._set_ab_b)
-        ab_menu.add_command(label="✕  Clear A-B", command=self._clear_ab)
-        menu.add_cascade(label="⟳  A-B Loop", menu=ab_menu)
-
         # Chapter nav (shown only when chapters exist)
         try:
             if self._player and self._player.get_chapter_count() > 0:
@@ -866,8 +901,8 @@ class EmbeddedPlayer:
         ov = tk.Toplevel(self._win)
         ov.overrideredirect(True)
         ov.attributes('-topmost', True)
-        ov.attributes('-alpha', 0.92)
-        ov.configure(bg="#0d0d0d")
+        ov.attributes('-alpha', 0.96)
+        ov.configure(bg=_CTRL_BG2)
         self._overlay_win = ov
 
         self._win.update_idletasks()
@@ -875,30 +910,31 @@ class EmbeddedPlayer:
         ph = self._win.winfo_height()
         px = self._win.winfo_rootx()
         py = self._win.winfo_rooty()
-        ow, oh = 620, 520
+        ow, oh = 640, 540
         ov.geometry(f"{ow}x{oh}+{px + (pw - ow) // 2}+{py + (ph - oh) // 2}")
 
-        outer = tk.Frame(ov, bg="#0d0d0d", padx=2, pady=2)
+        outer = tk.Frame(ov, bg=_CTRL_BG2, padx=2, pady=2)
         outer.pack(fill=tk.BOTH, expand=True)
+        tk.Frame(outer, height=2, bg=_ACCENT).pack(fill=tk.X)
 
         tk.Label(outer, text="⌨  Keyboard Shortcuts",
                  font=("Segoe UI", 14, "bold"),
-                 bg="#0d0d0d", fg="#e0e0e0").pack(pady=(14, 2))
+                 bg=_CTRL_BG2, fg=_TXT).pack(pady=(14, 2))
         tk.Label(outer, text="Press  ?  or click anywhere to close",
-                 font=("Segoe UI", 8), bg="#0d0d0d", fg="#555555").pack(pady=(0, 10))
+                 font=("Segoe UI", 8), bg=_CTRL_BG2, fg=_TXT_DIM).pack(pady=(0, 10))
 
-        tk.Frame(outer, bg="#2a2a2a", height=1).pack(fill=tk.X, padx=20)
+        tk.Frame(outer, bg=_BORDER, height=1).pack(fill=tk.X, padx=20)
 
-        scroll_frame = tk.Frame(outer, bg="#0d0d0d")
+        scroll_frame = tk.Frame(outer, bg=_CTRL_BG2)
         scroll_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
 
-        canvas = tk.Canvas(scroll_frame, bg="#0d0d0d", highlightthickness=0)
+        canvas = tk.Canvas(scroll_frame, bg=_CTRL_BG2, highlightthickness=0)
         sb = tk.Scrollbar(scroll_frame, orient=tk.VERTICAL, command=canvas.yview)
         canvas.configure(yscrollcommand=sb.set)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        inner = tk.Frame(canvas, bg="#0d0d0d")
+        inner = tk.Frame(canvas, bg=_CTRL_BG2)
         canvas.create_window((0, 0), window=inner, anchor='nw')
         inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.bind("<MouseWheel>", lambda e: canvas.yview_scroll(-1 if e.delta > 0 else 1, "units"))
@@ -906,8 +942,8 @@ class EmbeddedPlayer:
         from managers.settings_manager import HOTKEY_GROUPS, HOTKEY_LABELS
         hk = self._hotkeys
 
-        col_left = tk.Frame(inner, bg="#0d0d0d")
-        col_right = tk.Frame(inner, bg="#0d0d0d")
+        col_left = tk.Frame(inner, bg=_CTRL_BG2)
+        col_right = tk.Frame(inner, bg=_CTRL_BG2)
         col_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
         col_right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
@@ -916,26 +952,26 @@ class EmbeddedPlayer:
 
         for gi, (group_title, action_ids) in enumerate(groups):
             col = col_left if gi < mid else col_right
-            grp = tk.Frame(col, bg="#0d0d0d")
+            grp = tk.Frame(col, bg=_CTRL_BG2)
             grp.pack(fill=tk.X, pady=(0, 10))
 
             tk.Label(grp, text=group_title,
                      font=("Segoe UI", 9, "bold"),
-                     bg="#0d0d0d", fg="#e50914").pack(anchor='w', pady=(0, 3))
+                     bg=_CTRL_BG2, fg=_ACCENT).pack(anchor='w', pady=(0, 3))
 
             for aid in action_ids:
                 key = hk.get(aid) or "—"
                 label = HOTKEY_LABELS.get(aid, aid)
-                row = tk.Frame(grp, bg="#0d0d0d")
+                row = tk.Frame(grp, bg=_CTRL_BG2)
                 row.pack(fill=tk.X, pady=1)
 
                 tk.Label(row, text=key, width=14, anchor='w',
                          font=("Consolas", 8),
-                         bg="#1e1e1e", fg="#00cfff",
+                         bg=_BTN, fg="#7DD3FC",
                          padx=6, pady=2).pack(side=tk.LEFT)
                 tk.Label(row, text=label, anchor='w',
                          font=("Segoe UI", 8),
-                         bg="#0d0d0d", fg="#aaaaaa").pack(side=tk.LEFT, padx=(6, 0))
+                         bg=_CTRL_BG2, fg=_TXT_MED).pack(side=tk.LEFT, padx=(6, 0))
 
         extras = [
             ("Fixed shortcuts", [
@@ -950,21 +986,21 @@ class EmbeddedPlayer:
         ]
         for group_title, rows in extras:
             col = col_right
-            grp = tk.Frame(col, bg="#0d0d0d")
+            grp = tk.Frame(col, bg=_CTRL_BG2)
             grp.pack(fill=tk.X, pady=(0, 10))
             tk.Label(grp, text=group_title,
                      font=("Segoe UI", 9, "bold"),
-                     bg="#0d0d0d", fg="#e50914").pack(anchor='w', pady=(0, 3))
+                     bg=_CTRL_BG2, fg=_ACCENT).pack(anchor='w', pady=(0, 3))
             for key, label in rows:
-                row = tk.Frame(grp, bg="#0d0d0d")
+                row = tk.Frame(grp, bg=_CTRL_BG2)
                 row.pack(fill=tk.X, pady=1)
                 tk.Label(row, text=key, width=14, anchor='w',
                          font=("Consolas", 8),
-                         bg="#1e1e1e", fg="#00cfff",
+                         bg=_BTN, fg="#7DD3FC",
                          padx=6, pady=2).pack(side=tk.LEFT)
                 tk.Label(row, text=label, anchor='w',
                          font=("Segoe UI", 8),
-                         bg="#0d0d0d", fg="#aaaaaa").pack(side=tk.LEFT, padx=(6, 0))
+                         bg=_CTRL_BG2, fg=_TXT_MED).pack(side=tk.LEFT, padx=(6, 0))
 
         def _close_overlay(e=None):
             try:
@@ -996,18 +1032,18 @@ class EmbeddedPlayer:
     def _hover_rating(self, n: int):
         for i, btn in enumerate(self._rating_btns):
             btn.config(text="★" if i < n else "☆",
-                       fg="#f5c518" if i < n else "#888888")
+                       fg="#F5C518" if i < n else _TXT_DIM)
 
     def _refresh_rating_display(self):
         if not self.annotation_service or not self.videos:
             for btn in self._rating_btns:
-                btn.config(text="☆", fg="#888888")
+                btn.config(text="☆", fg=_TXT_DIM)
             return
         path = self.videos[self.index]
         rating = self.annotation_service.get_rating(path)
         for i, btn in enumerate(self._rating_btns):
             btn.config(text="★" if i < rating else "☆",
-                       fg="#f5c518" if i < rating else "#555555")
+                       fg="#F5C518" if i < rating else _TXT_DIM)
 
     def _add_bookmark(self):
         if not self.annotation_service or not self.videos:
@@ -1018,22 +1054,23 @@ class EmbeddedPlayer:
         # Ask for optional label via simple dialog
         dlg = tk.Toplevel(self._win)
         dlg.title("Add Bookmark")
-        dlg.geometry("340x120")
-        dlg.configure(bg="#111111")
+        dlg.geometry("360x130")
+        dlg.configure(bg=_CTRL_BG2)
         dlg.transient(self._win)
         dlg.grab_set()
         dlg.overrideredirect(False)
         apply_icon(dlg)
 
         pos_str = _fmt(pos)
-        tk.Label(dlg, text=f"Bookmark at {pos_str}",
-                 font=("Segoe UI", 10), bg="#111111", fg="#e0e0e0").pack(pady=(14, 4))
+        tk.Frame(dlg, height=2, bg=_ACCENT).pack(fill=tk.X)
+        tk.Label(dlg, text=f"Bookmark at  {pos_str}",
+                 font=("Segoe UI", 10, "bold"), bg=_CTRL_BG2, fg=_TXT).pack(pady=(12, 4))
 
         entry_var = tk.StringVar(value=pos_str)
         entry = tk.Entry(dlg, textvariable=entry_var,
-                         font=("Segoe UI", 10), bg="#1e1e1e", fg="#e0e0e0",
-                         insertbackground="#e0e0e0", relief=tk.FLAT,
-                         highlightthickness=1, highlightbackground="#444")
+                         font=("Segoe UI", 10), bg=_BTN, fg=_TXT,
+                         insertbackground=_TXT, relief=tk.FLAT,
+                         highlightthickness=1, highlightbackground=_BORDER)
         entry.pack(fill=tk.X, padx=20)
         entry.select_range(0, tk.END)
         entry.focus_set()
@@ -1047,9 +1084,9 @@ class EmbeddedPlayer:
             self._refresh_rating_display()
 
         entry.bind("<Return>", _save)
-        tk.Button(dlg, text="Save", command=_save,
-                  bg="#e50914", fg="white", relief=tk.FLAT,
-                  font=("Segoe UI", 9), padx=10, pady=4).pack(pady=8)
+        tk.Button(dlg, text="Save Bookmark", command=_save,
+                  bg=_ACCENT, fg="#0F1217", relief=tk.FLAT,
+                  font=("Segoe UI", 9, "bold"), padx=12, pady=5).pack(pady=8)
 
     def _show_bookmarks_menu(self):
         if not self.annotation_service or not self.videos:
@@ -1058,29 +1095,30 @@ class EmbeddedPlayer:
 
         dlg = tk.Toplevel(self._win)
         dlg.title("Bookmarks")
-        dlg.geometry("320x320")
-        dlg.configure(bg="#111111")
+        dlg.geometry("340x340")
+        dlg.configure(bg=_CTRL_BG2)
         dlg.transient(self._win)
         apply_icon(dlg)
 
+        tk.Frame(dlg, height=2, bg=_ACCENT).pack(fill=tk.X)
         tk.Label(dlg, text=os.path.basename(path)[:44],
-                 font=("Segoe UI", 9, "bold"), bg="#111111", fg="#e0e0e0",
-                 wraplength=290, anchor="w").pack(fill=tk.X, padx=12, pady=(10, 4))
+                 font=("Segoe UI", 9, "bold"), bg=_CTRL_BG2, fg=_TXT,
+                 wraplength=310, anchor="w").pack(fill=tk.X, padx=14, pady=(10, 4))
 
         if not self.annotation_service.get_bookmarks(path):
             tk.Label(dlg, text="No bookmarks.\nPress 🔖 while playing to add one.",
-                     font=("Segoe UI", 9), bg="#111111", fg="#666666",
-                     justify=tk.LEFT).pack(padx=12, pady=10)
+                     font=("Segoe UI", 9), bg=_CTRL_BG2, fg=_TXT_MED,
+                     justify=tk.LEFT).pack(padx=14, pady=14)
         else:
-            list_frame = tk.Frame(dlg, bg="#111111")
+            list_frame = tk.Frame(dlg, bg=_CTRL_BG2)
             list_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
 
-            canvas = tk.Canvas(list_frame, bg="#111111", highlightthickness=0)
+            canvas = tk.Canvas(list_frame, bg=_CTRL_BG2, highlightthickness=0)
             sb = tk.Scrollbar(list_frame, orient=tk.VERTICAL, command=canvas.yview)
             canvas.configure(yscrollcommand=sb.set)
             sb.pack(side=tk.RIGHT, fill=tk.Y)
             canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            inner = tk.Frame(canvas, bg="#111111")
+            inner = tk.Frame(canvas, bg=_CTRL_BG2)
             cwin = canvas.create_window((0, 0), window=inner, anchor="nw")
             inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
             canvas.bind("<Configure>", lambda e: canvas.itemconfig(cwin, width=e.width))
@@ -1092,7 +1130,7 @@ class EmbeddedPlayer:
                 for bm in self.annotation_service.get_bookmarks(path):
                     ms = bm["ms"]
                     lbl_text = bm.get("label", _fmt(ms))
-                    row = tk.Frame(inner, bg="#1a1a1a")
+                    row = tk.Frame(inner, bg=_BTN)
                     row.pack(fill=tk.X, pady=1)
 
                     def _jump(t=ms):
@@ -1100,9 +1138,9 @@ class EmbeddedPlayer:
                         dlg.destroy()
 
                     lbl_w = tk.Label(row, text=f"🔖 {lbl_text}",
-                                     font=("Segoe UI", 9), bg="#1a1a1a",
-                                     fg="#00BFFF", anchor="w", cursor="hand2")
-                    lbl_w.pack(side=tk.LEFT, padx=(8, 4), pady=3, fill=tk.X, expand=True)
+                                     font=("Segoe UI", 9), bg=_BTN,
+                                     fg=_ACCENT, anchor="w", cursor="hand2")
+                    lbl_w.pack(side=tk.LEFT, padx=(10, 4), pady=4, fill=tk.X, expand=True)
                     lbl_w.bind("<Button-1>", lambda e, t=ms: _jump(t))
                     row.bind("<Button-1>", lambda e, t=ms: _jump(t))
 
@@ -1111,18 +1149,18 @@ class EmbeddedPlayer:
                         _render()
 
                     tk.Button(row, text="✕", command=lambda t=ms: _del(t),
-                              font=("Segoe UI", 7), bg="#1a1a1a", fg="#555",
+                              font=("Segoe UI", 7), bg=_BTN, fg=_TXT_DIM,
                               relief=tk.FLAT, bd=0, padx=6, pady=2, cursor="hand2",
-                              activebackground="#2a2a2a", activeforeground="#e50914"
+                              activebackground=_BTN_HVR, activeforeground=_ACCENT2
                               ).pack(side=tk.RIGHT, padx=4)
 
             _render()
 
-            tk.Button(dlg, text="✕ Clear all",
+            tk.Button(dlg, text="✕  Clear all",
                       command=lambda: (self._clear_bookmarks(path), dlg.destroy()),
-                      font=("Segoe UI", 8), bg="#1e1e1e", fg="#666",
-                      relief=tk.FLAT, bd=0, padx=10, pady=4, cursor="hand2",
-                      activebackground="#2a2a2a", activeforeground="#e50914"
+                      font=("Segoe UI", 8), bg=_BTN, fg=_TXT_MED,
+                      relief=tk.FLAT, bd=0, padx=10, pady=5, cursor="hand2",
+                      activebackground=_BTN_HVR, activeforeground=_ACCENT2
                       ).pack(side=tk.BOTTOM, pady=6)
 
         dlg.bind("<Escape>", lambda e: dlg.destroy())
@@ -1142,8 +1180,8 @@ class EmbeddedPlayer:
         cur_tags = self.annotation_service.get_tags(path)
         all_tags = self.annotation_service.get_all_tags()
 
-        menu = tk.Menu(self._win, tearoff=0, bg="#1e1e1e", fg="#e0e0e0",
-                       activebackground="#333333", activeforeground="#ffffff",
+        menu = tk.Menu(self._win, tearoff=0, bg=_BTN, fg=_TXT,
+                       activebackground=_BTN_HVR, activeforeground=_TXT,
                        bd=0, relief=tk.FLAT, font=("Segoe UI", 9))
 
         menu.add_command(label="➕  Add new tag…", command=lambda: self._prompt_add_tag(path))
@@ -1168,18 +1206,19 @@ class EmbeddedPlayer:
     def _prompt_add_tag(self, path: str):
         dlg = tk.Toplevel(self._win)
         dlg.title("Add Tag")
-        dlg.geometry("340x120")
-        dlg.configure(bg="#111111")
+        dlg.geometry("340x130")
+        dlg.configure(bg=_CTRL_BG2)
         dlg.transient(self._win)
         dlg.grab_set()
         apply_icon(dlg)
 
+        tk.Frame(dlg, height=2, bg=_ACCENT).pack(fill=tk.X)
         tk.Label(dlg, text="Tag name:",
-                 font=("Segoe UI", 10), bg="#111111", fg="#e0e0e0").pack(pady=(14, 4))
+                 font=("Segoe UI", 10, "bold"), bg=_CTRL_BG2, fg=_TXT).pack(pady=(12, 4))
         var = tk.StringVar()
         entry = tk.Entry(dlg, textvariable=var, font=("Segoe UI", 10),
-                         bg="#1e1e1e", fg="#e0e0e0", insertbackground="#e0e0e0",
-                         relief=tk.FLAT, highlightthickness=1, highlightbackground="#444")
+                         bg=_BTN, fg=_TXT, insertbackground=_TXT,
+                         relief=tk.FLAT, highlightthickness=1, highlightbackground=_BORDER)
         entry.pack(fill=tk.X, padx=20)
         entry.focus_set()
 
@@ -1191,11 +1230,11 @@ class EmbeddedPlayer:
                     self.logger(f"Tag added: '{tag}'")
             dlg.destroy()
 
-        btn_frame = tk.Frame(dlg, bg="#111111")
+        btn_frame = tk.Frame(dlg, bg=_CTRL_BG2)
         btn_frame.pack(pady=(10, 0))
-        tk.Button(dlg, text="Save", command=_save,
-                  bg="#e50914", fg="white", relief=tk.FLAT,
-                  font=("Segoe UI", 9), padx=10, pady=4).pack(pady=8)
+        tk.Button(dlg, text="Add Tag", command=_save,
+                  bg=_ACCENT, fg="#0F1217", relief=tk.FLAT,
+                  font=("Segoe UI", 9, "bold"), padx=12, pady=5).pack(pady=8)
 
         entry.bind("<Return>", _save)
         entry.bind("<Escape>", lambda e: dlg.destroy())
@@ -1466,15 +1505,15 @@ class EmbeddedPlayer:
                 self._seek_preview_win = tk.Toplevel(self._win)
                 self._seek_preview_win.overrideredirect(True)
                 self._seek_preview_win.attributes('-topmost', True)
-                self._seek_preview_win.configure(bg="#111111")
+                self._seek_preview_win.configure(bg=_CTRL_BG2)
                 self._seek_preview_lbl = tk.Label(
-                    self._seek_preview_win, bg="#111111", bd=0)
+                    self._seek_preview_win, bg=_CTRL_BG2, bd=0)
                 self._seek_preview_lbl.pack()
                 self._seek_preview_time = tk.Label(
                     self._seek_preview_win,
-                    bg="#111111", fg="#ffffff",
-                    font=("Segoe UI", 8))
-                self._seek_preview_time.pack(pady=(0, 2))
+                    bg=_CTRL_BG2, fg=_TXT,
+                    font=("Segoe UI", 8, "bold"))
+                self._seek_preview_time.pack(pady=(0, 3))
 
             if photo:
                 self._seek_preview_lbl.configure(image=photo)
@@ -1605,6 +1644,38 @@ class EmbeddedPlayer:
     # VOLUME / MUTE
     # ═══════════════════════════════════════════════════════════════════
 
+    def _draw_vol_slider(self):
+        try:
+            c = self._vol_canvas
+            w = c.winfo_width() or 60
+            h = c.winfo_height() or 4
+            c.delete("all")
+            frac = self.volume / 100.0
+            px = int(frac * w)
+            c.create_rectangle(0, 0, w, h, fill=_TRACK, outline="")
+            c.create_rectangle(0, 0, px, h, fill=_ACCENT, outline="")
+            cy = h // 2
+            c.create_oval(px - 5, cy - 5, px + 5, cy + 5, fill="white", outline="")
+        except Exception:
+            pass
+
+    def _vol_click(self, e):
+        try:
+            w = self._vol_canvas.winfo_width() or 60
+            self.volume = max(0, min(100, int((e.x / w) * 100)))
+            if self.is_muted:
+                self.is_muted = False
+                self._player.audio_set_mute(False)
+            self._player.audio_set_volume(self.volume)
+            self._refresh_vol()
+            if self.on_volume_change:
+                self.on_volume_change(self.volume, self.is_muted)
+        except Exception:
+            pass
+
+    def _vol_drag(self, e):
+        self._vol_click(e)
+
     def _vol_change(self, delta: int):
         if self.is_muted:
             self.is_muted = False
@@ -1643,6 +1714,7 @@ class EmbeddedPlayer:
         try:
             self._lbl_mute.config(text=icon)
             self._lbl_vol.config(text=f"{vol}%")
+            self._draw_vol_slider()
         except Exception:
             pass
 
@@ -1677,7 +1749,7 @@ class EmbeddedPlayer:
     def _cycle_loop(self):
         modes = ["loop_on", "loop_off", "shuffle"]
         self.loop_mode = modes[(modes.index(self.loop_mode) + 1) % len(modes)]
-        labels = {"loop_on": "↺", "loop_off": "→", "shuffle": "⇄"}
+        labels = {"loop_on": "↺  Loop", "loop_off": "→  Once", "shuffle": "⇄  Shuffle"}
         try:
             self._btn_loop.config(text=labels[self.loop_mode])
         except Exception:
@@ -2242,21 +2314,21 @@ class EmbeddedPlayer:
         popup = tk.Toplevel(self._win)
         popup.overrideredirect(True)
         popup.attributes('-topmost', True)
-        popup.configure(bg="#1e1e1e")
+        popup.configure(bg=_BTN)
 
-        ITEM_H = 24
+        ITEM_H = 26
         MAX_VISIBLE = 15
         visible = min(len(items), MAX_VISIBLE)
         width = 320
 
-        frame_outer = tk.Frame(popup, bg="#333333", bd=1)
+        frame_outer = tk.Frame(popup, bg=_BORDER, bd=1)
         frame_outer.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
 
-        canvas = tk.Canvas(frame_outer, bg="#1e1e1e", highlightthickness=0,
+        canvas = tk.Canvas(frame_outer, bg=_BTN, highlightthickness=0,
                            width=width, height=visible * ITEM_H)
         canvas.pack(fill=tk.BOTH, expand=True)
 
-        inner = tk.Frame(canvas, bg="#1e1e1e")
+        inner = tk.Frame(canvas, bg=_BTN)
         canvas_window = canvas.create_window(0, 0, anchor="nw", window=inner)
 
         order = list(range(len(items)))
@@ -2264,7 +2336,7 @@ class EmbeddedPlayer:
         row_widgets = []
         for i, (label, is_current) in enumerate(items):
             fg = _ACCENT if is_current else _TXT
-            bg_default = "#2a2a2a" if is_current else "#1e1e1e"
+            bg_default = _BTN_HVR if is_current else _BTN
             row = tk.Frame(inner, bg=bg_default, height=ITEM_H)
             row.pack(fill=tk.X)
             row.pack_propagate(False)
@@ -2284,14 +2356,14 @@ class EmbeddedPlayer:
             lbl = tk.Label(row, text=label[:50] + ("…" if len(label) > 50 else ""),
                            anchor="w", bg=bg_default, fg=fg,
                            font=("Segoe UI", 8), cursor="hand2")
-            lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 4))
+            lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 4))
 
             row_widgets.append((row, prefix, lbl, bg_default, drag_handle))
 
             def _enter(e, r=row, p=prefix, l=lbl, dh=drag_handle):
-                r.config(bg=_BTN_HVR); p.config(bg=_BTN_HVR); l.config(bg=_BTN_HVR)
+                r.config(bg=_BTN_ACT); p.config(bg=_BTN_ACT); l.config(bg=_BTN_ACT)
                 if dh:
-                    dh.config(bg=_BTN_HVR)
+                    dh.config(bg=_BTN_ACT)
             def _leave(e, r=row, p=prefix, l=lbl, bg=bg_default, dh=drag_handle):
                 r.config(bg=bg); p.config(bg=bg); l.config(bg=bg)
                 if dh:
@@ -2328,15 +2400,15 @@ class EmbeddedPlayer:
                 ghost = tk.Toplevel(popup)
                 ghost.overrideredirect(True)
                 ghost.attributes('-topmost', True)
-                ghost.attributes('-alpha', 0.75)
-                ghost.configure(bg="#444444")
-                gl = tk.Label(ghost, text=lbl.cget("text"), bg="#444444", fg=_TXT,
-                              font=("Segoe UI", 8), padx=6, pady=3)
+                ghost.attributes('-alpha', 0.80)
+                ghost.configure(bg=_BTN_HVR)
+                gl = tk.Label(ghost, text=lbl.cget("text"), bg=_BTN_HVR, fg=_TXT,
+                              font=("Segoe UI", 8), padx=8, pady=4)
                 gl.pack()
                 ghost.geometry(f"+{e.x_root}+{e.y_root - ITEM_H // 2}")
                 _drag["ghost"] = ghost
-                row.config(bg="#333333")
-                if dh: dh.config(bg="#333333")
+                row.config(bg=_BTN_ACT)
+                if dh: dh.config(bg=_BTN_ACT)
 
             def _drag_motion(e):
                 if _drag["src"] is None or _drag["ghost"] is None:
@@ -2574,37 +2646,39 @@ class EmbeddedPlayer:
         self._tb_shown = False
         self._tb_y = -TB_H
 
-        self._titlebar = tk.Frame(self._win, bg="#1a1a1a",
+        self._titlebar = tk.Frame(self._win, bg=_CTRL_BG2,
                                   highlightthickness=0, height=TB_H)
         self._titlebar.place(x=0, y=-TB_H,
                              width=self._win.winfo_width(), height=TB_H)
         self._titlebar.lift()
 
         btn_close = tk.Button(self._titlebar, text="✕", command=self._close,
-                              bg="#1a1a1a", fg=_TXT, bd=0, padx=10, pady=0,
+                              bg=_CTRL_BG2, fg=_TXT_MED, bd=0, padx=12, pady=0,
                               relief=tk.FLAT, cursor="hand2",
-                              activebackground="#e50914", activeforeground="white",
+                              activebackground=_ACCENT2, activeforeground="white",
                               font=("Segoe UI", 10))
         btn_close.pack(side=tk.RIGHT)
 
         btn_max = tk.Button(self._titlebar, text="🗖", command=self._toggle_borderless,
-                            bg="#1a1a1a", fg=_TXT, bd=0, padx=10, pady=0,
+                            bg=_CTRL_BG2, fg=_TXT_MED, bd=0, padx=10, pady=0,
                             relief=tk.FLAT, cursor="hand2",
-                            activebackground="#333333", activeforeground="white",
+                            activebackground=_BTN_HVR, activeforeground=_TXT,
                             font=("Segoe UI", 10))
         btn_max.pack(side=tk.RIGHT)
 
         btn_min = tk.Button(self._titlebar, text="—",
                             command=self._borderless_minimize,
-                            bg="#1a1a1a", fg=_TXT, bd=0, padx=10, pady=0,
+                            bg=_CTRL_BG2, fg=_TXT_MED, bd=0, padx=10, pady=0,
                             relief=tk.FLAT, cursor="hand2",
-                            activebackground="#333333", activeforeground="white",
+                            activebackground=_BTN_HVR, activeforeground=_TXT,
                             font=("Segoe UI", 10))
         btn_min.pack(side=tk.RIGHT)
 
+        tk.Frame(self._titlebar, width=1, bg=_BORDER).pack(side=tk.RIGHT, fill=tk.Y, pady=6)
+
         tk.Label(self._titlebar, text="Recursive Video Player",
-                 bg="#1a1a1a", fg=_TXT_DIM,
-                 font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=12)
+                 bg=_CTRL_BG2, fg=_TXT_MED,
+                 font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=14)
 
         self._tb_zone = tk.Frame(self._win, bg="black", height=8,
                                  highlightthickness=0)
@@ -2775,7 +2849,7 @@ class EmbeddedPlayer:
             if ww < 10 or wh < 10:
                 return
             if self._ctrl_visible:
-                self._bar.place(x=0, y=max(0, wh - self.CTRL_H),
+                self._bar.place(x=0, y=wh - self.CTRL_H,
                                 width=ww, height=self.CTRL_H)
         except Exception:
             pass
@@ -2837,12 +2911,28 @@ class EmbeddedPlayer:
             h = sc.winfo_height()
             if w <= 1:
                 return
-            cy = h // 2
-            sc.create_rectangle(0, cy - 2, w, cy + 2, fill=_TRACK, outline="")
+            cy   = h // 2
+            RAIL = 3 if not self._seek_hover else 4
+            r    = RAIL
+
+            # Background track (flat left, rounded right)
+            sc.create_rectangle(0, cy - RAIL, w - r, cy + RAIL,
+                                 fill=_TRACK, outline="")
+            sc.create_oval(w - r * 2, cy - RAIL, w, cy + RAIL * 2,
+                           fill=_TRACK, outline="")
+
             cur = max(0, self._player.get_time() or 0)
             dur = max(1, self._player.get_length() or 1)
             px  = int((cur / dur) * w)
-            sc.create_rectangle(0, cy - 2, px, cy + 2, fill=_ACCENT, outline="")
+
+            # Filled progress
+            if px > 0:
+                sc.create_rectangle(r, cy - RAIL, px, cy + RAIL,
+                                     fill=_ACCENT, outline="")
+                sc.create_oval(0, cy - RAIL, r * 2, cy + RAIL * 2,
+                               fill=_ACCENT, outline="")
+
+            # A-B region
             try:
                 pt_a = self._ab_point_a
                 pt_b = self._ab_point_b
@@ -2850,29 +2940,33 @@ class EmbeddedPlayer:
                     ax = int((pt_a / dur) * w)
                     if pt_b is not None:
                         bx = int((pt_b / dur) * w)
-                        sc.create_rectangle(ax, cy - 2, bx, cy + 2,
-                                            fill="#00BFFF", outline="", stipple="gray50")
-                    sc.create_line(ax, 0, ax, h, fill="#00BFFF", width=2)
-                    sc.create_text(ax + 2, 2, text="A", anchor="nw",
-                                   font=("Segoe UI", 7, "bold"), fill="#00BFFF")
+                        sc.create_rectangle(ax, cy - RAIL, bx, cy + RAIL,
+                                            fill="#1B4F72", outline="", stipple="gray50")
+                    sc.create_line(ax, cy - 7, ax, cy + 7, fill="#60C8FF", width=2)
+                    sc.create_text(ax + 3, cy - 9, text="A", anchor="w",
+                                   font=("Segoe UI", 7, "bold"), fill="#60C8FF")
                 if pt_b is not None:
                     bx = int((pt_b / dur) * w)
-                    sc.create_line(bx, 0, bx, h, fill="#00BFFF", width=2)
-                    sc.create_text(bx - 2, 2, text="B", anchor="ne",
-                                   font=("Segoe UI", 7, "bold"), fill="#00BFFF")
+                    sc.create_line(bx, cy - 7, bx, cy + 7, fill="#60C8FF", width=2)
+                    sc.create_text(bx - 3, cy - 9, text="B", anchor="e",
+                                   font=("Segoe UI", 7, "bold"), fill="#60C8FF")
             except Exception:
                 pass
+
+            # Bookmark markers
             try:
                 if self.annotation_service and self.videos:
                     for bm in self.annotation_service.get_bookmarks(self.videos[self.index]):
                         bx = int((bm["ms"] / dur) * w)
-                        sc.create_rectangle(bx - 1, cy - 5, bx + 1, cy + 5,
-                                            fill="#FFD700", outline="")
+                        sc.create_rectangle(bx - 1, cy - 6, bx + 1, cy + 6,
+                                            fill="#F5C518", outline="")
             except Exception:
                 pass
-            r = 7 if self._seek_hover else 5
-            sc.create_oval(px - r, cy - r, px + r, cy + r,
-                           fill="white", outline="")
+
+            # Playhead dot
+            dot_r = 8 if self._seek_hover else 5
+            sc.create_oval(px - dot_r, cy - dot_r, px + dot_r, cy + dot_r,
+                           fill="white", outline=_ACCENT if self._seek_hover else "")
         except Exception:
             pass
 
@@ -2945,7 +3039,7 @@ class EmbeddedPlayer:
             self._lbl_speed.config(text=f"{self._player.get_rate():.2f}×")
         except Exception:
             pass
-        _L = {"loop_on": "↺", "loop_off": "→", "shuffle": "⇄"}
+        _L = {"loop_on": "↺  Loop", "loop_off": "→  Once", "shuffle": "⇄  Shuffle"}
         try:
             self._btn_loop.config(text=_L.get(self.loop_mode, "↺"))
         except Exception:
@@ -2986,18 +3080,18 @@ class EmbeddedPlayer:
         try:
             if self._ab_loop_active and self._ab_point_a is not None and self._ab_point_b is not None:
                 self._lbl_ab.config(text=f"⟳ {_fmt(self._ab_point_a)}–{_fmt(self._ab_point_b)}")
-                self._btn_ab_a.config(bg="#003d5c", fg="#00BFFF")
-                self._btn_ab_b.config(bg="#003d5c", fg="#00BFFF")
+                self._btn_ab_a.config(bg="#0D2740", fg="#60C8FF")
+                self._btn_ab_b.config(bg="#0D2740", fg="#60C8FF")
                 self._btn_ab_clr.config(fg=_TXT)
             elif self._ab_point_a is not None:
                 self._lbl_ab.config(text=f"A {_fmt(self._ab_point_a)}…")
-                self._btn_ab_a.config(bg="#003d5c", fg="#00BFFF")
-                self._btn_ab_b.config(bg=_BTN, fg="#00BFFF")
+                self._btn_ab_a.config(bg="#0D2740", fg="#60C8FF")
+                self._btn_ab_b.config(bg=_BTN, fg="#60C8FF")
                 self._btn_ab_clr.config(fg=_TXT_DIM)
             else:
                 self._lbl_ab.config(text="")
-                self._btn_ab_a.config(bg=_BTN, fg="#00BFFF")
-                self._btn_ab_b.config(bg=_BTN, fg="#00BFFF")
+                self._btn_ab_a.config(bg=_BTN, fg="#60C8FF")
+                self._btn_ab_b.config(bg=_BTN, fg="#60C8FF")
                 self._btn_ab_clr.config(fg=_TXT_DIM)
         except Exception:
             pass
@@ -3018,12 +3112,12 @@ class EmbeddedPlayer:
                 tags = self.annotation_service.get_tags(self.videos[self.index])
                 for tag in tags:
                     tk.Label(self._tag_frame, text=f"#{tag}",
-                             font=("Segoe UI", 7), bg="#1e1e2e", fg="#9988cc",
-                             padx=3, pady=1).pack(side=tk.LEFT, padx=1)
+                             font=("Segoe UI", 7), bg="#252C38", fg="#7B9CFF",
+                             padx=4, pady=2).pack(side=tk.LEFT, padx=1)
                 drop_btn = tk.Label(self._tag_frame,
                                     text="🏷▾" if not tags else "▾",
-                                    font=("Segoe UI", 7), bg="#2a2a3a", fg="#9988cc",
-                                    padx=4, pady=1, cursor="hand2", relief=tk.FLAT)
+                                    font=("Segoe UI", 7), bg="#2A303C", fg="#7B9CFF",
+                                    padx=4, pady=2, cursor="hand2", relief=tk.FLAT)
                 drop_btn.pack(side=tk.LEFT, padx=(1, 0))
                 drop_btn.bind("<Button-1>", lambda e: self._show_tag_menu())
         except Exception:
