@@ -88,7 +88,7 @@ class ConfigHandler:
                             pass
 
                     return {
-                        'dark_mode':               config.get('dark_mode', False),
+                        'dark_mode':               config.get('dark_mode', True),
                         'show_videos':             config.get('show_videos', True),
                         'expand_all':              False,
                         'selected_dirs':           decoded_dirs,
@@ -102,17 +102,17 @@ class ConfigHandler:
                         'volume':                  config.get('volume', 50),
                         'is_muted':                config.get('is_muted', False),
                         'loop_mode':               config.get('loop_mode', 'loop_on'),
-                        'show_console':            config.get('show_console', True),
+                        'show_console':            config.get('show_console', False),
                     }
         except Exception:
             pass
         return {
-            'dark_mode': False, 'show_videos': True, 'expand_all': False,
+            'dark_mode': True, 'show_videos': True, 'expand_all': False,
             'selected_dirs': [], 'save_directories': True,
             'start_from_last_played': False, 'last_played_video_index': 0,
             'last_played_video_path': '', 'excluded_subdirs': {}, 'excluded_videos': {},
             'smart_resume_enabled': False, 'volume': 50, 'is_muted': False,
-            'loop_mode': 'loop_on', 'show_console': True,
+            'loop_mode': 'loop_on', 'show_console': False,
         }
 
     def save(self, config_dict):
@@ -178,7 +178,7 @@ class ThemeSelector:
             'volume': getattr(self, 'volume', 50),
             'is_muted': getattr(self, 'is_muted', False),
             'loop_mode': getattr(self, 'loop_mode', 'loop_on'),
-            'show_console': getattr(self, 'show_console', True),
+            'show_console': getattr(self, 'show_console', False),
         }
         threading.Thread(target=self.config.save, args=(prefs,), daemon=True).start()
 
