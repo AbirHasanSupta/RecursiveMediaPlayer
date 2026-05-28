@@ -392,6 +392,52 @@ class GridViewManager:
         self._update_tag_filter_btn()
         return self
 
+    def apply_filter_sort(self, filter_sort_manager):
+        if not hasattr(self, 'all_items') or self.grid_window is None:
+            return
+        video_paths = [it['path'] for it in self.all_items if it['type'] == 'video']
+        if not video_paths:
+            return
+
+        def process():
+            try:
+                filtered = filter_sort_manager.apply_filter_and_sort(
+                    video_paths, load_properties=True
+                )
+                self.root.after(0, lambda: self._apply_filtered_videos(filtered))
+            except Exception as e:
+                print(f"[GridView] filter_sort error: {e}")
+
+        threading.Thread(target=process, daemon=True).start()
+
+    def _apply_filtered_videos(self, filtered_paths):
+        if getattr(self, '_closing', False):
+            return
+        from collections import OrderedDict
+        existing_items = {it['path']: it for it in self.all_items if it['type'] == 'video'}
+
+        dir_groups = OrderedDict()
+        for video in filtered_paths:
+            d = os.path.dirname(video)
+            if d not in dir_groups:
+                dir_groups[d] = []
+            dir_groups[d].append(video)
+
+        self.items = []
+        for dir_path, videos in dir_groups.items():
+            self.items.append({
+                'type': 'header',
+                'path': dir_path,
+                'name': os.path.basename(dir_path) or dir_path,
+                'video_count': len(videos)
+            })
+            for video in videos:
+                self.items.append(existing_items.get(video) or {'type': 'video', 'path': video, 'video_item': GridViewItem(video)})
+
+        self._pages_cache = None
+        self._page = 0
+        self._rebuild_grid()
+
     def _close_grid_view(self):
         self._teardown_grid_view()
         if self._embedded:

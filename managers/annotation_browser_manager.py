@@ -1702,6 +1702,28 @@ class AnnotationBrowserManager:
         self.tp.toast.success("Cleared",
                               f"Removed {', '.join(parts)} from {len(paths)} video{'s' if len(paths) != 1 else ''}")
 
+    def apply_filter_sort(self, filter_sort_manager):
+        video_paths = [p for p in getattr(self, '_filtered_videos', []) if os.path.isfile(p)]
+        if not video_paths:
+            return
+        def process():
+            try:
+                filtered = filter_sort_manager.apply_filter_and_sort(video_paths, load_properties=True)
+                self.root.after(0, lambda: self._apply_filter_sort_result(filtered))
+            except Exception as e:
+                print(f"[AnnotationBrowser] filter_sort error: {e}")
+        threading.Thread(target=process, daemon=True).start()
+
+    def _apply_filter_sort_result(self, filtered_paths):
+        if not self._win or not self._win.winfo_exists():
+            return
+        self._filtered_videos = filtered_paths
+        self._vid_selection.clear()
+        self._rebuild_vid_rows()
+        count_text = f"{len(filtered_paths)} video{'s' if len(filtered_paths) != 1 else ''}"
+        if hasattr(self, '_count_lbl'):
+            self._count_lbl.config(text=count_text)
+
     def _open_grid_view_from_selection(self, selection):
         if not self.grid_view_manager:
             return

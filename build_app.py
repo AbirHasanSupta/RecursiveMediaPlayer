@@ -5214,6 +5214,20 @@ def select_multiple_folders_and_play():
             pass
 
         def _show_filter_dialog(self):
+            active = getattr(self, '_active_app_view', 'home')
+            mgr = getattr(self, 'active_embedded_manager', None)
+            if active == 'gallery':
+                def _apply_gallery_filters():
+                    if hasattr(self, 'grid_view_manager'):
+                        self.grid_view_manager.apply_filter_sort(self.filter_sort_manager)
+                self.filter_sort_ui.on_apply_callback = _apply_gallery_filters
+            elif active in ('favourites', 'queue', 'playlist', 'tags') and mgr and hasattr(mgr, 'apply_filter_sort'):
+                def _apply_manager_filters(m=mgr):
+                    m.apply_filter_sort(self.filter_sort_manager)
+                self.filter_sort_ui.on_apply_callback = _apply_manager_filters
+            else:
+                self.toast.info("Filter / Sort", "Switch to Gallery, Favourites, Queue, Playlist, or Tags to apply filters.")
+                return
             self.filter_sort_ui.show_filter_dialog()
 
         def add_directory(self):

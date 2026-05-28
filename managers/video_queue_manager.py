@@ -844,6 +844,54 @@ class QueueUI:
         self.queue_service.set_current_index(first_index)
         self._refresh_queue()
 
+    def apply_filter_sort(self, filter_sort_manager):
+        if not hasattr(self, 'queue_service'):
+            return
+        queue = self.queue_service.get_queue()
+        video_paths = [e.video_path for e in queue if os.path.exists(e.video_path)]
+        if not video_paths:
+            return
+        import threading
+        def process():
+            try:
+                filtered = filter_sort_manager.apply_filter_and_sort(video_paths, load_properties=True)
+                self.parent.after(0, lambda: self._apply_filtered_tree(filtered))
+            except Exception as e:
+                print(f"[QueueUI] filter_sort error: {e}")
+        threading.Thread(target=process, daemon=True).start()
+
+    def _apply_filtered_tree(self, filtered_paths):
+        if not self.queue_tree or not self.queue_tree.winfo_exists():
+            return
+        filtered_set = {p: i for i, p in enumerate(filtered_paths)}
+        queue = self.queue_service.get_queue()
+        current_index = self.queue_service.get_current_index()
+        entries = [(orig_idx, e) for orig_idx, e in enumerate(queue) if e.video_path in filtered_set]
+        entries.sort(key=lambda t: filtered_set[t[1].video_path])
+        self.queue_tree.delete(*self.queue_tree.get_children())
+        if not entries:
+            self.queue_tree.insert("", tk.END, iid="empty",
+                                   values=("", "No videos match the current filters.", "", "", ""),
+                                   tags=("played",))
+            self.queue_info_label.config(text="0 videos")
+            return
+        for i, (orig_idx, entry) in enumerate(entries):
+            dir_str = os.path.normpath(os.path.dirname(entry.video_path))
+            size_str = self._get_file_size(entry.video_path)
+            dur_str = self._duration_cache.get(entry.video_path, "—")
+            if orig_idx == current_index:
+                tag = "playing"
+            elif entry.played:
+                tag = "played"
+            else:
+                tag = "normal"
+            self.queue_tree.insert("", tk.END, iid=str(orig_idx),
+                                   values=(i + 1, entry.video_name, dir_str, size_str, dur_str),
+                                   tags=(tag,))
+            if entry.video_path not in self._duration_cache:
+                self._fetch_duration_async(entry.video_path, str(orig_idx))
+        self.queue_info_label.config(text=f"{len(entries)} videos (filtered)")
+
     def _open_grid_view(self):
         """Open grid view with entire queue"""
         queue = self.queue_service.get_queue()

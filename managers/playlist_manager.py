@@ -791,6 +791,50 @@ class PlaylistUI:
         if videos:
             self.grid_view_manager.show_grid_view(videos, self.video_preview_manager)
 
+    def apply_filter_sort(self, filter_sort_manager):
+        if not self.current_playlist or not self.current_playlist.videos:
+            return
+        video_paths = [v for v in self.current_playlist.videos if os.path.exists(v)]
+        if not video_paths:
+            return
+        import threading
+        def process():
+            try:
+                filtered = filter_sort_manager.apply_filter_and_sort(video_paths, load_properties=True)
+                self.parent.after(0, lambda: self._apply_filtered_tree(filtered))
+            except Exception as e:
+                print(f"[PlaylistUI] filter_sort error: {e}")
+        threading.Thread(target=process, daemon=True).start()
+
+    def _apply_filtered_tree(self, filtered_paths):
+        if not self.video_tree or not self.video_tree.winfo_exists():
+            return
+        if not self.current_playlist:
+            return
+        filtered_set = {p: i for i, p in enumerate(filtered_paths)}
+        all_videos = self.current_playlist.videos
+        entries = [(orig_idx, v) for orig_idx, v in enumerate(all_videos) if v in filtered_set]
+        entries.sort(key=lambda t: filtered_set[t[1]])
+        self.video_tree.delete(*self.video_tree.get_children())
+        self.video_mapping = {}
+        if not entries:
+            self.video_tree.insert("", tk.END, iid="empty",
+                                   values=("", "No videos match the current filters.", "", "", ""),
+                                   tags=("missing",))
+            return
+        for i, (orig_idx, video) in enumerate(entries):
+            size_str = self._get_file_size(video)
+            dur_str = self._duration_cache.get(video, "—")
+            tag = "normal" if os.path.isfile(video) else "missing"
+            self.video_tree.insert("", tk.END, iid=str(orig_idx),
+                                   values=(i + 1, os.path.basename(video),
+                                           os.path.normpath(os.path.dirname(video)),
+                                           size_str, dur_str),
+                                   tags=(tag,))
+            self.video_mapping[orig_idx] = video
+            if video not in self._duration_cache:
+                self._fetch_duration_async(video, str(orig_idx))
+
     def _open_grid_view(self):
         """Open grid view with all playlist videos"""
         if not self.current_playlist or not self.current_playlist.videos:

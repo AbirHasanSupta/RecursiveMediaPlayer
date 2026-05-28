@@ -734,6 +734,48 @@ class FavoritesUI:
                 self.video_preview_manager._show_video_preview(
                     favorite.video_path, event.x_root, event.y_root)
 
+    def apply_filter_sort(self, filter_sort_manager):
+        if not self.favorite_entries:
+            return
+        video_paths = [fav.video_path for fav in self.favorite_entries if os.path.isfile(fav.video_path)]
+        if not video_paths:
+            return
+        import threading
+        def process():
+            try:
+                filtered = filter_sort_manager.apply_filter_and_sort(video_paths, load_properties=True)
+                self.parent.after(0, lambda: self._apply_filtered_tree(filtered))
+            except Exception as e:
+                print(f"[FavoritesUI] filter_sort error: {e}")
+        threading.Thread(target=process, daemon=True).start()
+
+    def _apply_filtered_tree(self, filtered_paths):
+        if not self.favorites_tree or not self.favorites_tree.winfo_exists():
+            return
+        filtered_set = {p: i for i, p in enumerate(filtered_paths)}
+        entries = [fav for fav in self.favorite_entries if fav.video_path in filtered_set]
+        entries.sort(key=lambda fav: filtered_set[fav.video_path])
+        self.favorites_tree.delete(*self.favorites_tree.get_children())
+        if not entries:
+            self.favorites_tree.insert("", tk.END, iid="empty",
+                                       values=("", "No videos match the current filters.", "", "", ""),
+                                       tags=("missing",))
+            self.info_label.config(text="0 videos")
+            return
+        for i, fav in enumerate(entries):
+            orig_idx = self.favorite_entries.index(fav)
+            prefix = f"{os.path.basename(fav.directory_path)} / " if self._is_multi_directory_scope() else ""
+            dir_str = os.path.normpath(os.path.dirname(fav.video_path))
+            size_str = self._get_file_size(fav.video_path)
+            dur_str = self._duration_cache.get(fav.video_path, "—")
+            tag = "normal" if os.path.isfile(fav.video_path) else "missing"
+            self.favorites_tree.insert("", tk.END, iid=str(orig_idx),
+                                       values=(i + 1, prefix + fav.video_name, dir_str, size_str, dur_str),
+                                       tags=(tag,))
+            if fav.video_path not in self._duration_cache:
+                self._fetch_duration_async(fav.video_path, str(orig_idx))
+        self.info_label.config(text=f"{len(entries)} videos (filtered)")
+
     def _open_grid_view(self):
         """Open grid view with all favorites"""
         if not self.favorite_entries:
