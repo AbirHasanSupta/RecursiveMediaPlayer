@@ -544,6 +544,7 @@ class GridViewManager:
             relief=tk.FLAT, bd=0,
             insertbackground=t['text']
         )
+        self.search_entry = search_entry
         search_entry.pack(side=tk.LEFT, ipady=7, padx=(0, 7))
 
         tk.Frame(inner_tb, bg=t['border'], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=8, padx=2)
@@ -2020,6 +2021,11 @@ class GridViewManager:
     # ─────────────────────────────────────────────────────────────────────────
     # Filter (original)
     # ─────────────────────────────────────────────────────────────────────────
+    def apply_search(self, query):
+        if hasattr(self, 'search_var') and self.search_var:
+            self.search_var.set(query)
+            # self._on_search_changed() is already triggered by trace on search_var
+
     def _on_search_changed(self):
         """Debounce the search filter to avoid rapid rebuilds."""
         if self._search_timer:

@@ -106,6 +106,8 @@ def select_multiple_folders_and_play():
             self.loop_mode = "loop_on"
             self._active_player = None
             self._now_playing_video_path = None
+            self._global_search_debounce_id = None
+            self._dir_search_debounce_id = None
 
             preferences = self.config.load_preferences()
             self.dark_mode = preferences['dark_mode']
@@ -236,6 +238,7 @@ def select_multiple_folders_and_play():
             self.settings_manager.set_hotkey_reload_callback(
                 lambda hk: reload_hotkeys(self.controller, hk)
             )
+            self.root.bind("<Button-1>", self._handle_global_click)
             app_settings = self.settings_manager.get_settings()
 
             self.video_preview_manager = VideoPreviewManager(self.root, self.update_console)
@@ -675,6 +678,101 @@ def select_multiple_folders_and_play():
             self._bind_button_hover(btn, variant)
             return btn
 
+        def _handle_global_click(self, event):
+            if not hasattr(self, 'global_search_entry'):
+                return
+            
+            focused = self.root.focus_get()
+            if not focused:
+                return
+            
+            # Global Search Bar focus out
+            if focused == self.global_search_entry:
+                clicked_widget = event.widget
+                is_search_component = (
+                    clicked_widget == self.global_search_entry or
+                    (hasattr(self, '_global_search_wrap') and clicked_widget == self._global_search_wrap) or
+                    (hasattr(self, 'global_search_icon') and clicked_widget == self.global_search_icon)
+                )
+                if not is_search_component:
+                    self.root.focus()
+            
+            # Directory Panel Search focus out
+            elif hasattr(self, 'search_entry') and focused == self.search_entry:
+                clicked_widget = event.widget
+                is_dir_search_component = (
+                    clicked_widget == self.search_entry or
+                    (hasattr(self, '_search_wrap') and clicked_widget == self._search_wrap) or
+                    (hasattr(self, '_search_icon') and clicked_widget == self._search_icon)
+                )
+                if not is_dir_search_component:
+                    self.root.focus()
+            
+            # Active Manager Search focus out (Annotation Browser, Grid View, etc.)
+            elif self.active_embedded_manager and hasattr(self.active_embedded_manager, 'search_entry'):
+                if focused == self.active_embedded_manager.search_entry:
+                    clicked_widget = event.widget
+                    # Note: We don't necessarily know all components of manager search bars, 
+                    # but checking the entry itself is a good start.
+                    if clicked_widget != self.active_embedded_manager.search_entry:
+                        self.root.focus()
+
+        def _setup_global_search_bar(self, parent):
+            search_wrap = tk.Frame(
+                parent,
+                bg=self.bg_color,
+                highlightbackground=self.entry_border,
+                highlightthickness=1,
+            )
+            search_wrap.pack(side=tk.RIGHT, padx=(10, 0), pady=0)
+            self._global_search_wrap = search_wrap
+
+            self.global_search_icon = tk.Label(
+                search_wrap, text="⌕",
+                bg=self.bg_color, fg=self.text_muted,
+                font=("Segoe UI", 11), padx=6, pady=0,
+            )
+            self.global_search_icon.pack(side=tk.LEFT)
+
+            self.global_search_entry = tk.Entry(
+                search_wrap,
+                font=self.small_font,
+                bg=self.bg_color, fg=self.entry_fg,
+                relief=tk.FLAT, bd=0,
+                highlightthickness=0,
+                width=30,
+                insertbackground=self.accent_color,
+            )
+            self.global_search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=6)
+            self.global_search_entry.bind('<KeyRelease>', self._on_global_search_changed)
+
+            def _search_focus_in(e):
+                search_wrap.config(highlightbackground=self.accent_color, highlightthickness=1)
+                self.global_search_icon.config(fg=self.accent_color)
+
+            def _search_focus_out(e):
+                search_wrap.config(highlightbackground=self.entry_border, highlightthickness=1)
+                self.global_search_icon.config(fg=self.text_muted)
+
+            self.global_search_entry.bind('<FocusIn>', _search_focus_in)
+            self.global_search_entry.bind('<FocusOut>', _search_focus_out)
+
+        def _on_global_search_changed(self, event=None):
+            if hasattr(self, '_global_search_debounce_id') and self._global_search_debounce_id:
+                self.root.after_cancel(self._global_search_debounce_id)
+
+            def _do_search():
+                query = self.global_search_entry.get().strip().lower()
+                if self.active_embedded_manager:
+                    if hasattr(self.active_embedded_manager, 'apply_search'):
+                        self.active_embedded_manager.apply_search(query)
+                    elif hasattr(self.active_embedded_manager, 'apply_filter_sort'):
+                        # Fallback for managers that use apply_filter_sort but don't have apply_search
+                        self.active_embedded_manager.apply_filter_sort()
+                self._global_search_debounce_id = None
+
+            self._global_search_debounce_id = self.root.after(300, _do_search)
+
         def setup_main_layout(self):
             self._active_app_view = "home"
             self.active_embedded_manager = None
@@ -714,6 +812,9 @@ def select_multiple_folders_and_play():
             self.workspace_nav = tk.Frame(self.workspace_header, bg=self.bg_color)
             self.workspace_nav.pack(side=tk.RIGHT, anchor="e")
 
+            # Global Search Bar in workspace header
+            self._setup_global_search_bar(self.workspace_nav)
+
             self.workspace_body = tk.Frame(self.workspace_frame, bg=self.bg_color)
             self.workspace_body.pack(fill=tk.BOTH, expand=True)
 
@@ -724,9 +825,17 @@ def select_multiple_folders_and_play():
             self.embedded_view_frame = None
             if hasattr(self, 'exclusion_section') and self.exclusion_section.winfo_ismapped():
                 self.exclusion_section.pack_forget()
+
             self._set_workspace_title("Home", "Welcome to Recursive Video Player")
             self._active_app_view = "home"
             self._refresh_media_pill_state()
+
+            # Re-apply global search to new manager if query exists
+            if hasattr(self, 'global_search_entry'):
+                query = self.global_search_entry.get().strip().lower()
+                if query and self.active_embedded_manager and hasattr(self.active_embedded_manager, 'apply_search'):
+                    self.active_embedded_manager.apply_search(query)
+
             self._render_home_dashboard()
 
         def _render_home_dashboard(self):
@@ -1328,6 +1437,12 @@ def select_multiple_folders_and_play():
             )
             self._refresh_media_pill_state()
             self.active_embedded_manager = builder(frame)
+
+            # Re-apply global search to new manager if query exists
+            if hasattr(self, 'global_search_entry'):
+                query = self.global_search_entry.get().strip().lower()
+                if query and hasattr(self.active_embedded_manager, 'apply_search'):
+                    self.active_embedded_manager.apply_search(query)
 
         def _set_workspace_title(self, title, subtitle=None):
             if hasattr(self, "workspace_title_label"):
@@ -3764,14 +3879,15 @@ def select_multiple_folders_and_play():
                 new_query = ""
             if new_query == self.search_query:
                 return
-            if hasattr(self, '_search_debounce_id'):
-                self.root.after_cancel(self._search_debounce_id)
+            if hasattr(self, '_dir_search_debounce_id') and self._dir_search_debounce_id:
+                self.root.after_cancel(self._dir_search_debounce_id)
 
             def _do_search():
                 self.search_query = new_query
                 self.refresh_search_results()
+                self._dir_search_debounce_id = None
 
-            self._search_debounce_id = self.root.after(300, _do_search)
+            self._dir_search_debounce_id = self.root.after(300, _do_search)
 
         def clear_search(self):
             if hasattr(self, 'search_entry'):
@@ -5578,6 +5694,9 @@ def select_multiple_folders_and_play():
             self._bind_media_pill_hover(btn, label)
 
             self._media_pill_btns[label] = btn
+            if not hasattr(self, '_media_pill_labels'):
+                self._media_pill_labels = {}
+            self._media_pill_labels[label] = label
             return btn
 
         def setup_action_buttons(self):
@@ -5590,6 +5709,9 @@ def select_multiple_folders_and_play():
                 "history": "History",
                 "tags": "Tags & Ratings",
             }
+            # Add emoji variations if needed to match PILL_ACCENTS keys exactly if they were changed
+            # But the UI labels in _make_media_pill are "Home", "Gallery", "Playlist", etc.
+            # and theme.py uses those same strings.
 
             def _tb_colors():
                 return {

@@ -1031,7 +1031,13 @@ class WatchHistoryUI:
         except Exception as e:
             self.theme_provider.toast.error("Error", f"Could not retrieve properties: {e}")
 
+    def apply_search(self, query):
+        self._search_query = query
+        self._apply_filter()
+
     def _apply_filter(self):
+        if not hasattr(self, 'history_tree') or not self.history_tree or not self.history_tree.winfo_exists():
+            return
         filter_value = self.filter_var.get()
 
         if filter_value == "all":
@@ -1042,6 +1048,15 @@ class WatchHistoryUI:
             self.current_entries = self.history_service.get_history_by_date_range(7)
         elif filter_value == "month":
             self.current_entries = self.history_service.get_history_by_date_range(30)
+
+        # Global Search filter
+        search_query = getattr(self, '_search_query', "").lower()
+        if search_query:
+            self.current_entries = [
+                e for e in self.current_entries 
+                if search_query in os.path.basename(e.video_path).lower() or 
+                   search_query in os.path.dirname(e.video_path).lower()
+            ]
 
         if self.directory_filter:
             self.current_entries = [

@@ -837,12 +837,16 @@ class FavoritesUI:
         except Exception as e:
             print(f"Error opening location: {e}")
 
+    def apply_search(self, query):
+        self._search_query = query
+        self._refresh_favorites_list()
+
     def _refresh_favorites_list(self):
         if not self.current_directories:
             return
 
         def refresh():
-            if not self.favorites_tree or not self.favorites_tree.winfo_exists():
+            if not hasattr(self, 'favorites_tree') or not self.favorites_tree or not self.favorites_tree.winfo_exists():
                 return
             t = self._get_design_tokens()
 
@@ -869,7 +873,11 @@ class FavoritesUI:
                 return
 
             rows = []
+            search_query = getattr(self, '_search_query', "").lower()
             for i, fav in enumerate(self.favorite_entries):
+                if search_query and search_query not in fav.video_name.lower() and \
+                   search_query not in fav.directory_path.lower():
+                    continue
                 prefix = f"{os.path.basename(fav.directory_path)} / " if self._is_multi_directory_scope() else ""
                 dir_str = os.path.normpath(os.path.dirname(fav.video_path))
                 size_str = self._get_file_size(fav.video_path)

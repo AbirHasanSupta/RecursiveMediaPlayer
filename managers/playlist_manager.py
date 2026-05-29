@@ -885,7 +885,7 @@ class PlaylistUI:
 
     def _refresh_playlist_list(self):
         def refresh():
-            if not self.playlist_listbox or not self.playlist_listbox.winfo_exists():
+            if not hasattr(self, 'playlist_listbox') or not self.playlist_listbox or not self.playlist_listbox.winfo_exists():
                 return
             current_selection = self.playlist_listbox.curselection()
             current_playlist_id = None
@@ -933,9 +933,13 @@ class PlaylistUI:
             if self.on_play_callback:
                 self.on_play_callback(self.current_playlist.videos[index:])
 
+    def apply_search(self, query):
+        self._search_query = query
+        self._refresh_video_list()
+
     def _refresh_video_list(self):
         def refresh():
-            if not self.video_tree or not self.video_tree.winfo_exists():
+            if not hasattr(self, 'video_tree') or not self.video_tree or not self.video_tree.winfo_exists():
                 return
             self.video_tree.delete(*self.video_tree.get_children())
             self.video_mapping = {}
@@ -951,10 +955,15 @@ class PlaylistUI:
                 return
 
             rows = []
+            search_query = getattr(self, '_search_query', "").lower()
             for i, video in enumerate(videos):
+                video_name = os.path.basename(video)
+                if search_query and search_query not in video_name.lower() and \
+                   search_query not in os.path.dirname(video).lower():
+                    continue
                 size_str = self._get_file_size(video)
                 dur_str = self._duration_cache.get(video, "—")
-                rows.append((i, i + 1, os.path.basename(video), os.path.normpath(os.path.dirname(video)),
+                rows.append((i, i + 1, video_name, os.path.normpath(os.path.dirname(video)),
                              size_str, dur_str))
                 self.video_mapping[i] = video
 

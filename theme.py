@@ -277,6 +277,20 @@ class ThemeSelector:
 
         # Apply colours to root and main frames
         self.root.configure(bg=self.bg_color)
+
+        # Update global search bar if it exists
+        if hasattr(self, 'global_search_entry'):
+            self.global_search_entry.config(
+                bg=self.bg_color, fg=self.entry_fg,
+                insertbackground=self.accent_color
+            )
+        if hasattr(self, 'global_search_icon'):
+            self.global_search_icon.config(bg=self.bg_color, fg=self.text_muted)
+        if hasattr(self, '_global_search_wrap'):
+            self._global_search_wrap.config(
+                bg=self.bg_color, highlightbackground=self.entry_border
+            )
+
         self.main_frame.configure(bg=self.bg_color)
         self.content_frame.configure(bg=self.bg_color)
         for section in ['dir_section', 'status_frame', 'button_frame']:

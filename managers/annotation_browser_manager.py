@@ -130,6 +130,7 @@ class AnnotationBrowserManager:
 
         self._selected_tags: set = set()
         self._search_var: Optional[tk.StringVar] = None
+        self._global_search_var: tk.StringVar = tk.StringVar()
         self._rating_var: Optional[tk.IntVar] = None
         self._video_listbox: Optional[tk.Listbox] = None
         self._vid_canvas: Optional[tk.Canvas] = None
@@ -574,12 +575,15 @@ class AnnotationBrowserManager:
         self._search_var = tk.StringVar()
         self._search_var.trace_add("write", lambda *_: self._on_search_change())
 
+        self._global_search_var.trace_add("write", lambda *_: self._apply_filter_from_cache())
+
         tk.Label(search_entry_frame, text="⌕", font=("Segoe UI", 11),
                  bg=P["search_bg"], fg=tp.muted_fg).pack(side=tk.LEFT, padx=(6, 2))
         search_e = tk.Entry(search_entry_frame, textvariable=self._search_var,
                             font=tp.normal_font, bg=P["search_bg"], fg=tp.entry_fg,
                             insertbackground=tp.entry_fg, relief=tk.FLAT,
                             highlightthickness=0, width=14)
+        self.search_entry = search_e
         search_e.pack(side=tk.LEFT, ipady=5, padx=(0, 6))
         search_e.bind("<FocusIn>",
                       lambda e: search_entry_frame.config(highlightbackground=P["search_hl"]))
@@ -1222,11 +1226,27 @@ class AnnotationBrowserManager:
         min_rating = self._rating_var.get() if self._rating_var else 0
         all_annotated = self._cached_annotated_videos
 
+        local_search_query = self._search_var.get().lower() if self._search_var else ""
+        global_search_query = self._global_search_var.get().lower()
+
         if self._selected_tags:
             candidates = [p for p in all_annotated
                           if self._selected_tags.issubset(set(self.svc.get_tags(p)))]
         else:
             candidates = all_annotated
+
+        if local_search_query:
+            candidates = [
+                p for p in candidates
+                if any(local_search_query in t.lower() for t in self.svc.get_tags(p))
+            ]
+
+        if global_search_query:
+            candidates = [
+                p for p in candidates
+                if global_search_query in os.path.basename(p).lower() or
+                   global_search_query in os.path.dirname(p).lower()
+            ]
 
         if self.directory_filter:
             candidates = [
@@ -1481,8 +1501,13 @@ class AnnotationBrowserManager:
                 else:
                     cell.config(bg=bg_, fg=fg_)
 
+    def apply_search(self, query):
+        if hasattr(self, '_global_search_var'):
+            self._global_search_var.set(query)
+
     def _on_search_change(self):
-        self.refresh()
+        self._rebuild_tags_from_cache()
+        self._apply_filter_from_cache()
 
     def _clear_filters(self):
         self._selected_tags.clear()
@@ -1491,6 +1516,8 @@ class AnnotationBrowserManager:
         self._update_rb_visuals(P)
         if self._search_var:
             self._search_var.set("")
+        if hasattr(self, '_global_search_var'):
+            self._global_search_var.set("")
         self.refresh()
 
     # ── Detail panel ──────────────────────────────────────────────────────────

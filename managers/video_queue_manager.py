@@ -670,9 +670,13 @@ class QueueUI:
         if videos and self.on_play_callback:
             self.on_play_callback(videos)
 
+    def apply_search(self, query):
+        self._search_query = query
+        self._refresh_queue()
+
     def _refresh_queue(self):
         def refresh():
-            if not self.queue_tree or not self.queue_tree.winfo_exists():
+            if not hasattr(self, 'queue_tree') or not self.queue_tree or not self.queue_tree.winfo_exists():
                 return
             t = self._get_design_tokens()
             ACCENT = t["queue_accent"]
@@ -689,7 +693,11 @@ class QueueUI:
                 return
 
             rows = []
+            search_query = getattr(self, '_search_query', "").lower()
             for i, entry in enumerate(queue):
+                if search_query and search_query not in entry.video_name.lower() and \
+                   search_query not in os.path.dirname(entry.video_path).lower():
+                    continue
                 dir_str = os.path.normpath(os.path.dirname(entry.video_path))
                 size_str = self._get_file_size(entry.video_path)
                 dur_str = self._duration_cache.get(entry.video_path, "—")
