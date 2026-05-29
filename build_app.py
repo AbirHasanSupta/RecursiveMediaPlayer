@@ -2900,7 +2900,9 @@ def select_multiple_folders_and_play():
                                 open_state = False
                                 if is_dir:
                                     if search_query:
-                                        open_state = self.matches_search(path, search_query) if auto_expand else False
+                                        dir_name_match = search_query in os.path.basename(path).lower()
+                                        has_match_children = self.matches_search(path, search_query)
+                                        open_state = (has_match_children and not dir_name_match) if auto_expand else False
                                     elif expand_all:
                                         open_state = norm_p not in collapsed
                                     else:
