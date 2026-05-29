@@ -5,22 +5,25 @@ A sophisticated video player application with AI-powered semantic search capabil
 ## Features
 
 ### Core Functionality
+- **Home Dashboard**: Central hub with watch statistics, recently played videos, and top directories
 - **Recursive Directory Scanning**: Automatically discovers videos in directory trees
 - **Multi-Monitor Support**: Switch between monitors during playback
 - **Advanced Exclusion System**: Exclude specific subdirectories and videos from playback
 - **Resume Playback**: Continue from where you last left off with smart resume capabilities
-- **Theme Support**: Light, dark, and custom themes
+- **Theme Support**: Light, dark, and custom themes (persistently saved)
 - **Playlist Management**: Create, edit, and manage multiple video playlists
-- **Watch History Tracking**: Detailed tracking of watched videos and playback positions
+- **Watch History & Statistics**: Detailed tracking of watched videos with visual charts and metrics
 - **Video Preview Generation**: Hover-based video previews and visual thumbnails
-- **Advanced Grid View**: Visual explorer for browsing video collections
+- **Advanced Grid View**: Visual explorer for browsing video collections with pagination and filtering
 - **Advanced Filter & Sort**: Filter by resolution, size, or date, and sort by various criteria
 - **Google Drive Support**: Stream and download videos directly from public Google Drive folders or links
 - **Dual Player Mode**: Play and compare two videos side-by-side
-- **Embedded Player**: Integrated, high-performance video playback with rich controls
+- **Embedded Player**: Integrated, high-performance video playback with rich controls, rotation, zoom, and subtitle support
 - **Favorites System**: Bookmark and organize your favorite videos for quick access
 - **Video Queue**: Manual queue management for fine-tuned playback order
+- **Annotation & Metadata**: Add tags, ratings, and bookmarks to your video collection
 - **Settings Management**: Persistent save/load for all user and application preferences
+- **Windows Shell Integration**: Register the player in the Windows folder context menu for quick access
 
 ### AI-Powered Search
 - **Semantic Video Search**: Find videos using natural language descriptions
@@ -71,7 +74,22 @@ pip install -r requirements\ai_requirements.txt
 3. (Optional) For AI search: `pip install -r requirements\ai_requirements.txt`
 4. Ensure VLC Media Player is installed and accessible
 5. Run the application: 
-   - For standard mode: `python build_app.py` (uses high-performance Embedded Player)
+   - For standard mode: `python build_app.py`
+   - For AI-augmented mode: Ensure preprocessing is done (see [AI Search System](#ai-search-system)) then run the app and toggle AI Mode.
+
+### Windows Shell Integration (Optional)
+
+You can add "Open with Recursive Video Player" to your Windows folder context menu:
+
+1. Build the application first (see [Building the Executable](#building-the-executable))
+2. Run the registration script as Administrator:
+   ```cmd
+   python register_context_menu.py
+   ```
+To remove it:
+   ```cmd
+   python register_context_menu.py unregister
+   ```
 
 ## Usage
 
@@ -170,16 +188,20 @@ The application saves preferences automatically:
 The project includes a build system to create a standalone Windows executable.
 
 ### Building the Executable
+
 1. Ensure `pyinstaller` is installed: `pip install pyinstaller`
 2. Run the build script:
    ```cmd
    python build.py
    ```
 This script will:
-- Write version information.
-- Clean previous build artifacts.
-- Use `video_player.spec` to build a lightweight version (using `build_app.py`) without AI dependencies.
-- Output the executable to `dist/RecursiveVideoPlayer/RecursiveVideoPlayer.exe`.
+- Write version information to `version.py`.
+- Clean previous build artifacts (`build`, `dist`, `__pycache__`).
+- Install/Update `pyinstaller`.
+- Build the standalone executable using `video_player.spec`.
+- Create a distribution ZIP package: `RecursiveVideoPlayer-vX.X.X.zip`.
+
+The output executable will be located at `dist/RecursiveVideoPlayer/RecursiveVideoPlayer.exe`.
 
 *Note: The standalone build intentionally excludes AI features to maintain a smaller file size and reduce system requirements.*
 
