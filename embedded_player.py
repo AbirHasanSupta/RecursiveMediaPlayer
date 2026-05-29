@@ -935,7 +935,9 @@ class EmbeddedPlayer:
         scroll_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
 
         canvas = tk.Canvas(scroll_frame, bg=_CTRL_BG2, highlightthickness=0)
-        sb = tk.Scrollbar(scroll_frame, orient=tk.VERTICAL, command=canvas.yview)
+        from tkinter import ttk
+        sb = ttk.Scrollbar(scroll_frame, orient=tk.VERTICAL, command=canvas.yview,
+                           style="ExclusionTree.Vertical.TScrollbar")
         canvas.configure(yscrollcommand=sb.set)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -1055,19 +1057,27 @@ class EmbeddedPlayer:
         if not self.annotation_service or not self.videos:
             return
         pos = self._player.get_time() or 0
+        pos_str = _fmt(pos)
         path = self.videos[self.index]
 
         # Ask for optional label via simple dialog
         dlg = tk.Toplevel(self._win)
+        dlg.withdraw()
         dlg.title("Add Bookmark")
-        dlg.geometry("360x130")
         dlg.configure(bg=_CTRL_BG2)
         dlg.transient(self._win)
         dlg.grab_set()
         dlg.overrideredirect(False)
         apply_icon(dlg)
 
-        pos_str = _fmt(pos)
+        # Center relative to parent window
+        dlg.update_idletasks()
+        pw, ph = self._win.winfo_width(), self._win.winfo_height()
+        px, py = self._win.winfo_rootx(), self._win.winfo_rooty()
+        dw, dh = 360, 130
+        dlg.geometry(f"{dw}x{dh}+{px + (pw - dw) // 2}+{py + (ph - dh) // 2}")
+        dlg.deiconify()
+
         tk.Frame(dlg, height=2, bg=_ACCENT).pack(fill=tk.X)
         tk.Label(dlg, text=f"Bookmark at  {pos_str}",
                  font=("Segoe UI", 10, "bold"), bg=_CTRL_BG2, fg=_TXT).pack(pady=(12, 4))
@@ -1100,11 +1110,19 @@ class EmbeddedPlayer:
         path = self.videos[self.index]
 
         dlg = tk.Toplevel(self._win)
+        dlg.withdraw()
         dlg.title("Bookmarks")
-        dlg.geometry("340x340")
         dlg.configure(bg=_CTRL_BG2)
         dlg.transient(self._win)
         apply_icon(dlg)
+
+        # Center relative to parent window
+        dlg.update_idletasks()
+        pw, ph = self._win.winfo_width(), self._win.winfo_height()
+        px, py = self._win.winfo_rootx(), self._win.winfo_rooty()
+        dw, dh = 340, 340
+        dlg.geometry(f"{dw}x{dh}+{px + (pw - dw) // 2}+{py + (ph - dh) // 2}")
+        dlg.deiconify()
 
         tk.Frame(dlg, height=2, bg=_ACCENT).pack(fill=tk.X)
         tk.Label(dlg, text=os.path.basename(path)[:44],
@@ -1120,7 +1138,9 @@ class EmbeddedPlayer:
             list_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
 
             canvas = tk.Canvas(list_frame, bg=_CTRL_BG2, highlightthickness=0)
-            sb = tk.Scrollbar(list_frame, orient=tk.VERTICAL, command=canvas.yview)
+            from tkinter import ttk
+            sb = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=canvas.yview,
+                               style="ExclusionTree.Vertical.TScrollbar")
             canvas.configure(yscrollcommand=sb.set)
             sb.pack(side=tk.RIGHT, fill=tk.Y)
             canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -1213,12 +1233,20 @@ class EmbeddedPlayer:
 
     def _prompt_add_tag(self, path: str):
         dlg = tk.Toplevel(self._win)
+        dlg.withdraw()
         dlg.title("Add Tag")
-        dlg.geometry("340x130")
         dlg.configure(bg=_CTRL_BG2)
         dlg.transient(self._win)
         dlg.grab_set()
         apply_icon(dlg)
+
+        # Center relative to parent window
+        dlg.update_idletasks()
+        pw, ph = self._win.winfo_width(), self._win.winfo_height()
+        px, py = self._win.winfo_rootx(), self._win.winfo_rooty()
+        dw, dh = 340, 130
+        dlg.geometry(f"{dw}x{dh}+{px + (pw - dw) // 2}+{py + (ph - dh) // 2}")
+        dlg.deiconify()
 
         tk.Frame(dlg, height=2, bg=_ACCENT).pack(fill=tk.X)
         tk.Label(dlg, text="Tag name:",

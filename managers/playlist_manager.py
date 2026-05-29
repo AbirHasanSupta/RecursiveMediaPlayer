@@ -1148,7 +1148,7 @@ class PlaylistInfoDialog:
         SURFACE = t["surface"]
         SURFACE2 = t["surface2"]
 
-        self.dialog.geometry("460x320")
+        self.dialog.geometry("460x360")
         self.dialog.configure(bg=BG)
 
         # Header
@@ -1217,7 +1217,7 @@ class PlaylistInfoDialog:
         btn_row = tk.Frame(body, bg=BG)
         btn_row.pack(fill=tk.X)
         tp.create_modern_button(btn_row, "Cancel", self._cancel, "secondary", "md").pack(side=tk.RIGHT, padx=(8, 0))
-        tp.create_modern_button(btn_row, "Save Playlist", self._ok, "playlist", "md").pack(side=tk.RIGHT)
+        tp.create_modern_button(btn_row, "Save Playlist", self._ok, "primary", "md").pack(side=tk.RIGHT)
 
         self.name_entry.focus_set()
         self.dialog.bind("<Return>", lambda e: self._ok())
@@ -1319,7 +1319,7 @@ class PlaylistManager:
         dialog.geometry("440x400")
         dialog.minsize(360, 320)
         dialog.configure(bg=BG)
-        dialog.resizable(False, False)
+        dialog.resizable(True, True)
         dialog.transient(self.ui.parent)
         dialog.grab_set()
 
@@ -1401,7 +1401,7 @@ class PlaylistManager:
 
         tp.create_modern_button(btn_row, "+ New Playlist", create_new, "secondary", "md").pack(side=tk.LEFT)
         tp.create_modern_button(btn_row, "Cancel", dialog.destroy, "secondary", "md").pack(side=tk.RIGHT, padx=(8, 0))
-        tp.create_modern_button(btn_row, "Add to Selected", add_to_existing, "playlist", "md").pack(side=tk.RIGHT)
+        tp.create_modern_button(btn_row, "Add to Selected", add_to_existing, "primary", "md").pack(side=tk.RIGHT)
 
         from icon_helper import apply_icon
         apply_icon(dialog)
