@@ -1932,8 +1932,7 @@ def select_multiple_folders_and_play():
                 return
 
             if not iid:
-                self.exclusion_tree.selection_remove(self.exclusion_tree.selection())
-                self._selection_anchor = None
+                self.clear_tree_selection()
                 return
 
             is_root = iid in self._dir_root_iids
@@ -1973,9 +1972,13 @@ def select_multiple_folders_and_play():
                     # toggle off
                     self.exclusion_tree.selection_remove(iid)
                     self.current_selected_dir_index = None
-                    self.clear_exclusion_children(iid)
                     self._is_filtered_mode = False
                     self._selection_anchor = None
+                    self._refresh_active_manager_for_directory_context()
+                    if getattr(self, 'search_query', ''):
+                        self.refresh_search_results()
+                    else:
+                        self.clear_exclusion_children(iid)
                     return "break"
                 self.exclusion_tree.selection_set(iid)
                 self._selection_anchor = iid
@@ -2206,8 +2209,21 @@ def select_multiple_folders_and_play():
                     self.exclusion_tree.item(iid, text=label, tags=(tag,))
                     break
 
+        def _get_root_directory_of_node(self, iid):
+            current = iid
+            while current:
+                if hasattr(self, '_dir_root_iids') and current in self._dir_root_iids:
+                    idx = self._dir_root_iids.index(current)
+                    if idx < len(self.selected_dirs):
+                        return self.selected_dirs[idx]
+                parent = self.exclusion_tree.parent(current)
+                if not parent or parent == current:
+                    break
+                current = parent
+            return None
+
         def _lazy_expand_node(self, iid, directory):
-            selected_dir = self.get_current_selected_directory()
+            selected_dir = self.get_current_selected_directory() or self._get_root_directory_of_node(iid)
             if not selected_dir:
                 return
 
@@ -2498,7 +2514,7 @@ def select_multiple_folders_and_play():
                     command=lambda: self.exclusion_tree.selection_set(self._tree_get_all_iids()))
             if selected_count > 0:
                 context_menu.add_command(label="Clear Selection",
-                    command=lambda: self.exclusion_tree.selection_remove(self._tree_get_all_iids()))
+                    command=self.clear_tree_selection)
 
             context_menu.add_separator()
             context_menu.add_command(label="Open in Gallery",
@@ -2711,18 +2727,24 @@ def select_multiple_folders_and_play():
                 self.exclusion_tree.insert("", tk.END, iid="__loading__",
                                            text="  Loading…ª", tags=("placeholder",))
 
-            if not hasattr(self, '_subdir_load_token'):
-                self._subdir_load_token = None
+            if not hasattr(self, '_subdir_load_tokens'):
+                self._subdir_load_tokens = {}
                 self._subdir_load_lock  = threading.RLock()
 
             with self._subdir_load_lock:
                 token = object()
-                self._subdir_load_token = token
+                if _root_iid is None:
+                    self._subdir_load_tokens.clear()
+                    self._subdir_load_tokens["global"] = token
+                    scope_key = "global"
+                else:
+                    self._subdir_load_tokens[_root_iid] = token
+                    scope_key = _root_iid
 
             # Handle Google Drive pseudo-paths
             try:
                 if isinstance(directory, str) and directory.startswith("gdrive://"):
-                    self._load_drive_tree(directory, token, restore_scroll)
+                    self._load_drive_tree(directory, token, restore_scroll, scope_key=scope_key)
                     return
             except Exception:
                 pass
@@ -2743,7 +2765,7 @@ def select_multiple_folders_and_play():
                     if self.resource_manager.is_shutting_down():
                         return
                     with self._subdir_load_lock:
-                        if self._subdir_load_token is not token:
+                        if self._subdir_load_tokens.get(scope_key) is not token:
                             return
 
                     path_to_iid = {}
@@ -2832,7 +2854,7 @@ def select_multiple_folders_and_play():
 
                     def post_tree():
                         with self._subdir_load_lock:
-                            if self._subdir_load_token is not token:
+                            if self._subdir_load_tokens.get(scope_key) is not token:
                                 return
 
                         if _root_iid is not None:
@@ -2865,7 +2887,7 @@ def select_multiple_folders_and_play():
 
                         def insert_chunk(start):
                             nonlocal target_iid
-                            if self._subdir_load_token is not token:
+                            if self._subdir_load_tokens.get(scope_key) is not token:
                                 return
                             end = min(start + chunk_size, total)
                             for i in range(start, end):
@@ -2952,7 +2974,7 @@ def select_multiple_folders_and_play():
                     err = str(e)
                     def post_error(msg=err):
                         with self._subdir_load_lock:
-                            if self._subdir_load_token is not token:
+                            if self._subdir_load_tokens.get(scope_key) is not token:
                                 return
                         self._clear_tree()
                         self.exclusion_tree.insert("", tk.END, iid="__error__",
@@ -2962,7 +2984,7 @@ def select_multiple_folders_and_play():
 
             ManagedThread(target=build_and_post, name="LoadSubdirs").start()
 
-        def _load_drive_tree(self, directory, token, restore_scroll):
+        def _load_drive_tree(self, directory, token, restore_scroll, scope_key="global"):
             """Populate the tree for a Google Drive pseudo-directory."""
             cache = self.scan_cache.get(directory)
             if not cache:
@@ -2975,7 +2997,7 @@ def select_multiple_folders_and_play():
 
             def post_drive():
                 with self._subdir_load_lock:
-                    if self._subdir_load_token is not token:
+                    if self._subdir_load_tokens.get(scope_key) is not token:
                         return
                 self._clear_tree()
                 mapping = {}
@@ -3613,7 +3635,10 @@ def select_multiple_folders_and_play():
                     selected_dir = self.selected_dirs[self.current_selected_dir_index]
                     self.load_subdirectories(selected_dir, max_depth=20)
                 else:
-                    self.clear_exclusion_list()
+                    if getattr(self, 'search_query', ''):
+                        self.refresh_search_results()
+                    else:
+                        self.clear_exclusion_list()
                 return
 
             selected_index = selection[0]
@@ -3696,9 +3721,39 @@ def select_multiple_folders_and_play():
                 if i < len(self.selected_dirs)
             ]
 
+        def clear_tree_selection(self):
+            if hasattr(self, 'exclusion_tree'):
+                self.exclusion_tree.selection_remove(self.exclusion_tree.selection())
+            self._selection_anchor = None
+            self.current_selected_dir_index = None
+            self._refresh_active_manager_for_directory_context()
+            self.clear_exclusion_list()
+
         def clear_exclusion_list(self):
             # self.selected_dir_label.config(text="Select a directory to see its folders and videos")
-            self._clear_tree()
+            if getattr(self, 'search_query', ''):
+                self.refresh_search_results()
+            else:
+                self._clear_tree()
+
+        def refresh_search_results(self):
+            selected_dir = self.get_current_selected_directory()
+            search_query = getattr(self, 'search_query', '')
+            if selected_dir:
+                self.load_subdirectories(selected_dir)
+            else:
+                if search_query:
+                    for idx, directory in enumerate(self.selected_dirs):
+                        if idx < len(self._dir_root_iids):
+                            root_iid = self._dir_root_iids[idx]
+                            self.load_subdirectories(directory, _root_iid=root_iid)
+                else:
+                    self._clear_tree()
+                    for riid in getattr(self, '_dir_root_iids', []):
+                        try:
+                            self.exclusion_tree.item(riid, open=False)
+                        except Exception:
+                            pass
 
         def on_search_changed(self, event=None):
             try:
@@ -3712,9 +3767,7 @@ def select_multiple_folders_and_play():
 
             def _do_search():
                 self.search_query = new_query
-                selected_dir = self.get_current_selected_directory()
-                if selected_dir:
-                    self.load_subdirectories(selected_dir)
+                self.refresh_search_results()
 
             self._search_debounce_id = self.root.after(300, _do_search)
 
@@ -3753,6 +3806,9 @@ def select_multiple_folders_and_play():
             return False
 
         def get_current_selected_directory(self):
+            if hasattr(self, 'exclusion_tree') and not self.exclusion_tree.selection():
+                self.current_selected_dir_index = None
+                return None
             selection = self.dir_listbox.curselection()
             if selection:
                 idx = selection[0]
