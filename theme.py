@@ -875,9 +875,17 @@ class ThemeSelector:
                 pass
         try:
             if isinstance(widget, (tk.Frame, tk.Toplevel)):
-                widget.configure(bg=self.bg_color)
+                if widget is getattr(self, '_global_search_wrap', None):
+                    widget.configure(bg=self.entry_bg, highlightbackground=self.entry_border)
+                else:
+                    widget.configure(bg=self.bg_color)
+            elif isinstance(widget, tk.Entry):
+                if widget is getattr(self, 'global_search_entry', None):
+                    widget.configure(bg=self.entry_bg, fg=self.entry_fg, insertbackground=self.accent_color)
             elif isinstance(widget, tk.Label):
-                if widget is getattr(self, 'workspace_context_label', None):
+                if widget is getattr(self, 'global_search_icon', None):
+                    widget.configure(bg=self.entry_bg, fg=self.text_muted)
+                elif widget is getattr(self, 'workspace_context_label', None):
                     widget.configure(bg=self.bg_color, fg=self.muted_fg)
                 else:
                     widget.configure(bg=self.bg_color, fg=self.text_color)
