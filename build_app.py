@@ -1976,7 +1976,7 @@ def select_multiple_folders_and_play():
                     self._selection_anchor = None
                     self._refresh_active_manager_for_directory_context()
                     if getattr(self, 'search_query', ''):
-                        self.refresh_search_results()
+                        self.refresh_search_results(auto_expand=False)
                     else:
                         self.clear_exclusion_children(iid)
                     return "break"
@@ -2699,7 +2699,7 @@ def select_multiple_folders_and_play():
                     new_mapping[riid] = self.current_subdirs_mapping[riid]
             self.current_subdirs_mapping = new_mapping
 
-        def load_subdirectories(self, directory, max_depth=20, restore_path=None, restore_scroll=None, _root_iid=None):
+        def load_subdirectories(self, directory, max_depth=20, restore_path=None, restore_scroll=None, _root_iid=None, auto_expand=True):
             self.current_max_depth = max_depth
             # Auto-resolve root iid from directory path
             if _root_iid is None and hasattr(self, '_dir_root_iids') and hasattr(self, 'selected_dirs'):
@@ -2721,7 +2721,7 @@ def select_multiple_folders_and_play():
                 loading_iid = f"__loading_{_root_iid}__"
                 self.exclusion_tree.insert(_root_iid, tk.END, iid=loading_iid,
                                            text="  Loading…", tags=("placeholder",))
-                self.exclusion_tree.item(_root_iid, open=True)
+                self.exclusion_tree.item(_root_iid, open=auto_expand)
             else:
                 self._clear_tree()
                 self.exclusion_tree.insert("", tk.END, iid="__loading__",
@@ -2900,7 +2900,7 @@ def select_multiple_folders_and_play():
                                 open_state = False
                                 if is_dir:
                                     if search_query:
-                                        open_state = self.matches_search(path, search_query)
+                                        open_state = self.matches_search(path, search_query) if auto_expand else False
                                     elif expand_all:
                                         open_state = norm_p not in collapsed
                                     else:
@@ -3636,7 +3636,7 @@ def select_multiple_folders_and_play():
                     self.load_subdirectories(selected_dir, max_depth=20)
                 else:
                     if getattr(self, 'search_query', ''):
-                        self.refresh_search_results()
+                        self.refresh_search_results(auto_expand=False)
                     else:
                         self.clear_exclusion_list()
                 return
@@ -3732,21 +3732,21 @@ def select_multiple_folders_and_play():
         def clear_exclusion_list(self):
             # self.selected_dir_label.config(text="Select a directory to see its folders and videos")
             if getattr(self, 'search_query', ''):
-                self.refresh_search_results()
+                self.refresh_search_results(auto_expand=False)
             else:
                 self._clear_tree()
 
-        def refresh_search_results(self):
+        def refresh_search_results(self, auto_expand=True):
             selected_dir = self.get_current_selected_directory()
             search_query = getattr(self, 'search_query', '')
             if selected_dir:
-                self.load_subdirectories(selected_dir)
+                self.load_subdirectories(selected_dir, auto_expand=auto_expand)
             else:
                 if search_query:
                     for idx, directory in enumerate(self.selected_dirs):
                         if idx < len(self._dir_root_iids):
                             root_iid = self._dir_root_iids[idx]
-                            self.load_subdirectories(directory, _root_iid=root_iid)
+                            self.load_subdirectories(directory, _root_iid=root_iid, auto_expand=auto_expand)
                 else:
                     self._clear_tree()
                     for riid in getattr(self, '_dir_root_iids', []):
