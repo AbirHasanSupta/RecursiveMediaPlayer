@@ -902,7 +902,7 @@ def select_multiple_folders_and_play():
             inner.bind("<Configure>", _on_inner_configure)
             canvas.bind("<Configure>", _on_canvas_configure)
             pad = tk.Frame(inner, bg=bg)
-            pad.pack(fill=tk.BOTH, expand=True, padx=30, pady=(35, 20))
+            pad.pack(fill=tk.BOTH, expand=True, padx=1, pady=(35, 20))
 
             hero = tk.Frame(pad, bg=surface)
             hero.pack(fill=tk.X, pady=(0, 18))
