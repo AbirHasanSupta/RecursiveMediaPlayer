@@ -72,6 +72,8 @@ class GridViewManager:
         self._active_tag_filters = set()
         self._tag_filter_btn = None
         self._closing = False
+        self.search_var = tk.StringVar()
+        self.search_var.trace_add('write', lambda *_: self._on_search_changed())
 
         # callbacks
         self.play_callback = None
@@ -527,28 +529,6 @@ class GridViewManager:
         inner_tb = tk.Frame(toolbar, bg=toolbar_bg)
         inner_tb.pack(fill=tk.BOTH, expand=True, padx=20)
 
-        # Filter
-        tk.Label(inner_tb, text="Filter", font=("Segoe UI", 8),
-                 bg=toolbar_bg, fg=t['text_muted']).pack(side=tk.LEFT, padx=(14, 6), pady=12)
-        self.search_var = tk.StringVar()
-        self.search_var.trace('w', lambda *_: self._on_search_changed())
-        search_frame = tk.Frame(inner_tb, bg=t['surface'],
-                                highlightthickness=1, highlightbackground=t['border'])
-        search_frame.pack(side=tk.LEFT, pady=12)
-        tk.Label(search_frame, text="⌕", font=("Segoe UI", 9),
-                 bg=t['surface'], fg=t['text_muted']).pack(side=tk.LEFT, padx=(7, 2))
-        search_entry = tk.Entry(
-            search_frame, textvariable=self.search_var,
-            font=("Segoe UI", 8), width=22,
-            bg=t['surface'], fg=t['text'],
-            relief=tk.FLAT, bd=0,
-            insertbackground=t['text']
-        )
-        self.search_entry = search_entry
-        search_entry.pack(side=tk.LEFT, ipady=7, padx=(0, 7))
-
-        tk.Frame(inner_tb, bg=t['border'], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=8, padx=2)
-
         tp = self.theme_provider
         self._tag_filter_btn = tp.create_manager_action_link(
             inner_tb, "All tags ▾", lambda: None, style="secondary"
@@ -726,7 +706,7 @@ class GridViewManager:
         if not hasattr(self, 'all_items'):
             self.all_items = self.items.copy()
 
-        term = self.search_var.get().lower() if hasattr(self, 'search_var') else ""
+        term = self.search_var.get().lower()
         active_tags = self._active_tag_filters
 
         if not active_tags and not term:
@@ -860,7 +840,7 @@ class GridViewManager:
                 if grid_videos:
                     self.video_preview_manager.prioritize_for_grid(grid_videos)
 
-            term = self.search_var.get().lower() if hasattr(self, 'search_var') else ""
+            term = self.search_var.get().lower()
             if term or self._active_tag_filters:
                 self.root.after(0, self._filter_directories)
             else:
@@ -2022,7 +2002,7 @@ class GridViewManager:
     # Filter (original)
     # ─────────────────────────────────────────────────────────────────────────
     def apply_search(self, query):
-        if hasattr(self, 'search_var') and self.search_var:
+        if self.search_var:
             self.search_var.set(query)
             # self._on_search_changed() is already triggered by trace on search_var
 

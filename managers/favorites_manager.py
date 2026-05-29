@@ -875,9 +875,17 @@ class FavoritesUI:
             rows = []
             search_query = getattr(self, '_search_query', "").lower()
             for i, fav in enumerate(self.favorite_entries):
-                if search_query and search_query not in fav.video_name.lower() and \
-                   search_query not in fav.directory_path.lower():
+                # Normalize paths for robust search
+                video_name_lower = fav.video_name.lower()
+                scope_path_lower = fav.directory_path.lower()
+                actual_dir_lower = os.path.normpath(os.path.dirname(fav.video_path)).lower()
+                
+                if search_query and \
+                   search_query not in video_name_lower and \
+                   search_query not in scope_path_lower and \
+                   search_query not in actual_dir_lower:
                     continue
+                
                 prefix = f"{os.path.basename(fav.directory_path)} / " if self._is_multi_directory_scope() else ""
                 dir_str = os.path.normpath(os.path.dirname(fav.video_path))
                 size_str = self._get_file_size(fav.video_path)
