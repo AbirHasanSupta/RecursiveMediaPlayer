@@ -71,6 +71,10 @@ class GridViewManager:
         self.annotation_service = None
         self._active_tag_filters = set()
         self._tag_filter_btn = None
+        self._sort_col = None
+        self._sort_rev = False
+        self._sort_btn = None
+        self._duration_cache = {}
         self._closing = False
         self.search_var = tk.StringVar()
         self.search_var.trace_add('write', lambda *_: self._on_search_changed())
@@ -345,6 +349,9 @@ class GridViewManager:
         self._page = 0
         self._pages_cache = None
         self._active_tag_filters.clear()
+        self._sort_col = None
+        self._sort_rev = False
+        self._sort_btn = None
         if hasattr(self, 'all_items'):
             del self.all_items
 
@@ -386,6 +393,9 @@ class GridViewManager:
         self._page = 0
         self._pages_cache = None
         self._active_tag_filters.clear()
+        self._sort_col = None
+        self._sort_rev = False
+        self._sort_btn = None
         if hasattr(self, 'all_items'):
             del self.all_items
 
@@ -530,13 +540,19 @@ class GridViewManager:
         inner_tb.pack(fill=tk.BOTH, expand=True, padx=20)
 
         tp = self.theme_provider
+        self._sort_btn = tp.create_manager_action_link(
+            inner_tb, "Sort: Default ▾", lambda: None, style="secondary"
+        )
+        self._sort_btn.pack(side=tk.LEFT, padx=(0, 4), pady=12)
+        self._sort_btn.bind("<Button-1>", lambda e: self._show_sort_menu(e))
+
+        tk.Frame(inner_tb, bg=t['border'], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=8, padx=8)
+
         self._tag_filter_btn = tp.create_manager_action_link(
             inner_tb, "All tags ▾", lambda: None, style="secondary"
         )
         self._tag_filter_btn.pack(side=tk.LEFT, padx=(0, 4), pady=12)
         self._tag_filter_btn.bind("<Button-1>", lambda e: self._show_tag_filter_menu(e))
-
-        tk.Frame(inner_tb, bg=t['border'], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=8, padx=8)
 
         right_tb = tk.Frame(inner_tb, bg=toolbar_bg)
         right_tb.pack(side=tk.RIGHT)
@@ -711,6 +727,7 @@ class GridViewManager:
 
         if not active_tags and not term:
             self.items = self.all_items.copy()
+            self._apply_sort_to_items()
             self.root.after(0, self._rebuild_grid)
             return
 
@@ -739,8 +756,147 @@ class GridViewManager:
             self.items.append(current_header)
             self.items.extend(current_dir_items)
 
+        self._apply_sort_to_items()
         self.root.after(0, self._rebuild_grid)
 
+
+    def _show_sort_menu(self, event):
+        menu = self.theme_provider.create_manager_context_menu(self.grid_window)
+        options = [
+            ("name",      "Video Name"),
+            ("duration",  "Duration"),
+            ("size",      "Size"),
+        ]
+        for col, label in options:
+            check = "✓ " if self._sort_col == col else "   "
+            menu.add_command(label=f"{check}{label}",
+                             command=lambda c=col: self._set_sort(c))
+        menu.add_separator()
+        asc_check  = "✓ " if not self._sort_rev else "   "
+        desc_check = "✓ " if self._sort_rev else "   "
+        menu.add_command(label=f"{asc_check}Ascending",
+                         command=lambda: self._set_sort_dir(False))
+        menu.add_command(label=f"{desc_check}Descending",
+                         command=lambda: self._set_sort_dir(True))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _set_sort(self, col):
+        self._sort_col = col
+        self._update_sort_btn()
+        if col == "duration":
+            self._fetch_durations_for_sort()
+        else:
+            self._apply_sort_and_rebuild()
+
+    def _set_sort_dir(self, reverse):
+        self._sort_rev = reverse
+        self._update_sort_btn()
+        self._apply_sort_and_rebuild()
+
+    def _update_sort_btn(self):
+        if not self._sort_btn:
+            return
+        tp = self.theme_provider
+        labels = {None: "Default", "name": "Name",
+                  "duration": "Duration", "size": "Size"}
+        col_label = labels.get(self._sort_col, "Default")
+        if self._sort_col is not None:
+            dir_suffix = " ▼" if self._sort_rev else " ▲"
+            text = f"Sort: {col_label}{dir_suffix}"
+            idle, hover, active = tp._manager_action_link_colors("primary", tp.get_manager_design_tokens())
+        else:
+            text = "Sort: Default ▾"
+            idle, hover, active = tp._manager_action_link_colors("secondary", tp.get_manager_design_tokens())
+        self._sort_btn.config(text=text, fg=idle)
+        self._sort_btn._link_idle = idle
+        self._sort_btn._link_hover = hover
+        self._sort_btn._link_active = active
+
+    def _apply_sort_and_rebuild(self):
+        self._page = 0
+        self._pages_cache = None
+        if not hasattr(self, 'all_items'):
+            return
+        if self._sort_col is None:
+            self.items = self.all_items.copy()
+        else:
+            self._apply_sort_to_items()
+        self.root.after(0, self._rebuild_grid)
+
+    def _apply_sort_to_items(self):
+        if self._sort_col is None:
+            return
+        col = self._sort_col
+        rev = self._sort_rev
+
+        def _sort_videos(video_items):
+            if col == "name":
+                video_items.sort(key=lambda it: os.path.basename(it['path']).lower(), reverse=rev)
+            elif col == "size":
+                def _sz(it):
+                    try: return os.path.getsize(it['path'])
+                    except: return 0
+                video_items.sort(key=_sz, reverse=rev)
+            elif col == "duration":
+                def _dur(it):
+                    d = self._duration_cache.get(it['path'], "—")
+                    if d == "—":
+                        return -1
+                    try:
+                        p = list(map(int, d.split(":")))
+                        return p[0] * 3600 + p[1] * 60 + p[2] if len(p) == 3 else p[0] * 60 + p[1]
+                    except:
+                        return -1
+                video_items.sort(key=_dur, reverse=rev)
+
+        rebuilt = []
+        i = 0
+        while i < len(self.items):
+            item = self.items[i]
+            if item['type'] == 'header':
+                videos = []
+                i += 1
+                while i < len(self.items) and self.items[i]['type'] == 'video':
+                    videos.append(self.items[i])
+                    i += 1
+                _sort_videos(videos)
+                rebuilt.append(item)
+                rebuilt.extend(videos)
+            else:
+                rebuilt.append(item)
+                i += 1
+        self.items = rebuilt
+
+    def _fetch_durations_for_sort(self):
+        video_paths = [it['path'] for it in getattr(self, 'all_items', self.items) if it['type'] == 'video']
+        missing = [p for p in video_paths if p not in self._duration_cache]
+        if not missing:
+            self._apply_sort_and_rebuild()
+            return
+
+        def _fetch_all():
+            import subprocess, sys
+            for path in missing:
+                try:
+                    kwargs = {}
+                    if sys.platform == "win32":
+                        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+                    r = subprocess.run(
+                        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                         "-of", "default=noprint_wrappers=1:nokey=1", path],
+                        capture_output=True, text=True, timeout=5, **kwargs)
+                    secs = float(r.stdout.strip())
+                    h, rem = divmod(int(secs), 3600)
+                    m, s = divmod(rem, 60)
+                    self._duration_cache[path] = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+                except:
+                    self._duration_cache[path] = "—"
+            self.root.after(0, self._apply_sort_and_rebuild)
+
+        threading.Thread(target=_fetch_all, daemon=True).start()
 
     def apply_theme(self):
         if not self.grid_window:
@@ -756,6 +912,7 @@ class GridViewManager:
         tp.restyle_manager_action_links(self.grid_window)
         tp.restyle_manager_buttons(self.grid_window)
         self._update_tag_filter_btn()
+        self._update_sort_btn()
         self._rebuild_grid()
         if hasattr(self, '_page_size_menu') and self._page_size_menu.winfo_exists():
             t = self._tok()
@@ -844,6 +1001,7 @@ class GridViewManager:
             if term or self._active_tag_filters:
                 self.root.after(0, self._filter_directories)
             else:
+                self._apply_sort_to_items()
                 self.root.after(0, self._rebuild_grid)
         except Exception as e:
             with self.loading_lock:
@@ -2046,6 +2204,7 @@ class GridViewManager:
         if self._active_tag_filters:
             self._apply_tag_filter()
         else:
+            self._apply_sort_to_items()
             self.root.after(0, self._rebuild_grid)
 
     # ─────────────────────────────────────────────────────────────────────────
