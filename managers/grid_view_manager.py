@@ -766,6 +766,7 @@ class GridViewManager:
             ("name",      "Video Name"),
             ("duration",  "Duration"),
             ("size",      "Size"),
+            ("directory", "Directory"),
         ]
         for col, label in options:
             check = "✓ " if self._sort_col == col else "   "
@@ -800,7 +801,7 @@ class GridViewManager:
         if not self._sort_btn:
             return
         tp = self.theme_provider
-        labels = {None: "Default", "name": "Name",
+        labels = {None: "Default", "name": "Name", "directory": "Directory",
                   "duration": "Duration", "size": "Size"}
         col_label = labels.get(self._sort_col, "Default")
         if self._sort_col is not None:
@@ -831,6 +832,24 @@ class GridViewManager:
             return
         col = self._sort_col
         rev = self._sort_rev
+
+        if col == "directory":
+            blocks = []
+            i = 0
+            while i < len(self.items):
+                item = self.items[i]
+                if item['type'] == 'header':
+                    block = [item]
+                    i += 1
+                    while i < len(self.items) and self.items[i]['type'] == 'video':
+                        block.append(self.items[i])
+                        i += 1
+                    blocks.append(block)
+                else:
+                    i += 1
+            blocks.sort(key=lambda b: b[0]['name'].lower(), reverse=rev)
+            self.items = [it for block in blocks for it in block]
+            return
 
         def _sort_videos(video_items):
             if col == "name":
