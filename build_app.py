@@ -1707,6 +1707,7 @@ def select_multiple_folders_and_play():
                 ("▤", "Toggle Videos", self.toggle_videos_visibility),
                 ("⊟", "Collapse All", self._collapse_all_tree_nodes),
                 ("⊞", "Expand All", self._expand_all_tree_nodes),
+                ("⊡", "Open in Gallery", self._show_grid_view),
                 ("−", "Hide Panel", self._toggle_directory_panel),
             ]
             self._dir_action_btns = {}
