@@ -1155,7 +1155,7 @@ def select_multiple_folders_and_play():
                         cw_pct = float(cw_e.completion_percentage or 0)
                         if (cw_e.video_path not in cw_seen
                                 and os.path.isfile(cw_e.video_path)
-                                and 5 < cw_pct < 95):
+                                and 5 < cw_pct < 91):
                             cw_seen.add(cw_e.video_path)
                             t_cw_entries.append(cw_e)
                         if len(t_cw_entries) >= 4:

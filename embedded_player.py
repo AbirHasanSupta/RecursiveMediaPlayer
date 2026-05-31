@@ -735,6 +735,7 @@ class EmbeddedPlayer:
         "prev_chapter":      "b",
         "cycle_subtitle":    "u",
         "disable_subtitles": "ctrl+u",
+        "toggle_gaming_mode": "g",
         "ab_set_a":          "[",
         "ab_set_b":          "]",
         "ab_clear":          "\\",
@@ -766,6 +767,7 @@ class EmbeddedPlayer:
         "prev_chapter":      ("_prev_chapter",      ()),
         "cycle_subtitle":    ("_cycle_subtitle",    ()),
         "disable_subtitles": ("_disable_subtitle",  ()),
+        "toggle_gaming_mode": ("_toggle_gaming_mode", ()),
         "ab_set_a":          ("_set_ab_a",          ()),
         "ab_set_b":          ("_set_ab_b",          ()),
         "ab_clear":          ("_clear_ab",          ()),
@@ -895,6 +897,7 @@ class EmbeddedPlayer:
         w.bind("<Up>",            lambda e: self._vol_change(+self.VOL_STEP), add=True)
         w.bind("<Down>",          lambda e: self._vol_change(-self.VOL_STEP), add=True)
         w.bind("<Escape>",        lambda e: self._escape())
+        w.bind("<g>", lambda e: self.set_gaming_mode(not self._gaming_mode), add=True)
         w.bind("<question>", lambda e: self._show_shortcut_overlay(), add=True)
         w.bind("<Shift-question>", lambda e: self._show_shortcut_overlay(), add=True)
 
@@ -2136,6 +2139,9 @@ class EmbeddedPlayer:
         except Exception as e:
             if self.logger:
                 self.logger(f"Subtitle disable error: {e}")
+
+    def _toggle_gaming_mode(self):
+        self.set_gaming_mode(not self._gaming_mode)
 
     def load_subtitle_file(self, path: str):
         try:
