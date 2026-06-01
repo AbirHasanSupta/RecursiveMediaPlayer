@@ -1231,7 +1231,7 @@ class GridViewManager:
                 grid_row += 1
 
         for i in range(cols):
-            self.grid_frame.columnconfigure(i, weight=1, uniform="col")
+            self.grid_frame.columnconfigure(i, weight=0, uniform="col", minsize=_CARD_W)
 
         self._update_selection_label()
 
@@ -1309,7 +1309,7 @@ class GridViewManager:
         # ── State-driven colours ──────────────────────────────────────────────
         dark = getattr(self.theme_provider, 'dark_mode', False)
         if is_sel:
-            border_col, border_w = t['accent'], 3
+            border_col, border_w = t['accent'], 2
             card_bg = info_bg  = t['accent_dim']
             name_fg, name_w    = t['accent'], "bold"
         elif is_excl:
@@ -1317,7 +1317,7 @@ class GridViewManager:
             card_bg = info_bg  = t['surface']
             name_fg, name_w    = t['text_muted'], "normal"
         else:
-            border_col, border_w = t['border'], 1
+            border_col, border_w = t['border'], 2
             card_bg = info_bg  = t['surface']
             name_fg, name_w    = t['text'], "normal"
 
@@ -1506,13 +1506,13 @@ class GridViewManager:
             is_excluded = video_path in self.excluded_items
 
             if is_playing:
-                border_col, border_w = t['now_playing'], 3
+                border_col, border_w = t['now_playing'], 2
             elif is_selected:
                 border_col, border_w = t['accent'], 2
             elif is_excluded:
                 border_col, border_w = t['excluded'], 2
             else:
-                border_col, border_w = t['border'], 1
+                border_col, border_w = t['border'], 2
 
             card.config(highlightbackground=border_col, highlightthickness=border_w)
 
@@ -1561,17 +1561,17 @@ class GridViewManager:
         is_excl = video_path in self.excluded_items
 
         if is_sel:
-            border_col, border_w = t['accent'],    3
-            card_bg = info_bg    = t['accent_dim']
-            name_fg, name_w      = t['accent'], "bold"
+            border_col, border_w = t['accent'], 2
+            card_bg = info_bg = t['accent_dim']
+            name_fg, name_w = t['accent'], "bold"
         elif is_excl:
-            border_col, border_w = t['excluded'],  2
-            card_bg = info_bg    = t['surface']
-            name_fg, name_w      = t['text_muted'], "normal"
+            border_col, border_w = t['excluded'], 2
+            card_bg = info_bg = t['surface']
+            name_fg, name_w = t['text_muted'], "normal"
         else:
-            border_col, border_w = t['border'],    1
-            card_bg = info_bg    = t['surface']
-            name_fg, name_w      = t['text'], "normal"
+            border_col, border_w = t['border'], 2
+            card_bg = info_bg = t['surface']
+            name_fg, name_w = t['text'], "normal"
 
         card.configure(bg=card_bg,
                        highlightbackground=border_col,
@@ -1809,8 +1809,8 @@ class GridViewManager:
 
         # Elevate border on every hover (accent highlight)
         if not is_sel:
-            card.configure(highlightbackground=t['accent'],
-                           highlightthickness=2 if not is_excl else 2)
+            # Change border color on hover without altering thickness
+            card.configure(highlightbackground=t['accent'])
 
         # Tint info area when unselected and unexcluded
         if not is_sel and not is_excl:
@@ -1849,27 +1849,28 @@ class GridViewManager:
         is_excl = vp in self.excluded_items
         t = self._tok()
 
-        # Restore border
+                # Restore border and background based on state
         if is_sel:
-            card.configure(highlightbackground=t['accent'], highlightthickness=3)
+            card.configure(highlightbackground=t['accent'], highlightthickness=2, bg=t['accent_dim'])
         elif is_excl:
-            card.configure(highlightbackground=t['excluded'], highlightthickness=2)
+            card.configure(highlightbackground=t['excluded'], highlightthickness=2, bg=t['surface'])
         else:
-            card.configure(highlightbackground=t['border'], highlightthickness=1,
-                           bg=t['surface'])
-            for child in card.winfo_children():
-                if getattr(child, '_is_info', False):
-                    child.configure(bg=t['surface'])
-                    for lbl in child.winfo_children():
-                        try:
-                            lbl.configure(bg=t['surface'])
-                        except tk.TclError:
-                            pass
-                elif not getattr(child, '_is_thumb', False):
+            card.configure(highlightbackground=t['border'], highlightthickness=2, bg=t['surface'])
+
+        # Reset child widgets background colours
+        for child in card.winfo_children():
+            if getattr(child, '_is_info', False):
+                child.configure(bg=t['surface'])
+                for lbl in child.winfo_children():
                     try:
-                        child.configure(bg=t['border'])
+                        lbl.configure(bg=t['surface'])
                     except tk.TclError:
                         pass
+            elif not getattr(child, '_is_thumb', False):
+                try:
+                    child.configure(bg=t['border'])
+                except tk.TclError:
+                    pass
 
         # Conceal action strip
         for child in card.winfo_children():
