@@ -2651,17 +2651,22 @@ class GridViewManager:
                 frame_rgb = _cv2.cvtColor(frame, _cv2.COLOR_BGR2RGB)
                 pil_image = Image.fromarray(frame_rgb)
             else:
-                pil_image = Image.open(str(blob_path))
+                pil_image = Image.open(str(blob_path)).convert("RGB")
 
-            # --- Letterbox the image into 240×135 (16:9) -----------------
-            target_w, target_h = 240, 135
-            pil_image.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
-            # Create black canvas
-            canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
-            # Paste centered
-            offset_x = (target_w - pil_image.width) // 2
-            offset_y = (target_h - pil_image.height) // 2
-            canvas.paste(pil_image, (offset_x, offset_y))
+            target_w, target_h = 240, 150
+            src_w, src_h = pil_image.size
+            if src_w >= src_h:
+                scale = target_w / src_w
+                new_h = int(src_h * scale)
+                pil_image = pil_image.resize((target_w, new_h), Image.Resampling.LANCZOS)
+                canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
+                canvas.paste(pil_image, (0, (target_h - new_h) // 2))
+            else:
+                scale = target_h / src_h
+                new_w = int(src_w * scale)
+                pil_image = pil_image.resize((new_w, target_h), Image.Resampling.LANCZOS)
+                canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
+                canvas.paste(pil_image, ((target_w - new_w) // 2, 0))
 
             photo = ImageTk.PhotoImage(canvas)
             item.thumbnail_image = photo
@@ -2680,7 +2685,7 @@ class GridViewManager:
             is_vid = thumbnail_data.startswith("VIDEO:")
             raw_b64 = thumbnail_data[6:]
 
-            target_w, target_h = 240, 135
+            target_w, target_h = 240, 150
 
             if is_vid:
                 video_data = _b64.b64decode(raw_b64)
@@ -2697,11 +2702,19 @@ class GridViewManager:
                 if ret and frame is not None:
                     frame_rgb = _cv2.cvtColor(frame, _cv2.COLOR_BGR2RGB)
                     pil_image = Image.fromarray(frame_rgb)
-                    pil_image.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
-                    canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
-                    canvas.paste(pil_image,
-                                 ((target_w - pil_image.width) // 2,
-                                  (target_h - pil_image.height) // 2))
+                    src_w, src_h = pil_image.size
+                    if src_w >= src_h:
+                        scale = target_w / src_w
+                        new_h = int(src_h * scale)
+                        pil_image = pil_image.resize((target_w, new_h), Image.Resampling.LANCZOS)
+                        canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
+                        canvas.paste(pil_image, (0, (target_h - new_h) // 2))
+                    else:
+                        scale = target_h / src_h
+                        new_w = int(src_w * scale)
+                        pil_image = pil_image.resize((new_w, target_h), Image.Resampling.LANCZOS)
+                        canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
+                        canvas.paste(pil_image, ((target_w - new_w) // 2, 0))
                     photo = ImageTk.PhotoImage(canvas)
                     item.thumbnail_image = photo
                     if video_path_norm:
@@ -2713,11 +2726,21 @@ class GridViewManager:
                 with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tf:
                     tf.write(image_data)
                     tmp_path = tf.name
-                img = Image.open(tmp_path)
-                img.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
-                canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
-                canvas.paste(img, ((target_w - img.width) // 2,
-                                   (target_h - img.height) // 2))
+                img = Image.open(tmp_path).convert("RGB")
+                src_w, src_h = img.size
+
+                if src_w >= src_h:
+                    scale = target_w / src_w
+                    new_h = int(src_h * scale)
+                    img = img.resize((target_w, new_h), Image.Resampling.LANCZOS)
+                    canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
+                    canvas.paste(img, (0, (target_h - new_h) // 2))
+                else:
+                    scale = target_h / src_h
+                    new_w = int(src_w * scale)
+                    img = img.resize((new_w, target_h), Image.Resampling.LANCZOS)
+                    canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
+                    canvas.paste(img, ((target_w - new_w) // 2, 0))
                 photo = ImageTk.PhotoImage(canvas)
                 item.thumbnail_image = photo
                 if video_path_norm:
