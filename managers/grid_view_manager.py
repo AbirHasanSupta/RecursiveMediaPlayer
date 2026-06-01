@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk
-from PIL import Image, ImageDraw, ImageTk
+from PIL import Image, ImageDraw, ImageFilter, ImageTk
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -12,20 +12,26 @@ from managers.video_preview_manager import get_thumb_pool, generate_thumbnail_wo
 
 
 # ── Layout tokens (colours come from _tok()) ─────────────────────────────────
-_THUMB_AREA_MIN_H   = 136
-_THUMB_AREA_MAX_H   = 220
-_THUMB_AREA_RATIO   = 0.62   # preview height ≈ ratio × card width
-_THUMB_CORNER_R     = 14
-_CARD_PAD_X         = 14
-_CARD_PAD_Y         = 14
-_CARD_INFO_PAD_Y    = 11
-_CARD_SHELL_PAD     = 4
-_THUMB_INSET        = 10
-_ACTION_STRIP_H     = 40
+_THUMB_AREA_MIN_H   = 88
+_THUMB_AREA_MAX_H   = 148
+_THUMB_AREA_RATIO   = 0.44   # landscape preview: height ≈ 44% of card width (~16:9)
+_CARD_PAD_X         = 6
+_CARD_PAD_Y         = 6
+_CARD_INFO_PAD_Y    = 7
+_CARD_TITLE_ROW_H   = 36   # fixed title block (2 lines max)
+_CARD_META_ROW_H    = 22   # reserved fav / rating / tags slot
+_CARD_SHELL_PAD     = 2
+_THUMB_INSET        = 6
+_ACTION_STRIP_H     = 36
 _THUMB_MAX_SOURCE   = 560
 _SHIMMER_MS         = 85
-
-
+# Drop shadow (Canvas-rendered, subtle)
+_SHADOW_BLUR        = 7
+_SHADOW_OFFSET_X    = 0
+_SHADOW_OFFSET_Y    = 3
+_SHADOW_HOST_X      = 5
+_SHADOW_HOST_Y      = 4
+_SHADOW_RADIUS      = 10
 def _hex_blend(c1: str, c2: str, t: float) -> str:
     """Linear interpolate between two hex colours (0 = c1, 1 = c2)."""
     r1, g1, b1 = int(c1[1:3], 16), int(c1[3:5], 16), int(c1[5:7], 16)
@@ -78,6 +84,7 @@ class GridViewManager:
         self._sort_btn = None
         self._duration_cache = {}
         self._closing = False
+        self._shadow_plate_cache = {}
         self.search_var = tk.StringVar()
         self.search_var.trace_add('write', lambda *_: self._on_search_changed())
 
@@ -184,33 +191,13 @@ class GridViewManager:
                     break
             if info_frame is None:
                 continue
-            # Remove existing meta_frame
-            for child in list(info_frame.winfo_children()):
-                if getattr(child, '_is_meta', False):
-                    child.destroy()
-            # Rebuild meta_frame
             svc = self.annotation_service
-            tags = svc.get_tags(vp)
-            rating = svc.get_rating(vp)
+            tags = svc.get_tags(vp) if svc else []
+            rating = svc.get_rating(vp) if svc else 0
             is_fav = (self.is_favourite_callback and self.is_favourite_callback(vp))
             is_sel = vp in self.selected_items
             info_bg = t['accent_dim'] if is_sel else t['card_surface']
-            meta_frame = tk.Frame(info_frame, bg=info_bg, height=20)
-            meta_frame._is_meta = True
-            meta_frame.pack(fill=tk.X, pady=(6, 0))
-            meta_frame.pack_propagate(False)
-            if is_fav:
-                tk.Label(meta_frame, text="♥", bg=info_bg, fg=t['warn'],
-                         font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=(0, 4))
-            if rating > 0:
-                filled = "★" * rating
-                empty  = "☆" * (5 - rating)
-                tk.Label(meta_frame, text=filled + empty, bg=info_bg, fg=t['warn'],
-                         font=("Segoe UI", 7)).pack(side=tk.LEFT, padx=(0, 6))
-            for tag in tags[:2]:
-                tk.Label(meta_frame, text=f"#{tag}",
-                         bg=t['accent_dim'], fg=t['accent'],
-                         font=("Segoe UI", 7), padx=6, pady=2).pack(side=tk.LEFT, padx=(0, 4))
+            self._update_card_meta_row(info_frame, info_bg, t, is_fav, rating, tags)
 
     def _refresh_card_meta(self, vp):
         """Immediately rebuild the meta row (fav ♥, rating ★, tags) for a single card."""
@@ -223,30 +210,11 @@ class GridViewManager:
         info_frame = self._card_info_frame(card)
         if info_frame is None:
             return
-        for child in list(info_frame.winfo_children()):
-            if getattr(child, '_is_meta', False):
-                child.destroy()
         svc    = self.annotation_service
         tags   = svc.get_tags(vp)   if svc else []
         rating = svc.get_rating(vp) if svc else 0
         is_fav = bool(self.is_favourite_callback and self.is_favourite_callback(vp))
-        meta_frame = tk.Frame(info_frame, bg=info_bg, height=20)
-        meta_frame._is_meta = True
-        meta_frame.pack(fill=tk.X, pady=(6, 0))
-        meta_frame.pack_propagate(False)
-        if is_fav:
-            tk.Label(meta_frame, text="♥", bg=info_bg, fg=t['warn'],
-                     font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=(0, 4))
-        if rating > 0:
-            filled = "★" * rating
-            empty  = "☆" * (5 - rating)
-            tk.Label(meta_frame, text=filled + empty, bg=info_bg, fg=t['warn'],
-                     font=("Segoe UI", 7)).pack(side=tk.LEFT, padx=(0, 6))
-        for tag in tags[:2]:
-            tk.Label(meta_frame, text=f"#{tag}",
-                     bg=t['accent_dim'], fg=t['accent'],
-                     font=("Segoe UI", 7), padx=6, pady=2
-                     ).pack(side=tk.LEFT, padx=(0, 4))
+        self._update_card_meta_row(info_frame, info_bg, t, is_fav, rating, tags)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Design tokens (new UI)
@@ -410,14 +378,6 @@ class GridViewManager:
     def _rgb_blend(self, a, b, t):
         return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
-    def _pil_rounded_mask(self, size, radius):
-        w, h = max(1, size[0]), max(1, size[1])
-        r = max(1, min(radius, min(w, h) // 2))
-        mask = Image.new("L", (w, h), 0)
-        draw = ImageDraw.Draw(mask)
-        draw.rounded_rectangle((0, 0, w - 1, h - 1), radius=r, fill=255)
-        return mask
-
     def _pil_bottom_scrim(self, size, strength=0.5):
         w, h = max(1, size[0]), max(1, size[1])
         grad = Image.new("L", (1, max(2, h)))
@@ -428,7 +388,7 @@ class GridViewManager:
         return grad
 
     def _pil_render_card_thumb(self, pil_image, box_w, box_h, t, has_frame=True):
-        """Cinematic letterbox + rounded corners + bottom scrim."""
+        """Letterbox thumbnail with optional bottom scrim."""
         box_w, box_h = max(1, box_w), max(1, box_h)
         gradient = (t['thumb_fill_top'], t['thumb_fill_bot'])
         base = self._pil_letterbox(pil_image, box_w, box_h, gradient=gradient)
@@ -436,10 +396,7 @@ class GridViewManager:
             scrim = self._pil_bottom_scrim((box_w, box_h), strength=0.55 if pil_image else 0)
             dark = Image.new("RGB", (box_w, box_h), (0, 0, 0))
             base = Image.composite(dark, base, scrim)
-        mask = self._pil_rounded_mask((box_w, box_h), _THUMB_CORNER_R)
-        rounded = Image.new("RGB", (box_w, box_h), gradient[0])
-        rounded.paste(base, mask=mask)
-        return rounded
+        return base
 
     def _pil_shimmer_frame(self, box_w, box_h, t, phase):
         """Animated skeleton frame while thumbnail loads."""
@@ -447,16 +404,13 @@ class GridViewManager:
         p = (phase % 20) / 20.0
         top = self._rgb_blend(t['thumb_fill_top'], t['thumb_fill_bot'], p)
         bot = self._rgb_blend(t['thumb_fill_bot'], t['thumb_fill_top'], p)
-        img = self._pil_gradient_backdrop(box_w, box_h, top, bot)
-        mask = self._pil_rounded_mask((box_w, box_h), _THUMB_CORNER_R)
-        out = Image.new("RGB", (box_w, box_h), top)
-        out.paste(img, mask=mask)
+        out = self._pil_gradient_backdrop(box_w, box_h, top, bot)
         draw = ImageDraw.Draw(out)
         bar_w = max(40, box_w // 3)
         x0 = int((box_w - bar_w) * ((phase % 10) / 10.0))
-        draw.rounded_rectangle(
+        draw.rectangle(
             (x0 + 12, box_h // 2 - 10, x0 + bar_w, box_h // 2 + 10),
-            radius=8, fill=self._rgb_blend(top, (255, 255, 255), 0.12),
+            fill=self._rgb_blend(top, (255, 255, 255), 0.12),
         )
         return out
 
@@ -537,6 +491,231 @@ class GridViewManager:
                 return child
         return None
 
+    def _ensure_card_meta_row(self, info_frame, info_bg):
+        for child in info_frame.winfo_children():
+            if getattr(child, '_is_meta', False):
+                try:
+                    child.configure(bg=info_bg, height=_CARD_META_ROW_H)
+                except tk.TclError:
+                    pass
+                return child
+        meta_frame = tk.Frame(info_frame, bg=info_bg, height=_CARD_META_ROW_H)
+        meta_frame._is_meta = True
+        meta_frame.pack(fill=tk.X, pady=(4, 0))
+        meta_frame.pack_propagate(False)
+        return meta_frame
+
+    def _fill_card_meta_row(self, meta_frame, info_bg, t, is_fav, rating, tags):
+        for w in list(meta_frame.winfo_children()):
+            w.destroy()
+        row = tk.Frame(meta_frame, bg=info_bg)
+        row.pack(side=tk.LEFT, anchor='w')
+        if is_fav:
+            tk.Label(row, text="♥", bg=info_bg, fg=t['warn'],
+                     font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=(0, 4))
+        if rating > 0:
+            filled = "★" * rating
+            empty  = "☆" * (5 - rating)
+            tk.Label(row, text=filled + empty, bg=info_bg, fg=t['warn'],
+                     font=("Segoe UI", 7)).pack(side=tk.LEFT, padx=(0, 6))
+        for tag in (tags or [])[:2]:
+            tk.Label(row, text=f"#{tag}",
+                     bg=t['accent_dim'], fg=t['accent'],
+                     font=("Segoe UI", 7), padx=6, pady=2
+                     ).pack(side=tk.LEFT, padx=(0, 4))
+
+    def _update_card_meta_row(self, info_frame, info_bg, t, is_fav, rating, tags):
+        """Refresh meta content without resizing the reserved meta slot."""
+        meta = self._ensure_card_meta_row(info_frame, info_bg)
+        self._fill_card_meta_row(meta, info_bg, t, is_fav, rating, tags)
+
+    def _pack_card_meta_row(self, info_frame, info_bg, t, is_fav, rating, tags):
+        self._update_card_meta_row(info_frame, info_bg, t, is_fav, rating, tags)
+
+    def _card_grid_slave(self, card):
+        """Widget placed on the grid (cell wrapper around shadow canvas)."""
+        return getattr(card, '_cell', card)
+
+    def _hex_to_rgb(self, hex_color: str):
+        h = hex_color.lstrip("#")
+        if len(h) != 6:
+            return (12, 14, 18)
+        return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+    def _pil_canvas_shadow(self, canvas_w, canvas_h, host_x, host_y, host_w, host_h,
+                           elevated: bool, t):
+        """Build RGB plate with Gaussian blurred drop shadow for a card canvas."""
+        canvas_w = max(1, int(canvas_w))
+        canvas_h = max(1, int(canvas_h))
+        host_w = max(24, int(host_w))
+        host_h = max(24, int(host_h))
+        opacity = 0.20 if elevated else 0.12
+        rgba = (0, 0, 0, int(255 * opacity))
+
+        layer = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(layer)
+        x1 = host_x + _SHADOW_OFFSET_X
+        y1 = host_y + _SHADOW_OFFSET_Y
+        draw.rounded_rectangle(
+            (x1, y1, x1 + host_w - 1, y1 + host_h - 1),
+            radius=_SHADOW_RADIUS,
+            fill=rgba,
+        )
+        layer = layer.filter(ImageFilter.GaussianBlur(_SHADOW_BLUR))
+
+        bg = Image.new("RGB", (canvas_w, canvas_h), self._hex_to_rgb(t['grid_canvas']))
+        bg.paste(layer, mask=layer.split()[3])
+        return bg
+
+    def _shadow_cache_key(self, canvas_w, canvas_h, host_w, host_h, elevated):
+        dark = getattr(self.theme_provider, 'dark_mode', False)
+        return (
+            canvas_w // 12, canvas_h // 12,
+            host_w // 12, host_h // 12,
+            elevated, dark,
+        )
+
+    def _draw_card_shadow(self, card_canvas, elevated=False):
+        """Paint cached drop shadow and keep host window above it."""
+        if not card_canvas or not card_canvas.winfo_exists():
+            return
+        try:
+            cw = max(1, card_canvas.winfo_width())
+            ch = max(1, card_canvas.winfo_height())
+        except tk.TclError:
+            return
+        if cw < 8 or ch < 8:
+            return
+
+        card_canvas._elevated = elevated
+        hx, hy = _SHADOW_HOST_X, _SHADOW_HOST_Y
+        iw = max(40, cw - hx - 6)
+        ih = max(40, ch - hy - _SHADOW_OFFSET_Y - 4)
+
+        t = self._tok()
+        key = self._shadow_cache_key(cw, ch, iw, ih, elevated)
+        plate = self._shadow_plate_cache.get(key)
+        if plate is None:
+            plate = self._pil_canvas_shadow(cw, ch, hx, hy, iw, ih, elevated, t)
+            if len(self._shadow_plate_cache) > 48:
+                self._shadow_plate_cache.clear()
+            self._shadow_plate_cache[key] = plate
+
+        card_canvas.delete("shadow")
+        photo = ImageTk.PhotoImage(plate)
+        card_canvas._shadow_photo = photo
+        card_canvas.create_image(0, 0, image=photo, anchor="nw", tags="shadow")
+        if getattr(card_canvas, "_win_id", None):
+            card_canvas.tag_raise(card_canvas._win_id)
+
+    def _card_canvas_host(self, card_canvas):
+        win_id = getattr(card_canvas, "_win_id", None)
+        if not win_id:
+            return None
+        try:
+            return card_canvas.nametowidget(card_canvas.itemcget(win_id, "window"))
+        except tk.TclError:
+            return None
+
+    def _sync_card_text_wrap(self, card, inner_width):
+        """Wrap title to card inner width so metadata rows stay visible."""
+        name_label = getattr(card, "_name_label", None)
+        if not name_label or not name_label.winfo_exists():
+            return
+        try:
+            name_label.configure(wraplength=max(72, int(inner_width) - 28))
+        except tk.TclError:
+            pass
+
+    def _layout_card_canvas(self, card_canvas, draw_shadow=True):
+        """Size embedded host from content; widen canvas to column, never clip info."""
+        if not card_canvas.winfo_exists():
+            return
+        win_id = getattr(card_canvas, "_win_id", None)
+        if not win_id:
+            return
+        cw = max(1, card_canvas.winfo_width())
+        hx, hy = _SHADOW_HOST_X, _SHADOW_HOST_Y
+        iw = max(40, cw - hx - 6)
+        host = self._card_canvas_host(card_canvas)
+        try:
+            card_canvas.coords(win_id, hx, hy)
+            card_canvas.itemconfig(win_id, width=iw)
+            if host and host.winfo_exists():
+                host.update_idletasks()
+                req_h = max(96, host.winfo_reqheight())
+                card_canvas.itemconfig(win_id, height=req_h)
+            else:
+                req_h = 200
+        except tk.TclError:
+            req_h = 200
+
+        needed_ch = hy + req_h + _SHADOW_OFFSET_Y + 6
+        try:
+            cur_h = int(card_canvas.cget("height"))
+        except tk.TclError:
+            cur_h = 0
+        if abs(cur_h - needed_ch) > 2:
+            try:
+                card_canvas.configure(height=needed_ch)
+            except tk.TclError:
+                pass
+
+        card = getattr(card_canvas, "_card_ref", None)
+        if card and card.winfo_exists():
+            self._sync_card_text_wrap(card, iw)
+
+        if draw_shadow:
+            self._draw_card_shadow(card_canvas, getattr(card_canvas, "_elevated", False))
+        self._sync_scrollregion()
+
+    def _sync_scrollregion(self):
+        if not hasattr(self, 'canvas') or not self.canvas.winfo_exists():
+            return
+        try:
+            self.canvas.update_idletasks()
+            bbox = self.canvas.bbox("all")
+            if bbox:
+                self.canvas.configure(scrollregion=bbox)
+        except tk.TclError:
+            pass
+
+    def _on_grid_mousewheel(self, event):
+        if not hasattr(self, 'canvas') or not self.canvas.winfo_exists():
+            return
+        delta = getattr(event, 'delta', 0)
+        if delta:
+            self.canvas.yview_scroll(int(-1 * (delta / 120)), "units")
+        elif getattr(event, 'num', None) == 4:
+            self.canvas.yview_scroll(-1, "units")
+        elif getattr(event, 'num', None) == 5:
+            self.canvas.yview_scroll(1, "units")
+
+    def _bind_grid_scroll(self, gw):
+        gw.bind("<MouseWheel>", self._on_grid_mousewheel, add="+")
+        gw.bind("<Button-4>", self._on_grid_mousewheel, add="+")
+        gw.bind("<Button-5>", self._on_grid_mousewheel, add="+")
+
+    def _unbind_grid_scroll(self, gw):
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            try:
+                gw.unbind(seq)
+            except Exception:
+                pass
+
+    def _repaint_card_shadow(self, card, elevated=False):
+        canvas = getattr(card, "_canvas", None)
+        if canvas and canvas.winfo_exists():
+            self._draw_card_shadow(canvas, elevated=elevated)
+
+    def _on_cols_spinbox(self):
+        try:
+            self._grid_cols = int(self.grid_size_var.get())
+        except (tk.TclError, ValueError):
+            pass
+        self._pages_cache = None
+        self._rebuild_grid()
+
     def _apply_card_chrome(self, card, border_col, border_w, card_bg, info_bg=None):
         """Sync shell / card / info colours after state changes."""
         if info_bg is None:
@@ -546,7 +725,13 @@ class GridViewManager:
         well = getattr(card, '_thumb_well', None)
         try:
             if cell and cell.winfo_exists():
-                cell.configure(bg=self._tok()['card_shadow'])
+                cell.configure(bg=self._tok()['grid_canvas'])
+            canvas = getattr(card, '_canvas', None)
+            if canvas and canvas.winfo_exists():
+                canvas.configure(bg=self._tok()['grid_canvas'])
+            host = getattr(card, '_host', None)
+            if host and host.winfo_exists():
+                host.configure(bg=card_bg)
         except tk.TclError:
             pass
         try:
@@ -568,11 +753,16 @@ class GridViewManager:
         if info:
             try:
                 info.configure(bg=info_bg)
-                for lbl in info.winfo_children():
+                for block in info.winfo_children():
                     try:
-                        lbl.configure(bg=info_bg)
+                        block.configure(bg=info_bg)
                     except tk.TclError:
                         pass
+                    if isinstance(block, tk.Label):
+                        try:
+                            block.configure(bg=info_bg)
+                        except tk.TclError:
+                            pass
             except tk.TclError:
                 pass
         for child in card.winfo_children():
@@ -632,6 +822,11 @@ class GridViewManager:
                 except tk.TclError:
                     pass
 
+        def _relayout_canvas():
+            cv = getattr(cell, "_card_canvas", None) if cell else None
+            if cv and cv.winfo_exists():
+                self._layout_card_canvas(cv)
+
         def _on_configure(event=None):
             if getattr(self, '_closing', False):
                 return
@@ -639,6 +834,7 @@ class GridViewManager:
             pil = getattr(item, '_pil_master', None)
             if pil is not None and label.winfo_exists():
                 self._apply_thumb_to_label(label, pil, container, item=item)
+            self.root.after_idle(_relayout_canvas)
 
         container.bind("<Configure>", _on_configure, add="+")
         if cell:
@@ -803,8 +999,8 @@ class GridViewManager:
                 pass
         self._cancel_drag()
         try:
-            if hasattr(self, "canvas") and self.canvas.winfo_exists():
-                self.canvas.unbind_all("<MouseWheel>")
+            if self.grid_window and self.grid_window.winfo_exists():
+                self._unbind_grid_scroll(self.grid_window)
         except Exception:
             pass
 
@@ -813,43 +1009,12 @@ class GridViewManager:
         if self._search_timer:
             self.root.after_cancel(self._search_timer)
             self._search_timer = None
+        self._shadow_plate_cache.clear()
         self._active_tag_filters.clear()
         self._update_tag_filter_btn()
 
     def _update_gallery_stats(self):
-        """Refresh header stat chips (videos, page, selection)."""
-        if not hasattr(self, '_stat_videos_lbl'):
-            return
-        try:
-            if not self._stat_videos_lbl.winfo_exists():
-                return
-        except tk.TclError:
-            return
-        t = self._tok()
-        total = sum(1 for i in self.items if i.get('type') == 'video')
-        pages = self._total_pages() if self.items else 1
-        sel = len(self.selected_items)
-        self._stat_videos_lbl.config(text=f"{total:,} videos")
-        self._stat_page_lbl.config(text=f"Page {self._page + 1} / {pages}")
-        self._stat_sel_lbl.config(
-            text=f"{sel} selected" if sel else "No selection",
-            bg=t['accent_dim'] if sel else t['chip_bg'],
-            fg=t['accent'] if sel else t['chip_fg'],
-        )
-
-    def _stat_chip(self, parent, label_text, t, accent=False):
-        bg = t['accent_dim'] if accent else t['chip_bg']
-        fg = t['accent'] if accent else t['chip_fg']
-        wrap = tk.Frame(parent, bg=bg, highlightthickness=1,
-                        highlightbackground=t['border'])
-        wrap.pack(side=tk.LEFT, padx=(0, 8))
-        inner = tk.Frame(wrap, bg=bg)
-        inner.pack(padx=10, pady=6)
-        tk.Label(inner, text=label_text, font=("Segoe UI", 7, "bold"),
-                 bg=bg, fg=t['text_muted']).pack(anchor="w")
-        val = tk.Label(inner, text="—", font=("Segoe UI", 10, "bold"), bg=bg, fg=fg)
-        val.pack(anchor="w")
-        return val
+        pass
 
     def _build_ui(self, videos, t):
         """Construct the entire window layout using theme tokens."""
@@ -858,77 +1023,24 @@ class GridViewManager:
         chrome = tk.Frame(gw, bg=t['grid_canvas'])
         chrome.pack(fill=tk.X)
 
-        # Hero header
-        hero = tk.Frame(chrome, bg=t['header_bg'],
-                        highlightthickness=1, highlightbackground=t['border'])
-        hero.pack(fill=tk.X, padx=16, pady=(16, 0))
-        tk.Frame(hero, bg=t['hero_accent'], height=3).pack(fill=tk.X)
-
-        h_inner = tk.Frame(hero, bg=t['header_bg'])
-        h_inner.pack(fill=tk.BOTH, expand=True, padx=18, pady=14)
-
-        brand = tk.Frame(h_inner, bg=t['header_bg'])
-        brand.pack(side=tk.LEFT, fill=tk.Y)
-        icon_ring = tk.Frame(brand, bg=t['accent_dim'], padx=2, pady=2)
-        icon_ring.pack(side=tk.LEFT, padx=(0, 14))
-        tk.Label(icon_ring, text="▣", font=("Segoe UI", 18, "bold"),
-                 bg=t['accent_dim'], fg=t['accent'], padx=8, pady=4).pack()
-        title_col = tk.Frame(brand, bg=t['header_bg'])
-        title_col.pack(side=tk.LEFT, fill=tk.Y)
-        tk.Label(title_col, text="Video Gallery",
-                 font=("Segoe UI", 18, "bold"),
-                 bg=t['header_bg'], fg=t['text']).pack(anchor="w")
-        tk.Label(title_col, text="Curate · filter · play — your library at a glance",
-                 font=("Segoe UI", 9),
-                 bg=t['header_bg'], fg=t['text_muted']).pack(anchor="w", pady=(3, 0))
-
-        stats_row = tk.Frame(h_inner, bg=t['header_bg'])
-        stats_row.pack(side=tk.RIGHT, fill=tk.Y)
-        self._stat_videos_lbl = self._stat_chip(stats_row, "LIBRARY", t)
-        self._stat_page_lbl = self._stat_chip(stats_row, "VIEW", t)
-        self._stat_sel_lbl = self._stat_chip(stats_row, "SELECTION", t, accent=False)
-
-        mid_row = tk.Frame(h_inner, bg=t['header_bg'])
-        mid_row.pack(side=tk.LEFT, fill=tk.Y, padx=(24, 0))
-        self.selection_label = tk.Label(
-            mid_row, text="Nothing selected",
-            font=("Segoe UI", 9, "bold"),
-            bg=t['pill_bg'], fg=t['text_sub'],
-            padx=12, pady=6,
-        )
-        self.selection_label.pack(side=tk.LEFT)
-        self.drag_mode_label = tk.Label(
-            mid_row, text="",
-            font=("Segoe UI", 9, "italic"),
-            bg=t['header_bg'], fg=t['text_muted'],
-        )
-        self.drag_mode_label.pack(side=tk.LEFT, padx=(12, 0))
-
-        if self._embedded and self.close_callback:
-            close_btn = tk.Label(
-                h_inner, text="✕", font=("Segoe UI", 12, "bold"),
-                bg=t['pill_bg'], fg=t['text_sub'],
-                cursor="hand2", padx=10, pady=6,
-            )
-            close_btn.pack(side=tk.RIGHT)
-            close_btn.bind("<Button-1>", lambda e: self._close_grid_view())
-            close_btn.bind("<Enter>", lambda e: close_btn.config(fg="#fff", bg=t['danger']))
-            close_btn.bind("<Leave>", lambda e: close_btn.config(fg=t['text_sub'], bg=t['pill_bg']))
-
         toolbar_card = tk.Frame(
             chrome, bg=t['surface2'],
             highlightthickness=1, highlightbackground=t['border'],
         )
-        toolbar_card.pack(fill=tk.X, padx=16, pady=(12, 14))
+        toolbar_card.pack(fill=tk.X, padx=10, pady=(8, 6))
         toolbar_bg = t['surface2']
         toolbar = tk.Frame(toolbar_card, bg=toolbar_bg)
-        toolbar.pack(fill=tk.X, padx=14, pady=10)
+        toolbar.pack(fill=tk.X, padx=8, pady=4)
 
         left_tb = tk.Frame(toolbar, bg=toolbar_bg)
         left_tb.pack(side=tk.LEFT, fill=tk.Y)
 
-        tk.Label(left_tb, text="Filters", font=("Segoe UI", 8, "bold"),
-                 bg=toolbar_bg, fg=t['text_muted']).pack(side=tk.LEFT, padx=(0, 10))
+        self.drag_mode_label = tk.Label(
+            left_tb, text="",
+            font=("Segoe UI", 8, "italic"),
+            bg=toolbar_bg, fg=t['text_muted'],
+        )
+        self.drag_mode_label.pack(side=tk.LEFT, padx=(0, 8))
 
         tp = self.theme_provider
         self._sort_btn = tp.create_manager_action_link(
@@ -961,7 +1073,7 @@ class GridViewManager:
         self.grid_size_var = tk.IntVar(value=self._grid_cols)
         spin = tk.Spinbox(
             cols_group, from_=2, to=12, textvariable=self.grid_size_var, width=3,
-            command=self._rebuild_grid,
+            command=self._on_cols_spinbox,
             font=("Segoe UI", 9),
             bg=t['surface'], fg=t['text'],
             relief=tk.FLAT, bd=0,
@@ -992,20 +1104,16 @@ class GridViewManager:
         )
         om.pack(side=tk.LEFT, padx=(0, 8), pady=6)
 
-        self._footer_bar = tk.Frame(
-            gw, bg=t['surface2'], height=34,
-            highlightthickness=1, highlightbackground=t['border'],
-        )
-        self._footer_bar.pack(fill=tk.X, side=tk.BOTTOM, padx=16, pady=(0, 12))
-        self._footer_bar.pack_propagate(False)
-        fb_inner = tk.Frame(self._footer_bar, bg=t['surface2'])
-        fb_inner.pack(fill=tk.BOTH, expand=True, padx=14)
-        self._footer_hint = tk.Label(
-            fb_inner,
-            text="Tip: Shift+click range · Ctrl+click multi-select · Double-click to play",
-            font=("Segoe UI", 8), bg=t['surface2'], fg=t['text_muted'], anchor="w",
-        )
-        self._footer_hint.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=8)
+        if self._embedded and self.close_callback:
+            close_btn = tk.Label(
+                right_tb, text="✕", font=("Segoe UI", 11, "bold"),
+                bg=t['pill_bg'], fg=t['text_sub'],
+                cursor="hand2", padx=8, pady=4,
+            )
+            close_btn.pack(side=tk.RIGHT, padx=(8, 0))
+            close_btn.bind("<Button-1>", lambda e: self._close_grid_view())
+            close_btn.bind("<Enter>", lambda e: close_btn.config(fg="#fff", bg=t['danger']))
+            close_btn.bind("<Leave>", lambda e: close_btn.config(fg=t['text_sub'], bg=t['pill_bg']))
 
         body = tk.Frame(gw, bg=t['grid_canvas'])
         body.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
@@ -1017,36 +1125,24 @@ class GridViewManager:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 8), pady=8)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(12, 0), pady=8)
 
-        self.grid_mesh = tk.Frame(self.canvas, bg=t['grid_mesh'], padx=10, pady=10)
+        self.grid_mesh = tk.Frame(self.canvas, bg=t['grid_mesh'], padx=6, pady=6)
         self.grid_frame = tk.Frame(self.grid_mesh, bg=t['grid_canvas'])
-        self.grid_frame.pack(fill=tk.BOTH, expand=True)
-        canvas_frame = self.canvas.create_window((0, 0), window=self.grid_mesh, anchor='nw')
+        self.grid_frame.pack(fill=tk.X)
+        self._canvas_frame_id = self.canvas.create_window(
+            (0, 0), window=self.grid_mesh, anchor='nw',
+        )
 
-        def _sync_scroll(_e=None):
+        self.grid_mesh.bind("<Configure>", lambda _e: self._sync_scrollregion())
+        self.grid_frame.bind("<Configure>", lambda _e: self._sync_scrollregion())
+
+        def _on_canvas_configure(e):
             if self.canvas.winfo_exists():
-                self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+                self.canvas.itemconfig(self._canvas_frame_id, width=e.width)
 
-        self.grid_mesh.bind("<Configure>", _sync_scroll)
-        self.grid_frame.bind("<Configure>", _sync_scroll)
-        self.canvas.bind("<Configure>",
-                         lambda e: self.canvas.itemconfig(canvas_frame, width=e.width))
+        self.canvas.bind("<Configure>", _on_canvas_configure)
         self.canvas.bind("<Button-1>", lambda e: self._clear_selection())
         self.grid_frame.bind("<Button-1>", lambda e: self._clear_selection())
-
-        def _on_mousewheel(e):
-            if self.canvas.winfo_exists():
-                self.canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
-
-        def _bind_scroll(e=None):
-            self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
-
-        def _unbind_scroll(e=None):
-            self.canvas.unbind_all("<MouseWheel>")
-
-        self.canvas.bind("<Enter>", _bind_scroll)
-        self.canvas.bind("<Leave>", _unbind_scroll)
-        gw.bind("<Enter>", _bind_scroll)
-        gw.bind("<Leave>", _unbind_scroll)
+        self._bind_grid_scroll(gw)
 
         # keyboard shortcuts
         gw.bind("<Control-a>", lambda e: self._select_all())
@@ -1352,6 +1448,7 @@ class GridViewManager:
         tp.restyle_manager_buttons(self.grid_window)
         self._update_tag_filter_btn()
         self._update_sort_btn()
+        self._shadow_plate_cache.clear()
         self._rebuild_grid()
         if hasattr(self, '_page_size_menu') and self._page_size_menu.winfo_exists():
             t = self._tok()
@@ -1570,7 +1667,7 @@ class GridViewManager:
         pill.pack(side=tk.LEFT, padx=6)
         tk.Label(pill, text=f"Page {self._page + 1} of {total_pages}",
                  font=("Segoe UI", 9, "bold"),
-                 bg=t['surface'], fg=t['text']).pack(padx=10, pady=5)
+                 bg=t['surface'], fg=t['text']).pack(padx=8, pady=3)
 
         _nav("›", self._next_page, self._page < total_pages - 1).pack(side=tk.LEFT, padx=(2, 10))
 
@@ -1666,7 +1763,7 @@ class GridViewManager:
             self.grid_frame.columnconfigure(i, weight=1, uniform="col")
 
         self._update_selection_label()
-        self._update_gallery_stats()
+        self.root.after_idle(self._sync_scrollregion)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Header row (new UI)
@@ -1674,47 +1771,38 @@ class GridViewManager:
 
     def _build_header(self, item_data, grid_row, cols, t):
         dir_path = item_data['path']
-        parent_name = os.path.basename(os.path.dirname(dir_path)) or dir_path
 
-        band = tk.Frame(self.grid_frame, bg=t['header_band'], cursor="arrow")
+        band = tk.Frame(self.grid_frame, bg=t['header_band'], cursor="hand2")
         band.grid(row=grid_row, column=0, columnspan=cols,
-                  sticky='ew', padx=_CARD_PAD_X, pady=(28, 6))
+                  sticky='ew', padx=_CARD_PAD_X, pady=(6, 2))
         item_data['_header_widget'] = band
 
         shell = tk.Frame(band, bg=t['card_border'],
                          highlightthickness=1, highlightbackground=t['border'])
-        shell.pack(fill=tk.X, padx=2, pady=2)
+        shell.pack(fill=tk.X, padx=1, pady=1)
 
         header = tk.Frame(shell, bg=t['header_surface'])
         header.pack(fill=tk.X)
-        tk.Frame(header, bg=t['accent'], height=2).pack(fill=tk.X)
+        tk.Frame(header, bg=t['accent'], height=1).pack(fill=tk.X)
 
         inner = tk.Frame(header, bg=t['header_surface'])
-        inner.pack(fill=tk.X, padx=18, pady=14)
+        inner.pack(fill=tk.X, padx=10, pady=5)
 
-        icon_col = tk.Frame(inner, bg=t['accent_dim'], padx=3, pady=3)
-        icon_col.pack(side=tk.LEFT, padx=(0, 14))
-        tk.Label(icon_col, text="📁", font=("Segoe UI Emoji", 14),
-                 bg=t['accent_dim'], fg=t['accent']).pack(padx=6, pady=2)
-
-        text_col = tk.Frame(inner, bg=t['header_surface'])
-        text_col.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        title_row = tk.Frame(text_col, bg=t['header_surface'])
+        title_row = tk.Frame(inner, bg=t['header_surface'])
         title_row.pack(fill=tk.X)
 
         drag_hint = tk.Label(
             title_row, text="⠿",
-            font=("Segoe UI", 11),
+            font=("Segoe UI", 9),
             bg=t['header_surface'], fg=t['text_muted'],
-            cursor="fleur",
+            cursor="hand2",
         )
-        drag_hint.pack(side=tk.LEFT, padx=(0, 8))
+        drag_hint.pack(side=tk.LEFT, padx=(0, 6))
 
         dir_label = tk.Label(
             title_row,
             text=item_data['name'],
-            font=("Segoe UI", 13, "bold"),
+            font=("Segoe UI", 10, "bold"),
             bg=t['header_surface'], fg=t['text'],
             anchor='w', cursor="hand2",
         )
@@ -1724,19 +1812,11 @@ class GridViewManager:
         count_badge = tk.Label(
             title_row,
             text=f" {cnt} ",
-            font=("Segoe UI", 8, "bold"),
+            font=("Segoe UI", 7, "bold"),
             bg=t['accent'], fg="#ffffff",
-            padx=8, pady=3, cursor="hand2",
+            padx=6, pady=1, cursor="hand2",
         )
-        count_badge.pack(side=tk.LEFT, padx=(10, 0))
-
-        tk.Label(
-            text_col,
-            text=parent_name if parent_name != item_data['name'] else dir_path,
-            font=("Segoe UI", 8),
-            bg=t['header_surface'], fg=t['text_muted'],
-            anchor='w',
-        ).pack(fill=tk.X, pady=(4, 0))
+        count_badge.pack(side=tk.LEFT, padx=(8, 0))
 
         for w in (drag_hint,):
             w.bind("<Button-1>",
@@ -1746,8 +1826,18 @@ class GridViewManager:
             w.bind("<ButtonRelease-1>",
                    lambda e, dp=dir_path: self._on_dir_header_release(e, dp))
 
-        for w in (band, shell, header, inner, text_col, title_row, dir_label, count_badge):
+        for w in (band, shell, header, inner, title_row, dir_label, count_badge):
             w.bind("<Button-1>", lambda e, dp=dir_path: self._on_dir_click(e, dp))
+
+        def _header_hand_cursor(widget):
+            try:
+                widget.configure(cursor="hand2")
+            except tk.TclError:
+                pass
+            for child in widget.winfo_children():
+                _header_hand_cursor(child)
+
+        _header_hand_cursor(band)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Video card (premium layout, original thumbnail loading)
@@ -1767,12 +1857,33 @@ class GridViewManager:
             card_bg = info_bg = t['card_surface']
             name_fg, name_w = t['text'], "normal"
 
-        cell = tk.Frame(self.grid_frame, bg=t['card_shadow'], cursor="hand2")
+        cell = tk.Frame(self.grid_frame, bg=t['grid_canvas'], cursor="hand2")
         cell.grid(row=grid_row, column=video_col,
-                  padx=_CARD_PAD_X, pady=_CARD_PAD_Y, sticky='nsew')
+                  padx=_CARD_PAD_X, pady=_CARD_PAD_Y, sticky='new')
+
+        card_canvas = tk.Canvas(
+            cell, bg=t['grid_canvas'],
+            highlightthickness=0, bd=0, relief=tk.FLAT,
+            cursor="hand2",
+        )
+        card_canvas.pack(fill=tk.X, anchor="nw")
+        card_canvas._elevated = False
+        cell._card_canvas = card_canvas
+
+        host = tk.Frame(card_canvas, bg=card_bg, cursor="hand2")
+        win_id = card_canvas.create_window(
+            _SHADOW_HOST_X, _SHADOW_HOST_Y, window=host, anchor="nw",
+        )
+        card_canvas._win_id = win_id
+
+        def _on_card_canvas_configure(event, cv=card_canvas):
+            self._layout_card_canvas(cv)
+
+        card_canvas.bind("<Configure>", _on_card_canvas_configure, add="+")
+        self.root.after_idle(lambda cv=card_canvas: self._layout_card_canvas(cv))
 
         shell = tk.Frame(
-            cell, bg=t['card_border'],
+            host, bg=t['card_border'],
             highlightthickness=1, highlightbackground=t['card_border'],
         )
         shell.pack(fill=tk.BOTH, expand=True, padx=_CARD_SHELL_PAD, pady=_CARD_SHELL_PAD)
@@ -1786,7 +1897,10 @@ class GridViewManager:
         )
         card.pack(fill=tk.BOTH, expand=True)
         card._cell = cell
+        card._canvas = card_canvas
+        card._host = host
         card._shell = shell
+        card_canvas._card_ref = card
         self.card_widgets[vp] = card
 
         card._accent_stripe = tk.Frame(card, bg=t['accent'], height=3 if is_sel else 0)
@@ -1823,30 +1937,6 @@ class GridViewManager:
             card._sel_badge.place(relx=0.04, rely=0.06, anchor='nw')
         else:
             card._sel_badge.place_forget()
-
-        card._ext_chip = self._make_overlay_chip(
-            thumb_container, self._format_ext(vp),
-            t['chip_bg'], "#ffffff", t,
-        )
-        card._ext_chip.place(relx=0.96, rely=0.06, anchor='ne')
-
-        dur_txt = self._duration_cache.get(vp, "")
-        card._dur_chip = None
-        if dur_txt and dur_txt != "—":
-            card._dur_chip = self._make_overlay_chip(
-                thumb_container, dur_txt, "#000000", "#ffffff", t,
-            )
-            card._dur_chip.place(relx=0.96, rely=0.94, anchor='se')
-
-        play_overlay = tk.Frame(thumb_container, bg=t['accent'], cursor="hand2")
-        play_overlay._is_play_overlay = True
-        tk.Label(
-            play_overlay, text="▶",
-            bg=t['accent'], fg="#ffffff",
-            font=("Segoe UI", 17, "bold"), padx=20, pady=12,
-        ).pack()
-        play_overlay.place_forget()
-        card._play_overlay = play_overlay
 
         if is_excl:
             excl_badge = tk.Label(
@@ -1924,7 +2014,7 @@ class GridViewManager:
         div.pack(fill=tk.X)
 
         info_frame = tk.Frame(
-            card, bg=info_bg, padx=14,
+            card, bg=info_bg, padx=10,
             pady=_CARD_INFO_PAD_Y, cursor="fleur",
         )
         info_frame._is_info = True
@@ -1932,64 +2022,31 @@ class GridViewManager:
 
         raw_name = os.path.basename(item.video_path)
         display_name = os.path.splitext(raw_name)[0]
-        if len(display_name) > 38:
-            display_name = display_name[:35] + "…"
+
+        title_box = tk.Frame(info_frame, bg=info_bg, height=_CARD_TITLE_ROW_H)
+        title_box._is_title_box = True
+        title_box.pack(fill=tk.X)
+        title_box.pack_propagate(False)
 
         name_label = tk.Label(
-            info_frame, text=display_name,
+            title_box, text=display_name,
             bg=info_bg, fg=name_fg,
             font=("Segoe UI", 10, name_w),
-            anchor='w', justify=tk.LEFT,
+            anchor='nw', justify=tk.LEFT,
         )
         name_label._is_title = True
-        name_label.pack(fill=tk.X)
-
-        sub_row = tk.Frame(info_frame, bg=info_bg)
-        sub_row._is_subrow = True
-        sub_row.pack(fill=tk.X, pady=(5, 0))
-        try:
-            fsize = self._format_bytes(os.path.getsize(vp)) if os.path.isfile(vp) else ""
-        except OSError:
-            fsize = ""
-        tk.Label(
-            sub_row, text=self._format_ext(vp),
-            font=("Segoe UI", 7, "bold"),
-            bg=t['chip_bg'], fg=t['chip_fg'], padx=6, pady=2,
-        ).pack(side=tk.LEFT)
-        if fsize:
-            tk.Label(sub_row, text=" · ", font=("Segoe UI", 7),
-                     bg=info_bg, fg=t['text_muted']).pack(side=tk.LEFT)
-            tk.Label(
-                sub_row, text=fsize,
-                font=("Segoe UI", 7),
-                bg=info_bg, fg=t['text_muted'],
-            ).pack(side=tk.LEFT)
+        card._name_label = name_label
+        name_label.pack(fill=tk.BOTH, expand=True, anchor='nw')
 
         svc    = self.annotation_service
         tags   = svc.get_tags(vp)   if svc else []
         rating = svc.get_rating(vp) if svc else 0
         is_fav = bool(self.is_favourite_callback and self.is_favourite_callback(vp))
 
-        meta_frame = tk.Frame(info_frame, bg=info_bg, height=20)
-        meta_frame._is_meta = True
-        meta_frame.pack(fill=tk.X, pady=(6, 0))
-        meta_frame.pack_propagate(False)
-        if is_fav:
-            tk.Label(meta_frame, text="♥", bg=info_bg, fg=t['warn'],
-                     font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=(0, 4))
-        if rating > 0:
-            filled = "★" * rating
-            empty  = "☆" * (5 - rating)
-            tk.Label(meta_frame, text=filled + empty, bg=info_bg, fg=t['warn'],
-                     font=("Segoe UI", 7)).pack(side=tk.LEFT, padx=(0, 6))
-        for tag in tags[:2]:
-            tk.Label(meta_frame, text=f"#{tag}",
-                     bg=t['accent_dim'], fg=t['accent'],
-                     font=("Segoe UI", 7), padx=6, pady=2
-                     ).pack(side=tk.LEFT, padx=(0, 4))
+        self._pack_card_meta_row(info_frame, info_bg, t, is_fav, rating, tags)
 
         bind_widgets = (
-            cell, shell, card, thumb_well, thumb_container, thumb_label,
+            cell, card_canvas, host, shell, card, thumb_well, thumb_container, thumb_label,
             name_label, info_frame,
         )
         for w in bind_widgets:
@@ -2007,7 +2064,7 @@ class GridViewManager:
 
         play_btn.bind("<Double-Button-1>", lambda e, _vp=vp: self._play_single(_vp))
 
-        for w in (cell, shell, card):
+        for w in (cell, card_canvas, host, shell, card):
             w.bind("<Enter>", lambda e, _vp=vp: self._on_card_enter(e, _vp))
             w.bind("<Leave>", lambda e, _vp=vp: self._on_card_leave(e, _vp))
 
@@ -2115,16 +2172,24 @@ class GridViewManager:
                 badge.place_forget()
 
         info_frame = self._card_info_frame(card)
-        name_label = None
         if info_frame:
-            for lbl in info_frame.winfo_children():
-                if getattr(lbl, '_is_title', False):
-                    name_label = lbl
-                    break
-        if name_label:
-            name_label.configure(fg=name_fg, font=("Segoe UI", 10, name_w))
+            for child in info_frame.winfo_children():
+                if getattr(child, '_is_title_box', False):
+                    try:
+                        child.configure(bg=info_bg)
+                    except tk.TclError:
+                        pass
+            name_label = getattr(card, '_name_label', None)
+            if name_label and name_label.winfo_exists():
+                name_label.configure(fg=name_fg, font=("Segoe UI", 10, name_w), bg=info_bg)
+            svc = self.annotation_service
+            tags = svc.get_tags(video_path) if svc else []
+            rating = svc.get_rating(video_path) if svc else 0
+            is_fav = bool(self.is_favourite_callback and self.is_favourite_callback(video_path))
+            self._update_card_meta_row(info_frame, info_bg, t, is_fav, rating, tags)
 
         self._refresh_excluded_badge(self._card_thumb_container(card), is_excl)
+        self._repaint_card_shadow(card, elevated=is_sel)
 
     def _refresh_excluded_badge(self, thumb_container, is_excluded):
         if thumb_container is None:
@@ -2173,25 +2238,7 @@ class GridViewManager:
         self._update_selection_label()
 
     def _update_selection_label(self):
-        if not hasattr(self, 'selection_label'):
-            return
-        try:
-            if not self.selection_label.winfo_exists():
-                return
-        except tk.TclError:
-            return
-        t = self._tok()
-        n = len(self.selected_items)
-        if n == 0:
-            self.selection_label.config(text="Nothing selected",
-                                        bg=t['surface2'], fg=t['text_muted'])
-        elif n == 1:
-            self.selection_label.config(text="1 selected",
-                                        bg=t['accent_dim'], fg=t['accent'])
-        else:
-            self.selection_label.config(text=f"{n} selected",
-                                        bg=t['accent_dim'], fg=t['accent'])
-        self._update_gallery_stats()
+        pass
 
     # ─────────────────────────────────────────────────────────────────────────
     # Playback (original)
@@ -2335,16 +2382,8 @@ class GridViewManager:
             self._apply_card_chrome(card, t['excluded'], 2, t['card_surface'], t['card_surface'])
         else:
             self._apply_card_chrome(card, t['accent'], 2, t['card_hover'], t['card_hover'])
-            try:
-                if cell and cell.winfo_exists():
-                    cell.configure(bg=_hex_blend(t['card_shadow'], t['accent'], 0.12))
-            except tk.TclError:
-                pass
 
-        overlay = getattr(card, '_play_overlay', None)
-        if overlay and overlay.winfo_exists():
-            overlay.place(relx=0.5, rely=0.5, anchor="center")
-            overlay.lift()
+        self._repaint_card_shadow(card, elevated=True)
 
         thumb = self._card_thumb_container(card)
         if thumb:
@@ -2375,10 +2414,7 @@ class GridViewManager:
             card_bg = info_bg = t['card_surface']
 
         self._apply_card_chrome(card, border_col, border_w, card_bg, info_bg)
-
-        overlay = getattr(card, '_play_overlay', None)
-        if overlay and overlay.winfo_exists():
-            overlay.place_forget()
+        self._repaint_card_shadow(card, elevated=is_sel)
 
         thumb = self._card_thumb_container(card)
         if thumb:
@@ -3252,7 +3288,7 @@ class GridViewManager:
                 if header_widget and header_widget.winfo_exists():
                     header_widget.grid(
                         row=grid_row, column=0, columnspan=cols,
-                        sticky='ew', padx=_CARD_PAD_X, pady=(28, 8)
+                        sticky='ew', padx=_CARD_PAD_X, pady=(6, 2)
                     )
                 else:
                     return self._rebuild_grid()
@@ -3261,11 +3297,15 @@ class GridViewManager:
 
             vp = item_data['path']
             card = self.card_widgets.get(vp)
-            if card and card.winfo_exists():
-                card.grid(
+            slave = self._card_grid_slave(card) if card else None
+            if slave and slave.winfo_exists():
+                slave.grid(
                     row=grid_row, column=video_col,
-                    padx=_CARD_PAD_X, pady=_CARD_PAD_Y, sticky='nsew'
+                    padx=_CARD_PAD_X, pady=_CARD_PAD_Y, sticky='new'
                 )
+                if card and getattr(card, '_canvas', None):
+                    self.root.after_idle(
+                        lambda c=card._canvas: self._layout_card_canvas(c))
             else:
                 return self._rebuild_grid()
 
