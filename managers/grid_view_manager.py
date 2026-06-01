@@ -628,46 +628,51 @@ class GridViewManager:
             pass
 
     def _layout_card_canvas(self, card_canvas, draw_shadow=True):
-        """Size embedded host from content; widen canvas to column, never clip info."""
         if not card_canvas.winfo_exists():
             return
+        if getattr(card_canvas, '_layout_in_progress', False):  # <-- ADD
+            return  # <-- ADD
         win_id = getattr(card_canvas, "_win_id", None)
         if not win_id:
             return
-        cw = max(1, card_canvas.winfo_width())
-        hx, hy = _SHADOW_HOST_X, _SHADOW_HOST_Y
-        iw = max(40, cw - hx - 6)
-        host = self._card_canvas_host(card_canvas)
-        try:
-            card_canvas.coords(win_id, hx, hy)
-            card_canvas.itemconfig(win_id, width=iw)
-            if host and host.winfo_exists():
-                host.update_idletasks()
-                req_h = max(96, host.winfo_reqheight())
-                card_canvas.itemconfig(win_id, height=req_h)
-            else:
-                req_h = 200
-        except tk.TclError:
-            req_h = 200
-
-        needed_ch = hy + req_h + _SHADOW_OFFSET_Y + 6
-        try:
-            cur_h = int(card_canvas.cget("height"))
-        except tk.TclError:
-            cur_h = 0
-        if abs(cur_h - needed_ch) > 2:
+        card_canvas._layout_in_progress = True  # <-- ADD
+        try:  # <-- ADD (wrap rest)
+            cw = max(1, card_canvas.winfo_width())
+            hx, hy = _SHADOW_HOST_X, _SHADOW_HOST_Y
+            iw = max(40, cw - hx - 6)
+            host = self._card_canvas_host(card_canvas)
             try:
-                card_canvas.configure(height=needed_ch)
+                card_canvas.coords(win_id, hx, hy)
+                card_canvas.itemconfig(win_id, width=iw)
+                if host and host.winfo_exists():
+                    host.update_idletasks()
+                    req_h = max(96, host.winfo_reqheight())
+                    card_canvas.itemconfig(win_id, height=req_h)
+                else:
+                    req_h = 200
             except tk.TclError:
-                pass
+                req_h = 200
 
-        card = getattr(card_canvas, "_card_ref", None)
-        if card and card.winfo_exists():
-            self._sync_card_text_wrap(card, iw)
+            needed_ch = hy + req_h + _SHADOW_OFFSET_Y + 6
+            try:
+                cur_h = int(card_canvas.cget("height"))
+            except tk.TclError:
+                cur_h = 0
+            if abs(cur_h - needed_ch) > 2:
+                try:
+                    card_canvas.configure(height=needed_ch)
+                except tk.TclError:
+                    pass
 
-        if draw_shadow:
-            self._draw_card_shadow(card_canvas, getattr(card_canvas, "_elevated", False))
-        self._sync_scrollregion()
+            card = getattr(card_canvas, "_card_ref", None)
+            if card and card.winfo_exists():
+                self._sync_card_text_wrap(card, iw)
+
+            if draw_shadow:
+                self._draw_card_shadow(card_canvas, getattr(card_canvas, "_elevated", False))
+            self._sync_scrollregion()
+        finally:  # <-- ADD
+            card_canvas._layout_in_progress = False  # <-- ADD
 
     def _sync_scrollregion(self):
         if not hasattr(self, 'canvas') or not self.canvas.winfo_exists():
