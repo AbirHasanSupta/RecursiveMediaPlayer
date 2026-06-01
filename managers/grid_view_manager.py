@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk
-from PIL import Image, ImageTk
+from PIL import Image, ImageDraw, ImageTk
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -12,12 +12,18 @@ from managers.video_preview_manager import get_thumb_pool, generate_thumbnail_wo
 
 
 # ── Layout tokens (colours come from _tok()) ─────────────────────────────────
-_THUMB_AREA_H       = 152   # fixed preview band height inside each card
-_CARD_PAD_X         = 10
-_CARD_PAD_Y         = 10
-_CARD_INFO_PAD_Y    = 8
-_ACTION_STRIP_H     = 36
-_THUMB_MAX_SOURCE   = 480   # longest edge when decoding source frames
+_THUMB_AREA_MIN_H   = 136
+_THUMB_AREA_MAX_H   = 220
+_THUMB_AREA_RATIO   = 0.62   # preview height ≈ ratio × card width
+_THUMB_CORNER_R     = 14
+_CARD_PAD_X         = 14
+_CARD_PAD_Y         = 14
+_CARD_INFO_PAD_Y    = 11
+_CARD_SHELL_PAD     = 4
+_THUMB_INSET        = 10
+_ACTION_STRIP_H     = 40
+_THUMB_MAX_SOURCE   = 560
+_SHIMMER_MS         = 85
 
 
 def _hex_blend(c1: str, c2: str, t: float) -> str:
@@ -188,10 +194,10 @@ class GridViewManager:
             rating = svc.get_rating(vp)
             is_fav = (self.is_favourite_callback and self.is_favourite_callback(vp))
             is_sel = vp in self.selected_items
-            info_bg = t['accent_dim'] if is_sel else t['surface']
-            meta_frame = tk.Frame(info_frame, bg=info_bg, height=18)
+            info_bg = t['accent_dim'] if is_sel else t['card_surface']
+            meta_frame = tk.Frame(info_frame, bg=info_bg, height=20)
             meta_frame._is_meta = True
-            meta_frame.pack(fill=tk.X, pady=(4, 0))
+            meta_frame.pack(fill=tk.X, pady=(6, 0))
             meta_frame.pack_propagate(False)
             if is_fav:
                 tk.Label(meta_frame, text="♥", bg=info_bg, fg=t['warn'],
@@ -204,7 +210,7 @@ class GridViewManager:
             for tag in tags[:2]:
                 tk.Label(meta_frame, text=f"#{tag}",
                          bg=t['accent_dim'], fg=t['accent'],
-                         font=("Segoe UI", 7), padx=5, pady=1).pack(side=tk.LEFT, padx=(0, 3))
+                         font=("Segoe UI", 7), padx=6, pady=2).pack(side=tk.LEFT, padx=(0, 4))
 
     def _refresh_card_meta(self, vp):
         """Immediately rebuild the meta row (fav ♥, rating ★, tags) for a single card."""
@@ -213,12 +219,8 @@ class GridViewManager:
             return
         t = self._tok()
         is_sel = vp in self.selected_items
-        info_bg = t['accent_dim'] if is_sel else t['surface']
-        info_frame = None
-        for child in card.winfo_children():
-            if getattr(child, '_is_info', False):
-                info_frame = child
-                break
+        info_bg = t['accent_dim'] if is_sel else t['card_surface']
+        info_frame = self._card_info_frame(card)
         if info_frame is None:
             return
         for child in list(info_frame.winfo_children()):
@@ -228,9 +230,9 @@ class GridViewManager:
         tags   = svc.get_tags(vp)   if svc else []
         rating = svc.get_rating(vp) if svc else 0
         is_fav = bool(self.is_favourite_callback and self.is_favourite_callback(vp))
-        meta_frame = tk.Frame(info_frame, bg=info_bg, height=18)
+        meta_frame = tk.Frame(info_frame, bg=info_bg, height=20)
         meta_frame._is_meta = True
-        meta_frame.pack(fill=tk.X, pady=(4, 0))
+        meta_frame.pack(fill=tk.X, pady=(6, 0))
         meta_frame.pack_propagate(False)
         if is_fav:
             tk.Label(meta_frame, text="♥", bg=info_bg, fg=t['warn'],
@@ -243,8 +245,8 @@ class GridViewManager:
         for tag in tags[:2]:
             tk.Label(meta_frame, text=f"#{tag}",
                      bg=t['accent_dim'], fg=t['accent'],
-                     font=("Segoe UI", 7), padx=5, pady=1
-                     ).pack(side=tk.LEFT, padx=(0, 3))
+                     font=("Segoe UI", 7), padx=6, pady=2
+                     ).pack(side=tk.LEFT, padx=(0, 4))
 
     # ─────────────────────────────────────────────────────────────────────────
     # Design tokens (new UI)
@@ -258,32 +260,55 @@ class GridViewManager:
         # Compute grid‑specific derived colours
         canvas_bg = base['bg']
         if dark:
-            accent_dim = "#172344"
-            card_hover = _hex_blend(base['surface'], base.get('surface2', "#252C38"), 0.45)
+            accent_dim = "#1a2d52"
+            card_surface = base['surface']
+            card_hover = _hex_blend(card_surface, "#2a3344", 0.38)
+            card_shadow = _hex_blend(canvas_bg, "#050608", 0.42)
+            card_border = _hex_blend(base['border'], "#3d4a62", 0.35)
+            thumb_well = _hex_blend("#0a0c10", card_surface, 0.2)
             pill_bg = base.get('surface2', "#252C38")
             bar_bg = _hex_blend(canvas_bg, base.get('surface2', "#1A1E26"), 0.55)
-            hdr_bg = base.get('header_bg', "#1A1E26")
-            header_band = _hex_blend(canvas_bg, "#0a0c10", 0.35)
-            header_surface = base['surface']
-            thumb_bg = "#08090c"
-            action_bg = _hex_blend("#0c0d11", base['surface'], 0.25)
+            hdr_bg = _hex_blend(base['surface'], "#141820", 0.35)
+            header_band = _hex_blend(canvas_bg, "#06080c", 0.5)
+            header_surface = card_surface
+            thumb_bg = "#06070a"
+            thumb_fill_top = (14, 16, 22)
+            thumb_fill_bot = (6, 7, 10)
+            action_bg = _hex_blend("#0a0c12", "#000000", 0.55)
+            overlay_scrim = "#12151c"
+            accent_glow = _hex_blend(base['accent'], "#ffffff", 0.15)
+            chip_bg = _hex_blend(card_surface, "#2a3344", 0.55)
+            chip_fg = "#c5cee0"
+            hero_accent = base['accent']
         else:
-            accent_dim = "#dbeafe"
-            card_hover = _hex_blend(base['surface'], "#EDF2F9", 0.55)
+            accent_dim = "#e8f0ff"
+            card_surface = base['surface']
+            card_hover = _hex_blend(card_surface, "#f0f4fa", 0.65)
+            card_shadow = _hex_blend(canvas_bg, "#c5ced9", 0.28)
+            card_border = _hex_blend(base['border'], "#ffffff", 0.55)
+            thumb_well = _hex_blend("#f3f6fb", card_surface, 0.45)
             pill_bg = "#E8EDF5"
             bar_bg = "#EEF2F8"
-            hdr_bg = base['surface']
-            header_band = _hex_blend(canvas_bg, "#E2E8F2", 0.65)
-            header_surface = base['surface']
-            thumb_bg = "#0e1014"
-            action_bg = _hex_blend("#1a1d28", "#2A303C", 0.12)
+            hdr_bg = card_surface
+            header_band = _hex_blend(canvas_bg, "#dce4ef", 0.55)
+            header_surface = card_surface
+            thumb_bg = "#0c0e12"
+            thumb_fill_top = (248, 250, 253)
+            thumb_fill_bot = (232, 236, 242)
+            action_bg = _hex_blend("#1e2430", "#ffffff", 0.88)
+            overlay_scrim = "#f8fafc"
+            accent_glow = _hex_blend(base['accent'], "#ffffff", 0.25)
+            chip_bg = "#eef2f8"
+            chip_fg = "#4a5568"
+            hero_accent = base['accent']
 
-        action_fg = "#e8ecf4" if dark else "#3d4556"
-        action_sep = _hex_blend(action_bg, base['border'], 0.5)
+        action_fg = "#f0f3fa" if dark else "#2d3548"
+        action_sep = _hex_blend(action_bg, base['border'], 0.45)
 
         return dict(
             bg          = canvas_bg,
             grid_canvas = canvas_bg,
+            grid_mesh   = _hex_blend(canvas_bg, base['surface'], 0.08) if dark else _hex_blend(canvas_bg, "#ffffff", 0.35),
             surface     = base['surface'],
             surface2    = bar_bg,
             border      = base['border'],
@@ -309,9 +334,20 @@ class GridViewManager:
             pill_fg     = base['text_muted'],
             scrollbar   = base['border'],
             card_hover  = card_hover,
+            card_surface= card_surface,
+            card_shadow = card_shadow,
+            card_border = card_border,
+            thumb_well  = thumb_well,
+            thumb_fill_top = thumb_fill_top,
+            thumb_fill_bot = thumb_fill_bot,
+            overlay_scrim = overlay_scrim,
             action_bg   = action_bg,
             action_fg   = action_fg,
             action_sep  = action_sep,
+            accent_glow = accent_glow,
+            chip_bg     = chip_bg,
+            chip_fg     = chip_fg,
+            hero_accent = hero_accent,
         )
 
 
@@ -328,24 +364,223 @@ class GridViewManager:
             w = max(120, int(container.winfo_width()))
             h = max(80, int(container.winfo_height()))
         except Exception:
-            w, h = 220, _THUMB_AREA_H
+            w, h = 220, _THUMB_AREA_MIN_H
         return w, h
 
-    def _pil_letterbox(self, pil_image, box_w, box_h, fill_rgb):
+    def _thumb_area_height(self, cell_width):
+        """Responsive preview height from card column width."""
+        try:
+            w = max(140, int(cell_width))
+        except Exception:
+            w = 220
+        h = int(w * _THUMB_AREA_RATIO)
+        return max(_THUMB_AREA_MIN_H, min(_THUMB_AREA_MAX_H, h))
+
+    def _pil_gradient_backdrop(self, box_w, box_h, top_rgb, bot_rgb):
+        """Soft vertical gradient fill for empty thumbnail areas."""
+        box_w, box_h = max(1, box_w), max(1, box_h)
+        grad = Image.new("RGB", (1, 2))
+        grad.putpixel((0, 0), top_rgb)
+        grad.putpixel((0, 1), bot_rgb)
+        return grad.resize((box_w, box_h), Image.Resampling.BILINEAR)
+
+    def _pil_letterbox(self, pil_image, box_w, box_h, fill_rgb=None, gradient=None):
         """Fit *pil_image* inside box_w×box_h preserving aspect ratio (letterbox)."""
+        box_w, box_h = max(1, box_w), max(1, box_h)
+        if gradient:
+            canvas = self._pil_gradient_backdrop(box_w, box_h, gradient[0], gradient[1])
+        elif fill_rgb:
+            canvas = Image.new("RGB", (box_w, box_h), fill_rgb)
+        else:
+            canvas = Image.new("RGB", (box_w, box_h), (12, 13, 16))
+
         if pil_image is None:
-            return Image.new("RGB", (max(1, box_w), max(1, box_h)), fill_rgb)
+            return canvas
         img = pil_image.convert("RGB")
         iw, ih = img.size
         if iw < 1 or ih < 1:
-            return Image.new("RGB", (max(1, box_w), max(1, box_h)), fill_rgb)
+            return canvas
         scale = min(box_w / iw, box_h / ih)
         nw = max(1, int(iw * scale))
         nh = max(1, int(ih * scale))
         resized = img.resize((nw, nh), Image.Resampling.LANCZOS)
-        canvas = Image.new("RGB", (max(1, box_w), max(1, box_h)), fill_rgb)
         canvas.paste(resized, ((box_w - nw) // 2, (box_h - nh) // 2))
         return canvas
+
+    def _rgb_blend(self, a, b, t):
+        return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
+
+    def _pil_rounded_mask(self, size, radius):
+        w, h = max(1, size[0]), max(1, size[1])
+        r = max(1, min(radius, min(w, h) // 2))
+        mask = Image.new("L", (w, h), 0)
+        draw = ImageDraw.Draw(mask)
+        draw.rounded_rectangle((0, 0, w - 1, h - 1), radius=r, fill=255)
+        return mask
+
+    def _pil_bottom_scrim(self, size, strength=0.5):
+        w, h = max(1, size[0]), max(1, size[1])
+        grad = Image.new("L", (1, max(2, h)))
+        for y in range(grad.size[1]):
+            t = max(0.0, (y - grad.size[1] * 0.45) / (grad.size[1] * 0.55))
+            grad.putpixel((0, y), int(255 * strength * t))
+        grad = grad.resize((w, h), Image.Resampling.BILINEAR)
+        return grad
+
+    def _pil_render_card_thumb(self, pil_image, box_w, box_h, t, has_frame=True):
+        """Cinematic letterbox + rounded corners + bottom scrim."""
+        box_w, box_h = max(1, box_w), max(1, box_h)
+        gradient = (t['thumb_fill_top'], t['thumb_fill_bot'])
+        base = self._pil_letterbox(pil_image, box_w, box_h, gradient=gradient)
+        if has_frame and pil_image is not None:
+            scrim = self._pil_bottom_scrim((box_w, box_h), strength=0.55 if pil_image else 0)
+            dark = Image.new("RGB", (box_w, box_h), (0, 0, 0))
+            base = Image.composite(dark, base, scrim)
+        mask = self._pil_rounded_mask((box_w, box_h), _THUMB_CORNER_R)
+        rounded = Image.new("RGB", (box_w, box_h), gradient[0])
+        rounded.paste(base, mask=mask)
+        return rounded
+
+    def _pil_shimmer_frame(self, box_w, box_h, t, phase):
+        """Animated skeleton frame while thumbnail loads."""
+        box_w, box_h = max(1, box_w), max(1, box_h)
+        p = (phase % 20) / 20.0
+        top = self._rgb_blend(t['thumb_fill_top'], t['thumb_fill_bot'], p)
+        bot = self._rgb_blend(t['thumb_fill_bot'], t['thumb_fill_top'], p)
+        img = self._pil_gradient_backdrop(box_w, box_h, top, bot)
+        mask = self._pil_rounded_mask((box_w, box_h), _THUMB_CORNER_R)
+        out = Image.new("RGB", (box_w, box_h), top)
+        out.paste(img, mask=mask)
+        draw = ImageDraw.Draw(out)
+        bar_w = max(40, box_w // 3)
+        x0 = int((box_w - bar_w) * ((phase % 10) / 10.0))
+        draw.rounded_rectangle(
+            (x0 + 12, box_h // 2 - 10, x0 + bar_w, box_h // 2 + 10),
+            radius=8, fill=self._rgb_blend(top, (255, 255, 255), 0.12),
+        )
+        return out
+
+    def _format_bytes(self, nbytes):
+        try:
+            n = int(nbytes)
+        except (TypeError, ValueError):
+            return ""
+        if n < 1024:
+            return f"{n} B"
+        if n < 1024 ** 2:
+            return f"{n / 1024:.1f} KB"
+        if n < 1024 ** 3:
+            return f"{n / (1024 ** 2):.1f} MB"
+        return f"{n / (1024 ** 3):.2f} GB"
+
+    def _format_ext(self, path):
+        ext = os.path.splitext(path)[1].lower().lstrip(".")
+        return (ext or "video").upper()[:8]
+
+    def _stop_thumb_shimmer(self, item):
+        aid = getattr(item, "_shimmer_after", None)
+        if aid:
+            try:
+                self.root.after_cancel(aid)
+            except Exception:
+                pass
+        item._shimmer_after = None
+
+    def _start_thumb_shimmer(self, label, container, item):
+        self._stop_thumb_shimmer(item)
+        if getattr(item, "_pil_master", None) is not None:
+            return
+
+        def tick(phase=0):
+            if getattr(self, "_closing", False):
+                return
+            if getattr(item, "_pil_master", None) is not None:
+                self._stop_thumb_shimmer(item)
+                return
+            if not label.winfo_exists():
+                return
+            t = self._tok()
+            box_w, box_h = self._thumb_box_size(container)
+            frame = self._pil_shimmer_frame(box_w, box_h, t, phase)
+            photo = ImageTk.PhotoImage(frame)
+            label.configure(image=photo, text="", width=box_w, height=box_h)
+            label.image = photo
+            item._shimmer_after = self.root.after(
+                _SHIMMER_MS, lambda: tick((phase + 1) % 20))
+
+        tick(0)
+
+    def _make_overlay_chip(self, parent, text, bg, fg, t):
+        chip = tk.Label(
+            parent, text=f" {text} ",
+            bg=bg, fg=fg,
+            font=("Segoe UI", 7, "bold"),
+            padx=6, pady=3,
+        )
+        chip._is_overlay_chip = True
+        return chip
+
+    def _card_thumb_container(self, card):
+        """Locate the thumbnail frame inside a card (supports nested well layout)."""
+        for child in card.winfo_children():
+            if getattr(child, '_is_thumb_well', False):
+                for sub in child.winfo_children():
+                    if getattr(sub, '_is_thumb', False):
+                        return sub
+            if getattr(child, '_is_thumb', False):
+                return child
+        return None
+
+    def _card_info_frame(self, card):
+        for child in card.winfo_children():
+            if getattr(child, '_is_info', False):
+                return child
+        return None
+
+    def _apply_card_chrome(self, card, border_col, border_w, card_bg, info_bg=None):
+        """Sync shell / card / info colours after state changes."""
+        if info_bg is None:
+            info_bg = card_bg
+        cell = getattr(card, '_cell', None)
+        shell = getattr(card, '_shell', None)
+        well = getattr(card, '_thumb_well', None)
+        try:
+            if cell and cell.winfo_exists():
+                cell.configure(bg=self._tok()['card_shadow'])
+        except tk.TclError:
+            pass
+        try:
+            if shell and shell.winfo_exists():
+                t = self._tok()
+                shell.configure(bg=t['card_border'], highlightbackground=border_col)
+        except tk.TclError:
+            pass
+        try:
+            card.configure(bg=card_bg, highlightbackground=border_col, highlightthickness=border_w)
+        except tk.TclError:
+            pass
+        try:
+            if well and well.winfo_exists():
+                well.configure(bg=self._tok()['thumb_well'])
+        except tk.TclError:
+            pass
+        info = self._card_info_frame(card)
+        if info:
+            try:
+                info.configure(bg=info_bg)
+                for lbl in info.winfo_children():
+                    try:
+                        lbl.configure(bg=info_bg)
+                    except tk.TclError:
+                        pass
+            except tk.TclError:
+                pass
+        for child in card.winfo_children():
+            if getattr(child, '_is_divider', False):
+                try:
+                    child.configure(bg=self._tok()['divider'])
+                except tk.TclError:
+                    pass
 
     def _pil_downscale_master(self, pil_image, max_edge=_THUMB_MAX_SOURCE):
         """Downscale large sources for cache without changing aspect ratio."""
@@ -362,7 +597,7 @@ class GridViewManager:
         item._pil_master = master
         self._photo_cache[path_norm] = master
 
-    def _apply_thumb_to_label(self, label, source, container=None):
+    def _apply_thumb_to_label(self, label, source, container=None, item=None):
         """Render PIL (or legacy PhotoImage) onto a centred label."""
         if not label.winfo_exists():
             return
@@ -370,14 +605,12 @@ class GridViewManager:
             container = label.master
         box_w, box_h = self._thumb_box_size(container)
         t = self._tok()
-        fill = t['thumb_bg']
-        if isinstance(fill, str) and fill.startswith("#"):
-            fill_rgb = (int(fill[1:3], 16), int(fill[3:5], 16), int(fill[5:7], 16))
-        else:
-            fill_rgb = (12, 13, 16)
+
+        if item is not None:
+            self._stop_thumb_shimmer(item)
 
         if isinstance(source, Image.Image):
-            boxed = self._pil_letterbox(source, box_w, box_h, fill_rgb)
+            boxed = self._pil_render_card_thumb(source, box_w, box_h, t, has_frame=True)
             photo = ImageTk.PhotoImage(boxed)
             label.configure(image=photo, text="", width=box_w, height=box_h)
             label.image = photo
@@ -388,16 +621,28 @@ class GridViewManager:
             label.image = source
             return
 
-    def _bind_thumb_resize(self, container, label, item):
+    def _bind_thumb_resize(self, container, label, item, cell=None):
         """Re-letterbox when the preview area is resized (responsive cards)."""
+        def _sync_height(event=None):
+            if cell and cell.winfo_exists():
+                try:
+                    h = self._thumb_area_height(cell.winfo_width())
+                    if abs(int(container.cget('height')) - h) > 4:
+                        container.configure(height=h)
+                except tk.TclError:
+                    pass
+
         def _on_configure(event=None):
             if getattr(self, '_closing', False):
                 return
+            _sync_height()
             pil = getattr(item, '_pil_master', None)
             if pil is not None and label.winfo_exists():
-                self._apply_thumb_to_label(label, pil, container)
+                self._apply_thumb_to_label(label, pil, container, item=item)
 
         container.bind("<Configure>", _on_configure, add="+")
+        if cell:
+            cell.bind("<Configure>", _on_configure, add="+")
 
     def show_grid_view(self, videos, video_preview_manager=None):
         if hasattr(self.theme_provider, "_open_grid_view"):
@@ -571,65 +816,110 @@ class GridViewManager:
         self._active_tag_filters.clear()
         self._update_tag_filter_btn()
 
+    def _update_gallery_stats(self):
+        """Refresh header stat chips (videos, page, selection)."""
+        if not hasattr(self, '_stat_videos_lbl'):
+            return
+        try:
+            if not self._stat_videos_lbl.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        t = self._tok()
+        total = sum(1 for i in self.items if i.get('type') == 'video')
+        pages = self._total_pages() if self.items else 1
+        sel = len(self.selected_items)
+        self._stat_videos_lbl.config(text=f"{total:,} videos")
+        self._stat_page_lbl.config(text=f"Page {self._page + 1} / {pages}")
+        self._stat_sel_lbl.config(
+            text=f"{sel} selected" if sel else "No selection",
+            bg=t['accent_dim'] if sel else t['chip_bg'],
+            fg=t['accent'] if sel else t['chip_fg'],
+        )
+
+    def _stat_chip(self, parent, label_text, t, accent=False):
+        bg = t['accent_dim'] if accent else t['chip_bg']
+        fg = t['accent'] if accent else t['chip_fg']
+        wrap = tk.Frame(parent, bg=bg, highlightthickness=1,
+                        highlightbackground=t['border'])
+        wrap.pack(side=tk.LEFT, padx=(0, 8))
+        inner = tk.Frame(wrap, bg=bg)
+        inner.pack(padx=10, pady=6)
+        tk.Label(inner, text=label_text, font=("Segoe UI", 7, "bold"),
+                 bg=bg, fg=t['text_muted']).pack(anchor="w")
+        val = tk.Label(inner, text="—", font=("Segoe UI", 10, "bold"), bg=bg, fg=fg)
+        val.pack(anchor="w")
+        return val
+
     def _build_ui(self, videos, t):
         """Construct the entire window layout using theme tokens."""
         gw = self.grid_window
 
-        # ── App chrome: title bar + toolbar (layered surfaces) ─────────────────
         chrome = tk.Frame(gw, bg=t['grid_canvas'])
         chrome.pack(fill=tk.X)
 
-        header = tk.Frame(chrome, bg=t['header_bg'], height=64)
-        header.pack(fill=tk.X, padx=16, pady=(14, 0))
-        header.pack_propagate(False)
-        h_inner = tk.Frame(header, bg=t['header_bg'])
-        h_inner.pack(fill=tk.BOTH, expand=True, padx=4, pady=0)
+        # Hero header
+        hero = tk.Frame(chrome, bg=t['header_bg'],
+                        highlightthickness=1, highlightbackground=t['border'])
+        hero.pack(fill=tk.X, padx=16, pady=(16, 0))
+        tk.Frame(hero, bg=t['hero_accent'], height=3).pack(fill=tk.X)
 
-        title_box = tk.Frame(h_inner, bg=t['header_bg'])
-        title_box.pack(side=tk.LEFT, fill=tk.Y)
-        tk.Label(title_box, text="🖼", font=("Segoe UI Emoji", 20),
-                 bg=t['header_bg'], fg=t['accent']).pack(side=tk.LEFT, padx=(0, 12), pady=16)
-        title_col = tk.Frame(title_box, bg=t['header_bg'])
-        title_col.pack(side=tk.LEFT, fill=tk.Y, pady=12)
+        h_inner = tk.Frame(hero, bg=t['header_bg'])
+        h_inner.pack(fill=tk.BOTH, expand=True, padx=18, pady=14)
+
+        brand = tk.Frame(h_inner, bg=t['header_bg'])
+        brand.pack(side=tk.LEFT, fill=tk.Y)
+        icon_ring = tk.Frame(brand, bg=t['accent_dim'], padx=2, pady=2)
+        icon_ring.pack(side=tk.LEFT, padx=(0, 14))
+        tk.Label(icon_ring, text="▣", font=("Segoe UI", 18, "bold"),
+                 bg=t['accent_dim'], fg=t['accent'], padx=8, pady=4).pack()
+        title_col = tk.Frame(brand, bg=t['header_bg'])
+        title_col.pack(side=tk.LEFT, fill=tk.Y)
         tk.Label(title_col, text="Video Gallery",
-                 font=("Segoe UI", 16, "bold"),
+                 font=("Segoe UI", 18, "bold"),
                  bg=t['header_bg'], fg=t['text']).pack(anchor="w")
-        tk.Label(title_col, text="Browse, filter, and play your collection",
+        tk.Label(title_col, text="Curate · filter · play — your library at a glance",
                  font=("Segoe UI", 9),
-                 bg=t['header_bg'], fg=t['text_muted']).pack(anchor="w", pady=(2, 0))
+                 bg=t['header_bg'], fg=t['text_muted']).pack(anchor="w", pady=(3, 0))
 
-        status_row = tk.Frame(h_inner, bg=t['header_bg'])
-        status_row.pack(side=tk.LEFT, fill=tk.Y, padx=(20, 0))
+        stats_row = tk.Frame(h_inner, bg=t['header_bg'])
+        stats_row.pack(side=tk.RIGHT, fill=tk.Y)
+        self._stat_videos_lbl = self._stat_chip(stats_row, "LIBRARY", t)
+        self._stat_page_lbl = self._stat_chip(stats_row, "VIEW", t)
+        self._stat_sel_lbl = self._stat_chip(stats_row, "SELECTION", t, accent=False)
 
+        mid_row = tk.Frame(h_inner, bg=t['header_bg'])
+        mid_row.pack(side=tk.LEFT, fill=tk.Y, padx=(24, 0))
         self.selection_label = tk.Label(
-            status_row, text="Nothing selected",
-            font=("Segoe UI", 9),
+            mid_row, text="Nothing selected",
+            font=("Segoe UI", 9, "bold"),
             bg=t['pill_bg'], fg=t['text_sub'],
-            padx=10, pady=5,
+            padx=12, pady=6,
         )
-        self.selection_label.pack(side=tk.LEFT, pady=16)
-
+        self.selection_label.pack(side=tk.LEFT)
         self.drag_mode_label = tk.Label(
-            status_row, text="",
+            mid_row, text="",
             font=("Segoe UI", 9, "italic"),
             bg=t['header_bg'], fg=t['text_muted'],
         )
-        self.drag_mode_label.pack(side=tk.LEFT, padx=(10, 0), pady=16)
+        self.drag_mode_label.pack(side=tk.LEFT, padx=(12, 0))
 
         if self._embedded and self.close_callback:
             close_btn = tk.Label(
-                h_inner, text="✕", font=("Segoe UI", 13),
-                bg=t['header_bg'], fg=t['text_sub'],
-                cursor="hand2", padx=12, pady=8,
+                h_inner, text="✕", font=("Segoe UI", 12, "bold"),
+                bg=t['pill_bg'], fg=t['text_sub'],
+                cursor="hand2", padx=10, pady=6,
             )
-            close_btn.pack(side=tk.RIGHT, pady=14)
+            close_btn.pack(side=tk.RIGHT)
             close_btn.bind("<Button-1>", lambda e: self._close_grid_view())
-            close_btn.bind("<Enter>", lambda e: close_btn.config(fg=t['danger'], bg=t['pill_bg']))
-            close_btn.bind("<Leave>", lambda e: close_btn.config(fg=t['text_sub'], bg=t['header_bg']))
+            close_btn.bind("<Enter>", lambda e: close_btn.config(fg="#fff", bg=t['danger']))
+            close_btn.bind("<Leave>", lambda e: close_btn.config(fg=t['text_sub'], bg=t['pill_bg']))
 
-        toolbar_card = tk.Frame(chrome, bg=t['surface2'],
-                                highlightthickness=1, highlightbackground=t['border'])
-        toolbar_card.pack(fill=tk.X, padx=16, pady=(10, 12))
+        toolbar_card = tk.Frame(
+            chrome, bg=t['surface2'],
+            highlightthickness=1, highlightbackground=t['border'],
+        )
+        toolbar_card.pack(fill=tk.X, padx=16, pady=(12, 14))
         toolbar_bg = t['surface2']
         toolbar = tk.Frame(toolbar_card, bg=toolbar_bg)
         toolbar.pack(fill=tk.X, padx=14, pady=10)
@@ -702,22 +992,42 @@ class GridViewManager:
         )
         om.pack(side=tk.LEFT, padx=(0, 8), pady=6)
 
-        # ── Canvas / scrollable grid ───────────────────────────────────────────
+        self._footer_bar = tk.Frame(
+            gw, bg=t['surface2'], height=34,
+            highlightthickness=1, highlightbackground=t['border'],
+        )
+        self._footer_bar.pack(fill=tk.X, side=tk.BOTTOM, padx=16, pady=(0, 12))
+        self._footer_bar.pack_propagate(False)
+        fb_inner = tk.Frame(self._footer_bar, bg=t['surface2'])
+        fb_inner.pack(fill=tk.BOTH, expand=True, padx=14)
+        self._footer_hint = tk.Label(
+            fb_inner,
+            text="Tip: Shift+click range · Ctrl+click multi-select · Double-click to play",
+            font=("Segoe UI", 8), bg=t['surface2'], fg=t['text_muted'], anchor="w",
+        )
+        self._footer_hint.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=8)
+
         body = tk.Frame(gw, bg=t['grid_canvas'])
         body.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
 
-        self.canvas = tk.Canvas(body, bg=t['grid_canvas'], highlightthickness=0)
+        self.canvas = tk.Canvas(body, bg=t['grid_mesh'], highlightthickness=0)
         scrollbar = ttk.Scrollbar(body, orient=tk.VERTICAL, command=self.canvas.yview,
                                   style="ExclusionTree.Vertical.TScrollbar")
         self.canvas.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 8), pady=8)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(12, 0), pady=8)
 
-        self.grid_frame = tk.Frame(self.canvas, bg=t['grid_canvas'])
-        canvas_frame = self.canvas.create_window((0, 0), window=self.grid_frame, anchor='nw')
+        self.grid_mesh = tk.Frame(self.canvas, bg=t['grid_mesh'], padx=10, pady=10)
+        self.grid_frame = tk.Frame(self.grid_mesh, bg=t['grid_canvas'])
+        self.grid_frame.pack(fill=tk.BOTH, expand=True)
+        canvas_frame = self.canvas.create_window((0, 0), window=self.grid_mesh, anchor='nw')
 
-        self.grid_frame.bind("<Configure>",
-                             lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        def _sync_scroll(_e=None):
+            if self.canvas.winfo_exists():
+                self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+        self.grid_mesh.bind("<Configure>", _sync_scroll)
+        self.grid_frame.bind("<Configure>", _sync_scroll)
         self.canvas.bind("<Configure>",
                          lambda e: self.canvas.itemconfig(canvas_frame, width=e.width))
         self.canvas.bind("<Button-1>", lambda e: self._clear_selection())
@@ -1033,7 +1343,9 @@ class GridViewManager:
         tp = self.theme_provider
         self.grid_window.configure(bg=t['grid_canvas'])
         if hasattr(self, 'canvas') and self.canvas.winfo_exists():
-            self.canvas.configure(bg=t['grid_canvas'])
+            self.canvas.configure(bg=t['grid_mesh'])
+        if hasattr(self, 'grid_mesh') and self.grid_mesh.winfo_exists():
+            self.grid_mesh.configure(bg=t['grid_mesh'])
         if hasattr(self, 'grid_frame') and self.grid_frame.winfo_exists():
             self.grid_frame.configure(bg=t['grid_canvas'])
         tp.restyle_manager_action_links(self.grid_window)
@@ -1310,13 +1622,20 @@ class GridViewManager:
 
         if not self.items:
             empty = tk.Frame(self.grid_frame, bg=t['grid_canvas'])
-            empty.pack(fill=tk.BOTH, expand=True, pady=80)
-            tk.Label(empty, text="No videos found",
-                     font=("Segoe UI", 15, "bold"),
-                     bg=t['grid_canvas'], fg=t['text']).pack()
-            tk.Label(empty, text="Try adjusting filters, tags, or search",
+            empty.pack(fill=tk.BOTH, expand=True, pady=100)
+            card = tk.Frame(
+                empty, bg=t['card_surface'],
+                highlightthickness=1, highlightbackground=t['border'],
+            )
+            card.pack(padx=40)
+            inner = tk.Frame(card, bg=t['card_surface'], padx=36, pady=28)
+            inner.pack()
+            tk.Label(inner, text="No videos found",
+                     font=("Segoe UI", 16, "bold"),
+                     bg=t['card_surface'], fg=t['text']).pack()
+            tk.Label(inner, text="Try adjusting filters, tags, or search",
                      font=("Segoe UI", 10),
-                     bg=t['grid_canvas'], fg=t['text_muted']).pack(pady=(8, 0))
+                     bg=t['card_surface'], fg=t['text_muted']).pack(pady=(10, 0))
             return
 
         page_items = self._get_page_items()
@@ -1347,6 +1666,7 @@ class GridViewManager:
             self.grid_frame.columnconfigure(i, weight=1, uniform="col")
 
         self._update_selection_label()
+        self._update_gallery_stats()
 
     # ─────────────────────────────────────────────────────────────────────────
     # Header row (new UI)
@@ -1354,52 +1674,69 @@ class GridViewManager:
 
     def _build_header(self, item_data, grid_row, cols, t):
         dir_path = item_data['path']
+        parent_name = os.path.basename(os.path.dirname(dir_path)) or dir_path
 
         band = tk.Frame(self.grid_frame, bg=t['header_band'], cursor="arrow")
         band.grid(row=grid_row, column=0, columnspan=cols,
-                  sticky='ew', padx=_CARD_PAD_X, pady=(24, 4))
+                  sticky='ew', padx=_CARD_PAD_X, pady=(28, 6))
         item_data['_header_widget'] = band
 
-        header = tk.Frame(
-            band, bg=t['header_surface'],
-            highlightthickness=1, highlightbackground=t['border'],
-        )
-        header.pack(fill=tk.X, padx=4, pady=4)
+        shell = tk.Frame(band, bg=t['card_border'],
+                         highlightthickness=1, highlightbackground=t['border'])
+        shell.pack(fill=tk.X, padx=2, pady=2)
+
+        header = tk.Frame(shell, bg=t['header_surface'])
+        header.pack(fill=tk.X)
+        tk.Frame(header, bg=t['accent'], height=2).pack(fill=tk.X)
 
         inner = tk.Frame(header, bg=t['header_surface'])
-        inner.pack(fill=tk.X, padx=14, pady=10)
+        inner.pack(fill=tk.X, padx=18, pady=14)
 
-        tk.Frame(inner, bg=t['accent'], width=4).pack(side=tk.LEFT, fill=tk.Y, padx=(0, 12))
+        icon_col = tk.Frame(inner, bg=t['accent_dim'], padx=3, pady=3)
+        icon_col.pack(side=tk.LEFT, padx=(0, 14))
+        tk.Label(icon_col, text="📁", font=("Segoe UI Emoji", 14),
+                 bg=t['accent_dim'], fg=t['accent']).pack(padx=6, pady=2)
 
-        left = tk.Frame(inner, bg=t['header_surface'])
-        left.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        text_col = tk.Frame(inner, bg=t['header_surface'])
+        text_col.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        title_row = tk.Frame(text_col, bg=t['header_surface'])
+        title_row.pack(fill=tk.X)
 
         drag_hint = tk.Label(
-            left, text="⠿",
+            title_row, text="⠿",
             font=("Segoe UI", 11),
             bg=t['header_surface'], fg=t['text_muted'],
-            cursor="fleur", padx=2,
+            cursor="fleur",
         )
-        drag_hint.pack(side=tk.LEFT)
+        drag_hint.pack(side=tk.LEFT, padx=(0, 8))
 
         dir_label = tk.Label(
-            left,
-            text=f"📁  {item_data['name']}",
-            font=("Segoe UI", 12, "bold"),
+            title_row,
+            text=item_data['name'],
+            font=("Segoe UI", 13, "bold"),
             bg=t['header_surface'], fg=t['text'],
             anchor='w', cursor="hand2",
         )
-        dir_label.pack(side=tk.LEFT, padx=(8, 0))
+        dir_label.pack(side=tk.LEFT)
 
         cnt = item_data.get('video_count', 0)
         count_badge = tk.Label(
-            left,
-            text=f"{cnt} video{'s' if cnt != 1 else ''}",
+            title_row,
+            text=f" {cnt} ",
             font=("Segoe UI", 8, "bold"),
-            bg=t['pill_bg'], fg=t['text_sub'],
-            padx=10, pady=4, cursor="hand2",
+            bg=t['accent'], fg="#ffffff",
+            padx=8, pady=3, cursor="hand2",
         )
-        count_badge.pack(side=tk.LEFT, padx=(12, 0))
+        count_badge.pack(side=tk.LEFT, padx=(10, 0))
+
+        tk.Label(
+            text_col,
+            text=parent_name if parent_name != item_data['name'] else dir_path,
+            font=("Segoe UI", 8),
+            bg=t['header_surface'], fg=t['text_muted'],
+            anchor='w',
+        ).pack(fill=tk.X, pady=(4, 0))
 
         for w in (drag_hint,):
             w.bind("<Button-1>",
@@ -1409,11 +1746,11 @@ class GridViewManager:
             w.bind("<ButtonRelease-1>",
                    lambda e, dp=dir_path: self._on_dir_header_release(e, dp))
 
-        for w in (band, header, inner, dir_label, count_badge, left):
+        for w in (band, shell, header, inner, text_col, title_row, dir_label, count_badge):
             w.bind("<Button-1>", lambda e, dp=dir_path: self._on_dir_click(e, dp))
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Video card (new UI style, original thumbnail loading)
+    # Video card (premium layout, original thumbnail loading)
     # ─────────────────────────────────────────────────────────────────────────
 
     def _build_card(self, item, vp, is_sel, is_excl, grid_row, video_col, t):
@@ -1423,30 +1760,48 @@ class GridViewManager:
             name_fg, name_w = t['accent'], "bold"
         elif is_excl:
             border_col, border_w = t['excluded'], 2
-            card_bg = info_bg = t['surface']
+            card_bg = info_bg = t['card_surface']
             name_fg, name_w = t['text_muted'], "normal"
         else:
-            border_col, border_w = t['border'], 1
-            card_bg = info_bg = t['surface']
+            border_col, border_w = t['card_border'], 1
+            card_bg = info_bg = t['card_surface']
             name_fg, name_w = t['text'], "normal"
 
-        cell = tk.Frame(self.grid_frame, bg=t['grid_canvas'], cursor="hand2")
+        cell = tk.Frame(self.grid_frame, bg=t['card_shadow'], cursor="hand2")
         cell.grid(row=grid_row, column=video_col,
                   padx=_CARD_PAD_X, pady=_CARD_PAD_Y, sticky='nsew')
 
+        shell = tk.Frame(
+            cell, bg=t['card_border'],
+            highlightthickness=1, highlightbackground=t['card_border'],
+        )
+        shell.pack(fill=tk.BOTH, expand=True, padx=_CARD_SHELL_PAD, pady=_CARD_SHELL_PAD)
+
         card = tk.Frame(
-            cell, bg=card_bg,
+            shell, bg=card_bg,
             relief=tk.FLAT, bd=0,
             highlightthickness=border_w,
             highlightbackground=border_col,
             cursor="hand2",
         )
         card.pack(fill=tk.BOTH, expand=True)
+        card._cell = cell
+        card._shell = shell
         self.card_widgets[vp] = card
 
+        card._accent_stripe = tk.Frame(card, bg=t['accent'], height=3 if is_sel else 0)
+        card._accent_stripe._is_accent_stripe = True
+        card._accent_stripe.pack(fill=tk.X)
+
+        thumb_well = tk.Frame(card, bg=t['thumb_well'], padx=_THUMB_INSET, pady=_THUMB_INSET)
+        thumb_well._is_thumb_well = True
+        thumb_well.pack(fill=tk.X)
+        card._thumb_well = thumb_well
+
+        thumb_h = _THUMB_AREA_MIN_H
         thumb_container = tk.Frame(
-            card, bg=t['thumb_bg'],
-            height=_THUMB_AREA_H, highlightthickness=0,
+            thumb_well, bg=t['thumb_bg'],
+            height=thumb_h, highlightthickness=0,
         )
         thumb_container._is_thumb = True
         thumb_container.pack(fill=tk.X)
@@ -1454,11 +1809,45 @@ class GridViewManager:
 
         thumb_label = tk.Label(
             thumb_container, bg=t['thumb_bg'], fg=t['text_muted'],
-            text="▶", font=("Segoe UI", 22),
+            text="", font=("Segoe UI", 1),
         )
         thumb_label.place(relx=0.5, rely=0.5, anchor="center")
 
-        # Status badges
+        card._sel_badge = tk.Label(
+            thumb_container, text=" ✓ ",
+            bg=t['accent'], fg="#ffffff",
+            font=("Segoe UI", 9, "bold"),
+        )
+        card._sel_badge._is_sel_badge = True
+        if is_sel:
+            card._sel_badge.place(relx=0.04, rely=0.06, anchor='nw')
+        else:
+            card._sel_badge.place_forget()
+
+        card._ext_chip = self._make_overlay_chip(
+            thumb_container, self._format_ext(vp),
+            t['chip_bg'], "#ffffff", t,
+        )
+        card._ext_chip.place(relx=0.96, rely=0.06, anchor='ne')
+
+        dur_txt = self._duration_cache.get(vp, "")
+        card._dur_chip = None
+        if dur_txt and dur_txt != "—":
+            card._dur_chip = self._make_overlay_chip(
+                thumb_container, dur_txt, "#000000", "#ffffff", t,
+            )
+            card._dur_chip.place(relx=0.96, rely=0.94, anchor='se')
+
+        play_overlay = tk.Frame(thumb_container, bg=t['accent'], cursor="hand2")
+        play_overlay._is_play_overlay = True
+        tk.Label(
+            play_overlay, text="▶",
+            bg=t['accent'], fg="#ffffff",
+            font=("Segoe UI", 17, "bold"), padx=20, pady=12,
+        ).pack()
+        play_overlay.place_forget()
+        card._play_overlay = play_overlay
+
         if is_excl:
             excl_badge = tk.Label(
                 thumb_container, text=" 🚫 Excluded ",
@@ -1519,18 +1908,23 @@ class GridViewManager:
         if isinstance(cached, Image.Image):
             item._pil_master = cached
             self.root.after_idle(
-                lambda: self._apply_thumb_to_label(thumb_label, cached, thumb_container))
+                lambda l=thumb_label, c=cached, tc=thumb_container, it=item:
+                self._apply_thumb_to_label(l, c, tc, item=it))
         elif cached is not None:
-            self._apply_thumb_to_label(thumb_label, cached, thumb_container)
+            self._apply_thumb_to_label(thumb_label, cached, thumb_container, item=item)
         else:
+            self._start_thumb_shimmer(thumb_label, thumb_container, item)
             self.thumbnail_executor.submit(
                 self._load_thumbnail, item, thumb_label, video_path_norm)
 
-        self._bind_thumb_resize(thumb_container, thumb_label, item)
+        self._bind_thumb_resize(thumb_container, thumb_label, item, cell=cell)
 
-        tk.Frame(card, bg=t['divider'], height=1).pack(fill=tk.X)
+        div = tk.Frame(card, bg=t['divider'], height=1)
+        div._is_divider = True
+        div.pack(fill=tk.X)
+
         info_frame = tk.Frame(
-            card, bg=info_bg, padx=12,
+            card, bg=info_bg, padx=14,
             pady=_CARD_INFO_PAD_Y, cursor="fleur",
         )
         info_frame._is_info = True
@@ -1544,20 +1938,41 @@ class GridViewManager:
         name_label = tk.Label(
             info_frame, text=display_name,
             bg=info_bg, fg=name_fg,
-            font=("Segoe UI", 9, name_w),
+            font=("Segoe UI", 10, name_w),
             anchor='w', justify=tk.LEFT,
         )
+        name_label._is_title = True
         name_label.pack(fill=tk.X)
 
-        # Meta row — always rendered (fixed height) so all cards are the same size
+        sub_row = tk.Frame(info_frame, bg=info_bg)
+        sub_row._is_subrow = True
+        sub_row.pack(fill=tk.X, pady=(5, 0))
+        try:
+            fsize = self._format_bytes(os.path.getsize(vp)) if os.path.isfile(vp) else ""
+        except OSError:
+            fsize = ""
+        tk.Label(
+            sub_row, text=self._format_ext(vp),
+            font=("Segoe UI", 7, "bold"),
+            bg=t['chip_bg'], fg=t['chip_fg'], padx=6, pady=2,
+        ).pack(side=tk.LEFT)
+        if fsize:
+            tk.Label(sub_row, text=" · ", font=("Segoe UI", 7),
+                     bg=info_bg, fg=t['text_muted']).pack(side=tk.LEFT)
+            tk.Label(
+                sub_row, text=fsize,
+                font=("Segoe UI", 7),
+                bg=info_bg, fg=t['text_muted'],
+            ).pack(side=tk.LEFT)
+
         svc    = self.annotation_service
         tags   = svc.get_tags(vp)   if svc else []
         rating = svc.get_rating(vp) if svc else 0
         is_fav = bool(self.is_favourite_callback and self.is_favourite_callback(vp))
 
-        meta_frame = tk.Frame(info_frame, bg=info_bg, height=18)
+        meta_frame = tk.Frame(info_frame, bg=info_bg, height=20)
         meta_frame._is_meta = True
-        meta_frame.pack(fill=tk.X, pady=(4, 0))
+        meta_frame.pack(fill=tk.X, pady=(6, 0))
         meta_frame.pack_propagate(False)
         if is_fav:
             tk.Label(meta_frame, text="♥", bg=info_bg, fg=t['warn'],
@@ -1570,10 +1985,14 @@ class GridViewManager:
         for tag in tags[:2]:
             tk.Label(meta_frame, text=f"#{tag}",
                      bg=t['accent_dim'], fg=t['accent'],
-                     font=("Segoe UI", 7), padx=5, pady=1
-                     ).pack(side=tk.LEFT, padx=(0, 3))
+                     font=("Segoe UI", 7), padx=6, pady=2
+                     ).pack(side=tk.LEFT, padx=(0, 4))
 
-        for w in (cell, card, thumb_container, thumb_label, name_label, info_frame):
+        bind_widgets = (
+            cell, shell, card, thumb_well, thumb_container, thumb_label,
+            name_label, info_frame,
+        )
+        for w in bind_widgets:
             w.bind("<Button-1>",
                    lambda e, _vp=vp, _cw=card: self._on_card_click_or_press(e, _vp, _cw))
             w.bind("<B1-Motion>",       lambda e, _vp=vp: self._on_card_motion(e, _vp))
@@ -1581,28 +2000,27 @@ class GridViewManager:
             w.bind("<Button-3>",        lambda e, _vp=vp: self._on_card_right_click(e, _vp))
             w.bind("<Double-Button-1>", lambda e, _vp=vp: self._play_single(_vp))
 
-        # Info frame is the drag handle (cursor already fleur)
         info_frame.bind("<Button-1>",
                         lambda e, _vp=vp, _cw=card: self._on_card_press(e, _vp, _cw))
         info_frame.bind("<B1-Motion>",       lambda e, _vp=vp: self._on_card_motion(e, _vp))
         info_frame.bind("<ButtonRelease-1>", lambda e, _vp=vp: self._on_card_release(e, _vp))
 
-        # Action strip buttons get their own Double-click so it doesn't bubble strangely
         play_btn.bind("<Double-Button-1>", lambda e, _vp=vp: self._play_single(_vp))
 
-        card.bind("<Enter>", lambda e, _vp=vp: self._on_card_enter(e, _vp))
-        card.bind("<Leave>", lambda e, _vp=vp: self._on_card_leave(e, _vp))
+        for w in (cell, shell, card):
+            w.bind("<Enter>", lambda e, _vp=vp: self._on_card_enter(e, _vp))
+            w.bind("<Leave>", lambda e, _vp=vp: self._on_card_leave(e, _vp))
 
     def _place_now_playing_badge(self, thumb_container, t):
         badge = tk.Label(
             thumb_container,
             text="  ▶  NOW PLAYING  ",
-            bg=t['now_playing'], fg="#000000",
+            bg=t['now_playing'], fg="#0a0f0d",
             font=("Segoe UI", 8, "bold"),
-            padx=4, pady=3
+            padx=8, pady=4,
         )
         badge._is_now_playing_badge = True
-        badge.place(relx=0.0, rely=1.0, anchor='sw')
+        badge.place(relx=0.02, rely=0.98, anchor='sw')
 
     # ─────────────────────────────────────────────────────────────────────────
     # Card state refresh (adapted to new token colours)
@@ -1625,13 +2043,9 @@ class GridViewManager:
             else:
                 border_col, border_w = t['border'], 1
 
-            card.config(highlightbackground=border_col, highlightthickness=border_w)
+            self._apply_card_chrome(card, border_col, border_w, card.cget('bg'))
 
-            thumb_container = None
-            for child in card.winfo_children():
-                if getattr(child, '_is_thumb', False):
-                    thumb_container = child
-                    break
+            thumb_container = self._card_thumb_container(card)
             if thumb_container is None:
                 return
 
@@ -1672,50 +2086,45 @@ class GridViewManager:
         is_excl = video_path in self.excluded_items
 
         if is_sel:
-            border_col, border_w = t['accent'],    3
-            card_bg = info_bg    = t['accent_dim']
-            name_fg, name_w      = t['accent'], "bold"
+            border_col, border_w = t['accent'], 2
+            card_bg = info_bg = t['accent_dim']
+            name_fg, name_w = t['accent'], "bold"
         elif is_excl:
-            border_col, border_w = t['excluded'],  2
-            card_bg = info_bg    = t['surface']
-            name_fg, name_w      = t['text_muted'], "normal"
+            border_col, border_w = t['excluded'], 2
+            card_bg = info_bg = t['card_surface']
+            name_fg, name_w = t['text_muted'], "normal"
         else:
-            border_col, border_w = t['border'],    1
-            card_bg = info_bg    = t['surface']
-            name_fg, name_w      = t['text'], "normal"
+            border_col, border_w = t['card_border'], 1
+            card_bg = info_bg = t['card_surface']
+            name_fg, name_w = t['text'], "normal"
 
-        card.configure(bg=card_bg,
-                       highlightbackground=border_col,
-                       highlightthickness=border_w)
+        self._apply_card_chrome(card, border_col, border_w, card_bg, info_bg)
 
-        thumb_container = info_frame = name_label = None
-        for child in card.winfo_children():
-            if getattr(child, '_is_thumb', False):
-                thumb_container = child
-            elif getattr(child, '_is_info', False):
-                info_frame = child
-                for lbl in child.winfo_children():
-                    if isinstance(lbl, tk.Label) and name_label is None:
-                        name_label = lbl
+        stripe = getattr(card, '_accent_stripe', None)
+        if stripe and stripe.winfo_exists():
+            try:
+                stripe.configure(height=3 if is_sel else 0)
+            except tk.TclError:
+                pass
 
+        badge = getattr(card, '_sel_badge', None)
+        if badge and badge.winfo_exists():
+            if is_sel:
+                badge.place(relx=0.04, rely=0.06, anchor='nw')
+            else:
+                badge.place_forget()
+
+        info_frame = self._card_info_frame(card)
+        name_label = None
         if info_frame:
-            info_frame.configure(bg=info_bg)
             for lbl in info_frame.winfo_children():
-                try:
-                    lbl.configure(bg=info_bg)
-                except tk.TclError:
-                    pass
-        # Update the thin divider frame between thumb and info
-        for child in card.winfo_children():
-            if not getattr(child, '_is_thumb', False) and not getattr(child, '_is_info', False):
-                try:
-                    child.configure(bg=t['border'])
-                except tk.TclError:
-                    pass
+                if getattr(lbl, '_is_title', False):
+                    name_label = lbl
+                    break
         if name_label:
-            name_label.configure(fg=name_fg, font=("Segoe UI", 9, name_w))
+            name_label.configure(fg=name_fg, font=("Segoe UI", 10, name_w))
 
-        self._refresh_excluded_badge(thumb_container, is_excl)
+        self._refresh_excluded_badge(self._card_thumb_container(card), is_excl)
 
     def _refresh_excluded_badge(self, thumb_container, is_excluded):
         if thumb_container is None:
@@ -1782,6 +2191,7 @@ class GridViewManager:
         else:
             self.selection_label.config(text=f"{n} selected",
                                         bg=t['accent_dim'], fg=t['accent'])
+        self._update_gallery_stats()
 
     # ─────────────────────────────────────────────────────────────────────────
     # Playback (original)
@@ -1914,42 +2324,34 @@ class GridViewManager:
         card = self.card_widgets.get(vp)
         if not card or not card.winfo_exists():
             return
-        is_sel  = vp in self.selected_items
+        is_sel = vp in self.selected_items
         is_excl = vp in self.excluded_items
         t = self._tok()
-        cell = card.master
+        cell = getattr(card, '_cell', card.master)
 
-        if not is_sel:
-            card.configure(highlightbackground=t['accent'], highlightthickness=2)
-
-        if not is_sel and not is_excl:
-            card.configure(bg=t['card_hover'])
+        if is_sel:
+            self._apply_card_chrome(card, t['accent'], 2, t['accent_dim'], t['accent_dim'])
+        elif is_excl:
+            self._apply_card_chrome(card, t['excluded'], 2, t['card_surface'], t['card_surface'])
+        else:
+            self._apply_card_chrome(card, t['accent'], 2, t['card_hover'], t['card_hover'])
             try:
-                cell.configure(bg=t['card_hover'])
+                if cell and cell.winfo_exists():
+                    cell.configure(bg=_hex_blend(t['card_shadow'], t['accent'], 0.12))
             except tk.TclError:
                 pass
-            for child in card.winfo_children():
-                if getattr(child, '_is_info', False):
-                    child.configure(bg=t['card_hover'])
-                    for lbl in child.winfo_children():
-                        try:
-                            lbl.configure(bg=t['card_hover'])
-                        except tk.TclError:
-                            pass
-                elif not getattr(child, '_is_thumb', False):
-                    try:
-                        child.configure(bg=t['divider'])
-                    except tk.TclError:
-                        pass
 
-        # Reveal action strip at bottom of thumbnail
-        for child in card.winfo_children():
-            if getattr(child, '_is_thumb', False):
-                for sub in child.winfo_children():
-                    if getattr(sub, '_is_action_strip', False):
-                        sub.place(relx=0.0, rely=1.0, anchor='sw', relwidth=1.0)
-                        sub.lift()
-                break
+        overlay = getattr(card, '_play_overlay', None)
+        if overlay and overlay.winfo_exists():
+            overlay.place(relx=0.5, rely=0.5, anchor="center")
+            overlay.lift()
+
+        thumb = self._card_thumb_container(card)
+        if thumb:
+            for sub in thumb.winfo_children():
+                if getattr(sub, '_is_action_strip', False):
+                    sub.place(relx=0.0, rely=1.0, anchor='sw', relwidth=1.0)
+                    sub.lift()
 
     def _on_card_leave(self, event, vp):
         self._hovered_card_path = None
@@ -1958,43 +2360,31 @@ class GridViewManager:
         card = self.card_widgets.get(vp)
         if not card or not card.winfo_exists():
             return
-        is_sel  = vp in self.selected_items
+        is_sel = vp in self.selected_items
         is_excl = vp in self.excluded_items
         t = self._tok()
-        cell = card.master
 
         if is_sel:
-            card.configure(highlightbackground=t['accent'], highlightthickness=2)
+            border_col, border_w = t['accent'], 2
+            card_bg = info_bg = t['accent_dim']
         elif is_excl:
-            card.configure(highlightbackground=t['excluded'], highlightthickness=2)
+            border_col, border_w = t['excluded'], 2
+            card_bg = info_bg = t['card_surface']
         else:
-            card.configure(highlightbackground=t['border'], highlightthickness=1,
-                           bg=t['surface'])
-            try:
-                cell.configure(bg=t['grid_canvas'])
-            except tk.TclError:
-                pass
-            for child in card.winfo_children():
-                if getattr(child, '_is_info', False):
-                    child.configure(bg=t['surface'])
-                    for lbl in child.winfo_children():
-                        try:
-                            lbl.configure(bg=t['surface'])
-                        except tk.TclError:
-                            pass
-                elif not getattr(child, '_is_thumb', False):
-                    try:
-                        child.configure(bg=t['divider'])
-                    except tk.TclError:
-                        pass
+            border_col, border_w = t['card_border'], 1
+            card_bg = info_bg = t['card_surface']
 
-        # Conceal action strip
-        for child in card.winfo_children():
-            if getattr(child, '_is_thumb', False):
-                for sub in child.winfo_children():
-                    if getattr(sub, '_is_action_strip', False):
-                        sub.place_forget()
-                break
+        self._apply_card_chrome(card, border_col, border_w, card_bg, info_bg)
+
+        overlay = getattr(card, '_play_overlay', None)
+        if overlay and overlay.winfo_exists():
+            overlay.place_forget()
+
+        thumb = self._card_thumb_container(card)
+        if thumb:
+            for sub in thumb.winfo_children():
+                if getattr(sub, '_is_action_strip', False):
+                    sub.place_forget()
 
     def _on_card_right_click(self, event, vp):
         # Original right‑click logic (unchanged)
@@ -2693,8 +3083,8 @@ class GridViewManager:
                     if pil is not None:
                         self._cache_pil_thumbnail(item, video_path_norm, pil)
                         self.root.after(
-                            0, lambda lbl=label, p=item._pil_master: self._apply_thumb_to_label(
-                                lbl, p, lbl.master))
+                            0, lambda lbl=label, p=item._pil_master, it=item: self._apply_thumb_to_label(
+                                lbl, p, lbl.master, item=it))
                         return
                     if th.thumbnail_data:
                         self._display_thumbnail_from_data(label, th.thumbnail_data, item, video_path_norm)
@@ -2799,8 +3189,8 @@ class GridViewManager:
                     pil_image = Image.fromarray(fr_rgb)
                     self._cache_pil_thumbnail(item, video_path_norm, pil_image)
                     self.root.after(
-                        0, lambda lbl=label, p=item._pil_master: self._apply_thumb_to_label(
-                            lbl, p, lbl.master))
+                        0, lambda lbl=label, p=item._pil_master, it=item: self._apply_thumb_to_label(
+                            lbl, p, lbl.master, item=it))
                     return
             else:
                 image_data = _b64.b64decode(raw_b64)
@@ -2815,8 +3205,8 @@ class GridViewManager:
                 tmp_path = None
                 self._cache_pil_thumbnail(item, video_path_norm, img)
                 self.root.after(
-                    0, lambda lbl=label, p=item._pil_master: self._apply_thumb_to_label(
-                        lbl, p, lbl.master))
+                    0, lambda lbl=label, p=item._pil_master, it=item: self._apply_thumb_to_label(
+                        lbl, p, lbl.master, item=it))
                 return
 
         except Exception:
