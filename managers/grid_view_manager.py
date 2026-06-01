@@ -2631,7 +2631,7 @@ class GridViewManager:
             self.root.after(0, lambda: label.winfo_exists() and label.configure(text="Error"))
 
     def _photo_from_blob(self, blob_path, is_video, item):
-        """Decode a raw JPEG or MP4 blob file directly — no base64 at all."""
+        """Decode a raw JPEG or MP4 blob file directly – with letterboxing."""
         import shutil, tempfile as _tf
         tmp_path = None
         try:
@@ -2648,13 +2648,22 @@ class GridViewManager:
                 tmp_path = None
                 if not ret or frame is None:
                     return None
-                frame_resized = _cv2.resize(frame, (240, 135))
-                frame_rgb = _cv2.cvtColor(frame_resized, _cv2.COLOR_BGR2RGB)
+                frame_rgb = _cv2.cvtColor(frame, _cv2.COLOR_BGR2RGB)
                 pil_image = Image.fromarray(frame_rgb)
             else:
                 pil_image = Image.open(str(blob_path))
-                pil_image.thumbnail((240, 135), Image.Resampling.LANCZOS)
-            photo = ImageTk.PhotoImage(pil_image)
+
+            # --- Letterbox the image into 240×135 (16:9) -----------------
+            target_w, target_h = 240, 135
+            pil_image.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
+            # Create black canvas
+            canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
+            # Paste centered
+            offset_x = (target_w - pil_image.width) // 2
+            offset_y = (target_h - pil_image.height) // 2
+            canvas.paste(pil_image, (offset_x, offset_y))
+
+            photo = ImageTk.PhotoImage(canvas)
             item.thumbnail_image = photo
             return photo
         except Exception:
@@ -2671,6 +2680,8 @@ class GridViewManager:
             is_vid = thumbnail_data.startswith("VIDEO:")
             raw_b64 = thumbnail_data[6:]
 
+            target_w, target_h = 240, 135
+
             if is_vid:
                 video_data = _b64.b64decode(raw_b64)
                 with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tf:
@@ -2684,10 +2695,14 @@ class GridViewManager:
                 except OSError: pass
                 tmp_path = None
                 if ret and frame is not None:
-                    fr = _cv2.resize(frame, (240, 135))
-                    fr_rgb = _cv2.cvtColor(fr, _cv2.COLOR_BGR2RGB)
-                    pil_image = Image.fromarray(fr_rgb)
-                    photo = ImageTk.PhotoImage(pil_image)
+                    frame_rgb = _cv2.cvtColor(frame, _cv2.COLOR_BGR2RGB)
+                    pil_image = Image.fromarray(frame_rgb)
+                    pil_image.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
+                    canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
+                    canvas.paste(pil_image,
+                                 ((target_w - pil_image.width) // 2,
+                                  (target_h - pil_image.height) // 2))
+                    photo = ImageTk.PhotoImage(canvas)
                     item.thumbnail_image = photo
                     if video_path_norm:
                         self._photo_cache[video_path_norm] = photo
@@ -2699,8 +2714,11 @@ class GridViewManager:
                     tf.write(image_data)
                     tmp_path = tf.name
                 img = Image.open(tmp_path)
-                img.thumbnail((240, 135), Image.Resampling.LANCZOS)
-                photo = ImageTk.PhotoImage(img)
+                img.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
+                canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
+                canvas.paste(img, ((target_w - img.width) // 2,
+                                   (target_h - img.height) // 2))
+                photo = ImageTk.PhotoImage(canvas)
                 item.thumbnail_image = photo
                 if video_path_norm:
                     self._photo_cache[video_path_norm] = photo
