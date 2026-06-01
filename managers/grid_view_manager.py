@@ -2653,21 +2653,18 @@ class GridViewManager:
             else:
                 pil_image = Image.open(str(blob_path)).convert("RGB")
 
+            from PIL import ImageOps
             target_w, target_h = 240, 150
             src_w, src_h = pil_image.size
             if src_w >= src_h:
-                scale = target_w / src_w
-                new_h = int(src_h * scale)
-                pil_image = pil_image.resize((target_w, new_h), Image.Resampling.LANCZOS)
-                canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
-                canvas.paste(pil_image, (0, (target_h - new_h) // 2))
+                canvas = ImageOps.fit(pil_image, (target_w, target_h), method=Image.Resampling.LANCZOS,
+                                      centering=(0.5, 0.5))
             else:
                 scale = target_h / src_h
                 new_w = int(src_w * scale)
                 pil_image = pil_image.resize((new_w, target_h), Image.Resampling.LANCZOS)
                 canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
                 canvas.paste(pil_image, ((target_w - new_w) // 2, 0))
-
             photo = ImageTk.PhotoImage(canvas)
             item.thumbnail_image = photo
             return photo
@@ -2704,11 +2701,9 @@ class GridViewManager:
                     pil_image = Image.fromarray(frame_rgb)
                     src_w, src_h = pil_image.size
                     if src_w >= src_h:
-                        scale = target_w / src_w
-                        new_h = int(src_h * scale)
-                        pil_image = pil_image.resize((target_w, new_h), Image.Resampling.LANCZOS)
-                        canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
-                        canvas.paste(pil_image, (0, (target_h - new_h) // 2))
+                        from PIL import ImageOps
+                        canvas = ImageOps.fit(pil_image, (target_w, target_h), method=Image.Resampling.LANCZOS,
+                                              centering=(0.5, 0.5))
                     else:
                         scale = target_h / src_h
                         new_w = int(src_w * scale)
@@ -2728,13 +2723,10 @@ class GridViewManager:
                     tmp_path = tf.name
                 img = Image.open(tmp_path).convert("RGB")
                 src_w, src_h = img.size
-
                 if src_w >= src_h:
-                    scale = target_w / src_w
-                    new_h = int(src_h * scale)
-                    img = img.resize((target_w, new_h), Image.Resampling.LANCZOS)
-                    canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
-                    canvas.paste(img, (0, (target_h - new_h) // 2))
+                    from PIL import ImageOps
+                    canvas = ImageOps.fit(img, (target_w, target_h), method=Image.Resampling.LANCZOS,
+                                          centering=(0.5, 0.5))
                 else:
                     scale = target_h / src_h
                     new_w = int(src_w * scale)
