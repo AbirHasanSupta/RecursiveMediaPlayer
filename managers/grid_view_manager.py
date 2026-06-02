@@ -14,7 +14,7 @@ from managers.video_preview_manager import get_thumb_pool, generate_thumbnail_wo
 # ── Design tokens (override per-theme in _get_design_tokens) ─────────────────
 _CARD_RADIUS        = 10
 _CARD_W             = 240
-_CARD_H             = 150   # ~16:9 for ~267px wide
+_CARD_H             = 165   # 16:15 ratio for 240px wide
 _INFO_H             = 60
 _CARD_PAD_X         = 7
 _CARD_PAD_Y         = 7
@@ -2653,18 +2653,14 @@ class GridViewManager:
             else:
                 pil_image = Image.open(str(blob_path)).convert("RGB")
 
-            from PIL import ImageOps
-            target_w, target_h = 240, 150
+            target_w, target_h = 270, 210
             src_w, src_h = pil_image.size
-            if src_w >= src_h:
-                canvas = ImageOps.fit(pil_image, (target_w, target_h), method=Image.Resampling.LANCZOS,
-                                      centering=(0.5, 0.5))
-            else:
-                scale = target_h / src_h
-                new_w = int(src_w * scale)
-                pil_image = pil_image.resize((new_w, target_h), Image.Resampling.LANCZOS)
-                canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
-                canvas.paste(pil_image, ((target_w - new_w) // 2, 0))
+            scale = min(target_w / src_w, target_h / src_h)
+            new_w = int(src_w * scale)
+            new_h = int(src_h * scale)
+            pil_image = pil_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
+            canvas.paste(pil_image, ((target_w - new_w) // 2, (target_h - new_h) // 2))
             photo = ImageTk.PhotoImage(canvas)
             item.thumbnail_image = photo
             return photo
@@ -2682,7 +2678,7 @@ class GridViewManager:
             is_vid = thumbnail_data.startswith("VIDEO:")
             raw_b64 = thumbnail_data[6:]
 
-            target_w, target_h = 240, 150
+            target_w, target_h = 270, 210
 
             if is_vid:
                 video_data = _b64.b64decode(raw_b64)
@@ -2700,16 +2696,12 @@ class GridViewManager:
                     frame_rgb = _cv2.cvtColor(frame, _cv2.COLOR_BGR2RGB)
                     pil_image = Image.fromarray(frame_rgb)
                     src_w, src_h = pil_image.size
-                    if src_w >= src_h:
-                        from PIL import ImageOps
-                        canvas = ImageOps.fit(pil_image, (target_w, target_h), method=Image.Resampling.LANCZOS,
-                                              centering=(0.5, 0.5))
-                    else:
-                        scale = target_h / src_h
-                        new_w = int(src_w * scale)
-                        pil_image = pil_image.resize((new_w, target_h), Image.Resampling.LANCZOS)
-                        canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
-                        canvas.paste(pil_image, ((target_w - new_w) // 2, 0))
+                    scale = min(target_w / src_w, target_h / src_h)
+                    new_w = int(src_w * scale)
+                    new_h = int(src_h * scale)
+                    pil_image = pil_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                    canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
+                    canvas.paste(pil_image, ((target_w - new_w) // 2, (target_h - new_h) // 2))
                     photo = ImageTk.PhotoImage(canvas)
                     item.thumbnail_image = photo
                     if video_path_norm:
@@ -2723,16 +2715,12 @@ class GridViewManager:
                     tmp_path = tf.name
                 img = Image.open(tmp_path).convert("RGB")
                 src_w, src_h = img.size
-                if src_w >= src_h:
-                    from PIL import ImageOps
-                    canvas = ImageOps.fit(img, (target_w, target_h), method=Image.Resampling.LANCZOS,
-                                          centering=(0.5, 0.5))
-                else:
-                    scale = target_h / src_h
-                    new_w = int(src_w * scale)
-                    img = img.resize((new_w, target_h), Image.Resampling.LANCZOS)
-                    canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
-                    canvas.paste(img, ((target_w - new_w) // 2, 0))
+                scale = min(target_w / src_w, target_h / src_h)
+                new_w = int(src_w * scale)
+                new_h = int(src_h * scale)
+                img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
+                canvas.paste(img, ((target_w - new_w) // 2, (target_h - new_h) // 2))
                 photo = ImageTk.PhotoImage(canvas)
                 item.thumbnail_image = photo
                 if video_path_norm:
