@@ -24,6 +24,192 @@ from managers.watch_history_manager import WatchHistoryManager
 from utils import is_video
 
 
+class FeatureManagerWiring:
+    """Coordinates cross-manager callbacks for the composed application."""
+
+    def __init__(self, app):
+        self.app = app
+
+    def wire_playlist(self):
+        app = self.app
+        app.playlist_manager.set_play_callback(app._play_playlist_videos)
+        app.playlist_manager.set_log_callback(app.update_console)
+        app.playlist_manager.set_video_preview_manager(app.video_preview_manager)
+        app.playlist_manager.set_grid_view_manager(app.grid_view_manager)
+        app.playlist_manager.set_add_to_favorites_callback(
+            lambda videos: app._add_videos_to_favorites_smart(videos)
+        )
+        app.playlist_manager.set_add_to_queue_callback(
+            lambda videos: app.queue_manager.add_to_queue(videos, added_from="playlist")
+        )
+        app.playlist_manager.ui.video_preview_manager = app.video_preview_manager
+
+    def wire_watch_history(self):
+        app = self.app
+        app.watch_history_manager.set_settings_manager(app.settings_manager)
+        app.watch_history_manager.set_play_callback(app._play_history_videos)
+        app.watch_history_manager.set_video_preview_manager(app.video_preview_manager)
+        app.watch_history_manager.set_grid_view_manager(app.grid_view_manager)
+        app.watch_history_manager.set_add_to_playlist_callback(
+            lambda videos: app.playlist_manager.add_videos_to_playlist([], videos)
+        )
+        app.watch_history_manager.set_add_to_queue_callback(
+            lambda videos: app.queue_manager.add_to_queue(videos, added_from="watch_history")
+        )
+        app.watch_history_manager.set_add_to_favourites_callback(
+            lambda videos: app._add_videos_to_favorites_smart(videos)
+        )
+        app.watch_history_manager.set_remove_from_favourites_callback(
+            lambda videos: app._remove_videos_from_favorites_smart(videos)
+        )
+        app.watch_history_manager.set_is_favourite_callback(
+            lambda video_path: app._is_favourite_smart(video_path)
+        )
+
+    def wire_queue(self):
+        app = self.app
+        app.queue_manager.set_play_callback(app._play_queue_videos)
+        app.queue_manager.set_video_preview_manager(app.video_preview_manager)
+        app.queue_manager.set_grid_view_manager(app.grid_view_manager)
+        app.queue_manager.set_add_to_favorites_callback(
+            lambda videos: app._add_videos_to_favorites_smart(videos)
+        )
+        app.queue_manager.set_add_to_playlist_callback(
+            lambda videos: app.playlist_manager.add_videos_to_playlist([], videos)
+        )
+
+    def wire_favorites(self):
+        app = self.app
+        app.favorites_manager.set_play_callback(app._play_favorites_videos)
+        app.favorites_manager.set_video_preview_manager(app.video_preview_manager)
+        app.favorites_manager.set_grid_view_manager(app.grid_view_manager)
+        app.favorites_manager.set_on_added_callback(app._on_favorites_added)
+        app.favorites_manager.set_on_removed_callback(app._on_favorites_removed)
+        app.favorites_manager.set_add_to_queue_callback(
+            lambda videos: app.queue_manager.add_to_queue(videos, added_from="favorites")
+        )
+        app.favorites_manager.set_add_to_playlist_callback(
+            lambda videos: app.playlist_manager.add_videos_to_playlist([], videos)
+        )
+
+    def wire_annotation_browser(self):
+        app = self.app
+        app.annotation_browser.set_video_preview_manager(app.video_preview_manager)
+        app.annotation_browser.set_grid_view_manager(app.grid_view_manager)
+        app.annotation_browser.set_add_to_playlist_callback(
+            lambda videos: app.playlist_manager.add_videos_to_playlist([], videos)
+        )
+        app.annotation_browser.set_add_to_queue_callback(
+            lambda videos: app.queue_manager.add_to_queue(videos, added_from="annotation_browser")
+        )
+        app.annotation_browser.set_add_to_favourites_callback(
+            lambda videos: app._add_videos_to_favorites_smart(videos)
+        )
+        app.annotation_browser.set_remove_from_favourites_callback(
+            lambda videos: app._remove_videos_from_favorites_smart(videos)
+        )
+        app.annotation_browser.set_is_favourite_callback(
+            lambda video_path: app._is_favourite_smart(video_path)
+        )
+
+    def wire_grid_view(self):
+        app = self.app
+        app.grid_view_manager.set_add_to_playlist_callback(
+            lambda videos: app.playlist_manager.add_videos_to_playlist([], videos)
+        )
+        app.grid_view_manager.set_add_to_favourites_callback(
+            lambda videos: app._add_videos_to_favorites_smart(videos)
+        )
+        app.grid_view_manager.set_remove_from_favourites_callback(
+            lambda videos: app._remove_videos_from_favorites_smart(videos)
+        )
+        app.grid_view_manager.set_is_favourite_callback(
+            lambda video_path: app._is_favourite_smart(video_path)
+        )
+        app.grid_view_manager.set_add_to_queue_callback(
+            lambda videos: app.queue_manager.add_to_queue(videos, added_from="grid_view")
+        )
+        app.grid_view_manager.set_play_in_dual_player1_callback(
+            lambda videos: app.dual_player_manager.load_videos_into_slot(1, 1, videos)
+        )
+        app.grid_view_manager.set_play_in_dual_player2_callback(
+            lambda videos: app.dual_player_manager.load_videos_into_slot(1, 2, videos)
+        )
+        app.grid_view_manager.set_play_in_dual_player3_callback(
+            lambda videos: app.dual_player_manager.load_videos_into_slot(1, 3, videos)
+        )
+        app.grid_view_manager.set_get_player_count_callback(lambda: 3)
+
+        if app.settings_manager.get_settings().dual_window_enabled:
+            app.grid_view_manager.set_play_in_dual_player_win2_1_callback(
+                lambda videos: app.dual_player_manager.load_videos_into_slot(2, 1, videos)
+            )
+            app.grid_view_manager.set_play_in_dual_player_win2_2_callback(
+                lambda videos: app.dual_player_manager.load_videos_into_slot(2, 2, videos)
+            )
+            app.grid_view_manager.set_play_in_dual_player_win2_3_callback(
+                lambda videos: app.dual_player_manager.load_videos_into_slot(2, 3, videos)
+            )
+
+        app.grid_view_manager.set_open_file_location_callback(app._context_open_location)
+        app.grid_view_manager.set_show_properties_callback(app._context_show_properties)
+        app.grid_view_manager.set_annotation_service(app.annotation_service)
+        app.grid_view_manager.set_exclude_video_callback(app._grid_exclude_video)
+        app.grid_view_manager.set_remove_exclusion_video_callback(app._grid_remove_exclusion_video)
+        app.grid_view_manager.set_locate_in_panel_callback(app.locate_in_directory_panel)
+        app.playlist_manager.set_locate_in_panel_callback(app.locate_in_directory_panel)
+        app.watch_history_manager.set_locate_in_panel_callback(app.locate_in_directory_panel)
+        app.favorites_manager.set_locate_in_panel_callback(app.locate_in_directory_panel)
+        app.queue_manager.set_locate_in_panel_callback(app.locate_in_directory_panel)
+        app.annotation_browser.set_locate_in_panel_callback(app.locate_in_directory_panel)
+
+    def wire_settings_panel(self):
+        app = self.app
+        app.settings_manager.ui.cleanup_resume_callback = lambda: app.resume_manager.service.cleanup_old_positions(
+            app.settings_manager.get_settings().auto_cleanup_days)
+        app.settings_manager.ui.cleanup_history_callback = lambda: app.watch_history_manager.service.cleanup_old_entries(
+            app.settings_manager.get_settings().auto_cleanup_days)
+        app.settings_manager.ui.clear_thumbnails_callback = lambda: app._clear_thumbnail_cache()
+        app.settings_manager.ui.video_preview_manager = app.video_preview_manager
+        app.settings_manager.ui.clear_metadata_callback = lambda: app._clear_metadata_cache()
+        app.settings_manager.ui.get_metadata_info_callback = lambda: app._get_metadata_cache_info()
+        app.settings_manager.ui.filter_sort_manager = app.filter_sort_manager
+
+    def finish_startup(self):
+        app = self.app
+        app.root.after(0, app._fix_pill_colors_initial)
+        app.root.after(100, app._show_home_view)
+        app._setup_periodic_cleanup()
+        app.resource_manager.register_cleanup_callback(app._cleanup_managers)
+
+
+class PlaybackScopeBuilder:
+    """Builds player input collections from candidate video paths."""
+
+    def __init__(self, stream_detector):
+        self.stream_detector = stream_detector
+
+    def build(self, video_paths, *, include_streams=True):
+        video_to_dir = {}
+        directories = []
+
+        for video_path in video_paths:
+            if include_streams and self.stream_detector(video_path):
+                video_dir = "STREAMS"
+            else:
+                video_dir = os.path.dirname(video_path) if os.path.isfile(video_path) else None
+
+            if not video_dir:
+                continue
+
+            video_to_dir[video_path] = video_dir
+            if video_dir not in directories:
+                directories.append(video_dir)
+
+        directories.sort()
+        return list(video_to_dir.keys()), video_to_dir, directories
+
+
 class ManagersMixin:
     def _initialize_drive_manager(self):
         try:
@@ -62,65 +248,15 @@ class ManagersMixin:
         self.grid_view_manager.set_play_callback(self._play_grid_videos)
 
         self.playlist_manager = PlaylistManager(self.root, self)
-        self.playlist_manager.set_play_callback(self._play_playlist_videos)
-        self.playlist_manager.set_log_callback(self.update_console)
-        self.playlist_manager.set_video_preview_manager(self.video_preview_manager)
-        self.playlist_manager.set_grid_view_manager(self.grid_view_manager)
-        self.playlist_manager.set_add_to_favorites_callback(
-            lambda videos: self._add_videos_to_favorites_smart(videos)
-        )
-        self.playlist_manager.set_add_to_queue_callback(
-            lambda videos: self.queue_manager.add_to_queue(videos, added_from="playlist")
-        )
-        self.playlist_manager.ui.video_preview_manager = self.video_preview_manager
 
         self.watch_history_manager = WatchHistoryManager(self.root, self)
-        self.watch_history_manager.set_settings_manager(self.settings_manager)
-        self.watch_history_manager.set_play_callback(self._play_history_videos)
-        self.watch_history_manager.set_video_preview_manager(self.video_preview_manager)
-        self.watch_history_manager.set_grid_view_manager(self.grid_view_manager)
-        self.watch_history_manager.set_add_to_playlist_callback(
-            lambda videos: self.playlist_manager.add_videos_to_playlist([], videos)
-        )
-        self.watch_history_manager.set_add_to_queue_callback(
-            lambda videos: self.queue_manager.add_to_queue(videos, added_from="watch_history")
-        )
-        self.watch_history_manager.set_add_to_favourites_callback(
-            lambda videos: self._add_videos_to_favorites_smart(videos)
-        )
-        self.watch_history_manager.set_remove_from_favourites_callback(
-            lambda videos: self._remove_videos_from_favorites_smart(videos)
-        )
-        self.watch_history_manager.set_is_favourite_callback(
-            lambda video_path: self._is_favourite_smart(video_path)
-        )
 
         self.resume_manager = ResumePlaybackManager()
         self.resume_manager.set_resume_enabled(self.smart_resume_enabled)
 
         self.queue_manager = VideoQueueManager(self.root, self)
-        self.queue_manager.set_play_callback(self._play_queue_videos)
-        self.queue_manager.set_video_preview_manager(self.video_preview_manager)
-        self.queue_manager.set_grid_view_manager(self.grid_view_manager)
-        self.queue_manager.set_add_to_favorites_callback(
-            lambda videos: self._add_videos_to_favorites_smart(videos)
-        )
-        self.queue_manager.set_add_to_playlist_callback(
-            lambda videos: self.playlist_manager.add_videos_to_playlist([], videos)
-        )
 
         self.favorites_manager = FavoritesManager(self.root, self)
-        self.favorites_manager.set_play_callback(self._play_favorites_videos)
-        self.favorites_manager.set_video_preview_manager(self.video_preview_manager)
-        self.favorites_manager.set_grid_view_manager(self.grid_view_manager)
-        self.favorites_manager.set_on_added_callback(self._on_favorites_added)
-        self.favorites_manager.set_on_removed_callback(self._on_favorites_removed)
-        self.favorites_manager.set_add_to_queue_callback(
-            lambda videos: self.queue_manager.add_to_queue(videos, added_from="favorites")
-        )
-        self.favorites_manager.set_add_to_playlist_callback(
-            lambda videos: self.playlist_manager.add_videos_to_playlist([], videos)
-        )
 
         self.annotation_service = VideoAnnotationService()
         self.annotation_service.subscribe(self._on_any_annotation_changed)
@@ -131,23 +267,6 @@ class ManagersMixin:
             annotation_service=self.annotation_service,
             play_callback=self._play_annotated_videos,
             logger=self.update_console,
-        )
-        self.annotation_browser.set_video_preview_manager(self.video_preview_manager)
-        self.annotation_browser.set_grid_view_manager(self.grid_view_manager)
-        self.annotation_browser.set_add_to_playlist_callback(
-            lambda videos: self.playlist_manager.add_videos_to_playlist([], videos)
-        )
-        self.annotation_browser.set_add_to_queue_callback(
-            lambda videos: self.queue_manager.add_to_queue(videos, added_from="annotation_browser")
-        )
-        self.annotation_browser.set_add_to_favourites_callback(
-            lambda videos: self._add_videos_to_favorites_smart(videos)
-        )
-        self.annotation_browser.set_remove_from_favourites_callback(
-            lambda videos: self._remove_videos_from_favorites_smart(videos)
-        )
-        self.annotation_browser.set_is_favourite_callback(
-            lambda video_path: self._is_favourite_smart(video_path)
         )
 
         self.dual_player_manager = DualPlayerManager(
@@ -171,69 +290,17 @@ class ManagersMixin:
             self._apply_filters_and_refresh
         )
         self.filter_sort_ui.app_instance = self
+        self.playback_scope_builder = PlaybackScopeBuilder(self._is_stream_url)
 
-        self.grid_view_manager.set_add_to_playlist_callback(
-            lambda videos: self.playlist_manager.add_videos_to_playlist([], videos)
-        )
-        self.grid_view_manager.set_add_to_favourites_callback(
-            lambda videos: self._add_videos_to_favorites_smart(videos)
-        )
-        self.grid_view_manager.set_remove_from_favourites_callback(
-            lambda videos: self._remove_videos_from_favorites_smart(videos)
-        )
-        self.grid_view_manager.set_is_favourite_callback(
-            lambda video_path: self._is_favourite_smart(video_path)
-        )
-        self.grid_view_manager.set_add_to_queue_callback(
-            lambda videos: self.queue_manager.add_to_queue(videos, added_from="grid_view")
-        )
-        self.grid_view_manager.set_play_in_dual_player1_callback(
-            lambda videos: self.dual_player_manager.load_videos_into_slot(1, 1, videos)
-        )
-        self.grid_view_manager.set_play_in_dual_player2_callback(
-            lambda videos: self.dual_player_manager.load_videos_into_slot(1, 2, videos)
-        )
-        self.grid_view_manager.set_play_in_dual_player3_callback(
-            lambda videos: self.dual_player_manager.load_videos_into_slot(1, 3, videos)
-        )
-        self.grid_view_manager.set_get_player_count_callback(lambda: 3)
-
-        if self.settings_manager.get_settings().dual_window_enabled:
-            self.grid_view_manager.set_play_in_dual_player_win2_1_callback(
-                lambda videos: self.dual_player_manager.load_videos_into_slot(2, 1, videos)
-            )
-            self.grid_view_manager.set_play_in_dual_player_win2_2_callback(
-                lambda videos: self.dual_player_manager.load_videos_into_slot(2, 2, videos)
-            )
-            self.grid_view_manager.set_play_in_dual_player_win2_3_callback(
-                lambda videos: self.dual_player_manager.load_videos_into_slot(2, 3, videos)
-            )
-
-        self.grid_view_manager.set_open_file_location_callback(self._context_open_location)
-        self.grid_view_manager.set_show_properties_callback(self._context_show_properties)
-        self.grid_view_manager.set_annotation_service(self.annotation_service)
-        self.grid_view_manager.set_exclude_video_callback(self._grid_exclude_video)
-        self.grid_view_manager.set_remove_exclusion_video_callback(self._grid_remove_exclusion_video)
-        self.grid_view_manager.set_locate_in_panel_callback(self.locate_in_directory_panel)
-        self.playlist_manager.set_locate_in_panel_callback(self.locate_in_directory_panel)
-        self.watch_history_manager.set_locate_in_panel_callback(self.locate_in_directory_panel)
-        self.favorites_manager.set_locate_in_panel_callback(self.locate_in_directory_panel)
-        self.queue_manager.set_locate_in_panel_callback(self.locate_in_directory_panel)
-        self.annotation_browser.set_locate_in_panel_callback(self.locate_in_directory_panel)
-
-        self.settings_manager.ui.cleanup_resume_callback = lambda: self.resume_manager.service.cleanup_old_positions(
-            self.settings_manager.get_settings().auto_cleanup_days)
-        self.settings_manager.ui.cleanup_history_callback = lambda: self.watch_history_manager.service.cleanup_old_entries(
-            self.settings_manager.get_settings().auto_cleanup_days)
-        self.settings_manager.ui.clear_thumbnails_callback = lambda: self._clear_thumbnail_cache()
-        self.settings_manager.ui.video_preview_manager = self.video_preview_manager
-        self.settings_manager.ui.clear_metadata_callback = lambda: self._clear_metadata_cache()
-        self.settings_manager.ui.get_metadata_info_callback = lambda: self._get_metadata_cache_info()
-        self.settings_manager.ui.filter_sort_manager = self.filter_sort_manager
-        self.root.after(0, self._fix_pill_colors_initial)
-        self.root.after(100, self._show_home_view)
-        self._setup_periodic_cleanup()
-        self.resource_manager.register_cleanup_callback(self._cleanup_managers)
+        wiring = FeatureManagerWiring(self)
+        wiring.wire_playlist()
+        wiring.wire_watch_history()
+        wiring.wire_queue()
+        wiring.wire_favorites()
+        wiring.wire_annotation_browser()
+        wiring.wire_grid_view()
+        wiring.wire_settings_panel()
+        wiring.finish_startup()
 
 
     def _show_favorites_manager(self):
@@ -294,17 +361,7 @@ class ManagersMixin:
     def _play_queue_videos(self, videos):
         if not videos:
             return
-        all_video_to_dir = {}
-        all_directories = []
-        for vp in videos:
-            vdir = "STREAMS" if self._is_stream_url(vp) else (
-                os.path.dirname(vp) if os.path.isfile(vp) else None)
-            if vdir:
-                all_video_to_dir[vp] = vdir
-                if vdir not in all_directories:
-                    all_directories.append(vdir)
-        all_directories.sort()
-        valid_videos = list(all_video_to_dir.keys())
+        valid_videos, all_video_to_dir, all_directories = self.playback_scope_builder.build(videos)
         if not valid_videos:
             self.toast.warning("Warning", "No valid videos found")
             return
@@ -369,17 +426,7 @@ class ManagersMixin:
         self.update_console("=" * 60)
         self.update_console("STARTING HISTORY VIDEO PLAYBACK")
         self.update_console("=" * 60)
-        all_video_to_dir = {}
-        all_directories  = []
-        for vp in videos:
-            vdir = "STREAMS" if self._is_stream_url(vp) else (
-                os.path.dirname(vp) if os.path.isfile(vp) else None)
-            if vdir:
-                all_video_to_dir[vp] = vdir
-                if vdir not in all_directories:
-                    all_directories.append(vdir)
-        all_directories.sort()
-        valid_videos = list(all_video_to_dir.keys())
+        valid_videos, all_video_to_dir, all_directories = self.playback_scope_builder.build(videos)
         if not valid_videos:
             self.toast.warning("Warning", "No valid videos found")
             return
@@ -450,17 +497,7 @@ class ManagersMixin:
         self.update_console("=" * 60)
         self.update_console("STARTING PLAYLIST PLAYBACK")
         self.update_console("=" * 60)
-        all_video_to_dir = {}
-        all_directories  = []
-        for vp in videos:
-            vdir = "STREAMS" if self._is_stream_url(vp) else (
-                os.path.dirname(vp) if os.path.isfile(vp) else None)
-            if vdir:
-                all_video_to_dir[vp] = vdir
-                if vdir not in all_directories:
-                    all_directories.append(vdir)
-        all_directories.sort()
-        valid_videos = list(all_video_to_dir.keys())
+        valid_videos, all_video_to_dir, all_directories = self.playback_scope_builder.build(videos)
         if not valid_videos:
             self.toast.warning("Warning", "No valid videos found in playlist")
             return
@@ -606,16 +643,10 @@ class ManagersMixin:
     def _play_annotated_videos(self, video_paths: list):
         if not video_paths:
             return
-        all_video_to_dir = {}
-        all_directories = []
-        for vp in video_paths:
-            vdir = os.path.dirname(vp) if os.path.isfile(vp) else None
-            if vdir:
-                all_video_to_dir[vp] = vdir
-                if vdir not in all_directories:
-                    all_directories.append(vdir)
-        all_directories.sort()
-        valid_videos = list(all_video_to_dir.keys())
+        valid_videos, all_video_to_dir, all_directories = self.playback_scope_builder.build(
+            video_paths,
+            include_streams=False,
+        )
         if not valid_videos:
             return
         self._launch_player(self._make_player(valid_videos, all_video_to_dir, all_directories, 0))

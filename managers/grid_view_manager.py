@@ -41,6 +41,28 @@ class GridViewItem:
         self.thumbnail_image = None
 
 
+class GridViewCallbacks:
+    def __init__(self):
+        self.play = None
+        self.add_to_playlist = None
+        self.add_to_favourites = None
+        self.remove_from_favourites = None
+        self.is_favourite = None
+        self.add_to_queue = None
+        self.play_in_dual_player1 = None
+        self.play_in_dual_player2 = None
+        self.play_in_dual_player3 = None
+        self.play_in_dual_player_win2_1 = None
+        self.play_in_dual_player_win2_2 = None
+        self.play_in_dual_player_win2_3 = None
+        self.get_player_count = None
+        self.open_file_location = None
+        self.show_properties = None
+        self.exclude_video = None
+        self.remove_exclusion_video = None
+        self.locate_in_panel = None
+
+
 class GridViewManager:
     def __init__(self, root, theme_provider, console_callback=None):
         self.root = root
@@ -79,25 +101,7 @@ class GridViewManager:
         self.search_var = tk.StringVar()
         self.search_var.trace_add('write', lambda *_: self._on_search_changed())
 
-        # callbacks
-        self.play_callback = None
-        self.add_to_playlist_callback = None
-        self.add_to_favourites_callback = None
-        self.remove_from_favourites_callback = None
-        self.is_favourite_callback = None
-        self.add_to_queue_callback = None
-        self.play_in_dual_player1_callback = None
-        self.play_in_dual_player2_callback = None
-        self.play_in_dual_player3_callback = None
-        self.play_in_dual_player_win2_1_callback = None
-        self.play_in_dual_player_win2_2_callback = None
-        self.play_in_dual_player_win2_3_callback = None
-        self.get_player_count_callback = None
-        self.open_file_location_callback = None
-        self.show_properties_callback = None
-        self.exclude_video_callback = None
-        self.remove_exclusion_video_callback = None
-        self.locate_in_panel_callback = None
+        self.callbacks = GridViewCallbacks()
 
         self._drag_source = None
         self._drag_ghost = None
@@ -163,6 +167,96 @@ class GridViewManager:
 
     def set_locate_in_panel_callback(self, cb):
         self.locate_in_panel_callback = cb
+
+    @property
+    def play_callback(self): return self.callbacks.play
+    @play_callback.setter
+    def play_callback(self, cb): self.callbacks.play = cb
+
+    @property
+    def add_to_playlist_callback(self): return self.callbacks.add_to_playlist
+    @add_to_playlist_callback.setter
+    def add_to_playlist_callback(self, cb): self.callbacks.add_to_playlist = cb
+
+    @property
+    def add_to_favourites_callback(self): return self.callbacks.add_to_favourites
+    @add_to_favourites_callback.setter
+    def add_to_favourites_callback(self, cb): self.callbacks.add_to_favourites = cb
+
+    @property
+    def remove_from_favourites_callback(self): return self.callbacks.remove_from_favourites
+    @remove_from_favourites_callback.setter
+    def remove_from_favourites_callback(self, cb): self.callbacks.remove_from_favourites = cb
+
+    @property
+    def is_favourite_callback(self): return self.callbacks.is_favourite
+    @is_favourite_callback.setter
+    def is_favourite_callback(self, cb): self.callbacks.is_favourite = cb
+
+    @property
+    def add_to_queue_callback(self): return self.callbacks.add_to_queue
+    @add_to_queue_callback.setter
+    def add_to_queue_callback(self, cb): self.callbacks.add_to_queue = cb
+
+    @property
+    def play_in_dual_player1_callback(self): return self.callbacks.play_in_dual_player1
+    @play_in_dual_player1_callback.setter
+    def play_in_dual_player1_callback(self, cb): self.callbacks.play_in_dual_player1 = cb
+
+    @property
+    def play_in_dual_player2_callback(self): return self.callbacks.play_in_dual_player2
+    @play_in_dual_player2_callback.setter
+    def play_in_dual_player2_callback(self, cb): self.callbacks.play_in_dual_player2 = cb
+
+    @property
+    def play_in_dual_player3_callback(self): return self.callbacks.play_in_dual_player3
+    @play_in_dual_player3_callback.setter
+    def play_in_dual_player3_callback(self, cb): self.callbacks.play_in_dual_player3 = cb
+
+    @property
+    def play_in_dual_player_win2_1_callback(self): return self.callbacks.play_in_dual_player_win2_1
+    @play_in_dual_player_win2_1_callback.setter
+    def play_in_dual_player_win2_1_callback(self, cb): self.callbacks.play_in_dual_player_win2_1 = cb
+
+    @property
+    def play_in_dual_player_win2_2_callback(self): return self.callbacks.play_in_dual_player_win2_2
+    @play_in_dual_player_win2_2_callback.setter
+    def play_in_dual_player_win2_2_callback(self, cb): self.callbacks.play_in_dual_player_win2_2 = cb
+
+    @property
+    def play_in_dual_player_win2_3_callback(self): return self.callbacks.play_in_dual_player_win2_3
+    @play_in_dual_player_win2_3_callback.setter
+    def play_in_dual_player_win2_3_callback(self, cb): self.callbacks.play_in_dual_player_win2_3 = cb
+
+    @property
+    def get_player_count_callback(self): return self.callbacks.get_player_count
+    @get_player_count_callback.setter
+    def get_player_count_callback(self, cb): self.callbacks.get_player_count = cb
+
+    @property
+    def open_file_location_callback(self): return self.callbacks.open_file_location
+    @open_file_location_callback.setter
+    def open_file_location_callback(self, cb): self.callbacks.open_file_location = cb
+
+    @property
+    def show_properties_callback(self): return self.callbacks.show_properties
+    @show_properties_callback.setter
+    def show_properties_callback(self, cb): self.callbacks.show_properties = cb
+
+    @property
+    def exclude_video_callback(self): return self.callbacks.exclude_video
+    @exclude_video_callback.setter
+    def exclude_video_callback(self, cb): self.callbacks.exclude_video = cb
+
+    @property
+    def remove_exclusion_video_callback(self): return self.callbacks.remove_exclusion_video
+    @remove_exclusion_video_callback.setter
+    def remove_exclusion_video_callback(self, cb): self.callbacks.remove_exclusion_video = cb
+
+    @property
+    def locate_in_panel_callback(self): return self.callbacks.locate_in_panel
+    @locate_in_panel_callback.setter
+    def locate_in_panel_callback(self, cb): self.callbacks.locate_in_panel = cb
 
     def _on_annotation_changed(self):
         if self.grid_window and self.grid_window.winfo_exists():

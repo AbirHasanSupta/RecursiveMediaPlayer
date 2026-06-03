@@ -7,27 +7,9 @@ from tkinter import ttk
 from typing import List, Optional, Callable
 import uuid
 
+from managers.app_paths import get_app_dirs as _get_app_dirs
 from managers.toast_manager import Toast
 from utils import _responsive_geometry
-
-
-def _get_app_dirs():
-    """Return (appdata_dir, localappdata_dir) for Recursive Media Player."""
-    import os, sys
-    from pathlib import Path
-    APP = "Recursive Media Player"
-    if os.name == "nt":
-        settings = Path(os.environ.get("APPDATA",  Path.home() / "AppData" / "Roaming")) / APP
-        local    = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))  / APP
-    elif sys.platform == "darwin":
-        settings = Path.home() / "Library" / "Application Support" / APP
-        local    = Path.home() / "Library" / "Caches" / APP
-    else:
-        settings = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP
-        local    = Path(os.environ.get("XDG_CACHE_HOME",  Path.home() / ".cache"))  / APP
-    return settings, local
-
-
 
 
 class QueueEntry:
@@ -321,6 +303,15 @@ class QueueService:
                 return False
 
 
+class QueueUICallbacks:
+    def __init__(self):
+        self.play = None
+        self.jump = None
+        self.add_to_favorites = None
+        self.add_to_playlist = None
+        self.locate_in_panel = None
+
+
 class QueueUI:
     def __init__(self, parent, theme_provider, queue_service: QueueService):
         self.parent = parent
@@ -329,16 +320,12 @@ class QueueUI:
 
         self.queue_window = None
         self.queue_listbox = None
-        self.on_play_callback = None
-        self.on_jump_callback = None
+        self.callbacks = QueueUICallbacks()
 
         self.drag_start_index = None
         self.drag_data = None
         self.video_preview_manager = None
         self.grid_view_manager = None
-        self.add_to_favorites_callback = None
-        self.add_to_playlist_callback = None
-        self.locate_in_panel_callback = None
         self._embedded = False
         self._close_callback = None
         self._sort_col = None
@@ -347,6 +334,31 @@ class QueueUI:
         self.queue_tree = None
         self._hovered_iid = None
         self.theme_provider.register_manager_ui(self)
+
+    @property
+    def on_play_callback(self): return self.callbacks.play
+    @on_play_callback.setter
+    def on_play_callback(self, callback): self.callbacks.play = callback
+
+    @property
+    def on_jump_callback(self): return self.callbacks.jump
+    @on_jump_callback.setter
+    def on_jump_callback(self, callback): self.callbacks.jump = callback
+
+    @property
+    def add_to_favorites_callback(self): return self.callbacks.add_to_favorites
+    @add_to_favorites_callback.setter
+    def add_to_favorites_callback(self, callback): self.callbacks.add_to_favorites = callback
+
+    @property
+    def add_to_playlist_callback(self): return self.callbacks.add_to_playlist
+    @add_to_playlist_callback.setter
+    def add_to_playlist_callback(self, callback): self.callbacks.add_to_playlist = callback
+
+    @property
+    def locate_in_panel_callback(self): return self.callbacks.locate_in_panel
+    @locate_in_panel_callback.setter
+    def locate_in_panel_callback(self, callback): self.callbacks.locate_in_panel = callback
 
     def show_queue_manager(self):
         if self.queue_window and self.queue_window.winfo_exists():

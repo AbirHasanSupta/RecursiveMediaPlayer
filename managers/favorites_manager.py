@@ -220,13 +220,21 @@ class FavoriteService:
             return self.storage.save_favorites(self._favorites)
 
 
+class FavoritesUICallbacks:
+    def __init__(self, play=None):
+        self.play = play
+        self.removed = None
+        self.add_to_queue = None
+        self.add_to_playlist = None
+        self.locate_in_panel = None
+
+
 class FavoritesUI:
     def __init__(self, parent, theme_provider, favorite_service: FavoriteService, on_play_callback: Callable = None):
         self.parent = parent
         self.theme_provider = theme_provider
         self.favorite_service = favorite_service
-        self.on_play_callback = on_play_callback
-        self._on_removed_callback = None
+        self.callbacks = FavoritesUICallbacks(on_play_callback)
 
         self.favorites_window = None
         self.current_directory = None
@@ -235,9 +243,6 @@ class FavoritesUI:
         self.dragging_index = None
         self.video_preview_manager = None
         self.grid_view_manager = None
-        self.add_to_queue_callback = None
-        self.add_to_playlist_callback = None
-        self.locate_in_panel_callback = None
         self._embedded = False
         self._close_callback = None
         self._sort_col = None
@@ -246,6 +251,31 @@ class FavoritesUI:
         self.favorites_tree = None
         self.theme_provider.register_manager_ui(self)
         self._hovered_iid = None
+
+    @property
+    def on_play_callback(self): return self.callbacks.play
+    @on_play_callback.setter
+    def on_play_callback(self, callback): self.callbacks.play = callback
+
+    @property
+    def _on_removed_callback(self): return self.callbacks.removed
+    @_on_removed_callback.setter
+    def _on_removed_callback(self, callback): self.callbacks.removed = callback
+
+    @property
+    def add_to_queue_callback(self): return self.callbacks.add_to_queue
+    @add_to_queue_callback.setter
+    def add_to_queue_callback(self, callback): self.callbacks.add_to_queue = callback
+
+    @property
+    def add_to_playlist_callback(self): return self.callbacks.add_to_playlist
+    @add_to_playlist_callback.setter
+    def add_to_playlist_callback(self, callback): self.callbacks.add_to_playlist = callback
+
+    @property
+    def locate_in_panel_callback(self): return self.callbacks.locate_in_panel
+    @locate_in_panel_callback.setter
+    def locate_in_panel_callback(self, callback): self.callbacks.locate_in_panel = callback
 
     def show_favorites_manager(self, selected_directory: str = None):
         if self.favorites_window and self.favorites_window.winfo_exists():

@@ -8,24 +8,9 @@ from datetime import datetime, timedelta
 from typing import List, Dict
 import uuid
 
+from managers.app_paths import get_app_dirs as _get_app_dirs
 from managers.resource_manager import get_resource_manager
 from utils import _responsive_geometry
-
-
-def _get_app_dirs():
-    import os, sys
-    from pathlib import Path
-    APP = "Recursive Media Player"
-    if os.name == "nt":
-        settings = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / APP
-        local = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / APP
-    elif sys.platform == "darwin":
-        settings = Path.home() / "Library" / "Application Support" / APP
-        local = Path.home() / "Library" / "Caches" / APP
-    else:
-        settings = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP
-        local = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / APP
-    return settings, local
 
 
 class WatchHistoryEntry:
@@ -320,6 +305,17 @@ class WatchHistoryService:
             return len(entries_to_remove)
 
 
+class WatchHistoryUICallbacks:
+    def __init__(self):
+        self.play = None
+        self.add_to_playlist = None
+        self.add_to_queue = None
+        self.add_to_favourites = None
+        self.remove_from_favourites = None
+        self.is_favourite = None
+        self.locate_in_panel = None
+
+
 class WatchHistoryUI:
 
     def __init__(self, parent, theme_provider, history_service: WatchHistoryService):
@@ -336,15 +332,45 @@ class WatchHistoryUI:
         self._embedded = False
         self._close_callback = None
         self.grid_view_manager = None
-        self.add_to_playlist_callback = None
-        self.add_to_queue_callback = None
-        self.add_to_favourites_callback = None
-        self.remove_from_favourites_callback = None
-        self.is_favourite_callback = None
-        self.locate_in_panel_callback = None
+        self.callbacks = WatchHistoryUICallbacks()
         self.theme_provider.register_manager_ui(self)
         self.history_tree = None
         self._hovered_iid = None
+
+    @property
+    def play_callback(self): return self.callbacks.play
+    @play_callback.setter
+    def play_callback(self, callback): self.callbacks.play = callback
+
+    @property
+    def add_to_playlist_callback(self): return self.callbacks.add_to_playlist
+    @add_to_playlist_callback.setter
+    def add_to_playlist_callback(self, callback): self.callbacks.add_to_playlist = callback
+
+    @property
+    def add_to_queue_callback(self): return self.callbacks.add_to_queue
+    @add_to_queue_callback.setter
+    def add_to_queue_callback(self, callback): self.callbacks.add_to_queue = callback
+
+    @property
+    def add_to_favourites_callback(self): return self.callbacks.add_to_favourites
+    @add_to_favourites_callback.setter
+    def add_to_favourites_callback(self, callback): self.callbacks.add_to_favourites = callback
+
+    @property
+    def remove_from_favourites_callback(self): return self.callbacks.remove_from_favourites
+    @remove_from_favourites_callback.setter
+    def remove_from_favourites_callback(self, callback): self.callbacks.remove_from_favourites = callback
+
+    @property
+    def is_favourite_callback(self): return self.callbacks.is_favourite
+    @is_favourite_callback.setter
+    def is_favourite_callback(self, callback): self.callbacks.is_favourite = callback
+
+    @property
+    def locate_in_panel_callback(self): return self.callbacks.locate_in_panel
+    @locate_in_panel_callback.setter
+    def locate_in_panel_callback(self, callback): self.callbacks.locate_in_panel = callback
 
     def _get_design_tokens(self):
         return self.theme_provider.get_manager_design_tokens()

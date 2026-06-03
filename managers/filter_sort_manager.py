@@ -21,25 +21,8 @@ from typing import List, Dict, Any, Callable, Optional, Tuple
 from collections import defaultdict
 import cv2
 
+from managers.app_paths import get_app_dirs as _get_app_dirs
 from managers.resource_manager import get_resource_manager
-
-def _get_app_dirs():
-    """Return (appdata_dir, localappdata_dir) for Recursive Media Player."""
-    import os, sys
-    from pathlib import Path
-    APP = "Recursive Media Player"
-    if os.name == "nt":
-        settings = Path(os.environ.get("APPDATA",  Path.home() / "AppData" / "Roaming")) / APP
-        local    = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))  / APP
-    elif sys.platform == "darwin":
-        settings = Path.home() / "Library" / "Application Support" / APP
-        local    = Path.home() / "Library" / "Caches" / APP
-    else:
-        settings = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP
-        local    = Path(os.environ.get("XDG_CACHE_HOME",  Path.home() / ".cache"))  / APP
-    return settings, local
-
-
 
 
 # ---------------------------------------------------------------------------

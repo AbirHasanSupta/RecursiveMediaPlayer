@@ -21,7 +21,7 @@ from managers.resource_manager import ThreadSafeDict, get_resource_manager, Mana
 from theme import BehaviorComposer, ThemeSelector
 from mixin.backend import BackendMixin
 from mixin.frontend import FrontendMixin
-from mixin.manager import ManagersMixin
+from mixin.managers import ManagersMixin
 from mixin.theme_core import ThemeCoreMixin
 from mixin.ui import UIMixin
 from utils import is_video, check_vlc, show_vlc_missing_and_exit
