@@ -1296,7 +1296,7 @@ class PlaylistManager:
     def add_videos_to_playlist(self, videos: List[str], selected_videos: List[str] = None):
         if not videos and not selected_videos:
             self.ui.theme_provider.toast.warning("Warning", "No videos to add to playlist")
-            return
+            return False
 
         videos_to_add = selected_videos if selected_videos else videos
 
@@ -1311,8 +1311,10 @@ class PlaylistManager:
                 self.service.create_playlist(name, description, videos_to_add)
                 self._log(f"Playlist '{name}' created with {len(videos_to_add)} videos")
                 self.ui._refresh_playlist_list()
+                return True
+            return False
         else:
-            self._show_add_to_playlist_dialog(videos_to_add, playlists)
+            return self._show_add_to_playlist_dialog(videos_to_add, playlists)
 
     def _show_add_to_playlist_dialog(self, videos: list, playlists: list):
         tp = self.ui.theme_provider
@@ -1387,7 +1389,10 @@ class PlaylistManager:
         btn_row = tk.Frame(body, bg=BG)
         btn_row.pack(fill=tk.X)
 
+        added = False
+
         def create_new():
+            nonlocal added
             dialog.destroy()
             info_dialog = PlaylistInfoDialog(self.ui.parent, tp)
             result = info_dialog.show()
@@ -1396,8 +1401,10 @@ class PlaylistManager:
                 self.service.create_playlist(name, desc, videos)
                 self._log(f"Playlist '{name}' created with {len(videos)} videos")
                 self.ui._refresh_playlist_list()
+                added = True
 
         def add_to_existing():
+            nonlocal added
             sel = playlist_listbox.curselection()
             if not sel:
                 self.ui.theme_provider.toast.warning("Warning", "Please select a playlist")
@@ -1405,17 +1412,23 @@ class PlaylistManager:
             chosen = playlists[sel[0]]
             self.service.add_videos_to_playlist(chosen.id, videos)
             self._log(f"Added {len(videos)} videos to '{chosen.name}'")
+            added = True
             dialog.destroy()
-            self.ui._refresh_playlist_list()
+
+        def cancel():
+            nonlocal added
+            added = False
+            dialog.destroy()
 
         tp.create_modern_button(btn_row, "+ New Playlist", create_new, "secondary", "md").pack(side=tk.LEFT)
-        tp.create_modern_button(btn_row, "Cancel", dialog.destroy, "secondary", "md").pack(side=tk.RIGHT, padx=(8, 0))
+        tp.create_modern_button(btn_row, "Cancel", cancel, "secondary", "md").pack(side=tk.RIGHT, padx=(8, 0))
         tp.create_modern_button(btn_row, "Add to Selected", add_to_existing, "primary", "md").pack(side=tk.RIGHT)
 
         from icon_helper import apply_icon
         apply_icon(dialog)
         dialog.deiconify()
         self.ui.parent.wait_window(dialog)
+        return added
 
     def _on_play_playlist(self, videos: List[str]):
         """Handle playlist playback"""

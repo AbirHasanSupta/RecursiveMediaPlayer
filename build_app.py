@@ -4803,8 +4803,9 @@ def select_multiple_folders_and_play():
                             if is_video(full) and not self.is_video_excluded(selected_dir, full):
                                 selected_videos.append(full)
             if selected_videos:
-                self.playlist_manager.add_videos_to_playlist([], selected_videos)
-                self.toast.success("Playlist",
+                added = self.playlist_manager.add_videos_to_playlist([], selected_videos)
+                if added:
+                    self.toast.success("Playlist",
                                    f"{len(selected_videos)} video{'s' if len(selected_videos) != 1 else ''} added to playlist")
 
         def _context_copy_selected(self, selection):
