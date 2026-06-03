@@ -2,10 +2,7 @@ import json
 import os
 import os.path
 import sys
-import threading
 from pathlib import Path
-import tkinter as tk
-from tkinter import ttk
 import base64
 from mixin.theme_core import ThemeCoreMixin
 from mixin.theme_directory import ThemeDirectoryMixin
@@ -133,61 +130,57 @@ class ConfigHandler:
             pass
 
 
-class ThemeSelector(ThemePreferencesMixin, ThemeCoreMixin, ThemeDirectoryMixin, ThemeManagerMixin, ThemeToolbarMixin):
-    def __init__(self):
-        self.config = ConfigHandler()
-        self.toast = None
-        self._save_timer = None
+class BehaviorComposer:
+    """Installs behavior-provider methods onto an object without inheritance."""
+
+    def __init__(self, host, *, preserve_existing=True):
+        self.host = host
+        self.preserve_existing = preserve_existing
+        self.providers = []
+
+    def install(self, *providers):
+        for provider in providers:
+            self.providers.append(provider)
+            for name, member in provider.__dict__.items():
+                if name.startswith("__"):
+                    continue
+                if isinstance(member, staticmethod):
+                    value = member.__get__(self.host, type(self.host))
+                elif isinstance(member, classmethod):
+                    value = member.__get__(type(self.host), type(self.host))
+                elif callable(member):
+                    if self.preserve_existing and hasattr(self.host, name):
+                        continue
+                    value = member.__get__(self.host, type(self.host))
+                else:
+                    if self.preserve_existing and hasattr(self.host, name):
+                        continue
+                    value = member
+                setattr(self.host, name, value)
+        return self.host
 
 
+class ThemeSelector:
+    """Composed theme facade used by the main app and manager UIs."""
 
+    _THEME_BEHAVIORS = (
+        ThemePreferencesMixin,
+        ThemeCoreMixin,
+        ThemeDirectoryMixin,
+        ThemeManagerMixin,
+        ThemeToolbarMixin,
+    )
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    def __init__(self, host=None):
+        target = host or self
+        target.config = ConfigHandler()
+        target.toast = getattr(target, "toast", None)
+        target._save_timer = getattr(target, "_save_timer", None)
+        target._theme = self if host is not None else target
+        target._theme_components = BehaviorComposer(target)
+        target._theme_components.install(*self._THEME_BEHAVIORS)
+        target.PILL_ACCENTS_LIGHT = self.PILL_ACCENTS_LIGHT
+        target.PILL_ACCENTS_DARK = self.PILL_ACCENTS_DARK
 
 
     # ── Toolbar / pill colour palette ─────────────────────────────────────────
@@ -209,14 +202,3 @@ class ThemeSelector(ThemePreferencesMixin, ThemeCoreMixin, ThemeDirectoryMixin, 
         "🕐 History":   ("#C39BD3", "#6c2f8f", "#FFFFFF", "#521f6e"),
         "🏷 Tags & Ratings": ("#f5c518", "#b8920f", "#FFFFFF", "#8a6d0a"),
     }
-
-
-
-
-
-
-
-
-
-
-

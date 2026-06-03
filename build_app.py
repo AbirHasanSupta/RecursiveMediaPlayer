@@ -2,9 +2,6 @@ import multiprocessing
 
 from embedded_player import EmbeddedPlayer
 from icon_helper import apply_icon
-from managers.annotation_browser_manager import AnnotationBrowserManager
-from managers.toast_manager import Toast
-from managers.video_metadata_manager import VideoAnnotationService
 from splash import show_splash
 import random as _random
 
@@ -15,38 +12,265 @@ except ImportError:
 
 import threading
 import tkinter as tk
-from datetime import datetime, timedelta
-from tkinter import filedialog, messagebox, ttk
-from tkinter.font import Font
+from tkinter import filedialog
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 
-from key_press import reload_hotkeys
-from managers.favorites_manager import FavoritesManager
-from managers.filter_sort_manager import AdvancedFilterSortManager
-from managers.filter_sort_ui import FilterSortUI
-from managers.grid_view_manager import GridViewManager
-from managers.resource_manager import ThreadSafeDict, get_resource_manager, ManagedExecutor, MemoryMonitor, \
-    ManagedThread
-from theme import ThemeSelector
+from managers.resource_manager import ThreadSafeDict, get_resource_manager, ManagedExecutor
+from theme import BehaviorComposer, ThemeSelector
 from mixin.backend import BackendMixin
 from mixin.frontend import FrontendMixin
 from mixin.manager import ManagersMixin
+from mixin.theme_core import ThemeCoreMixin
 from mixin.ui import UIMixin
-from utils import gather_videos_with_directories, is_video, gather_videos, check_vlc, show_vlc_missing_and_exit
-from managers.playlist_manager import PlaylistManager
-from managers.watch_history_manager import WatchHistoryManager
-from managers.resume_playback_manager import ResumePlaybackManager
-from managers.settings_manager import SettingsManager
-from managers.video_preview_manager import VideoPreviewManager
-from managers.video_queue_manager import VideoQueueManager
-from managers.google_drive_manager import GoogleDriveManager
-from managers.dual_player_manager import DualPlayerManager
-import struct
+from utils import is_video, check_vlc, show_vlc_missing_and_exit
 import socket
 import time
 from tkinterdnd2 import DND_FILES, TkinterDnD
+
+
+class DirectoryDisplayService:
+    def display_name(self, directory):
+        if len(directory) <= 60:
+            return directory
+        display_name = os.path.basename(directory)
+        parent = os.path.dirname(directory)
+        if parent:
+            display_name = f"{os.path.basename(parent)}/{display_name}"
+        return f".../{display_name}"
+
+    def add_and_scan(self, app, directory):
+        app.dir_listbox.insert(tk.END, self.display_name(directory))
+        app._submit_scan(directory)
+
+
+class PlayerSessionService:
+    def make_player(self, app, videos, video_to_dir, directories, start_index=0):
+        player = EmbeddedPlayer(
+            parent=app.root,
+            videos=videos,
+            video_to_dir=video_to_dir,
+            directories=directories,
+            start_index=start_index,
+            volume=getattr(app, 'volume', 50),
+            is_muted=getattr(app, 'is_muted', False),
+            loop_mode=getattr(app, 'loop_mode', 'loop_on'),
+            logger=app.update_console,
+            on_close=app._on_player_closed,
+            on_volume_change=app._save_volume_callback,
+            resume_manager=app.resume_manager,
+            annotation_service=app.annotation_service,
+        )
+        player.on_loop_change = app._save_loop_callback
+        player.on_close_save = app._on_player_close_save
+        player.on_video_changed = app.on_video_changed
+        player.on_video_end = app._on_player_video_end
+        player.on_add_to_playlist = lambda vids: app.playlist_manager.add_videos_to_playlist([], vids)
+        player.on_add_to_queue = lambda vids: app.queue_manager.add_to_queue(vids, added_from="player")
+        player.on_add_to_favourites = lambda vids: app.favorites_manager.add_to_favorites(
+            vids, app.get_current_selected_directory() or os.path.dirname(vids[0]))
+        player.set_hotkeys(app.settings_manager.get_settings().hotkeys)
+        player.toast = app.toast
+        if hasattr(app, 'video_preview_manager') and app.video_preview_manager:
+            player.set_seek_preview_manager(app.video_preview_manager)
+        app_settings = app.settings_manager.get_settings()
+        if app_settings.gaming_mode:
+            player.set_gaming_mode(True)
+        return player
+
+    def launch_player(self, app, player):
+        if app._active_player is not None:
+            try:
+                app._active_player._close()
+            except Exception:
+                pass
+            app._active_player = None
+        player.play()
+        app._active_player = player
+
+
+class AppStateInitializer:
+    def initialize(self, app):
+        app.selected_dirs = []
+        app.excluded_subdirs = {}
+        app._view_tab_labels = {}
+        app._media_pill_btns = {}
+        app.excluded_videos = {}
+        app._is_filtered_mode = False
+        app._filtered_videos = []
+        app._base_directory = None
+        app.controller = None
+        app.player_thread = None
+        app.keys_thread = None
+        app.video_count = 0
+        app.current_selected_dir_index = None
+        app.current_subdirs_mapping = {}
+        app.show_videos = True
+        app.show_only_excluded = False
+        app.search_query = ""
+        app.expanded_paths = set()
+        app.collapsed_paths = set()
+        app.current_max_depth = 20
+        app.loop_mode = "loop_on"
+        app._active_player = None
+        app._now_playing_video_path = None
+        app._global_search_debounce_id = None
+        app._dir_search_debounce_id = None
+
+
+class PreferenceHydrator:
+    def hydrate(self, app):
+        preferences = app.config.load_preferences()
+        app.dark_mode = preferences['dark_mode']
+        app.show_videos = preferences['show_videos']
+        app.expand_all_default = False
+        app.save_directories = True
+        app.smart_resume_enabled = preferences['smart_resume_enabled']
+        app.start_from_last_played = app.smart_resume_enabled
+        app.last_played_video_index = preferences['last_played_video_index']
+        app.last_played_video_path = preferences['last_played_video_path']
+        app.excluded_subdirs = preferences.get('excluded_subdirs', {})
+        app.excluded_videos = preferences.get('excluded_videos', {})
+        app.volume = preferences.get('volume', 50)
+        app.is_muted = preferences.get('is_muted', False)
+        app.loop_mode = preferences.get('loop_mode', 'loop_on')
+        app.show_console = preferences.get('show_console', True)
+        return preferences
+
+
+class MainWindowConfigurator:
+    def configure(self, app):
+        root = app.root
+        root.title("Recursive Video Player")
+        sw = root.winfo_screenwidth()
+        sh = root.winfo_screenheight()
+        restore_w = max(1280, int(sw * 0.75))
+        restore_h = max(720, int(sh * 0.75))
+        cx = (sw - restore_w) // 2
+        cy = (sh - restore_h) // 2
+        root.geometry(f"{restore_w}x{restore_h}+{cx}+{cy}")
+        root.minsize(900, 600)
+        root.protocol("WM_DELETE_WINDOW", app.cancel)
+        root.configure(bg=app.bg_color)
+        apply_icon(root)
+
+
+class LayoutInitializer:
+    def build(self, app):
+        app._initialize_drive_manager()
+        app.setup_main_layout()
+        app.setup_directory_section()
+        app.setup_status_section()
+        app.setup_console_section()
+        app.setup_action_buttons()
+        app._initialize_base_managers()
+        app.setup_exclusion_section()
+
+
+class IpcServer:
+    def start(self, app):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+
+        port_file = os.path.expanduser("~/.rmp_instance_port")
+        with open(port_file, 'w') as f:
+            f.write(str(port))
+
+        sock.listen(1)
+
+        def accept_connections():
+            while True:
+                try:
+                    conn, addr = sock.accept()
+                    data = conn.recv(1024).decode()
+                    conn.close()
+                    if data and os.path.isdir(data):
+                        app.root.after(0, lambda path=data: app._add_directory_from_ipc(path))
+                except:
+                    break
+
+        threading.Thread(target=accept_connections, daemon=True).start()
+
+
+class ScanRuntimeInitializer:
+    def initialize(self, app):
+        app.scan_cache = ThreadSafeDict()
+        app.pending_scans = set()
+        app._pending_scans_lock = threading.RLock()
+        max_workers = min(8, (os.cpu_count() or 4))
+        app.executor = ManagedExecutor(ThreadPoolExecutor, max_workers=max_workers)
+        app.resource_manager = get_resource_manager()
+        app.resource_manager.register_cleanup_callback(app._cleanup_scan_cache)
+        app.resource_manager.register_cleanup_callback(app._cleanup_player_threads)
+        app._qa_seed = _random.randint(0, 10 ** 9)
+
+
+class StartupDirectoryLoader:
+    def __init__(self, directory_display=None):
+        self.directory_display = directory_display or DirectoryDisplayService()
+
+    def load(self, app, preferences):
+        command_line_dir = app._get_command_line_directory()
+        if command_line_dir:
+            app.selected_dirs = []
+            if app.save_directories:
+                app.selected_dirs = preferences.get('selected_dirs', [])
+            if command_line_dir not in app.selected_dirs:
+                app.selected_dirs.append(command_line_dir)
+        elif app.save_directories:
+            app.selected_dirs = preferences.get('selected_dirs', [])
+        else:
+            app.selected_dirs = []
+
+        for directory in app.selected_dirs:
+            self.directory_display.add_and_scan(app, directory)
+
+
+class DragDropBinder:
+    def bind(self, app):
+        app.root.drop_target_register(DND_FILES)
+        app.root.dnd_bind('<<Drop>>', app._on_drop_files)
+
+
+class DirectorySelectorBootstrapper:
+    def __init__(self, app, root, behaviors):
+        self.app = app
+        self.root = root
+        self.behaviors = behaviors
+        self.state = AppStateInitializer()
+        self.preferences = PreferenceHydrator()
+        self.window = MainWindowConfigurator()
+        self.layout = LayoutInitializer()
+        self.ipc = IpcServer()
+        self.scan_runtime = ScanRuntimeInitializer()
+        self.drag_drop = DragDropBinder()
+        self.directory_display = DirectoryDisplayService()
+        self.player_sessions = PlayerSessionService()
+        self.startup_dirs = StartupDirectoryLoader(self.directory_display)
+
+    def bootstrap(self):
+        app = self.app
+        app.theme = ThemeSelector(app)
+        app._app_components = BehaviorComposer(app)
+        app._app_components.install(*self.behaviors)
+        app.root = self.root
+        app.directory_display = self.directory_display
+        app.player_sessions = self.player_sessions
+        self.state.initialize(app)
+        preferences = self.preferences.hydrate(app)
+        app.setup_theme()
+        self.window.configure(app)
+        self.layout.build(app)
+        self.ipc.start(app)
+        self.scan_runtime.initialize(app)
+        app.apply_theme()
+        self.drag_drop.bind(app)
+        self.startup_dirs.load(app, preferences)
+        app._initialize_feature_managers()
+
 
 def select_multiple_folders_and_play():
     port_file = os.path.expanduser("~/.rmp_instance_port")
@@ -83,177 +307,25 @@ def select_multiple_folders_and_play():
                 except:
                     pass
 
-    class DirectorySelector(ThemeSelector, BackendMixin, UIMixin, FrontendMixin, ManagersMixin):
+    class DirectorySelector:
+        _APP_BEHAVIORS = (
+            BackendMixin,
+            UIMixin,
+            FrontendMixin,
+            ManagersMixin,
+        )
+
         def __init__(self, root):
-            super().__init__()
-            self.root = root
-            self.selected_dirs = []
-            self.excluded_subdirs = {}
-            self._view_tab_labels = {}  # will be filled in setup_action_buttons
-            self._media_pill_btns = {}
-            self.excluded_videos = {}
-            self._is_filtered_mode = False
-            self._filtered_videos = []
-            self._base_directory = None
-            self.controller = None
-            self.player_thread = None
-            self.keys_thread = None
-            self.video_count = 0
-            self.current_selected_dir_index = None
-            self.current_subdirs_mapping = {}  # iid -> path
-            self.show_videos = True
-            self.show_only_excluded = False
-            self.search_query = ""
-            self.expanded_paths = set()
-            self.collapsed_paths = set()
-            self.current_max_depth = 20
-            self.loop_mode = "loop_on"
-            self._active_player = None
-            self._now_playing_video_path = None
-            self._global_search_debounce_id = None
-            self._dir_search_debounce_id = None
-
-            preferences = self.config.load_preferences()
-            self.dark_mode = preferences['dark_mode']
-            self.show_videos = preferences['show_videos']
-            self.expand_all_default = False
-            self.save_directories = True
-            self.smart_resume_enabled = preferences['smart_resume_enabled']
-            self.start_from_last_played = self.smart_resume_enabled
-            self.last_played_video_index = preferences['last_played_video_index']
-            self.last_played_video_path = preferences['last_played_video_path']
-            self.excluded_subdirs = preferences.get('excluded_subdirs', {})
-            self.excluded_videos = preferences.get('excluded_videos', {})
-            self.volume = preferences.get('volume', 50)
-            self.is_muted = preferences.get('is_muted', False)
-            self.loop_mode = preferences.get('loop_mode', 'loop_on')
-            self.show_console = preferences.get('show_console', True)
-
-            self.setup_theme()
-
-            root.title("Recursive Video Player")
-            sw = root.winfo_screenwidth()
-            sh = root.winfo_screenheight()
-            restore_w = max(1280, int(sw * 0.75))
-            restore_h = max(720, int(sh * 0.75))
-            cx = (sw - restore_w) // 2
-            cy = (sh - restore_h) // 2
-            root.geometry(f"{restore_w}x{restore_h}+{cx}+{cy}")
-
-            # try:
-            #     root.state('zoomed')
-            # except:
-            #     pass
-
-            root.minsize(900, 600)
-            root.protocol("WM_DELETE_WINDOW", self.cancel)
-            root.configure(bg=self.bg_color)
-            apply_icon(root)
-
-            self._initialize_drive_manager()
-
-            self.setup_main_layout()
-            self.setup_directory_section()
-            self.setup_status_section()
-            self.setup_console_section()
-            self.setup_action_buttons()
-            self._initialize_base_managers()
-
-            self.setup_exclusion_section()
-
-            def start_ipc_server():
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                sock.bind(("127.0.0.1", 0))
-                port = sock.getsockname()[1]
-
-                port_file = os.path.expanduser("~/.rmp_instance_port")
-                with open(port_file, 'w') as f:
-                    f.write(str(port))
-
-                sock.listen(1)
-
-                def accept_connections():
-                    while True:
-                        try:
-                            conn, addr = sock.accept()
-                            data = conn.recv(1024).decode()
-                            conn.close()
-                            if data and os.path.isdir(data):
-                                self.root.after(0, lambda: self._add_directory_from_ipc(data))
-                        except:
-                            break
-
-                threading.Thread(target=accept_connections, daemon=True).start()
-
-            start_ipc_server()
-
-            self.scan_cache = ThreadSafeDict()
-            self.pending_scans = set()
-            self._pending_scans_lock = threading.RLock()
-            max_workers = min(8, (os.cpu_count() or 4))
-            self.executor = ManagedExecutor(ThreadPoolExecutor, max_workers=max_workers)
-            self.resource_manager = get_resource_manager()
-            self.resource_manager.register_cleanup_callback(self._cleanup_scan_cache)
-            self.resource_manager.register_cleanup_callback(self._cleanup_player_threads)
-            self._qa_seed = _random.randint(0, 10 ** 9)
-            self.apply_theme()
-            self.root.drop_target_register(DND_FILES)
-            self.root.dnd_bind('<<Drop>>', self._on_drop_files)
-            command_line_dir = self._get_command_line_directory()
-            if command_line_dir:
-                self.selected_dirs = []
-                if self.save_directories:
-                    self.selected_dirs = preferences.get('selected_dirs', [])
-
-                if command_line_dir not in self.selected_dirs:
-                    self.selected_dirs.append(command_line_dir)
-
-                for directory in self.selected_dirs:
-                    display_name = directory
-                    if len(directory) > 60:
-                        display_name = os.path.basename(directory)
-                        parent = os.path.dirname(directory)
-                        if parent:
-                            display_name = f"{os.path.basename(parent)}/{display_name}"
-                        display_name = f".../{display_name}"
-                    self.dir_listbox.insert(tk.END, display_name)
-                    self._submit_scan(directory)
-            elif self.save_directories:
-                self.selected_dirs = preferences.get('selected_dirs', [])
-                for directory in self.selected_dirs:
-                    display_name = directory
-                    if len(directory) > 60:
-                        display_name = os.path.basename(directory)
-                        parent = os.path.dirname(directory)
-                        if parent:
-                            display_name = f"{os.path.basename(parent)}/{display_name}"
-                        display_name = f".../{display_name}"
-                    self.dir_listbox.insert(tk.END, display_name)
-                    self._submit_scan(directory)
-            else:
-                self.selected_dirs = []
-
-            self._initialize_feature_managers()
+            DirectorySelectorBootstrapper(self, root, self._APP_BEHAVIORS).bootstrap()
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        def apply_theme(self):
+            dir_w = self.dir_section.winfo_width() if hasattr(self, 'dir_section') else 0
+            ThemeCoreMixin.apply_theme(self)
+            self._reapply_tree_columns()
+            if dir_w > 10:
+                self.dir_section.config(width=dir_w)
+                self.dir_section.pack_propagate(False)
 
 
         def _cleanup_active_manager(self):
@@ -294,8 +366,6 @@ def select_multiple_folders_and_play():
                     self.active_embedded_manager.apply_search(query)
 
 
-
-
         def global_play(self):
             if self.active_embedded_manager is not None:
                 # Attempt to call the manager's play_from_global method
@@ -307,27 +377,12 @@ def select_multiple_folders_and_play():
                 self.play_videos()
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         def clear_exclusion_children(self, root_iid):
             for child in list(self.exclusion_tree.get_children(root_iid)):
                 try:
                     self.exclusion_tree.delete(child)
                 except Exception:
                     pass
-
 
 
         def _refresh_dir_action_states(self):
@@ -343,9 +398,6 @@ def select_multiple_folders_and_play():
                 )
 
 
-
-
-
         def on_directory_focus_out(self, event):
             selection = self.dir_listbox.curselection()
             if selection:
@@ -357,30 +409,6 @@ def select_multiple_folders_and_play():
                 self.dir_listbox.selection_set(self.current_selected_dir_index)
                 self.dir_listbox.activate(self.current_selected_dir_index)
 
-
-
-
-
-
-
-
-
-
-
-
-
-        # ------------------------------------------------------------------
-        # Selection helpers — mirror the old curselection() API
-        # ------------------------------------------------------------------
-
-
-
-
-
-
-        # ------------------------------------------------------------------
-        # Click / double-click on Treeview
-        # ------------------------------------------------------------------
 
         def _on_left_click(self, event):
             iid = self.exclusion_tree.identify_row(event.y)
@@ -424,89 +452,12 @@ def select_multiple_folders_and_play():
             self._selection_anchor = iid
             return "break"
 
-
-
-
-
-
-
-        # ------------------------------------------------------------------
-        # Tree population — replaces load_subdirectories
-        # ------------------------------------------------------------------
-
-
-
-
-
-
-
-        # ------------------------------------------------------------------
-        # Now-playing indicator
-        # ------------------------------------------------------------------
-
-
-        # ------------------------------------------------------------------
-        # Filtered view (used by filter_sort_ui)
-        # ------------------------------------------------------------------
-
-
-
-        # ------------------------------------------------------------------
-        # Helpers used by many callers below
-        # ------------------------------------------------------------------
-
-
-        # ------------------------------------------------------------------
-        # Everything below is functionally identical to original; only the
-        # listbox API calls are updated to use the tree / iid-based mapping.
-        # ------------------------------------------------------------------
-
-
         def _make_player(self, videos, video_to_dir, directories, start_index=0):
-            """Create and return a configured EmbeddedPlayer (not yet played)."""
-            player = EmbeddedPlayer(
-                parent=self.root,
-                videos=videos,
-                video_to_dir=video_to_dir,
-                directories=directories,
-                start_index=start_index,
-                volume=getattr(self, 'volume', 50),
-                is_muted=getattr(self, 'is_muted', False),
-                loop_mode=getattr(self, 'loop_mode', 'loop_on'),
-                logger=self.update_console,
-                on_close=self._on_player_closed,
-                on_volume_change=self._save_volume_callback,
-                resume_manager=self.resume_manager,
-                annotation_service=self.annotation_service,
-            )
-            player.on_loop_change        = self._save_loop_callback
-            player.on_close_save         = self._on_player_close_save
-            player.on_video_changed      = self.on_video_changed
-            player.on_video_end          = self._on_player_video_end
-            player.on_add_to_playlist    = lambda vids: self.playlist_manager.add_videos_to_playlist([], vids)
-            player.on_add_to_queue       = lambda vids: self.queue_manager.add_to_queue(vids, added_from="player")
-            player.on_add_to_favourites  = lambda vids: self.favorites_manager.add_to_favorites(
-                vids, self.get_current_selected_directory() or os.path.dirname(vids[0]))
-            player.set_hotkeys(self.settings_manager.get_settings().hotkeys)
-            player.toast = self.toast
-            if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
-                player.set_seek_preview_manager(self.video_preview_manager)
-            app_settings = self.settings_manager.get_settings()
-            if app_settings.gaming_mode:
-                player.set_gaming_mode(True)
-            return player
+            return self.player_sessions.make_player(
+                self, videos, video_to_dir, directories, start_index=start_index)
 
         def _launch_player(self, player):
-            if self._active_player is not None:
-                try:
-                    self._active_player._close()
-                except Exception:
-                    pass
-                self._active_player = None
-            player.play()
-            self._active_player = player
-
-
+            self.player_sessions.launch_player(self, player)
 
 
         def play_videos(self):
@@ -759,23 +710,6 @@ def select_multiple_folders_and_play():
             ]
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         def expand_all_directories(self):
             selected_dir = self.get_current_selected_directory()
             if selected_dir:
@@ -795,49 +729,9 @@ def select_multiple_folders_and_play():
 
 
 
-
-
         def toggle_save_directories(self):
             self.save_directories = bool(self.save_directories_var.get())
             self.save_preferences()
-
-        # ------------------------------------------------------------------
-        # Dir listbox helpers (unchanged API)
-        # ------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-        # ------------------------------------------------------------------
-        # Context menu actions — updated to use _resolve_iids_to_paths
-        # ------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
         def _context_open_grid_view(self, selection):
             selected_dir = self.get_current_selected_directory()
@@ -865,14 +759,6 @@ def select_multiple_folders_and_play():
             else:
                 self.toast.warning("Warning", "No valid videos found in selection")
 
-        # ------------------------------------------------------------------
-        # Playlist / Queue / History play callbacks
-        # ------------------------------------------------------------------
-
-
-
-
-
         def _show_history_embedded(self, frame, selected_dirs):
             ui = self.watch_history_manager.show_embedded(
                 frame,
@@ -882,14 +768,6 @@ def select_multiple_folders_and_play():
                 ui.set_directory_filter(selected_dirs)
                 ui.refresh()
             return ui
-
-
-
-        # ------------------------------------------------------------------
-        # Grid view
-        # ------------------------------------------------------------------
-
-
 
         def _add_to_playlist(self):
             selected_dir = self.get_current_selected_directory()
@@ -933,28 +811,13 @@ def select_multiple_folders_and_play():
 
                 threading.Thread(target=collect_all_videos, daemon=True).start()
 
-
-        # ------------------------------------------------------------------
-        # Misc
-        # ------------------------------------------------------------------
-
-
-
         def add_directory(self):
             directory = filedialog.askdirectory(title="Select a Directory")
             if directory and directory not in self.selected_dirs:
                 self.selected_dirs.append(directory)
-                display_name = directory
-                if len(directory) > 60:
-                    display_name = os.path.basename(directory)
-                    parent = os.path.dirname(directory)
-                    if parent:
-                        display_name = f"{os.path.basename(parent)}/{display_name}"
-                    display_name = f".../{display_name}"
-                self.dir_listbox.insert(tk.END, display_name)
+                self.directory_display.add_and_scan(self, directory)
                 self.update_console(f"Added directory: {directory}")
                 self.update_console(f"Scanning '{os.path.basename(directory)}' for videos…")
-                self._submit_scan(directory)
                 self.toast.success("Directory Added", f"'{os.path.basename(directory)}' added — scanning…")
                 self.update_video_count()
                 self.save_preferences()
@@ -1023,7 +886,6 @@ def select_multiple_folders_and_play():
             self.save_preferences()
 
 
-
         def _save_volume_callback(self, volume, is_muted=None):
             self.volume = volume
             if is_muted is not None:
@@ -1038,31 +900,6 @@ def select_multiple_folders_and_play():
             """Legacy shim — indices here are iids (strings)."""
             return self._resolve_iids_to_paths(indices)
 
-
-        # ------------------------------------------------------------------
-        # draw_slider + speed helpers (unchanged)
-        # ------------------------------------------------------------------
-
-
-
-
-
-        # ------------------------------------------------------------------
-        # Settings changed callback
-        # ------------------------------------------------------------------
-
-
-
-
-        # ------------------------------------------------------------------
-        # Action buttons (toolbar) — identical to original
-        # ------------------------------------------------------------------
-
-
-
-        # ------------------------------------------------------------------
-        # Cancel / shutdown
-        # ------------------------------------------------------------------
 
         def cancel(self):
             if self._active_player is not None:
@@ -1122,11 +959,6 @@ def select_multiple_folders_and_play():
                 sys.exit(0)
             except:
                 os._exit(0)
-
-        # ------------------------------------------------------------------
-        # Google Drive dialog (unchanged)
-        # ------------------------------------------------------------------
-
 
 
     root = TkinterDnD.Tk()

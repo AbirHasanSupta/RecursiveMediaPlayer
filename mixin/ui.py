@@ -4,38 +4,13 @@ except ImportError:
     __version__ = __commit__ = __build__ = "dev"
 import os
 import random as _random
-import socket
-import struct
-import sys
-import threading
-import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from tkinter import filedialog, messagebox, ttk
+from tkinter import ttk
 from tkinter.font import Font
 import tkinter as tk
 
-from embedded_player import EmbeddedPlayer
-from icon_helper import apply_icon
-from key_press import reload_hotkeys
-from managers.annotation_browser_manager import AnnotationBrowserManager
-from managers.dual_player_manager import DualPlayerManager
-from managers.favorites_manager import FavoritesManager
-from managers.filter_sort_manager import AdvancedFilterSortManager
-from managers.filter_sort_ui import FilterSortUI
-from managers.google_drive_manager import GoogleDriveManager
-from managers.grid_view_manager import GridViewManager
-from managers.playlist_manager import PlaylistManager
-from managers.resource_manager import ThreadSafeDict, get_resource_manager, ManagedExecutor, MemoryMonitor, ManagedThread
-from managers.resume_playback_manager import ResumePlaybackManager
-from managers.settings_manager import SettingsManager
-from managers.toast_manager import Toast
-from managers.video_metadata_manager import VideoAnnotationService
-from managers.video_preview_manager import VideoPreviewManager
-from managers.video_queue_manager import VideoQueueManager
-from managers.watch_history_manager import WatchHistoryManager
-from tkinterdnd2 import DND_FILES, TkinterDnD
-from utils import gather_videos_with_directories, is_video, gather_videos, check_vlc, show_vlc_missing_and_exit
+from managers.resource_manager import ManagedThread
+from mixin.theme_core import ThemeCoreMixin
 
 
 class UIMixin:
@@ -146,7 +121,7 @@ class UIMixin:
     def apply_theme(self):
         dir_w = self.dir_section.winfo_width() if hasattr(self, 'dir_section') else 0
 
-        super().apply_theme()
+        ThemeCoreMixin.apply_theme(self)
 
         self._reapply_tree_columns()
 

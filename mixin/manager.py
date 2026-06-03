@@ -1,17 +1,8 @@
 import os
-import random as _random
-import socket
-import struct
-import sys
 import threading
-import time
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
-from tkinter import filedialog, messagebox, ttk
-from tkinter.font import Font
+from tkinter import ttk
 import tkinter as tk
 
-from embedded_player import EmbeddedPlayer
 from icon_helper import apply_icon
 from key_press import reload_hotkeys
 from managers.annotation_browser_manager import AnnotationBrowserManager
@@ -22,7 +13,7 @@ from managers.filter_sort_ui import FilterSortUI
 from managers.google_drive_manager import GoogleDriveManager
 from managers.grid_view_manager import GridViewManager
 from managers.playlist_manager import PlaylistManager
-from managers.resource_manager import ThreadSafeDict, get_resource_manager, ManagedExecutor, MemoryMonitor, ManagedThread
+from managers.resource_manager import ManagedThread
 from managers.resume_playback_manager import ResumePlaybackManager
 from managers.settings_manager import SettingsManager
 from managers.toast_manager import Toast
@@ -30,8 +21,7 @@ from managers.video_metadata_manager import VideoAnnotationService
 from managers.video_preview_manager import VideoPreviewManager
 from managers.video_queue_manager import VideoQueueManager
 from managers.watch_history_manager import WatchHistoryManager
-from tkinterdnd2 import DND_FILES, TkinterDnD
-from utils import gather_videos_with_directories, is_video, gather_videos, check_vlc, show_vlc_missing_and_exit
+from utils import is_video
 
 
 class ManagersMixin:

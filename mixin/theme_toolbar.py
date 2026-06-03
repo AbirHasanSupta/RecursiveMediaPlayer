@@ -1,8 +1,4 @@
-import base64
-import threading
 import tkinter as tk
-from tkinter import ttk
-from tkinter.font import Font
 
 
 class ThemeToolbarMixin:
