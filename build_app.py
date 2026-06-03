@@ -2305,24 +2305,27 @@ def select_multiple_folders_and_play():
             m, sec = divmod(r, 60)
             return f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
 
-        def _refresh_video_row(self, path):
-            """Update the tree row for a specific video path without reloading everything."""
-            selected_dir = self.get_current_selected_directory()
-            if not selected_dir:
-                return
+        def _refresh_video_row(self, path, selected_dir=None):
+            """Update the tree row for a specific video path without reloading."""
+            if selected_dir is None:
+                selected_dir = self.get_current_selected_directory()
+                if not selected_dir:
+                    return
             excluded_dir_set = set(os.path.normpath(p) for p in self.excluded_subdirs.get(selected_dir, []))
             excluded_vid_set = set(os.path.normpath(p) for p in self.excluded_videos.get(selected_dir, []))
+            norm_path = os.path.normpath(path)
             for iid, p in self.current_subdirs_mapping.items():
-                if os.path.normpath(p) == os.path.normpath(path):
-                    size_str = self._get_video_size_str(path)
-                    rating_str = self._get_rating_stars(path)
-                    tags_str = self._get_tags_str(path)
-                    # Update columns
-                    self.exclusion_tree.item(iid, values=(rating_str, tags_str, size_str))
-                    # Update tag and label for now‑playing / fav / excl
-                    tag = self._tag_for_item(path, selected_dir, excluded_dir_set, excluded_vid_set)
-                    label = self._label_for_item(path, False, excluded_dir_set, excluded_vid_set, selected_dir)
-                    self.exclusion_tree.item(iid, text=label, tags=(tag,))
+                if os.path.normpath(p) == norm_path:
+                    try:
+                        size_str = self._get_video_size_str(path)
+                        rating_str = self._get_rating_stars(path)
+                        tags_str = self._get_tags_str(path)
+                        self.exclusion_tree.item(iid, values=(rating_str, tags_str, size_str))
+                        tag = self._tag_for_item(path, selected_dir, excluded_dir_set, excluded_vid_set)
+                        label = self._label_for_item(path, False, excluded_dir_set, excluded_vid_set, selected_dir)
+                        self.exclusion_tree.item(iid, text=label, tags=(tag,))
+                    except tk.TclError:
+                        pass
                     break
 
         def _get_root_directory_of_node(self, iid):
@@ -3925,18 +3928,23 @@ def select_multiple_folders_and_play():
             return False
 
         def get_current_selected_directory(self):
-            if hasattr(self, 'exclusion_tree') and not self.exclusion_tree.selection():
-                self.current_selected_dir_index = None
-                return None
             selection = self.dir_listbox.curselection()
             if selection:
                 idx = selection[0]
                 if idx < len(self.selected_dirs):
                     self.current_selected_dir_index = idx
                     return self.selected_dirs[idx]
-            if self.current_selected_dir_index is not None and self.current_selected_dir_index < len(self.selected_dirs):
+            tree_sel = list(self.exclusion_tree.selection())
+            if tree_sel:
+                iid = tree_sel[0]
+                root_iid = self._get_root_iid_from_iid(iid)
+                if root_iid and root_iid in self._dir_root_iids:
+                    idx = self._dir_root_iids.index(root_iid)
+                    self.current_selected_dir_index = idx
+                    return self.selected_dirs[idx]
+            if self.current_selected_dir_index is not None and self.current_selected_dir_index < len(
+                    self.selected_dirs):
                 return self.selected_dirs[self.current_selected_dir_index]
-
             return None
 
         def _get_effective_selected_dirs(self):
@@ -4653,6 +4661,10 @@ def select_multiple_folders_and_play():
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
                 return
+
+            # Save current tree selection
+            current_selection = list(self.exclusion_tree.selection())
+
             selected_videos = []
             for iid in selection:
                 item_path = self.current_subdirs_mapping.get(iid)
@@ -4667,18 +4679,36 @@ def select_multiple_folders_and_play():
                             full = os.path.join(root, f)
                             if is_video(full) and not self.is_video_excluded(selected_dir, full):
                                 selected_videos.append(full)
+
             if selected_videos:
                 count = self.favorites_manager.add_to_favorites(selected_videos, selected_dir)
                 if count > 0:
                     self.toast.success("Favorites", f"{count} video{'s' if count != 1 else ''} added to favorites")
                 self.update_console(f"Added {count} video(s) to favorites")
-                scroll_pos = self._tree_yview()
-                self.load_subdirectories(selected_dir, restore_scroll=scroll_pos)
+
+                # Update each affected row
+                for video in selected_videos:
+                    self._refresh_video_row(video, selected_dir)
+
+                # Restore selection
+                if current_selection:
+                    valid = [iid for iid in current_selection if self.exclusion_tree.exists(iid)]
+                    if valid:
+                        self.exclusion_tree.selection_set(valid)
+                        self.exclusion_tree.focus(valid[0])
+                        self._selection_anchor = valid[0]
+                        # Re-establish directory index from first selected item's root
+                        root_iid = self._get_root_iid_from_iid(valid[0])
+                        if root_iid and root_iid in self._dir_root_iids:
+                            self.current_selected_dir_index = self._dir_root_iids.index(root_iid)
 
         def _context_remove_from_favorites(self, selection):
             selected_dir = self.get_current_selected_directory()
             if not selected_dir:
                 return
+
+            current_selection = list(self.exclusion_tree.selection())
+
             selected_videos = []
             for iid in selection:
                 item_path = self.current_subdirs_mapping.get(iid)
@@ -4692,14 +4722,48 @@ def select_multiple_folders_and_play():
                             full = os.path.join(root, f)
                             if is_video(full):
                                 selected_videos.append(full)
-            if selected_videos:
-                count = self.favorites_manager.remove_from_favorites(selected_videos, selected_dir)
-                self.update_console(f"Removed {count} video(s) from favorites")
-                if count > 0:
-                    self.toast.success("Favorites", f"{count} video{'s' if count != 1 else ''} removed from favorites")
-                scroll_pos = self._tree_yview()
-                self.load_subdirectories(selected_dir, max_depth=self.current_max_depth, restore_scroll=scroll_pos)
 
+            if selected_videos:
+                # Temporarily disable the callback that would reload the whole tree
+                original_callback = self.favorites_manager._on_removed_callback
+                self.favorites_manager.set_on_removed_callback(None)
+
+                try:
+                    count = self.favorites_manager.remove_from_favorites(selected_videos, selected_dir)
+                    self.update_console(f"Removed {count} video(s) from favorites")
+                    if count > 0:
+                        self.toast.success("Favorites",
+                                           f"{count} video{'s' if count != 1 else ''} removed from favorites")
+                finally:
+                    # Restore the original callback
+                    self.favorites_manager.set_on_removed_callback(original_callback)
+
+                # Update each affected row (tree still intact, iids valid)
+                for video in selected_videos:
+                    self._refresh_video_row(video, selected_dir)
+
+                # Restore selection
+                if current_selection:
+                    valid = [iid for iid in current_selection if self.exclusion_tree.exists(iid)]
+                    if valid:
+                        self.exclusion_tree.selection_set(valid)
+                        self.exclusion_tree.focus(valid[0])
+                        self._selection_anchor = valid[0]
+                        root_iid = self._get_root_iid_from_iid(valid[0])
+                        if root_iid and root_iid in self._dir_root_iids:
+                            self.current_selected_dir_index = self._dir_root_iids.index(root_iid)
+
+
+        def _get_root_iid_from_iid(self, iid):
+            """Return the root iid (top-level directory node) for a given iid."""
+            if iid in self._dir_root_iids:
+                return iid
+            parent = self.exclusion_tree.parent(iid)
+            while parent:
+                if parent in self._dir_root_iids:
+                    return parent
+                parent = self.exclusion_tree.parent(parent)
+            return None
         def _play_favorites_videos(self, videos):
             if not videos:
                 return
