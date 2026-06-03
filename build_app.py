@@ -309,7 +309,8 @@ def select_multiple_folders_and_play():
             self.favorites_manager.set_play_callback(self._play_favorites_videos)
             self.favorites_manager.set_video_preview_manager(self.video_preview_manager)
             self.favorites_manager.set_grid_view_manager(self.grid_view_manager)
-            self.favorites_manager.set_on_removed_callback(self._refresh_tree_after_fav_change)
+            self.favorites_manager.set_on_added_callback(self._on_favorites_added)
+            self.favorites_manager.set_on_removed_callback(self._on_favorites_removed)
             self.favorites_manager.set_add_to_queue_callback(
                 lambda videos: self.queue_manager.add_to_queue(videos, added_from="favorites")
             )
@@ -430,15 +431,17 @@ def select_multiple_folders_and_play():
             self._setup_periodic_cleanup()
             self.resource_manager.register_cleanup_callback(self._cleanup_managers)
 
-        def _refresh_tree_after_fav_change(self, removed_videos=None):
-            selected_dir = self.get_current_selected_directory()
-            if not selected_dir:
+        def _on_favorites_removed(self, removed_videos):
+            """Called when videos are removed from favorites."""
+            if not removed_videos:
                 return
-            if removed_videos and isinstance(removed_videos, list):
+            selected_dir = self.get_current_selected_directory()
+            if selected_dir:
                 for video in removed_videos:
-                    self._refresh_video_row(video, selected_dir)
-            else:
-                self.load_subdirectories(selected_dir, max_depth=self.current_max_depth)
+                    if os.path.normpath(video).startswith(os.path.normpath(selected_dir) + os.sep):
+                        self._refresh_video_row(video, selected_dir)
+            if hasattr(self, 'grid_view_manager') and self.grid_view_manager:
+                self.grid_view_manager.refresh_favorite_state_for_videos(removed_videos)
 
         def _setup_periodic_cleanup(self):
             self.memory_monitor = MemoryMonitor(threshold_mb=1200)
@@ -4660,6 +4663,19 @@ def select_multiple_folders_and_play():
                     close_callback=self._show_home_view
                 )
             )
+
+        def _on_favorites_added(self, added_videos):
+            """Called when videos are added to favorites."""
+            if not added_videos:
+                return
+            selected_dir = self.get_current_selected_directory()
+            if selected_dir:
+                for video in added_videos:
+                    if os.path.normpath(video).startswith(os.path.normpath(selected_dir) + os.sep):
+                        self._refresh_video_row(video, selected_dir)
+            if hasattr(self, 'grid_view_manager') and self.grid_view_manager:
+                self.grid_view_manager.refresh_favorite_state_for_videos(added_videos)
+
 
         def _context_add_to_favorites(self, selection):
             selected_dir = self.get_current_selected_directory()

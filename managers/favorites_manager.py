@@ -1060,6 +1060,10 @@ class FavoritesManager:
 
         self._play_callback = None
         self._on_removed_callback = None
+        self._on_added_callback = None
+
+    def set_on_added_callback(self, callback):
+        self._on_added_callback = callback
 
     def set_on_removed_callback(self, callback):
         self._on_removed_callback = callback
@@ -1078,6 +1082,16 @@ class FavoritesManager:
 
     def add_to_favorites(self, video_paths: List[str], directory_path: str) -> int:
         count = self.service.add_multiple_to_favorites(video_paths, directory_path)
+        if count and self._on_added_callback:
+            self._on_added_callback(video_paths)
+        if count and self.ui:
+            self.ui._refresh_favorites_list()
+        return count
+
+    def add_multiple_to_favorites(self, video_paths: List[str], directory_path: str) -> int:
+        count = self.service.add_multiple_to_favorites(video_paths, directory_path)
+        if count and self._on_added_callback:
+            self._on_added_callback(video_paths)
         if count and self.ui:
             self.ui._refresh_favorites_list()
         return count

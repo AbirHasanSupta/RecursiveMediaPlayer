@@ -1534,6 +1534,13 @@ class GridViewManager:
         except Exception:
             pass
 
+    def refresh_favorite_state_for_videos(self, video_paths):
+        """Update the favorite star and meta row for given videos in the current grid."""
+        if not self.grid_window or not self.grid_window.winfo_exists():
+            return
+        for vp in video_paths:
+            self._refresh_card_meta(vp)
+
     def mark_now_playing(self, video_path):
         old_path = self.now_playing_path
         self.now_playing_path = os.path.normpath(video_path) if video_path else None
