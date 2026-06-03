@@ -4744,19 +4744,11 @@ def select_multiple_folders_and_play():
                                 selected_videos.append(full)
 
             if selected_videos:
-                # Temporarily disable the callback that would reload the whole tree
-                original_callback = self.favorites_manager._on_removed_callback
-                self.favorites_manager.set_on_removed_callback(None)
-
-                try:
-                    count = self.favorites_manager.remove_from_favorites(selected_videos, selected_dir)
-                    self.update_console(f"Removed {count} video(s) from favorites")
-                    if count > 0:
-                        self.toast.success("Favorites",
-                                           f"{count} video{'s' if count != 1 else ''} removed from favorites")
-                finally:
-                    # Restore the original callback
-                    self.favorites_manager.set_on_removed_callback(original_callback)
+                count = self.favorites_manager.remove_from_favorites(selected_videos, selected_dir)
+                self.update_console(f"Removed {count} video(s) from favorites")
+                if count > 0:
+                    self.toast.success("Favorites",
+                                       f"{count} video{'s' if count != 1 else ''} removed from favorites")
 
                 # Update each affected row (tree still intact, iids valid)
                 for video in selected_videos:
