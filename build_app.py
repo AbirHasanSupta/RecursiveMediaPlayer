@@ -430,11 +430,15 @@ def select_multiple_folders_and_play():
             self._setup_periodic_cleanup()
             self.resource_manager.register_cleanup_callback(self._cleanup_managers)
 
-        def _refresh_tree_after_fav_change(self):
+        def _refresh_tree_after_fav_change(self, removed_videos=None):
             selected_dir = self.get_current_selected_directory()
-            if selected_dir:
-                scroll_pos = self.exclusion_tree.yview()
-                self.load_subdirectories(selected_dir, max_depth=self.current_max_depth, restore_scroll=scroll_pos)
+            if not selected_dir:
+                return
+            if removed_videos and isinstance(removed_videos, list):
+                for video in removed_videos:
+                    self._refresh_video_row(video, selected_dir)
+            else:
+                self.load_subdirectories(selected_dir, max_depth=self.current_max_depth)
 
         def _setup_periodic_cleanup(self):
             self.memory_monitor = MemoryMonitor(threshold_mb=1200)

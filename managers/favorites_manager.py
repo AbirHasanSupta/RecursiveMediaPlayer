@@ -1016,10 +1016,12 @@ class FavoritesUI:
                                    parent=self.favorites_window):
             return
         by_directory = {}
+        removed_videos = []
         for index in selection:
             if 0 <= index < len(self.favorite_entries):
                 fav = self.favorite_entries[index]
                 by_directory.setdefault(fav.directory_path, []).append(fav.video_path)
+                removed_videos.append(fav.video_path)
         removed = 0
         for directory, video_paths in by_directory.items():
             removed += self.favorite_service.remove_multiple_from_favorites(video_paths, directory)
@@ -1027,7 +1029,7 @@ class FavoritesUI:
             self._refresh_favorites_list()
             self.theme_provider.toast.success("Removed", f"{removed} favorite{'s' if removed != 1 else ''} removed")
             if self._on_removed_callback:
-                self._on_removed_callback()
+                self._on_removed_callback(removed_videos)
 
     def _clear_all(self):
         if not self.favorite_entries:
@@ -1041,12 +1043,13 @@ class FavoritesUI:
 
         if result:
             count = len(self.favorite_entries)
+            cleared_videos = [fav.video_path for fav in self.favorite_entries]
             self.theme_provider.toast.success("Cleared", f"Removed all {count} favorite{'s' if count != 1 else ''}")
             for directory in self.current_directories:
                 self.favorite_service.clear_favorites_for_directory(directory)
             self._refresh_favorites_list()
             if self._on_removed_callback:
-                self._on_removed_callback()
+                self._on_removed_callback(cleared_videos)
 
 
 class FavoritesManager:
@@ -1083,7 +1086,7 @@ class FavoritesManager:
         count = self.service.remove_multiple_from_favorites(video_paths, directory_path)
         if count > 0:
             if self._on_removed_callback:
-                self._on_removed_callback()
+                self._on_removed_callback(video_paths)
             if self.ui:
                 self.ui._refresh_favorites_list()
         return count
