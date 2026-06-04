@@ -161,6 +161,9 @@ class EmbeddedPlayer:
         self._speed_idx      = self.SPEED_STEPS.index(1.0)
         self._rotation_index = 0
         self._flip_h         = False
+        self._eq_brightness = 1.0  # 0.0–2.0
+        self._eq_contrast = 1.0  # 0.0–2.0
+        self._eq_saturation = 1.0  # 0.0–3.0
         self._borderless     = False
         self._titlebar = None
         self._titlebar_job = None
@@ -222,6 +225,198 @@ class EmbeddedPlayer:
         if not self._running:
             return
         self._refresh_display()
+
+    def _apply_video_adjust(self):
+        try:
+            self._player.video_set_adjust_int(vlc.VideoAdjustOption.Enable, 1)
+            self._player.video_set_adjust_float(vlc.VideoAdjustOption.Brightness, self._eq_brightness)
+            self._player.video_set_adjust_float(vlc.VideoAdjustOption.Contrast, self._eq_contrast)
+            self._player.video_set_adjust_float(vlc.VideoAdjustOption.Saturation, self._eq_saturation)
+        except Exception as e:
+            if self.logger:
+                self.logger(f"Adjust error: {e}")
+
+    def _reset_video_adjust(self):
+        self._eq_brightness = 1.0
+        self._eq_contrast = 1.0
+        self._eq_saturation = 1.0
+        self._apply_video_adjust()
+        if self.toast:
+            self.toast.info("Video", "Video adjustments reset")
+
+    def _show_video_adjust_dialog(self):
+        if hasattr(self, '_adj_win') and self._adj_win and self._adj_win.winfo_exists():
+            self._adj_win.lift()
+            return
+
+        dlg = tk.Toplevel(self._win)
+        dlg.title("Video Adjustments")
+        dlg.configure(bg=_CTRL_BG2)
+        dlg.overrideredirect(False)
+        dlg.resizable(False, False)
+        dlg.transient(self._win)
+        dlg.attributes('-topmost', True)
+        apply_icon(dlg)
+        self._adj_win = dlg
+
+        pw, ph = self._win.winfo_width(), self._win.winfo_height()
+        px, py = self._win.winfo_rootx(), self._win.winfo_rooty()
+        dw, dh = 360, 280
+        dlg.geometry(f"{dw}x{dh}+{px + (pw - dw) // 2}+{py + (ph - dh) // 2}")
+
+        tk.Frame(dlg, height=2, bg=_ACCENT).pack(fill=tk.X)
+
+        hdr = tk.Frame(dlg, bg=_CTRL_BG2)
+        hdr.pack(fill=tk.X, padx=18, pady=(12, 8))
+        tk.Label(hdr, text="Video Adjustments",
+                 font=("Segoe UI", 10, "bold"), bg=_CTRL_BG2, fg=_TXT).pack(side=tk.LEFT)
+
+        body = tk.Frame(dlg, bg=_CTRL_BG2)
+        body.pack(fill=tk.X, padx=18, pady=(0, 4))
+
+        TRACK_H = 3
+        THUMB_R = 6
+        CANVAS_H = 22
+        TRACK_CLR = "#2A303C"
+        FILL_CLR = _ACCENT
+        THUMB_CLR = "#FFFFFF"
+        THUMB_BDR = _ACCENT
+
+        sliders = []
+
+        def _make_slider(label, attr, from_, to_, init):
+            row = tk.Frame(body, bg=_CTRL_BG2)
+            row.pack(fill=tk.X, pady=5)
+
+            lbl_row = tk.Frame(row, bg=_CTRL_BG2)
+            lbl_row.pack(fill=tk.X, pady=(0, 3))
+            tk.Label(lbl_row, text=label,
+                     font=("Segoe UI", 8), bg=_CTRL_BG2, fg=_TXT_MED,
+                     anchor="w").pack(side=tk.LEFT)
+            val_lbl = tk.Label(lbl_row, text=f"{init:.2f}",
+                               font=("Consolas", 8), bg=_CTRL_BG2, fg=_ACCENT,
+                               anchor="e")
+            val_lbl.pack(side=tk.RIGHT)
+
+            c = tk.Canvas(row, height=CANVAS_H, bg=_CTRL_BG2,
+                          highlightthickness=0, cursor="hand2")
+            c.pack(fill=tk.X)
+
+            state = {"value": init, "dragging": False}
+
+            def _frac():
+                return (state["value"] - from_) / (to_ - from_)
+
+            def _draw(canvas=c):
+                canvas.delete("all")
+                w = canvas.winfo_width()
+                if w <= 1:
+                    return
+                cy = CANVAS_H // 2
+                # track background
+                canvas.create_rectangle(
+                    THUMB_R, cy - TRACK_H // 2,
+                             w - THUMB_R, cy + TRACK_H // 2,
+                    fill=TRACK_CLR, outline="", tags="track"
+                )
+                # filled portion
+                fx = THUMB_R + _frac() * (w - 2 * THUMB_R)
+                if fx > THUMB_R:
+                    canvas.create_rectangle(
+                        THUMB_R, cy - TRACK_H // 2,
+                        fx, cy + TRACK_H // 2,
+                        fill=FILL_CLR, outline="", tags="fill"
+                    )
+                # thumb — drawn as two overlapping ovals for a clean ring
+                canvas.create_oval(
+                    fx - THUMB_R, cy - THUMB_R,
+                    fx + THUMB_R, cy + THUMB_R,
+                    fill=_CTRL_BG2, outline=THUMB_BDR, width=2
+                )
+                canvas.create_oval(
+                    fx - 3, cy - 3,
+                    fx + 3, cy + 3,
+                    fill=THUMB_CLR, outline=""
+                )
+
+            def _set_from_x(x, canvas=c):
+                w = canvas.winfo_width()
+                frac = max(0.0, min(1.0, (x - THUMB_R) / max(1, w - 2 * THUMB_R)))
+                raw = from_ + frac * (to_ - from_)
+                # snap to 2 decimal places
+                snapped = round(raw * 20) / 20
+                state["value"] = max(from_, min(to_, snapped))
+                val_lbl.config(text=f"{state['value']:.2f}")
+                setattr(self, attr, state["value"])
+                self._apply_video_adjust()
+                _draw(canvas)
+
+            def _on_press(e, canvas=c):
+                state["dragging"] = True
+                _set_from_x(e.x, canvas)
+
+            def _on_drag(e, canvas=c):
+                if state["dragging"]:
+                    _set_from_x(e.x, canvas)
+
+            def _on_release(e):
+                state["dragging"] = False
+
+            def _on_configure(e, canvas=c):
+                _draw(canvas)
+
+            c.bind("<ButtonPress-1>", _on_press)
+            c.bind("<B1-Motion>", _on_drag)
+            c.bind("<ButtonRelease-1>", _on_release)
+            c.bind("<Configure>", _on_configure)
+            c.after(20, lambda: _draw(c))
+
+            sliders.append((attr, state, _draw))
+
+        _make_slider("Brightness", "_eq_brightness", 0.0, 2.0, self._eq_brightness)
+        _make_slider("Contrast", "_eq_contrast", 0.0, 2.0, self._eq_contrast)
+        _make_slider("Saturation", "_eq_saturation", 0.0, 3.0, self._eq_saturation)
+
+        sep = tk.Frame(dlg, bg="#2A303C", height=1)
+        sep.pack(fill=tk.X, padx=18, pady=(8, 0))
+
+        btn_row = tk.Frame(dlg, bg=_CTRL_BG2)
+        btn_row.pack(pady=(10, 14))
+
+        def _reset():
+            self._eq_brightness = 1.0
+            self._eq_contrast = 1.0
+            self._eq_saturation = 1.0
+            self._apply_video_adjust()
+            for attr, state, _draw in sliders:
+                state["value"] = 1.0
+                _draw()
+            # refresh val labels
+            for child in body.winfo_children():
+                for sub in child.winfo_children():
+                    if isinstance(sub, tk.Frame):
+                        for w in sub.winfo_children():
+                            if isinstance(w, tk.Label) and w.cget("font") and "Consolas" in str(w.cget("font")):
+                                w.config(text="1.00")
+
+        def _close():
+            dlg.destroy()
+            self._adj_win = None
+
+        tk.Button(btn_row, text="Reset defaults", command=_reset,
+                  bg=_BTN, fg=_TXT_MED, relief=tk.FLAT,
+                  padx=14, pady=5, font=("Segoe UI", 8),
+                  cursor="hand2", activebackground=_BTN_HVR,
+                  bd=0, highlightthickness=0).pack(side=tk.LEFT, padx=(0, 8))
+
+        tk.Button(btn_row, text="Done", command=_close,
+                  bg=_ACCENT, fg="#0F1217", relief=tk.FLAT,
+                  padx=18, pady=5, font=("Segoe UI", 8, "bold"),
+                  cursor="hand2", activebackground="#9BB0FF",
+                  bd=0, highlightthickness=0).pack(side=tk.LEFT)
+
+        dlg.bind("<Escape>", lambda e: _close())
+        dlg.protocol("WM_DELETE_WINDOW", _close)
 
     # ═══════════════════════════════════════════════════════════════════
     # GAMING MODE — global hotkeys via pynput
@@ -787,6 +982,9 @@ class EmbeddedPlayer:
 
         # Playback tools
         menu.add_command(label="📸  Screenshot", command=self._screenshot)
+        menu.add_separator()
+
+        menu.add_command(label="🎨  Video Adjustments", command=self._show_video_adjust_dialog)
         menu.add_separator()
 
         # Speed submenu
@@ -1428,6 +1626,7 @@ class EmbeddedPlayer:
         media = self._instance.media_new(path)
         self._player.set_media(media)
         self._player.play()
+        self._win.after(300, self._apply_video_adjust)
         if self.resume_manager:
             self.resume_manager.stop_tracking_video()
         if self.on_video_changed:
