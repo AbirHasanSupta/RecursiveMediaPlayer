@@ -36,6 +36,7 @@ class AISearchManager:
         self._active_ui: Optional[AISearchUI] = None
         self._bridge_start_attempted = False
         self._index_status: Optional[IndexStatus] = None
+        self._persisted_state: Optional[dict] = None
 
     def _get_index_dir(self) -> str:
         try:
@@ -149,6 +150,12 @@ class AISearchManager:
             self._bridge = None
         self._ensure_bridge()
 
+    def _save_state(self, query: str, results: list, counts: dict, scores: dict):
+        self._persisted_state = {"query": query, "results": results, "counts": counts, "scores": scores}
+
+    def _clear_state(self):
+        self._persisted_state = None
+
     def show_embedded(self, frame: tk.Frame, close_callback: Callable = None) -> "AISearchUI":
         ui = AISearchUI(
             frame=frame,
@@ -159,6 +166,8 @@ class AISearchManager:
         )
         self._active_ui = ui
         self._ensure_bridge()
+        if self._persisted_state:
+            ui.restore_state(self._persisted_state)
         return ui
 
     def apply_search(self, query: str):
@@ -430,9 +439,15 @@ class AISearchUI:
     def apply_search(self, query: str):
         self.run_search(query)
 
+    def restore_state(self, state: dict):
+        self._search_var.set(state["query"])
+        self._last_query = state["query"]
+        self._render_results(state["results"], state["counts"], state["scores"])
+
     def _clear_search(self):
         self._search_var.set("")
         self.search_entry.focus_set()
+        self._manager._clear_state()
         self._show_empty_state()
 
     def _on_search_click(self):
@@ -460,6 +475,7 @@ class AISearchUI:
         results = msg.get("results", [])
         counts = msg.get("counts", {})
         scores = msg.get("scores", {})
+        self._manager._save_state(self._last_query, results, counts, scores)
         self._render_results(results, counts, scores)
 
     def _show_empty_state(self):
