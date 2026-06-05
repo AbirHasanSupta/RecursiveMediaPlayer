@@ -3,6 +3,7 @@ import multiprocessing
 from embedded_player import EmbeddedPlayer
 from icon_helper import apply_icon
 from managers.annotation_browser_manager import AnnotationBrowserManager
+from managers.ai_search_manager import AISearchManager
 from managers.toast_manager import Toast
 from managers.video_metadata_manager import VideoAnnotationService
 from splash import show_splash
@@ -157,7 +158,7 @@ def select_multiple_folders_and_play():
             self.setup_status_section()
             self.setup_console_section()
             self.setup_action_buttons()
-            self.settings_manager = SettingsManager(self.root, self, self.update_console, enable_ai=False)
+            self.settings_manager = SettingsManager(self.root, self, self.update_console, enable_ai=True)
             self.toast = Toast(self.root, self)
             self.setup_exclusion_section()
 
@@ -344,6 +345,9 @@ def select_multiple_folders_and_play():
             )
             self.annotation_browser.set_is_favourite_callback(
                 lambda video_path: self._is_favourite_smart(video_path)
+            )
+            self.ai_search_manager = AISearchManager(
+                self.root, self, self.update_console
             )
 
             self.dual_player_manager = DualPlayerManager(
@@ -3804,6 +3808,21 @@ def select_multiple_folders_and_play():
                     self.active_embedded_manager.refresh()
                 except Exception:
                     pass
+            elif active == "ai_search" and getattr(self, "active_embedded_manager", None):
+                try:
+                    self.active_embedded_manager.set_directory_filter(
+                        self._get_effective_selected_dirs()
+                    )
+                except Exception:
+                    pass
+
+        def _show_ai_search(self):
+            self._show_embedded_view(
+                "ai_search",
+                lambda frame: self.ai_search_manager.show_embedded(
+                    frame, close_callback=self._show_home_view
+                )
+            )
 
         def _show_grid_view_for_current_directory(self, forced_dir=None):
             selected_dirs = self.get_selected_directories()
@@ -5764,6 +5783,7 @@ def select_multiple_folders_and_play():
                     "Favourites": self._show_favorites_manager,
                     "Tags & Ratings": self._show_annotation_browser,
                     "History": self._show_watch_history,
+                    "AI Search": self._show_ai_search,
                 }[label]
                 cmd()
 
@@ -5786,6 +5806,7 @@ def select_multiple_folders_and_play():
                 "favourites": "Favourites",
                 "history": "History",
                 "tags": "Tags & Ratings",
+                "ai_search": "AI Search",
             }
             # Add emoji variations if needed to match PILL_ACCENTS keys exactly if they were changed
             # But the UI labels in _make_media_pill are "Home", "Gallery", "Playlist", etc.
@@ -5815,7 +5836,7 @@ def select_multiple_folders_and_play():
             self._toolbar_menus = {}
             self._toolbar_commands = {}
 
-            for pill_label in ["Home", "Gallery", "Playlist", "Favourites", "Queue", "Tags & Ratings", "History"]:
+            for pill_label in ["Home", "Gallery", "Playlist", "Favourites", "Queue", "Tags & Ratings", "History", "AI Search"]:
                 self._make_media_pill(pill_label)
 
             sb = self._sidebar_panel

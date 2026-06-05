@@ -1286,7 +1286,7 @@ def main():
 
 
     elif args.mode == "search":
-        if not args.query:
+        if not args.query and not args.keep_alive:
             print("Provide --query for search")
             return
 
@@ -1309,20 +1309,90 @@ def main():
         searcher = HighAccuracyVideoSearcher(clip_index_path, text_index_path, metadata_path, tfidf_path)
 
         if args.keep_alive:
-            print("High-accuracy search ready! Type queries (or 'quit' to exit):")
+            import json as _json
+            import sys as _sys
+
+            unique_videos = len(set(searcher.metadata['video_paths']))
+            ready_msg = {
+                "status": "ready",
+                "device": str(searcher.device),
+                "video_count": unique_videos,
+            }
+            print(_json.dumps(ready_msg), flush=True)
+
             while True:
-                user_input = input("\n> ").strip()
-                if user_input.lower() in ['quit', 'exit', 'q']:
+                try:
+                    raw = _sys.stdin.readline()
+                except (KeyboardInterrupt, EOFError):
                     break
-                if user_input:
-                    results, counts, scores = searcher.query(user_input, args.top_k, caption_weight=0.4)
-                    print(f"\nTop {len(results)} results:")
-                    for i, result_path in enumerate(results):
-                        print(
-                            f"{i + 1}. {result_path} (frames: {counts[result_path]}, score: {scores[result_path]:.3f})")
+
+                if not raw:
+                    break
+
+                raw = raw.strip()
+                if not raw:
+                    continue
+
+                try:
+                    payload = _json.loads(raw)
+                except _json.JSONDecodeError:
+                    error_out = {"error": "invalid JSON", "results": [], "counts": {}, "scores": {}}
+                    print(_json.dumps(error_out), flush=True)
+                    continue
+
+                if payload.get("quit"):
+                    break
+
+                query_text = payload.get("query", "").strip()
+                if not query_text:
+                    continue
+
+                top_k = int(payload.get("top_k", args.top_k))
+                qid = payload.get("_qid")
+                directory = payload.get("directory")
+
+                try:
+                    if directory:
+                        results, counts, scores = searcher.query_filtered_by_directory(
+                            query_text, directory, top_k, caption_weight=0.4
+                        )
+                    else:
+                        results, counts, scores = searcher.query(
+                            query_text, top_k, caption_weight=0.4
+                        )
+
+                    results = [r for r in results if os.path.isfile(r)]
+                    result_set = set(results)
+                    counts = {k: v for k, v in counts.items() if k in result_set}
+                    scores = {k: v for k, v in scores.items() if k in result_set}
+
+                    response = {
+                        "results": results,
+                        "counts": counts,
+                        "scores": {k: float(v) for k, v in scores.items()},
+                    }
+                    if qid is not None:
+                        response["_qid"] = qid
+
+                except Exception as exc:
+                    response = {
+                        "error": str(exc),
+                        "results": [],
+                        "counts": {},
+                        "scores": {},
+                    }
+                    if qid is not None:
+                        response["_qid"] = qid
+
+                print(_json.dumps(response), flush=True)
 
         else:
             results, counts, scores = searcher.query(args.query, args.top_k, caption_weight=0.4)
+
+            results = [r for r in results if os.path.isfile(r)]
+            result_set = set(results)
+            counts = {k: v for k, v in counts.items() if k in result_set}
+            scores = {k: v for k, v in scores.items() if k in result_set}
 
             output_data = {
                 "results": results,
