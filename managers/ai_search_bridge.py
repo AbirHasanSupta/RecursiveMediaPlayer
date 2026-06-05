@@ -7,6 +7,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Callable, Optional
+import atexit
 
 try:
     import requests as _requests
@@ -78,10 +79,20 @@ class AIServerBridge:
     # ------------------------------------------------------------------
 
     def _resolve_ai_executable(self) -> list:
+        import shutil
         base = Path(sys.executable).parent
+
         sidecar = base / "ai_search.exe"
         if sidecar.exists():
             return [str(sidecar)]
+
+        beside_exe = base / "enhanced_model.py"
+        if beside_exe.exists():
+            python = shutil.which("python") or shutil.which("python3")
+            if not python:
+                raise FileNotFoundError("Python not found in PATH — required to run AI model")
+            return [python, str(beside_exe)]
+
         script = Path(__file__).parent.parent / "enhanced_model.py"
         if script.exists():
             return [sys.executable, str(script)]
@@ -129,6 +140,9 @@ class AIServerBridge:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+            if not getattr(self, '_atexit_registered', False):
+                atexit.register(self.stop)
+                self._atexit_registered = True
             with self._lock:
                 self._ready = False
                 self._alive = False

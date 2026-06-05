@@ -199,8 +199,9 @@ class SettingsStorage:
 
 
 class PreprocessingRunner:
-    def __init__(self, console_callback: Callable = None):
+    def __init__(self, console_callback: Callable = None, get_bridge_fn: Callable = None):
         self.console_callback = console_callback
+        self.get_bridge_fn = get_bridge_fn
         self.current_process = None
         self.is_running = False
         self.output_queue = queue.Queue()
@@ -208,16 +209,50 @@ class PreprocessingRunner:
     def start_preprocessing(self, videos_dir: str, settings: SettingsData) -> bool:
         if self.is_running:
             return False
+
+        bridge = self.get_bridge_fn() if self.get_bridge_fn else None
+        if bridge is not None and bridge.is_alive():
+            self.is_running = True
+            payload = {
+                "videos_dir": videos_dir,
+                "out_dir": settings.ai_index_path,
+                "workers": settings.preprocessing_workers,
+                "max_frames": settings.max_frames_per_video,
+                "incremental": settings.incremental_preprocessing,
+                "force_rebuild": not settings.incremental_preprocessing,
+                "exclude_dirs": getattr(settings, "excluded_index_dirs", "raw"),
+            }
+
+            def _progress(line: str):
+                self._log(line)
+
+            def _done(success: bool, error: str = None):
+                self.is_running = False
+                if success:
+                    self._log("AI preprocessing completed successfully!")
+                else:
+                    self._log(f"AI preprocessing failed: {error}")
+
+            bridge.start_preprocessing(payload, _progress, _done)
+            return True
+
         self.is_running = True
 
         def run_preprocessing():
             try:
-                script_path = Path(__file__).parent.parent / "enhanced_model.py"
+                import shutil as _shutil, sys as _sys
+                _base = Path(_sys.executable).parent
+                script_path = _base / "enhanced_model.py"
+                if not script_path.exists():
+                    script_path = Path(__file__).parent.parent / "enhanced_model.py"
                 if not script_path.exists():
                     self._log("Error: enhanced_model.py not found")
                     return
+                python_exe = (
+                        _shutil.which("python") or _shutil.which("python3") or _sys.executable
+                )
                 cmd = [
-                    sys.executable, str(script_path),
+                    python_exe, str(script_path),
                     "--mode", "preprocess",
                     "--videos_dir", videos_dir,
                     "--out_dir", settings.ai_index_path,
@@ -231,7 +266,7 @@ class PreprocessingRunner:
                 excluded = getattr(settings, 'excluded_index_dirs', '').strip()
                 if excluded:
                     cmd += ['--exclude_dirs', excluded]
-                self._log(f"Starting AI preprocessing...")
+                self._log("Starting AI preprocessing...")
                 self._log(f"Command: {' '.join(cmd)}")
                 self.current_process = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -256,6 +291,12 @@ class PreprocessingRunner:
         return True
 
     def stop_preprocessing(self):
+        bridge = self.get_bridge_fn() if self.get_bridge_fn else None
+        if bridge is not None and bridge.is_alive():
+            bridge.cancel_preprocessing()
+            self.is_running = False
+            self._log("AI preprocessing cancelled")
+            return
         if self.current_process:
             try:
                 self.current_process.terminate()
@@ -278,7 +319,7 @@ class PreprocessingRunner:
 class SettingsUI:
     def __init__(self, parent, theme_provider, settings: SettingsData,
                  console_callback: Callable = None, on_settings_changed: Callable = None,
-                 enable_ai: bool = True):
+                 enable_ai: bool = True, get_bridge_fn: Callable = None):
         self.parent = parent
         self.theme_provider = theme_provider
         self.settings = settings
@@ -287,7 +328,7 @@ class SettingsUI:
         self.enable_ai = enable_ai
 
         self.settings_window = None
-        self.preprocessing_runner = PreprocessingRunner(console_callback)
+        self.preprocessing_runner = PreprocessingRunner(console_callback, get_bridge_fn)
 
         self.ai_index_path_var = None
         self.workers_var = None
@@ -1273,10 +1314,10 @@ class SettingsUI:
 
 
 class SettingsManager:
-    def __init__(self, parent, theme_provider, console_callback: Callable = None, enable_ai: bool = True):
+    def __init__(self, parent, theme_provider, console_callback: Callable = None, enable_ai: bool = True, get_bridge_fn: Callable = None):
         self.storage = SettingsStorage()
         self.settings = self.storage.load_settings()
-        self.ui = SettingsUI(parent, theme_provider, self.settings, console_callback, self._on_settings_changed, enable_ai=enable_ai)
+        self.ui = SettingsUI(parent, theme_provider, self.settings, console_callback, self._on_settings_changed, enable_ai=enable_ai, get_bridge_fn=get_bridge_fn)
 
         self._settings_changed_callbacks = []
         self._hotkey_reload_callback: Optional[Callable] = None

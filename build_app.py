@@ -158,7 +158,11 @@ def select_multiple_folders_and_play():
             self.setup_status_section()
             self.setup_console_section()
             self.setup_action_buttons()
-            self.settings_manager = SettingsManager(self.root, self, self.update_console, enable_ai=True)
+            self.ai_search_manager = AISearchManager(
+                self.root, self, self.update_console
+            )
+            self.settings_manager = SettingsManager(self.root, self, self.update_console, enable_ai=True,
+                                                    get_bridge_fn=lambda: getattr(self.ai_search_manager, '_bridge', None))
             self.toast = Toast(self.root, self)
             self.setup_exclusion_section()
 
@@ -346,9 +350,6 @@ def select_multiple_folders_and_play():
             self.annotation_browser.set_is_favourite_callback(
                 lambda video_path: self._is_favourite_smart(video_path)
             )
-            self.ai_search_manager = AISearchManager(
-                self.root, self, self.update_console
-            )
 
             self.dual_player_manager = DualPlayerManager(
                 self.root,
@@ -462,7 +463,7 @@ def select_multiple_folders_and_play():
                 'video_preview_manager', 'grid_view_manager', 'playlist_manager',
                 'watch_history_manager', 'queue_manager', 'favorites_manager',
                 'filter_sort_manager', 'settings_manager', 'resume_manager',
-                'dual_player_manager', 'annotation_browser_manager'
+                'dual_player_manager', 'annotation_browser_manager', 'ai_search_manager',
             ]
             for manager_name in managers:
                 if hasattr(self, manager_name):

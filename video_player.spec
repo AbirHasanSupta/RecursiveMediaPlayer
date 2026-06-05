@@ -73,7 +73,7 @@ a = Analysis(
         ('theme.py', '.'),
         ('utils.py', '.'),
         ('embedded_player.py', '.'),
-
+        ('enhanced_model.py', '.'),
         # ── managers package ─────────────────────────────────────────────────
         ('managers', 'managers'),
     ],

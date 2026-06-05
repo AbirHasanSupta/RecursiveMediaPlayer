@@ -6,7 +6,7 @@ import tkinter as tk
 from pathlib import Path
 from typing import Callable, Optional
 
-from managers.ai_search_bridge import AIServerBridge
+from managers.ai_search_bridge import AIServerBridge, AIPreprocessorBridge
 from managers.ai_indexing_dialog import IndexingDialog
 from managers.ai_index_status import IndexStatus, IndexStatusChecker
 
@@ -31,12 +31,21 @@ class AISearchManager:
         self._app = app
         self._log = logger or (lambda m: None)
         self._bridge: Optional[AIServerBridge] = None
-        self._preprocessor = None
+        self._preprocessor = AIPreprocessorBridge(
+            get_bridge_fn=lambda: self._bridge,
+            root=self._root,
+            logger=self._log,
+        )
         self._directory_filter: list = []
         self._active_ui: Optional[AISearchUI] = None
         self._bridge_start_attempted = False
         self._index_status: Optional[IndexStatus] = None
         self._persisted_state: Optional[dict] = None
+
+    def cleanup(self):
+        if self._bridge:
+            self._bridge.stop()
+            self._bridge = None
 
     def _get_index_dir(self) -> str:
         try:
@@ -50,12 +59,6 @@ class AISearchManager:
         checker = IndexStatusChecker(index_dir)
         self._index_status = checker.check_files()
 
-        if not self._index_status.files_present:
-            if self._active_ui:
-                self._active_ui.set_status("warn", "⚠  No index found — click Index to build one")
-                self._active_ui.set_device_badge("", "")
-            return
-
         if self._bridge and self._bridge.is_ready():
             if self._active_ui:
                 label, color = self._index_status.format_device()
@@ -68,10 +71,15 @@ class AISearchManager:
                     )
             return
 
-        # If a start was already attempted and the bridge is still alive, do not
-        # double-start.  Use is_ready() only — no internal attribute access.
+        # Server is up but in no_index state — preprocessing is possible, don't restart
+        if self._bridge_start_attempted and self._bridge and self._bridge.is_alive():
+            if not self._index_status.files_present and self._active_ui:
+                self._active_ui.set_status("warn", "⚠  No index found — click Index to build one")
+                self._active_ui.set_device_badge("", "")
+            return
+
+        # Still loading — wait for poll
         if self._bridge_start_attempted and self._bridge and not self._bridge.is_ready():
-            # Could still be loading; wait for poll to notice
             return
 
         self._bridge = AIServerBridge(
