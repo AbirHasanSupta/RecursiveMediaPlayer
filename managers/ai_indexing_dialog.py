@@ -116,6 +116,7 @@ class IndexingDialog:
         self._frames_var: Optional[tk.IntVar] = None
         self._incremental_var: Optional[tk.BooleanVar] = None
         self._gpu_var: Optional[tk.BooleanVar] = None
+        self._excluded_dirs_var: Optional[tk.StringVar] = None
 
         self._progress_bar: Optional[ttk.Progressbar] = None
         self._progress_lbl: Optional[tk.Label] = None
@@ -243,6 +244,23 @@ class IndexingDialog:
         ttk.Checkbutton(checks, text="GPU acceleration  (requires CUDA-capable GPU)",
                         variable=self._gpu_var,
                         style="Modern.TCheckbutton").pack(anchor="w", pady=1)
+
+        excl_frame = tk.Frame(outer, bg=bg)
+        excl_frame.pack(fill=tk.X, pady=(8, 2))
+        tk.Label(excl_frame, text="Exclude directory names:",
+                 font=fn, bg=bg, fg=text).pack(anchor="w")
+        self._excluded_dirs_var = tk.StringVar(
+            value=getattr(settings, 'excluded_index_dirs', 'raw')
+        )
+        excl_wrap = tk.Frame(excl_frame, bg=surface,
+                             highlightbackground=border, highlightthickness=1)
+        excl_wrap.pack(fill=tk.X, pady=(3, 0))
+        tk.Entry(excl_wrap, textvariable=self._excluded_dirs_var,
+                 bg=surface, fg=text, relief="flat", bd=0,
+                 font=fn, insertbackground=accent).pack(fill=tk.X, ipady=5, padx=8)
+        tk.Label(excl_frame,
+                 text='Comma-separated, case-insensitive exact folder name match  (e.g. raw, raws, footage)',
+                 font=fs, bg=bg, fg=muted).pack(anchor="w", pady=(3, 0))
 
         tk.Frame(outer, bg=border, height=1).pack(fill=tk.X, pady=(0, 14))
 
@@ -381,6 +399,7 @@ class IndexingDialog:
         settings.max_frames_per_video = self._frames_var.get()
         settings.incremental_preprocessing = self._incremental_var.get()
         settings.enable_gpu_acceleration = self._gpu_var.get()
+        settings.excluded_index_dirs = self._excluded_dirs_var.get()
 
         self._manager._preprocessor.start_preprocessing(
             videos_dir=videos_dir,

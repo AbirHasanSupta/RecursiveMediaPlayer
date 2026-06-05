@@ -215,6 +215,10 @@ class AIPreprocessor:
             else:
                 cmd.append("--force_rebuild")
 
+            excluded = getattr(settings, 'excluded_index_dirs', '').strip()
+            if excluded:
+                cmd += ['--exclude_dirs', excluded]
+
             self._process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,

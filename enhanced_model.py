@@ -556,7 +556,7 @@ class HighAccuracyVideoIndexer:
         return set(os.path.abspath(meta['video_path']) for meta in self.frame_metadata)
 
     def process_video_folder(self, videos_dir: str, workers: int = 3, max_frames_per_video: int = 60,
-                             out_dir: str = None, incremental: bool = True):
+                             out_dir: str = None, incremental: bool = True, excluded_dirs: str = "raw"):
         """Process videos with incremental support"""
         videos_dir = Path(videos_dir)
 
@@ -569,10 +569,15 @@ class HighAccuracyVideoIndexer:
 
         print(f"Recursively scanning {videos_dir} for video files...")
 
+        excluded_names = {
+            name.strip().lower()
+            for name in excluded_dirs.split(',')
+            if name.strip()
+        }
+
         def should_skip_path(path: Path) -> bool:
-            """Check if path contains any 'raw' directory (case insensitive)"""
             for part in path.parts:
-                if part.lower() == 'raw':
+                if part.lower() in excluded_names:
                     return True
             return False
 
@@ -605,29 +610,27 @@ class HighAccuracyVideoIndexer:
             print(f"Incremental mode: Skipped {skipped_existing} already processed videos")
 
         # Report skipped 'Raw' directories
-        def count_all_videos_including_raw():
-            """Count total videos including those in Raw directories"""
+        def count_all_videos_including_excluded():
             all_videos = []
             for ext in video_extensions:
                 all_videos.extend(list(videos_dir.glob(f"**/*{ext}")))
                 all_videos.extend(list(videos_dir.glob(f"**/*{ext.upper()}")))
             return len(set(str(p) for p in all_videos if p.is_file()))
 
-        def find_raw_directories():
-            """Find all Raw directories that were skipped"""
-            raw_dirs = set()
+        def find_excluded_directories():
+            excl_dirs = set()
             for path in videos_dir.rglob("*"):
-                if path.is_dir() and path.name.lower() == 'raw':
-                    raw_dirs.add(str(path.relative_to(videos_dir)))
-            return raw_dirs
+                if path.is_dir() and path.name.lower() in excluded_names:
+                    excl_dirs.add(str(path.relative_to(videos_dir)))
+            return excl_dirs
 
-        total_videos_including_raw = count_all_videos_including_raw()
+        total_videos_including_raw = count_all_videos_including_excluded()
         total_after_raw_filter = len(video_files) + (len(self.get_existing_video_paths()) if incremental else 0)
         skipped_videos_count = total_videos_including_raw - total_after_raw_filter
-        raw_directories = find_raw_directories()
+        raw_directories = find_excluded_directories()
 
         if skipped_videos_count > 0:
-            print(f"Skipped {skipped_videos_count} videos from {len(raw_directories)} 'Raw' directories:")
+            print(f"Skipped {skipped_videos_count} videos from {len(raw_directories)} excluded directories:")
             for raw_dir in sorted(raw_directories):
                 print(f"  - Skipped: {raw_dir}/")
 
@@ -1193,6 +1196,8 @@ def main():
     parser.add_argument("--incremental", action="store_true", default=True,
                         help="Incremental preprocessing (append to existing)")
     parser.add_argument("--force_rebuild", action="store_true", help="Force complete rebuild (ignore existing indices)")
+    parser.add_argument("--exclude_dirs", type=str, default="raw",
+                        help="Comma-separated directory names to exclude (case-insensitive exact match)")
     parser.add_argument("--query", type=str)
     parser.add_argument("--top_k", type=int, default=20)
     parser.add_argument("--clip_weight", type=float, default=0.35)
@@ -1264,7 +1269,8 @@ def main():
             args.workers,
             args.max_frames,
             out_dir=str(out_dir),
-            incremental=incremental_mode
+            incremental=incremental_mode,
+            excluded_dirs=args.exclude_dirs,
         )
 
         print("Building indices...")

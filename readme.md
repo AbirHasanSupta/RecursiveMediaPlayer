@@ -31,6 +31,13 @@ A sophisticated video player application with AI-powered semantic search capabil
 - **Intelligent Frame Sampling**: Adaptive sampling based on video length and content
 - **Query Expansion**: Automatic synonym and semantic expansion for better results
 - **Resource-Efficient Preprocessing**: Smart batching and memory management for large collections
+- **In-App Indexing Dialog**: Launch and monitor preprocessing directly from the UI via the **⚙ Index** button — no command line required
+- **Stale Index Detection**: Automatically detects new or removed videos since last index build and prompts for an update
+- **Device Badge**: Live GPU/CPU/MPS indicator showing which compute device the AI engine is using
+- **Result Persistence**: Search results and query are preserved when switching to other tabs and restored on return
+- **Thumbnail Previews**: Hover over any search result to see a video thumbnail preview
+- **Rich Context Menu**: Right-click any result to play, open in Gallery, add to playlist, add to queue, add/remove from favourites, open file location, view properties, or show in the directory panel
+- **Directory Name Exclusion**: Skip subdirectories matching comma-separated name patterns (e.g. `raw, temp`) during indexing — configurable in **Settings > AI & Preprocessing**
 
 ### Playback Controls
 - **Keyboard Shortcuts**: Comprehensive hotkey support for all functions
@@ -73,9 +80,10 @@ pip install -r requirements\ai_requirements.txt
 2. Install Python dependencies: `pip install -r requirements\requirements.txt`
 3. (Optional) For AI search: `pip install -r requirements\ai_requirements.txt`
 4. Ensure VLC Media Player is installed and accessible
-5. Run the application: 
-   - For standard mode: `python build_app.py`
-   - For AI-augmented mode: Ensure preprocessing is done (see [AI Search System](#ai-search-system)) then run the app and toggle AI Mode.
+5. Run the application:
+   ```cmd
+   python build_app.py
+   ```
 
 ### Windows Shell Integration (Optional)
 
@@ -110,10 +118,20 @@ The application features comprehensive hotkey support. All shortcuts can be cust
 ## AI Search System
 
 ### Prerequisites for AI Search
-The AI search functionality requires preprocessed video indices. You need to run the preprocessing step before using AI search features.
+The AI search functionality requires preprocessed video indices. Build the index before using AI search — either via the in-app dialog (recommended) or the command line.
 
-### Preprocessing Videos
-Generate AI search indices for your video collection:
+### Building the Index
+
+#### Option 1 — In-App (Recommended)
+1. Navigate to the **AI Search** tab from the top navigation bar
+2. Click the **⚙ Index** button next to the search bar
+3. Select the video directory to index in the dialog that opens
+4. Adjust worker count, max frames, and incremental mode if needed, then click **Start**
+5. Progress is shown live; close the dialog when complete — the search engine loads automatically
+
+Preprocessing settings (index path, workers, max frames, incremental mode, excluded directory names) can also be configured in advance under **Settings > AI & Preprocessing**.
+
+#### Option 2 — Command Line
 ```cmd
 python enhanced_model.py --mode preprocess
 python enhanced_model.py --mode preprocess --videos_dir "C:/Videos" --out_dir "./index_data"
@@ -121,27 +139,30 @@ python enhanced_model.py --mode preprocess --videos_dir "C:/Videos" --out_dir ".
 ```
 
 #### Preprocessing Parameters
-- `--videos_dir`: Path to video directory (optional - GUI dialog if not provided)
-- `--out_dir`: Output directory for index files (default: `C:/Users/[User]/Documents/Recursive Media Player/index_data`)
-- `--workers`: Number of parallel workers (default: 3, recommended 1-3 for stability)
+- `--videos_dir`: Path to video directory (optional — GUI dialog shown if omitted)
+- `--out_dir`: Output directory for index files (default: `%LOCALAPPDATA%\Recursive Media Player\index_data`)
+- `--workers`: Number of parallel workers (default: 3, recommended 1–3 for stability)
 - `--max_frames`: Maximum frames to analyze per video (default: 60)
 - `--incremental`: Add to existing index rather than rebuilding (default: enabled)
 - `--force_rebuild`: Force complete rebuild of indices
+- `--exclude_dirs`: Comma-separated directory name patterns to skip (e.g. `raw,temp`)
 
 #### Preprocessing Output
-- `clip_index.faiss` - Visual similarity index
-- `text_index.faiss` - Text/caption similarity index  
-- `metadata.pkl` - Video metadata and captions
-- `tfidf_index.pkl` - Text search index
+- `clip_index.faiss` — Visual similarity index
+- `text_index.faiss` — Text/caption similarity index
+- `metadata.pkl` — Video metadata and captions
+- `tfidf_index.pkl` — Text search index
 
 ### Using AI Search
 
 #### In the GUI Application
-1. Click "AI Mode" button after preprocessing is complete
-2. Select a directory from your added directories
-3. Enter search queries in the AI search box
-4. Results show matching videos with relevance scores
-5. Click "Play Videos" to play the search results
+1. Navigate to the **AI Search** tab from the top navigation bar
+2. The status bar shows index state: video count, index age, compute device (GPU/CPU/MPS), and any staleness warnings
+3. If the index is stale (new or removed videos detected), a warning is shown — click **⚙ Index** to update
+4. Enter a natural language query in the search box and press Enter or click **Search**
+5. Results display with relevance scores and thumbnail previews on hover
+6. Right-click any result for context menu actions, or double-click to play
+7. Results and the current query are preserved if you switch to another tab and return
 
 #### Command Line Search
 ```cmd
@@ -154,7 +175,7 @@ python enhanced_model.py --mode search --query "walking" --keep_alive
 - `--query`: Search text (natural language description)
 - `--top_k`: Number of results to return (default: 20)
 - `--clip_weight`: Visual similarity weight (default: 0.35)
-- `--text_weight`: Caption similarity weight (default: 0.35) 
+- `--text_weight`: Caption similarity weight (default: 0.35)
 - `--tfidf_weight`: Keyword matching weight (default: 0.3)
 - `--keep_alive`: Interactive mode for multiple searches
 
@@ -177,11 +198,19 @@ python enhanced_model.py --mode search --query "woman in white dress dancing ind
 ### Settings
 The application saves preferences automatically:
 - Selected directories
-- Exclusion lists  
+- Exclusion lists
 - Theme preference
-- Hotkey customizations (rebindable in the "Shortcuts" tab)
+- Hotkey customizations (rebindable in the **Shortcuts** tab)
 - Playback position (if resume enabled)
 - UI layout preferences
+
+### AI & Preprocessing Settings
+Accessible via **Settings > AI & Preprocessing**:
+- **AI Index Path**: Directory where index files are stored (default: `%LOCALAPPDATA%\Recursive Media Player\index_data`)
+- **Workers**: Number of parallel preprocessing workers (default: 3)
+- **Max Frames per Video**: Frame sample limit per video (default: 60, range: 20–200)
+- **Incremental Mode**: When enabled, only new videos are added to the existing index rather than rebuilding from scratch (default: on)
+- **Excluded Directory Names**: Comma-separated subfolder name patterns to skip during indexing (default: `raw`)
 
 ## Build and Distribution
 
@@ -210,7 +239,7 @@ The output executable will be located at `dist/RecursiveVideoPlayer/RecursiveVid
 ### AI Search Performance
 - **Preprocessing**: Can take significant time for large collections (hours for thousands of videos)
 - **Memory Usage**: Requires 4-8GB RAM during preprocessing
-- **GPU Acceleration**: Supports CUDA for faster processing
+- **GPU Acceleration**: Supports CUDA for faster processing; device in use is shown in the AI Search status bar
 - **Incremental Updates**: Add new videos without full reprocessing
 
 ### System Requirements
@@ -224,9 +253,16 @@ The output executable will be located at `dist/RecursiveVideoPlayer/RecursiveVid
 
 **VLC not found**: Ensure VLC Media Player is installed and in system PATH
 
-**AI search not working**: Verify all AI dependencies are installed and preprocessing completed
+**AI search not working**: Verify all AI dependencies are installed and the index has been built (status bar in the AI Search tab will indicate if no index is found)
 
-**Memory errors during preprocessing**: Reduce `--workers` parameter or `--max_frames`
+**AI Search tab shows "No index found"**: Click **⚙ Index** to build the index, or run `python enhanced_model.py --mode preprocess` from the command line
 
-**Hotkeys not working**: Ensure application window has focus
+**Index appears stale after adding new videos**: The status bar will show a warning — click **⚙ Index** and run with incremental mode to update without a full rebuild
 
+**Memory errors during preprocessing**: Reduce the Workers setting or Max Frames per Video in **Settings > AI & Preprocessing**, or use the `--workers` and `--max_frames` CLI flags
+
+**Certain subdirectories are being indexed unintentionally**: Add the folder name to the Excluded Directory Names field in **Settings > AI & Preprocessing** (e.g. `raw, backup, temp`)
+
+**Search engine not loading after indexing**: The bridge process starts automatically when the AI Search tab is opened; check that `enhanced_model.py` is present in the project root or that `ai_search.exe` exists alongside the executable
+
+**Hotkeys not working**: Ensure the application window has focus

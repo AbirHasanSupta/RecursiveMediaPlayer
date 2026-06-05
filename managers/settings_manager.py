@@ -118,7 +118,7 @@ class SettingsData:
         self.auto_cleanup_days = 30
         self.enable_gpu_acceleration = True
         self.incremental_preprocessing = True
-        self.skip_raw_directories = True
+        self.excluded_index_dirs = "raw"
         self.preprocessing_batch_size = 10
         self.preview_duration = 3
         self.use_video_preview = True
@@ -136,7 +136,7 @@ class SettingsData:
             'auto_cleanup_days': self.auto_cleanup_days,
             'enable_gpu_acceleration': self.enable_gpu_acceleration,
             'incremental_preprocessing': self.incremental_preprocessing,
-            'skip_raw_directories': self.skip_raw_directories,
+            'excluded_index_dirs': self.excluded_index_dirs,
             'preprocessing_batch_size': self.preprocessing_batch_size,
             'preview_duration': self.preview_duration,
             'use_video_preview': self.use_video_preview,
@@ -156,7 +156,7 @@ class SettingsData:
         settings.auto_cleanup_days = data.get('auto_cleanup_days', settings.auto_cleanup_days)
         settings.enable_gpu_acceleration = data.get('enable_gpu_acceleration', settings.enable_gpu_acceleration)
         settings.incremental_preprocessing = data.get('incremental_preprocessing', settings.incremental_preprocessing)
-        settings.skip_raw_directories = data.get('skip_raw_directories', settings.skip_raw_directories)
+        settings.excluded_index_dirs = data.get('excluded_index_dirs', data.get('skip_raw_directories', None) and "raw" or settings.excluded_index_dirs)
         settings.preprocessing_batch_size = data.get('preprocessing_batch_size', settings.preprocessing_batch_size)
         settings.preview_duration = data.get('preview_duration', settings.preview_duration)
         settings.use_video_preview = data.get('use_video_preview', settings.use_video_preview)
@@ -228,6 +228,9 @@ class PreprocessingRunner:
                     cmd.append("--incremental")
                 else:
                     cmd.append("--force_rebuild")
+                excluded = getattr(settings, 'excluded_index_dirs', '').strip()
+                if excluded:
+                    cmd += ['--exclude_dirs', excluded]
                 self._log(f"Starting AI preprocessing...")
                 self._log(f"Command: {' '.join(cmd)}")
                 self.current_process = subprocess.Popen(
@@ -292,7 +295,7 @@ class SettingsUI:
         self.cleanup_days_var = None
         self.gpu_acceleration_var = None
         self.incremental_var = None
-        self.skip_raw_var = None
+        self.excluded_dirs_var = None
         self.batch_size_var = None
         self.cleanup_resume_callback = None
         self.cleanup_history_callback = None
@@ -566,9 +569,25 @@ class SettingsUI:
         ttk.Checkbutton(prep_body, text="Enable GPU Acceleration (if available)",
                         variable=self.gpu_acceleration_var, style="Modern.TCheckbutton").pack(anchor='w', pady=2)
 
-        self.skip_raw_var = tk.BooleanVar(value=self.settings.skip_raw_directories)
-        ttk.Checkbutton(prep_body, text="Skip 'Raw' directories during preprocessing",
-                        variable=self.skip_raw_var, style="Modern.TCheckbutton").pack(anchor='w', pady=2)
+        excl_row = tk.Frame(prep_body, bg=tp.bg_color)
+        excl_row.pack(fill=tk.X, pady=(6, 2))
+        tk.Label(excl_row, text="Exclude directory names (comma-separated, case-insensitive):",
+                 font=tp.normal_font, bg=tp.bg_color, fg=tp.text_color).pack(anchor='w')
+        self.excluded_dirs_var = tk.StringVar(value=self.settings.excluded_index_dirs)
+        excl_entry = tk.Entry(
+            excl_row,
+            textvariable=self.excluded_dirs_var,
+            font=tp.normal_font,
+            bg=getattr(tp, 'entry_bg', tp.surface_color),
+            fg=getattr(tp, 'entry_fg', tp.text_color),
+            insertbackground=getattr(tp, 'entry_fg', tp.text_color),
+            relief=tk.FLAT, bd=0,
+            highlightthickness=1,
+            highlightbackground=getattr(tp, 'entry_border', tp.border_color),
+        )
+        excl_entry.pack(fill=tk.X, pady=(3, 0))
+        tk.Label(excl_row, text='e.g. "raw, raws, footage" — exact folder name match (subdirectories only)',
+                 font=tp.small_font, bg=tp.bg_color, fg=tp.text_muted).pack(anchor='w', pady=(2, 0))
 
         action_body = self._make_section(main_container, "Run AI Preprocessing", pady=(0, 0))
 
@@ -1190,8 +1209,8 @@ class SettingsUI:
             self.gpu_acceleration_var.set(settings.enable_gpu_acceleration)
         if self.incremental_var:
             self.incremental_var.set(settings.incremental_preprocessing)
-        if self.skip_raw_var:
-            self.skip_raw_var.set(settings.skip_raw_directories)
+        if self.excluded_dirs_var:
+            self.excluded_dirs_var.set(settings.excluded_index_dirs)
         self.preview_duration_var.set(settings.preview_duration)
         self.use_video_preview_var.set(settings.use_video_preview)
         self.enable_watch_history_var.set(settings.enable_watch_history)
@@ -1226,8 +1245,8 @@ class SettingsUI:
             self.settings.enable_gpu_acceleration = self.gpu_acceleration_var.get()
         if self.incremental_var:
             self.settings.incremental_preprocessing = self.incremental_var.get()
-        if self.skip_raw_var:
-            self.settings.skip_raw_directories = self.skip_raw_var.get()
+        if self.excluded_dirs_var:
+            self.settings.excluded_index_dirs = self.excluded_dirs_var.get()
         self.settings.preview_duration = self.preview_duration_var.get()
         self.settings.use_video_preview = self.use_video_preview_var.get()
         self.settings.enable_watch_history = self.enable_watch_history_var.get()

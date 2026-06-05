@@ -74,7 +74,7 @@ def main():
     print(f"\n  Version    : {version}")
     print(f"  Commit     : {commit}")
     print(f"  Build date : {build}")
-    print(f"\nExecutable location: {os.path.abspath('dist/RecursiveVideoPlayer/RecursiveVideoPlayer.exe')}")
+    print(f"\nExecutable location: {os.path.abspath('dist/RecursiveVideoPlayer/Recursive Video Player.exe')}")
     print("\nNOTE: Before distributing, ensure:")
     print("  1. VLC is installed on target system")
     print("  2. Test all features thoroughly")
