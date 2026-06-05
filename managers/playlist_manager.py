@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 import threading
 import tkinter as tk
@@ -52,7 +52,7 @@ class PlaylistStorage:
     """Handles playlist persistence following Single Responsibility Principle"""
 
     def __init__(self):
-        self.playlists_dir = Path.home() / "Documents" / "Recursive Media Player" / "Playlists"
+        self.playlists_dir = Path.home() / "Documents" / "Recursive Video Player" / "Playlists"
         self.playlists_dir.mkdir(parents=True, exist_ok=True)
         self.playlists_file = self.playlists_dir / "playlists.json"
 

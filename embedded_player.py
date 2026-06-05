@@ -1,4 +1,4 @@
-"""
+﻿"""
 EmbeddedPlayer
 ==============
 A self-contained Toplevel that hosts a VLC instance inside a Tkinter canvas,
@@ -2159,7 +2159,7 @@ class EmbeddedPlayer:
     def _screenshot(self):
         try:
             vid     = self.videos[self.index]
-            out_dir = _get_pictures_dir() / "Recursive Media Player" / "Screenshots"
+            out_dir = _get_pictures_dir() / "Recursive Video Player" / "Screenshots"
             out_dir.mkdir(parents=True, exist_ok=True)
             stem    = os.path.splitext(os.path.basename(vid))[0]
             ts      = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -2209,7 +2209,7 @@ class EmbeddedPlayer:
             ext     = os.path.splitext(vid)[1] or ".mp4"
             stem    = os.path.splitext(os.path.basename(vid))[0]
             ts      = datetime.now().strftime("%Y%m%d_%H%M%S")
-            out_dir = _get_pictures_dir() / "Recursive Media Player" / "Clips"
+            out_dir = _get_pictures_dir() / "Recursive Video Player" / "Clips"
             out_dir.mkdir(parents=True, exist_ok=True)
             out     = out_dir / f"{stem}_clip_{ts}{ext}"
             pt_a    = self._ab_point_a / 1000.0

@@ -1,4 +1,4 @@
-"""
+﻿"""
 VideoPreviewManager — fast binary thumbnail cache + LRU in-memory cache + background prefetch.
 
 Changes vs previous version:
@@ -339,7 +339,7 @@ class ThumbnailStorage:
         else:
             base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
 
-        self.thumbnails_dir = base / "Recursive Media Player" / "Thumbnails"
+        self.thumbnails_dir = base / "Recursive Video Player" / "Thumbnails"
         self.blobs_dir = self.thumbnails_dir / "blobs"
         self.blobs_dir.mkdir(parents=True, exist_ok=True)
         # _hide_file(self.blobs_dir)

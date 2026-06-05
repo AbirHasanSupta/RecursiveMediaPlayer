@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 import threading
 import tkinter as tk
@@ -15,7 +15,7 @@ from utils import _responsive_geometry
 def _get_app_dirs():
     import os, sys
     from pathlib import Path
-    APP = "Recursive Media Player"
+    APP = "Recursive Video Player"
     if os.name == "nt":
         settings = Path(os.environ.get("APPDATA",  Path.home() / "AppData" / "Roaming")) / APP
         local    = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))  / APP

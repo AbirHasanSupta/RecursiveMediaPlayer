@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 import threading
@@ -58,7 +58,7 @@ class AISearchManager:
             return self._app.settings_manager.settings.ai_index_path
         except Exception:
             return str(Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-                       / "Recursive Media Player" / "index_data")
+                       / "Recursive Video Player" / "index_data")
 
     def _ensure_bridge(self):
         url = self._get_server_url()

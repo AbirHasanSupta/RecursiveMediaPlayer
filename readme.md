@@ -1,4 +1,4 @@
-# Recursive Video Player
+﻿# Recursive Video Player
 
 A feature-rich video player with AI-powered semantic search, built for managing and playing large video collections across multiple directories.
 
@@ -82,7 +82,7 @@ Default: `http://0.0.0.0:8000`. Optional flags:
 |---|---|---|
 | `--host` | `0.0.0.0` | Bind address (`127.0.0.1` for local-only) |
 | `--port` | `8000` | Listening port |
-| `--out_dir` | `%LOCALAPPDATA%\Recursive Media Player\index_data` | Index directory to load on startup |
+| `--out_dir` | `%LOCALAPPDATA%\Recursive Video Player\index_data` | Index directory to load on startup |
 
 The server starts even without an index — you can build one from inside the app.
 

@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 import threading
 import tkinter as tk
@@ -44,7 +44,7 @@ class FavoriteEntry:
 
 class FavoriteStorage:
     def __init__(self):
-        self.favorites_dir = Path.home() / "Documents" / "Recursive Media Player" / "Favorites"
+        self.favorites_dir = Path.home() / "Documents" / "Recursive Video Player" / "Favorites"
         self.favorites_dir.mkdir(parents=True, exist_ok=True)
         self.favorites_file = self.favorites_dir / "favorites.json"
 
