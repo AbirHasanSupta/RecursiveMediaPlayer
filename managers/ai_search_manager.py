@@ -4,7 +4,6 @@ import os
 import threading
 import tkinter as tk
 from pathlib import Path
-from tkinter import font as tkfont
 from typing import Callable, Optional
 
 from managers.ai_search_bridge import AISearchBridge, AIPreprocessor
@@ -15,6 +14,15 @@ try:
     from tkinter import ttk
 except ImportError:
     pass
+
+try:
+    from PIL import Image, ImageTk
+    _PIL_OK = True
+except ImportError:
+    _PIL_OK = False
+
+_THUMB_W = 120
+_THUMB_H = 68
 
 
 class AISearchManager:
@@ -210,6 +218,13 @@ class AISearchUI:
         self._preprocessing = False
         self._debounce_id = None
 
+        self._selected_paths: set = set()
+        self._all_results: list = []
+        self._last_anchor_path: Optional[str] = None
+        self._card_frames: dict = {}
+        self._photo_cache: dict = {}
+        self._sel_count_lbl: Optional[tk.Label] = None
+
         self._pull_theme()
         self._build()
 
@@ -226,6 +241,8 @@ class AISearchUI:
         self.alt_row = getattr(a, "alt_row_color", "#F7F9FC")
         self.fn = getattr(a, "normal_font", ("Segoe UI", 10))
         self.fs = getattr(a, "small_font", ("Segoe UI", 9))
+        dark = getattr(a, "dark_mode", False)
+        self.accent_dim = "#172344" if dark else "#dbeafe"
 
     def _build(self):
         self._frame.configure(bg=self.bg)
@@ -255,7 +272,6 @@ class AISearchUI:
             insertbackground=self.accent,
         )
         self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=6, padx=(0, 8))
-        self.search_entry.insert(0, "")
         self.search_entry.bind("<Return>", lambda _e: self._on_search_click())
         self.search_entry.bind("<FocusIn>", lambda _e: search_wrap.config(
             highlightbackground=self.accent))
@@ -295,13 +311,9 @@ class AISearchUI:
         status_row = tk.Frame(top, bg=self.surface)
         status_row.pack(fill=tk.X, padx=16, pady=(0, 10))
 
-        self._status_icon = tk.Label(status_row, text="⏳", bg=self.surface,
-                                     fg=self.muted, font=("Segoe UI Emoji", 9))
-        self._status_icon.pack(side=tk.LEFT)
-
-        self._status_lbl = tk.Label(status_row, text="Initializing…",
+        self._status_lbl = tk.Label(status_row, text="⏳  Initializing…",
                                     bg=self.surface, fg=self.muted, font=self.fs)
-        self._status_lbl.pack(side=tk.LEFT, padx=(4, 0))
+        self._status_lbl.pack(side=tk.LEFT)
 
         self._retry_lbl = tk.Label(status_row, text="Retry", bg=self.surface,
                                    fg=self.accent, font=self.fs, cursor="hand2")
@@ -339,6 +351,10 @@ class AISearchUI:
         self._canvas.bind("<Configure>", self._on_canvas_configure)
         self._canvas.bind("<MouseWheel>", self._on_mousewheel)
         self._canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        self._canvas.bind("<Button-1>", lambda _e: self._clear_selection())
+        self._results_frame.bind("<Button-1>", lambda _e: self._clear_selection())
+        self._frame.bind("<Control-a>", lambda _e: self._select_all())
+        self._frame.bind("<Escape>", lambda _e: self._clear_selection())
 
         self._show_empty_state()
 
@@ -364,7 +380,6 @@ class AISearchUI:
         }
         icon, color = icons.get(state, ("●", self.muted))
         try:
-            self._status_icon.config(text=icon, fg=color)
             self._status_lbl.config(text=text, fg=color if state != "loading" else self.muted)
             self._retry_lbl.pack_forget()
             if state != "ready":
@@ -488,6 +503,10 @@ class AISearchUI:
                  font=("Segoe UI", 9), bg=self.bg, fg=self.muted).pack()
 
     def _clear_results(self):
+        self._selected_paths.clear()
+        self._all_results.clear()
+        self._card_frames.clear()
+        self._sel_count_lbl = None
         for w in self._result_widgets:
             try:
                 w.destroy()
@@ -506,9 +525,13 @@ class AISearchUI:
             self._show_no_results_state(self._last_query)
             return
 
+        self._all_results = list(results)
+        max_score = max(scores.values()) if scores else 1.0
+
         header = tk.Frame(self._results_frame, bg=self.bg)
         header.pack(fill=tk.X, padx=16, pady=(12, 6))
         self._result_widgets.append(header)
+
         tk.Label(header,
                  text=f"{len(results)} result{'s' if len(results) != 1 else ''} for  \"{self._last_query}\"",
                  font=("Segoe UI", 10, "bold"), bg=self.bg, fg=self.text).pack(side=tk.LEFT)
@@ -517,82 +540,88 @@ class AISearchUI:
             tk.Label(header, text=f"in {dir_lbl}",
                      font=self.fs, bg=self.bg, fg=self.muted).pack(side=tk.LEFT, padx=(6, 0))
 
+        self._sel_count_lbl = tk.Label(
+            header, text="", font=self.fs, bg=self.bg, fg=self.accent
+        )
+        self._sel_count_lbl.pack(side=tk.RIGHT, padx=(0, 8))
+
         for i, video_path in enumerate(results):
             row_bg = self.surface if i % 2 == 0 else self.alt_row
-            card = self._make_result_card(video_path, counts, scores, row_bg)
+            card = self._make_result_card(video_path, counts, scores, row_bg, max_score)
             card.pack(fill=tk.X, padx=16, pady=3)
             self._result_widgets.append(card)
 
         self._canvas.yview_moveto(0)
 
-    def _make_result_card(self, video_path: str, counts: dict, scores: dict, bg: str) -> tk.Frame:
+    def _make_result_card(self, video_path: str, counts: dict, scores: dict,
+                          bg: str, max_score: float = 15.0) -> tk.Frame:
         score = scores.get(video_path, 0.0)
         count = counts.get(video_path, 1)
-        filename = os.path.basename(video_path)
-        name_no_ext = os.path.splitext(filename)[0]
+        name_no_ext = os.path.splitext(os.path.basename(video_path))[0]
+        is_sel = video_path in self._selected_paths
+
+        card_bg = self.accent_dim if is_sel else bg
+        border_col = self.accent if is_sel else self.border
+        border_w = 2 if is_sel else 1
 
         card = tk.Frame(
-            self._results_frame, bg=bg,
-            highlightbackground=self.border, highlightthickness=1,
+            self._results_frame, bg=card_bg,
+            highlightbackground=border_col, highlightthickness=border_w,
         )
+        card._orig_bg = bg
+        self._card_frames[video_path] = card
 
-        def _enter(_e):
-            card.config(bg=self.hover, highlightbackground=self.accent)
-            for w in _all_card_widgets:
-                try:
-                    w.config(bg=self.hover)
-                except Exception:
-                    pass
-
-        def _leave(_e):
-            card.config(bg=bg, highlightbackground=self.border)
-            for w in _all_card_widgets:
-                try:
-                    w.config(bg=bg)
-                except Exception:
-                    pass
-
-        card.bind("<Enter>", _enter)
-        card.bind("<Leave>", _leave)
-        card.bind("<Double-Button-1>", lambda _e: self._play_video(video_path))
-
-        left = tk.Frame(card, bg=bg, width=72)
+        # ── Thumbnail ─────────────────────────────────────────────────────────
+        left = tk.Frame(card, bg=card_bg)
         left.pack(side=tk.LEFT, fill=tk.Y, padx=(10, 0), pady=10)
-        left.pack_propagate(False)
 
-        thumb_lbl = tk.Label(left, text="🎬", font=("Segoe UI Emoji", 22),
-                             bg=bg, fg=self.muted, width=4, height=2)
-        thumb_lbl.pack(expand=True)
+        thumb_container = tk.Frame(left, bg="#0b0c0f", width=_THUMB_W, height=_THUMB_H)
+        thumb_container.pack()
+        thumb_container.pack_propagate(False)
+        thumb_container._is_thumb = True
 
-        score_bar_bg = tk.Frame(left, bg=self.border, height=4)
-        score_bar_bg.pack(fill=tk.X, pady=(4, 0))
-        bar_fill = tk.Frame(score_bar_bg, bg=self._score_color(score), height=4)
-        bar_fill.place(relx=0, rely=0, relwidth=min(score, 1.0), relheight=1.0)
+        thumb_lbl = tk.Label(thumb_container, text="🎬",
+                             font=("Segoe UI Emoji", 14),
+                             bg="#0b0c0f", fg="#2e323c")
+        thumb_lbl.pack(fill=tk.BOTH, expand=True)
 
-        right = tk.Frame(card, bg=bg)
+        threading.Thread(
+            target=self._fetch_thumbnail_bg,
+            args=(video_path, os.path.normpath(video_path), thumb_lbl),
+            daemon=True,
+        ).start()
+
+        score_bar_bg = tk.Frame(left, bg=self.border, height=3)
+        score_bar_bg.pack(fill=tk.X, pady=(3, 0))
+        rel_w = min(score / max(max_score, 0.01), 1.0)
+        bar_fill = tk.Frame(score_bar_bg, bg=self._score_color(score, max_score), height=3)
+        bar_fill.place(relx=0, rely=0, relwidth=rel_w, relheight=1.0)
+
+        # ── Info ──────────────────────────────────────────────────────────────
+        right = tk.Frame(card, bg=card_bg)
         right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=12, pady=10)
 
         name_lbl = tk.Label(right, text=name_no_ext,
                             font=("Segoe UI", 10, "bold"),
-                            bg=bg, fg=self.text,
+                            bg=card_bg, fg=self.accent if is_sel else self.text,
                             anchor="w", justify=tk.LEFT)
         name_lbl.pack(fill=tk.X)
 
         meta_lbl = tk.Label(
             right,
             text=f"Score: {score:.2f}  ·  {count} matching frame{'s' if count != 1 else ''}",
-            font=self.fs, bg=bg, fg=self.muted, anchor="w",
+            font=self.fs, bg=card_bg, fg=self.muted, anchor="w",
         )
         meta_lbl.pack(fill=tk.X, pady=(2, 0))
 
         dir_lbl = tk.Label(
             right,
             text=os.path.dirname(video_path),
-            font=self.fs, bg=bg, fg=self.muted, anchor="w",
+            font=self.fs, bg=card_bg, fg=self.muted, anchor="w",
         )
         dir_lbl.pack(fill=tk.X)
 
-        btn_row = tk.Frame(right, bg=bg)
+        btn_row = tk.Frame(right, bg=card_bg)
         btn_row.pack(fill=tk.X, pady=(6, 0))
 
         play_btn = tk.Label(btn_row, text="▶  Play",
@@ -606,42 +635,435 @@ class AISearchUI:
 
         open_btn = tk.Label(btn_row, text="📂  Locate",
                             font=("Segoe UI", 9),
-                            bg=bg, fg=self.muted,
+                            bg=card_bg, fg=self.muted,
                             padx=8, pady=4, cursor="hand2",
                             highlightbackground=self.border, highlightthickness=1)
         open_btn.pack(side=tk.LEFT, padx=(0, 6))
         open_btn.bind("<Button-1>", lambda _e: self._locate_video(video_path))
-        open_btn.bind("<Enter>", lambda _e: open_btn.config(
-            fg=self.accent, highlightbackground=self.accent))
-        open_btn.bind("<Leave>", lambda _e: open_btn.config(
-            fg=self.muted, highlightbackground=self.border))
+        open_btn.bind("<Enter>", lambda _e: open_btn.config(fg=self.accent, highlightbackground=self.accent))
+        open_btn.bind("<Leave>", lambda _e: open_btn.config(fg=self.muted, highlightbackground=self.border))
 
-        queue_btn = tk.Label(btn_row, text="+ Queue",
-                             font=("Segoe UI", 9),
-                             bg=bg, fg=self.muted,
-                             padx=8, pady=4, cursor="hand2",
-                             highlightbackground=self.border, highlightthickness=1)
-        queue_btn.pack(side=tk.LEFT)
-        queue_btn.bind("<Button-1>", lambda _e: self._add_to_queue(video_path))
-        queue_btn.bind("<Enter>", lambda _e: queue_btn.config(
-            fg=self.accent, highlightbackground=self.accent))
-        queue_btn.bind("<Leave>", lambda _e: queue_btn.config(
-            fg=self.muted, highlightbackground=self.border))
+        # Store refs for selection state updates
+        card._name_lbl = name_lbl
+        card._content_widgets = [left, right, name_lbl, meta_lbl, dir_lbl, btn_row,
+                                  open_btn, score_bar_bg]
 
-        _all_card_widgets = [left, thumb_lbl, score_bar_bg, right,
-                              name_lbl, meta_lbl, dir_lbl, btn_row, open_btn, queue_btn]
-        for w in _all_card_widgets:
+        # ── Hover ─────────────────────────────────────────────────────────────
+        def _enter(_e, vp=video_path):
+            if vp not in self._selected_paths:
+                card.config(highlightbackground=self.accent, highlightthickness=1)
+
+        def _leave(_e, vp=video_path):
+            if vp not in self._selected_paths:
+                card.config(highlightbackground=self.border, highlightthickness=1)
+            self._hide_thumbnail_tooltip()
+
+        all_hover = [card, thumb_container, thumb_lbl, left, right, name_lbl,
+                     meta_lbl, dir_lbl, btn_row, open_btn, score_bar_bg]
+        for w in all_hover:
             w.bind("<Enter>", _enter)
             w.bind("<Leave>", _leave)
 
+        # ── Selection / right-click bindings (card body, NOT action buttons) ──
+        select_targets = [card, thumb_container, thumb_lbl, left, right,
+                          name_lbl, meta_lbl, dir_lbl, btn_row]
+        for w in select_targets:
+            w.bind("<Button-1>", lambda _e, vp=video_path: self._on_card_click(_e, vp))
+            w.bind("<Button-3>", lambda _e, vp=video_path: self._on_card_right_click(_e, vp))
+            w.bind("<Double-Button-1>", lambda _e, vp=video_path: self._play_video(vp))
+
         return card
 
-    def _score_color(self, score: float) -> str:
-        if score >= 0.75:
+    # ── Selection ─────────────────────────────────────────────────────────────
+
+    def _on_card_click(self, event, vp: str):
+        self._hide_thumbnail_tooltip()
+        ctrl = bool(event.state & 0x4)
+        shift = bool(event.state & 0x1)
+
+        if shift and self._last_anchor_path and self._last_anchor_path in self._all_results:
+            ai = self._all_results.index(self._last_anchor_path)
+            bi = self._all_results.index(vp) if vp in self._all_results else 0
+            for i in range(min(ai, bi), max(ai, bi) + 1):
+                self._selected_paths.add(self._all_results[i])
+                self._update_card_selection(self._all_results[i])
+        elif ctrl:
+            if vp in self._selected_paths:
+                self._selected_paths.discard(vp)
+            else:
+                self._selected_paths.add(vp)
+            self._update_card_selection(vp)
+            self._last_anchor_path = vp
+        else:
+            old = set(self._selected_paths)
+            self._selected_paths = {vp}
+            for op in old:
+                if op != vp:
+                    self._update_card_selection(op)
+            self._update_card_selection(vp)
+            self._last_anchor_path = vp
+
+        self._update_selection_label()
+
+    def _on_card_right_click(self, event, vp: str):
+        if vp not in self._selected_paths:
+            vpm = getattr(self._app, 'video_preview_manager', None)
+            if vpm and hasattr(vpm, '_thumbnails'):
+                vp_norm = os.path.normpath(vp)
+                th = vpm._thumbnails.get(vp_norm)
+                if th and hasattr(th, 'is_valid') and th.is_valid() and th.thumbnail_data:
+                    if hasattr(vpm, 'tooltip'):
+                        try:
+                            vpm.tooltip.show_preview(vp, th.thumbnail_data,
+                                                     event.x_root, event.y_root)
+                        except Exception:
+                            pass
+                        return
+                if hasattr(vpm, '_generate_thumbnail_async') and hasattr(vpm, '_lock'):
+                    try:
+                        with vpm._lock:
+                            already = vp_norm in getattr(vpm, '_generation_queue', set())
+                        if not already:
+                            vpm._generate_thumbnail_async(vp_norm, event.x_root, event.y_root)
+                    except Exception:
+                        pass
+            return
+        self._show_context_menu(event, vp)
+
+    def _update_card_selection(self, vp: str):
+        card = self._card_frames.get(vp)
+        if not card:
+            return
+        try:
+            if not card.winfo_exists():
+                return
+        except Exception:
+            return
+        is_sel = vp in self._selected_paths
+        bg = self.accent_dim if is_sel else card._orig_bg
+        name_fg = self.accent if is_sel else self.text
+        border_col = self.accent if is_sel else self.border
+        border_w = 2 if is_sel else 1
+
+        card.config(bg=bg, highlightbackground=border_col, highlightthickness=border_w)
+        for w in getattr(card, '_content_widgets', []):
+            try:
+                w.config(bg=bg)
+            except Exception:
+                pass
+        name_lbl = getattr(card, '_name_lbl', None)
+        if name_lbl:
+            try:
+                name_lbl.config(fg=name_fg)
+            except Exception:
+                pass
+
+    def _update_selection_label(self):
+        if not self._sel_count_lbl:
+            return
+        try:
+            if not self._sel_count_lbl.winfo_exists():
+                return
+            n = len(self._selected_paths)
+            self._sel_count_lbl.config(
+                text=f"{n} selected" if n > 0 else ""
+            )
+        except Exception:
+            pass
+
+    def _get_selected_videos(self) -> list:
+        return [vp for vp in self._all_results if vp in self._selected_paths]
+
+    def _select_all(self):
+        for vp in self._all_results:
+            self._selected_paths.add(vp)
+            self._update_card_selection(vp)
+        self._update_selection_label()
+
+    def _clear_selection(self):
+        old = set(self._selected_paths)
+        self._selected_paths.clear()
+        self._last_anchor_path = None
+        for vp in old:
+            self._update_card_selection(vp)
+        self._update_selection_label()
+
+    def _hide_thumbnail_tooltip(self):
+        try:
+            vpm = getattr(self._app, 'video_preview_manager', None)
+            if vpm and hasattr(vpm, 'tooltip') and vpm.tooltip:
+                if hasattr(vpm.tooltip, 'hide'):
+                    vpm.tooltip.hide()
+                elif hasattr(vpm.tooltip, 'hide_preview'):
+                    vpm.tooltip.hide_preview()
+        except Exception:
+            pass
+
+    # ── Context menu ──────────────────────────────────────────────────────────
+
+    def _make_context_menu(self):
+        tp = getattr(self._app, 'theme_provider', None)
+        if tp is None and hasattr(self._app, 'create_manager_context_menu'):
+            tp = self._app
+        if tp and hasattr(tp, 'create_manager_context_menu'):
+            return tp.create_manager_context_menu(self._root)
+        dark = getattr(self._app, 'dark_mode', False)
+        bg = getattr(self._app, 'surface_color', '#1A1E26' if dark else '#FFFFFF')
+        fg = getattr(self._app, 'text_color', '#E2E8F0' if dark else '#1E2A3A')
+        hover = getattr(self._app, 'hover_color', '#252C38' if dark else '#EDF2F7')
+        return tk.Menu(
+            self._root, tearoff=0,
+            bg=bg, fg=fg,
+            activebackground=hover, activeforeground=fg,
+            relief='flat', bd=1, font=('Segoe UI', 10),
+        )
+
+    def _show_context_menu(self, event, vp: str):
+        if not self._selected_paths:
+            return
+        menu = self._make_context_menu()
+        n = len(self._selected_paths)
+        single = vp if n == 1 else None
+        gvm = getattr(self._app, 'grid_view_manager', None)
+
+        # 1. Play
+        menu.add_command(
+            label=f"▶  Play Selected  ({n})" if n > 1 else "▶  Play",
+            command=self._play_selected,
+        )
+
+        # 2. Selection
+        menu.add_separator()
+        menu.add_command(label="Select All", command=self._select_all)
+        menu.add_command(label="Clear Selection", command=self._clear_selection)
+
+        # 3. Gallery
+        menu.add_separator()
+        menu.add_command(label="Open in Gallery", command=self._open_in_gallery)
+
+        # 4. Playlist / Favourites / Queue
+        menu.add_separator()
+        menu.add_command(label="Add to Playlist", command=self._ctx_add_to_playlist)
+        if gvm and gvm.is_favourite_callback:
+            sel = list(self._selected_paths)
+            all_fav = all(gvm.is_favourite_callback(v) for v in sel)
+            if all_fav and gvm.remove_from_favourites_callback:
+                menu.add_command(label="Remove from Favourites",
+                                 command=self._ctx_remove_from_favourites)
+            elif gvm.add_to_favourites_callback:
+                menu.add_command(label="Add to Favourites",
+                                 command=self._ctx_add_to_favourites)
+        menu.add_command(label="Add to Queue", command=self._ctx_add_to_queue)
+
+        # 5. Dual player Win 1
+        if gvm:
+            win1_slots = [s for s in (1, 2, 3)
+                          if getattr(gvm, f'play_in_dual_player{s}_callback', None)]
+            has_win2 = any(getattr(gvm, f'play_in_dual_player_win2_{s}_callback', None)
+                           for s in (1, 2, 3))
+            if win1_slots or has_win2:
+                menu.add_separator()
+            for slot in win1_slots:
+                menu.add_command(
+                    label=f"▶ Win 1 › Player {slot}",
+                    command=lambda s=slot: self._ctx_dual_player(1, s),
+                )
+            if has_win2:
+                menu.add_separator()
+                for slot in (1, 2, 3):
+                    if getattr(gvm, f'play_in_dual_player_win2_{slot}_callback', None):
+                        menu.add_command(
+                            label=f"▶ Win 2 › Player {slot}",
+                            command=lambda s=slot: self._ctx_dual_player(2, s),
+                        )
+
+        # 6. File actions (single selection only)
+        if single and os.path.isfile(single):
+            menu.add_separator()
+            menu.add_command(label="Open File Location",
+                             command=lambda: self._locate_video(single))
+            menu.add_command(label="Properties",
+                             command=lambda: self._ctx_properties(single))
+            if hasattr(self._app, 'locate_in_directory_panel'):
+                menu.add_command(label="Show in Panel",
+                                 command=lambda: self._locate_video(single))
+
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _play_selected(self):
+        videos = self._get_selected_videos()
+        if videos:
+            try:
+                self._app._play_grid_videos(videos)
+            except Exception as e:
+                self._manager._log(f"AI Search play error: {e}")
+
+    def _ctx_add_to_playlist(self):
+        videos = self._get_selected_videos()
+        if not videos:
+            return
+        gvm = getattr(self._app, 'grid_view_manager', None)
+        if gvm and gvm.add_to_playlist_callback:
+            gvm.add_to_playlist_callback(videos)
+            return
+        try:
+            self._app.playlist_manager.add_videos_to_playlist_dialog(videos)
+        except Exception:
+            pass
+
+    def _ctx_add_to_queue(self):
+        videos = self._get_selected_videos()
+        if videos:
+            try:
+                self._app.queue_manager.add_to_queue(videos, added_from="ai_search")
+            except Exception as e:
+                self._manager._log(f"AI Search queue error: {e}")
+
+    def _ctx_add_to_favourites(self):
+        videos = self._get_selected_videos()
+        if not videos:
+            return
+        gvm = getattr(self._app, 'grid_view_manager', None)
+        if gvm and gvm.add_to_favourites_callback:
+            gvm.add_to_favourites_callback(videos)
+
+    def _ctx_remove_from_favourites(self):
+        videos = self._get_selected_videos()
+        if not videos:
+            return
+        gvm = getattr(self._app, 'grid_view_manager', None)
+        if gvm and gvm.remove_from_favourites_callback:
+            gvm.remove_from_favourites_callback(videos)
+
+    def _ctx_dual_player(self, win: int, slot: int):
+        videos = self._get_selected_videos()
+        if not videos:
+            return
+        gvm = getattr(self._app, 'grid_view_manager', None)
+        if not gvm:
+            return
+        attr = (f"play_in_dual_player{slot}_callback" if win == 1
+                else f"play_in_dual_player_win2_{slot}_callback")
+        cb = getattr(gvm, attr, None)
+        if cb:
+            cb(videos)
+
+    def _ctx_properties(self, fp: str):
+        gvm = getattr(self._app, 'grid_view_manager', None)
+        if gvm and gvm.show_properties_callback:
+            gvm.show_properties_callback(fp)
+            return
+        try:
+            from datetime import datetime as _dt
+            si = os.stat(fp)
+            info = (f"File: {os.path.basename(fp)}\n\n"
+                    f"Path: {fp}\n\n"
+                    f"Size: {si.st_size / (1024 * 1024):.2f} MB ({si.st_size:,} bytes)\n\n"
+                    f"Modified: {_dt.fromtimestamp(si.st_mtime):%Y-%m-%d %H:%M:%S}\n\n")
+            import tkinter.messagebox as _mb
+            _mb.showinfo("Properties", info)
+        except Exception:
+            pass
+
+    def _open_in_gallery(self):
+        paths = self._get_selected_videos() or list(self._all_results)
+        if not paths:
+            return
+        try:
+            vpm = getattr(self._app, 'video_preview_manager', None)
+            self._app.grid_view_manager.show_grid_view(paths, video_preview_manager=vpm)
+        except Exception as e:
+            self._manager._log(f"Open in gallery error: {e}")
+
+    # ── Thumbnails ────────────────────────────────────────────────────────────
+
+    def _fetch_thumbnail_bg(self, vp: str, vp_norm: str, label: tk.Label):
+        try:
+            cached = self._photo_cache.get(vp_norm)
+            if cached:
+                self._root.after(0, lambda lbl=label, p=cached: self._set_thumb_label(lbl, p))
+                return
+
+            vpm = getattr(self._app, 'video_preview_manager', None)
+
+            if vpm and hasattr(vpm, 'lru_cache'):
+                photo = vpm.lru_cache.get(vp_norm)
+                if photo:
+                    self._photo_cache[vp_norm] = photo
+                    self._root.after(0, lambda lbl=label, p=photo: self._set_thumb_label(lbl, p))
+                    return
+
+            pil_img = None
+
+            if vpm and hasattr(vpm, '_thumbnails') and _PIL_OK:
+                th = vpm._thumbnails.get(vp_norm)
+                if th and hasattr(th, 'blob_path') and th.blob_path:
+                    try:
+                        if th.blob_path.exists():
+                            pil_img = Image.open(str(th.blob_path)).convert("RGB")
+                    except Exception:
+                        pass
+
+            if pil_img is None and _PIL_OK:
+                try:
+                    import cv2
+                    cap = cv2.VideoCapture(vp)
+                    ret, frame = cap.read()
+                    cap.release()
+                    if ret and frame is not None:
+                        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        pil_img = Image.fromarray(frame_rgb)
+                except Exception:
+                    pass
+
+            if pil_img is None:
+                return
+
+            sw, sh = pil_img.size
+            scale = min(_THUMB_W / sw, _THUMB_H / sh)
+            nw, nh = int(sw * scale), int(sh * scale)
+            pil_img = pil_img.resize((nw, nh), Image.Resampling.LANCZOS)
+            canvas = Image.new("RGB", (_THUMB_W, _THUMB_H), (11, 12, 17))
+            canvas.paste(pil_img, ((_THUMB_W - nw) // 2, (_THUMB_H - nh) // 2))
+
+            self._root.after(0, lambda img=canvas, lbl=label, p=vp_norm:
+                             self._apply_thumbnail(img, lbl, p))
+        except Exception:
+            pass
+
+    def _apply_thumbnail(self, pil_img, label: tk.Label, vp_norm: str):
+        if not _PIL_OK:
+            return
+        try:
+            if not label.winfo_exists():
+                return
+            photo = ImageTk.PhotoImage(pil_img)
+            self._photo_cache[vp_norm] = photo
+            label.configure(image=photo, text="")
+            label.image = photo
+        except Exception:
+            pass
+
+    def _set_thumb_label(self, label: tk.Label, photo):
+        try:
+            if label.winfo_exists():
+                label.configure(image=photo, text="")
+                label.image = photo
+        except Exception:
+            pass
+
+    # ── Misc ──────────────────────────────────────────────────────────────────
+
+    def _score_color(self, score: float, max_score: float = 15.0) -> str:
+        ratio = score / max(max_score, 0.01)
+        if ratio >= 0.75:
             return "#34c98a"
-        if score >= 0.50:
+        if ratio >= 0.50:
             return "#5E81F4"
-        if score >= 0.30:
+        if ratio >= 0.25:
             return "#f5a623"
         return "#aaaaaa"
 
