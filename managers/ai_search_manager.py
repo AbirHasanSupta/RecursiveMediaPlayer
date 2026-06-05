@@ -338,9 +338,10 @@ class AISearchUI:
         self._canvas = tk.Canvas(self._results_outer, bg=self.bg,
                                  highlightthickness=0, bd=0)
         self._scrollbar = ttk.Scrollbar(self._results_outer, orient="vertical",
-                                        command=self._canvas.yview)
+                                        command=self._canvas.yview,
+                                        style="ExclusionTree.Vertical.TScrollbar")
         self._canvas.configure(yscrollcommand=self._scrollbar.set)
-        self._scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self._scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
         self._canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         self._results_frame = tk.Frame(self._canvas, bg=self.bg)

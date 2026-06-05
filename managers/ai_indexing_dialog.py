@@ -16,6 +16,92 @@ _RE_FILENAME = re.compile(r'[Pp]rocessing[:\s]+(.+\.(?:mp4|mkv|avi|mov|wmv|flv|w
                           re.IGNORECASE)
 
 
+class _ModernProgressBar:
+    _H = 12
+
+    def __init__(self, parent, track_bg, accent, success="#34c98a"):
+        self._track_bg = track_bg
+        self._accent = accent
+        self._success = success
+        self._value = 0.0
+        self._maximum = 100.0
+        self._mode = "determinate"
+        self._anim_id = None
+        self._anim_pos = 0.0
+
+        self._canvas = tk.Canvas(
+            parent, height=self._H, bg=track_bg,
+            highlightthickness=0, bd=0,
+        )
+        self._canvas.bind("<Configure>", lambda _e: self._redraw())
+
+    def pack(self, **kw):
+        self._canvas.pack(**kw)
+
+    def configure(self, **kw):
+        kw.pop("length", None)
+        changed = False
+        if "mode" in kw:
+            self._mode = kw.pop("mode")
+            changed = True
+        if "maximum" in kw:
+            self._maximum = float(kw.pop("maximum"))
+            changed = True
+        if "value" in kw:
+            self._value = float(kw.pop("value"))
+            changed = True
+        if kw:
+            self._canvas.configure(**kw)
+        if changed:
+            self._redraw()
+
+    config = configure
+
+    def start(self, ms=15):
+        self._stop_anim()
+        self._mode = "indeterminate"
+        self._anim_pos = 0.0
+        self._tick(ms)
+
+    def stop(self):
+        self._stop_anim()
+
+    def _stop_anim(self):
+        if self._anim_id is not None:
+            try:
+                self._canvas.after_cancel(self._anim_id)
+            except Exception:
+                pass
+            self._anim_id = None
+
+    def _tick(self, ms):
+        self._anim_pos = (self._anim_pos + 0.025) % 1.0
+        self._redraw()
+        self._anim_id = self._canvas.after(ms, lambda: self._tick(ms))
+
+    def _redraw(self):
+        c = self._canvas
+        w = c.winfo_width()
+        h = c.winfo_height()
+        if w < 4:
+            return
+        c.delete("all")
+        c.create_rectangle(0, 0, w, h, fill=self._track_bg, outline="")
+        if self._mode == "indeterminate":
+            streak = max(60, int(w * 0.30))
+            x0 = int(self._anim_pos * (w + streak)) - streak
+            x1 = min(w, x0 + streak)
+            x0 = max(0, x0)
+            if x1 > x0:
+                c.create_rectangle(x0, 2, x1, h - 2, fill=self._accent, outline="")
+        else:
+            ratio = min(self._value / max(self._maximum, 1.0), 1.0)
+            fw = int(w * ratio)
+            if fw > 0:
+                color = self._success if ratio >= 1.0 else self._accent
+                c.create_rectangle(0, 2, fw, h - 2, fill=color, outline="")
+
+
 class IndexingDialog:
     def __init__(self, root: tk.Misc, app, manager: "AISearchManager"):
         self._root = root
@@ -161,26 +247,35 @@ class IndexingDialog:
         tk.Frame(outer, bg=border, height=1).pack(fill=tk.X, pady=(0, 14))
 
         _section_lbl("PROGRESS")
-        self._progress_bar = ttk.Progressbar(outer, mode="determinate",
-                                              length=440, maximum=100)
-        self._progress_bar.pack(fill=tk.X, pady=(0, 6))
 
-        self._progress_lbl = tk.Label(outer, text="Ready to start",
-                                      font=fs, bg=bg, fg=muted, anchor="w")
-        self._progress_lbl.pack(fill=tk.X)
+        prog_card = tk.Frame(outer, bg=surface,
+                             highlightbackground=border, highlightthickness=1)
+        prog_card.pack(fill=tk.X, pady=(0, 4))
+        prog_inner = tk.Frame(prog_card, bg=surface)
+        prog_inner.pack(fill=tk.BOTH, expand=True, padx=14, pady=12)
 
-        self._file_lbl = tk.Label(outer, text="",
-                                  font=fs, bg=bg, fg=muted, anchor="w",
-                                  wraplength=440, justify=tk.LEFT)
-        self._file_lbl.pack(fill=tk.X, pady=(2, 8))
+        self._progress_lbl = tk.Label(prog_inner, text="Ready to start",
+                                      font=fs, bg=surface, fg=muted, anchor="w")
+        self._progress_lbl.pack(fill=tk.X, pady=(0, 8))
+
+        dark = getattr(tp, 'dark_mode', False)
+        track_bg = getattr(tp, 'border_color', "#2A303C" if dark else "#E2E8F0")
+        self._progress_bar = _ModernProgressBar(prog_inner, track_bg, accent)
+        self._progress_bar.pack(fill=tk.X)
+
+        self._file_lbl = tk.Label(prog_inner, text="",
+                                  font=fs, bg=surface, fg=muted, anchor="w",
+                                  wraplength=460, justify=tk.LEFT)
+        self._file_lbl.pack(fill=tk.X, pady=(7, 0))
 
         log_frame = tk.Frame(outer, bg=surface,
                              highlightbackground=border, highlightthickness=1)
-        log_frame.pack(fill=tk.X, pady=(0, 16))
-        log_scroll = tk.Scrollbar(log_frame)
-        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        log_frame.pack(fill=tk.X, pady=(12, 16))
+        log_scroll = ttk.Scrollbar(log_frame, orient=tk.VERTICAL,
+                                   style="ExclusionTree.Vertical.TScrollbar")
+        log_scroll.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
         self._log_text = tk.Text(
-            log_frame, height=6,
+            log_frame, height=10,
             bg=getattr(tp, "console_bg", "#1E2A3A"),
             fg=getattr(tp, "console_fg", "#F7F9FC"),
             font=("Consolas", 8),
