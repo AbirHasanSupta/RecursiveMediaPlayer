@@ -17,9 +17,12 @@ import os
 import json
 import pickle
 import gc
+import subprocess
+import sys
+import threading
 from pathlib import Path
 from collections import Counter, defaultdict
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 import concurrent.futures
 import re
 import psutil
@@ -62,6 +65,170 @@ except Exception:
     _DEEPFACE_AVAILABLE = False
 
 import faiss
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request
+import uvicorn
+
+_api_searcher = None
+_server_out_dir: str = ""   # set at --mode server startup
+
+# ── Preprocessing state ──────────────────────────────────────────────────────
+# Shared between the /index/* endpoints and the background subprocess thread.
+_preprocess_lock = threading.Lock()
+_preprocess_state: dict = {
+    "running": False,
+    "pending_lines": [],   # lines not yet polled by client
+    "done": False,
+    "success": False,
+    "error": None,
+    "_process": None,      # subprocess.Popen handle
+}
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    yield
+
+
+app = FastAPI(lifespan=_lifespan)
+
+
+@app.get("/status")
+async def api_status():
+    """Lightweight readiness probe — polled by AIServerBridge at startup."""
+    global _api_searcher
+    if _api_searcher is None:
+        return {"status": "no_index"}
+    try:
+        unique_videos = len(set(_api_searcher.metadata["video_paths"]))
+        device = str(_api_searcher.device)
+    except Exception:
+        unique_videos = 0
+        device = "unknown"
+    return {"status": "ready", "device": device, "video_count": unique_videos}
+
+
+@app.post("/search")
+async def api_search(req: Request):
+    global _api_searcher
+    payload = await req.json()
+    query_text = payload.get("query", "").strip()
+    top_k = int(payload.get("top_k", 20))
+    directory = payload.get("directory")
+    qid = payload.get("_qid")
+    try:
+        if directory:
+            results, counts, scores = _api_searcher.query_filtered_by_directory(
+                query_text, directory, top_k, caption_weight=0.4
+            )
+        else:
+            results, counts, scores = _api_searcher.query(query_text, top_k, caption_weight=0.4)
+
+        results = [r for r in results if os.path.isfile(r)]
+        result_set = set(results)
+        counts = {k: v for k, v in counts.items() if k in result_set}
+        scores = {k: v for k, v in scores.items() if k in result_set}
+
+        response = {
+            "results": results,
+            "counts": counts,
+            "scores": {k: float(v) for k, v in scores.items()},
+        }
+        if qid is not None:
+            response["_qid"] = qid
+        return response
+    except Exception as exc:
+        return {"error": str(exc), "results": [], "counts": {}, "scores": {}}
+
+
+# ── Indexing (preprocessing) endpoints ──────────────────────────────────────
+
+@app.post("/index/start")
+async def api_index_start(req: Request):
+    """Start preprocessing in a background subprocess. Non-blocking."""
+    global _preprocess_state, _preprocess_lock
+    payload = await req.json()
+    with _preprocess_lock:
+        if _preprocess_state["running"]:
+            return {"status": "already_running"}
+        _preprocess_state.update({
+            "running": True,
+            "pending_lines": [],
+            "done": False,
+            "success": False,
+            "error": None,
+            "_process": None,
+        })
+    threading.Thread(
+        target=_run_preprocess_subprocess, args=(payload,), daemon=True
+    ).start()
+    return {"status": "started"}
+
+
+@app.get("/index/status")
+async def api_index_status():
+    """Poll preprocessing progress. Lines are consumed (cleared) on each call."""
+    global _preprocess_state, _preprocess_lock
+    with _preprocess_lock:
+        lines = list(_preprocess_state["pending_lines"])
+        _preprocess_state["pending_lines"].clear()
+        return {
+            "running": _preprocess_state["running"],
+            "lines": lines,
+            "done": _preprocess_state["done"],
+            "success": _preprocess_state["success"],
+            "error": _preprocess_state["error"],
+        }
+
+
+@app.post("/index/cancel")
+async def api_index_cancel():
+    """Terminate a running preprocessing subprocess."""
+    global _preprocess_state, _preprocess_lock
+    with _preprocess_lock:
+        proc = _preprocess_state.get("_process")
+    if proc and proc.poll() is None:
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+    with _preprocess_lock:
+        _preprocess_state.update({
+            "running": False,
+            "done": True,
+            "success": False,
+            "error": "cancelled",
+        })
+    return {"status": "cancelled"}
+
+
+@app.post("/index/reload")
+async def api_index_reload(req: Request):
+    """Reload the in-memory searcher after a new index has been built."""
+    global _api_searcher, _server_out_dir
+    payload = await req.json()
+    out_dir = payload.get("out_dir") or _server_out_dir
+    clip_path  = str(Path(out_dir) / "clip_index.faiss")
+    text_path  = str(Path(out_dir) / "text_index.faiss")
+    meta_path  = str(Path(out_dir) / "metadata.pkl")
+    tfidf_path = str(Path(out_dir) / "tfidf_index.pkl")
+    missing = [f for f in [clip_path, text_path, meta_path, tfidf_path]
+               if not os.path.exists(f)]
+    if missing:
+        return {"status": "no_index", "error": f"Missing files: {missing}"}
+    try:
+        _api_searcher = HighAccuracyVideoSearcher(
+            clip_path, text_path, meta_path, tfidf_path
+        )
+        unique_videos = len(set(_api_searcher.metadata["video_paths"]))
+        device = str(_api_searcher.device)
+        return {"status": "reloaded", "device": device, "video_count": unique_videos}
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
 
 
 def get_memory_info():
@@ -1184,9 +1351,76 @@ def select_video_directory():
         print(f"Error in directory selection: {e}")
         return None
 
+
+def _run_preprocess_subprocess(payload: dict) -> None:
+    """
+    Spawn ``enhanced_model.py --mode preprocess ...`` as a child process,
+    capture its stdout into _preprocess_state['pending_lines'] for polling.
+    """
+    global _preprocess_state, _preprocess_lock
+
+    out_dir       = str(payload.get("out_dir", ""))
+    videos_dir    = str(payload.get("videos_dir", ""))
+    workers       = int(payload.get("workers", 3))
+    max_frames    = int(payload.get("max_frames", 60))
+    force_rebuild = bool(payload.get("force_rebuild", False))
+    exclude_dirs  = str(payload.get("exclude_dirs", "raw"))
+
+    cmd = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--mode", "preprocess",
+        "--videos_dir", videos_dir,
+        "--out_dir", out_dir,
+        "--workers", str(workers),
+        "--max_frames", str(max_frames),
+        "--exclude_dirs", exclude_dirs,
+    ]
+    if force_rebuild:
+        cmd.append("--force_rebuild")
+    else:
+        cmd.append("--incremental")
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        with _preprocess_lock:
+            _preprocess_state["_process"] = proc
+
+        for raw in proc.stdout:
+            line = raw.strip()
+            if line:
+                with _preprocess_lock:
+                    _preprocess_state["pending_lines"].append(line)
+
+        return_code = proc.wait()
+        success = (return_code == 0)
+        with _preprocess_lock:
+            _preprocess_state.update({
+                "running": False,
+                "done": True,
+                "success": success,
+                "error": None if success else f"exit code {return_code}",
+            })
+
+    except Exception as exc:
+        with _preprocess_lock:
+            _preprocess_state.update({
+                "running": False,
+                "done": True,
+                "success": False,
+                "error": str(exc),
+            })
+
+
 def main():
     parser = argparse.ArgumentParser(description="High-Accuracy Video Search with Resource Management")
-    parser.add_argument("--mode", choices=["preprocess", "search"], required=True)
+    parser.add_argument("--mode", choices=["preprocess", "search", "server"], required=True)
     parser.add_argument("--videos_dir", default=None, help="Video directory (will prompt if not provided)")
     parser.add_argument("--out_dir", default=str(__import__("pathlib").Path(__import__("os").environ.get("LOCALAPPDATA", __import__("pathlib").Path.home() / "AppData" / "Local")) / "Recursive Media Player" / "index_data"),
                         help="Output directory for index files")
@@ -1204,6 +1438,8 @@ def main():
     parser.add_argument("--text_weight", type=float, default=0.35)
     parser.add_argument("--tfidf_weight", type=float, default=0.3)
     parser.add_argument("--keep_alive", action="store_true", help="Interactive mode")
+    parser.add_argument("--host", type=str, default="0.0.0.0")
+    parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
 
     if args.mode == "preprocess":
@@ -1407,6 +1643,29 @@ def main():
             }
 
             print(json.dumps(output_data, indent=2))
+
+    elif args.mode == "server":
+        global _api_searcher, _server_out_dir
+        out_dir_to_use = args.out_dir
+        _server_out_dir = out_dir_to_use
+        clip_index_path = str(Path(out_dir_to_use) / "clip_index.faiss")
+        text_index_path = str(Path(out_dir_to_use) / "text_index.faiss")
+        metadata_path   = str(Path(out_dir_to_use) / "metadata.pkl")
+        tfidf_path      = str(Path(out_dir_to_use) / "tfidf_index.pkl")
+        missing_files   = [f for f in [clip_index_path, text_index_path,
+                                       metadata_path, tfidf_path]
+                           if not os.path.exists(f)]
+        if missing_files:
+            # Start server without search capability — index can be built via /index/start
+            print(f"No index found in {out_dir_to_use} — server starting without search.")
+            print("Use POST /index/start to build an index, then POST /index/reload.")
+            _api_searcher = None
+        else:
+            _api_searcher = HighAccuracyVideoSearcher(
+                clip_index_path, text_index_path, metadata_path, tfidf_path
+            )
+        print(f"FastAPI server starting on http://{args.host}:{args.port}")
+        uvicorn.run(app, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

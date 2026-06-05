@@ -6,7 +6,7 @@ import tkinter as tk
 from pathlib import Path
 from typing import Callable, Optional
 
-from managers.ai_search_bridge import AISearchBridge, AIPreprocessor
+from managers.ai_search_bridge import AIServerBridge
 from managers.ai_indexing_dialog import IndexingDialog
 from managers.ai_index_status import IndexStatus, IndexStatusChecker
 
@@ -30,8 +30,8 @@ class AISearchManager:
         self._root = root
         self._app = app
         self._log = logger or (lambda m: None)
-        self._bridge: Optional[AISearchBridge] = None
-        self._preprocessor = AIPreprocessor(logger=self._log)
+        self._bridge: Optional[AIServerBridge] = None
+        self._preprocessor = None
         self._directory_filter: list = []
         self._active_ui: Optional[AISearchUI] = None
         self._bridge_start_attempted = False
@@ -68,11 +68,13 @@ class AISearchManager:
                     )
             return
 
-        if self._bridge_start_attempted and self._bridge and self._bridge._process and \
-                self._bridge._process.poll() is None:
+        # If a start was already attempted and the bridge is still alive, do not
+        # double-start.  Use is_ready() only — no internal attribute access.
+        if self._bridge_start_attempted and self._bridge and not self._bridge.is_ready():
+            # Could still be loading; wait for poll to notice
             return
 
-        self._bridge = AISearchBridge(
+        self._bridge = AIServerBridge(
             index_dir, root=self._root, logger=self._log,
             on_ready_callback=self._on_bridge_ready,
         )
@@ -96,10 +98,8 @@ class AISearchManager:
             return
         if self._bridge and self._bridge.is_ready():
             return
+        # Timeout after ~60 s (120 × 500 ms)
         if attempts > 120:
-            self._on_bridge_error()
-            return
-        if self._bridge and self._bridge._process and self._bridge._process.poll() is not None:
             self._on_bridge_error()
             return
         self._root.after(500, lambda: self._poll_bridge_ready(attempts + 1))
