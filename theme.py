@@ -881,7 +881,19 @@ class ThemeSelector:
                     widget.configure(bg=self.bg_color)
             elif isinstance(widget, tk.Entry):
                 if widget is getattr(self, 'global_search_entry', None):
-                    widget.configure(bg=self.entry_bg, fg=self.entry_fg, insertbackground=self.accent_color)
+                    widget.configure(
+                        bg=self.entry_bg, fg=self.entry_fg,
+                        insertbackground=self.accent_color,
+                        readonlybackground=self.entry_bg,
+                        disabledbackground=self.entry_bg,
+                    )
+                else:
+                    widget.configure(
+                        bg=self.entry_bg, fg=self.entry_fg,
+                        insertbackground=self.entry_fg,
+                        readonlybackground=self.entry_bg,
+                        disabledbackground=self.entry_bg,
+                    )
             elif isinstance(widget, tk.Label):
                 if widget is getattr(self, 'global_search_icon', None):
                     widget.configure(bg=self.entry_bg, fg=self.text_muted)
@@ -925,6 +937,8 @@ class ThemeSelector:
                         bg=self.entry_bg, fg=self.entry_fg,
                         insertbackground=self.entry_fg,
                         highlightbackground=self.entry_border,
+                        readonlybackground=self.entry_bg,
+                        disabledbackground=self.entry_bg,
                     )
                 for child in widget.winfo_children():
                     _walk(child)
@@ -1267,6 +1281,8 @@ class ThemeSelector:
                         bg=self.entry_bg, fg=self.entry_fg,
                         insertbackground=self.entry_fg,
                         highlightbackground=self.entry_border,
+                        readonlybackground=self.entry_bg,
+                        disabledbackground=self.entry_bg,
                     )
 
                 if isinstance(widget, tk.Text):

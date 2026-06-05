@@ -162,6 +162,7 @@ def select_multiple_folders_and_play():
                 self.root, self, self.update_console
             )
             self.settings_manager = SettingsManager(self.root, self, self.update_console, enable_ai=True)
+            self._update_ai_search_visibility()
             self.toast = Toast(self.root, self)
             self.setup_exclusion_section()
 
@@ -435,6 +436,9 @@ def select_multiple_folders_and_play():
             self.root.after(100, self._show_home_view)
             self._setup_periodic_cleanup()
             self.resource_manager.register_cleanup_callback(self._cleanup_managers)
+
+        def _on_settings_changed_ui(self, new_settings):
+            self._update_ai_search_visibility()
 
         def _on_favorites_removed(self, removed_videos):
             """Called when videos are removed from favorites."""
@@ -3818,6 +3822,9 @@ def select_multiple_folders_and_play():
                     pass
 
         def _show_ai_search(self):
+            if not self.settings_manager.get_settings().ai_search_enabled:
+                self.toast.warning("AI Search", "AI search is disabled in settings.")
+                return
             self._show_embedded_view(
                 "ai_search",
                 lambda frame: self.ai_search_manager.show_embedded(
@@ -5745,6 +5752,10 @@ def select_multiple_folders_and_play():
                     self._last_show_annotations = new_show
                     self._toggle_annotation_columns(new_show)
 
+            self._update_ai_search_visibility()
+            if not new_settings.ai_search_enabled and getattr(self, '_active_app_view', None) == "ai_search":
+                self._show_home_view()
+
         def _toggle_annotation_columns(self, enabled):
             pass
 
@@ -5760,6 +5771,27 @@ def select_multiple_folders_and_play():
         # ------------------------------------------------------------------
         # Action buttons (toolbar) — identical to original
         # ------------------------------------------------------------------
+        def _update_ai_search_visibility(self):
+            if not hasattr(self, 'settings_manager'):
+                return
+            enabled = self.settings_manager.get_settings().ai_search_enabled
+            if not hasattr(self, 'ai_search_pill_container'):
+                return
+
+            if not hasattr(self, '_ai_search_pill_packed'):
+                # When setup_action_buttons runs, it initially packs it
+                self._ai_search_pill_packed = True
+
+            if enabled:
+                if not self._ai_search_pill_packed:
+                    history_container = self._media_pill_btns["History"]._pill_container
+                    self.ai_search_pill_container.pack(side=tk.LEFT, padx=2, after=history_container)
+                    self._ai_search_pill_packed = True
+            else:
+                if self._ai_search_pill_packed:
+                    self.ai_search_pill_container.pack_forget()
+                    self._ai_search_pill_packed = False
+
 
         def _make_media_pill(self, label):
             container = tk.Frame(self.workspace_nav, bg=self.bg_color)
@@ -5793,10 +5825,7 @@ def select_multiple_folders_and_play():
             self._bind_media_pill_hover(btn, label)
 
             self._media_pill_btns[label] = btn
-            if not hasattr(self, '_media_pill_labels'):
-                self._media_pill_labels = {}
-            self._media_pill_labels[label] = label
-            return btn
+            return container, btn
 
         def setup_action_buttons(self):
             self._view_tab_labels = {
@@ -5838,7 +5867,9 @@ def select_multiple_folders_and_play():
             self._toolbar_commands = {}
 
             for pill_label in ["Home", "Gallery", "Playlist", "Favourites", "Queue", "Tags & Ratings", "History", "AI Search"]:
-                self._make_media_pill(pill_label)
+                container, btn = self._make_media_pill(pill_label)
+                if pill_label == "AI Search":
+                    self.ai_search_pill_container = container
 
             sb = self._sidebar_panel
 

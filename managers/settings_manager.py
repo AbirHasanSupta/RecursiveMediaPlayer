@@ -125,6 +125,7 @@ class SettingsData:
         self.enable_watch_history = True
         self.dual_window_enabled = False
         self.gaming_mode = False
+        self.ai_search_enabled = False
         self.show_video_annotations_in_tree = True
         self.hotkeys: Dict[str, str] = dict(DEFAULT_HOTKEYS)
         self.ai_server_url: str = ""
@@ -147,6 +148,7 @@ class SettingsData:
             'gaming_mode': self.gaming_mode,
             'show_video_annotations_in_tree': self.show_video_annotations_in_tree,
             'ai_server_url': self.ai_server_url,
+            'ai_search_enabled': self.ai_search_enabled,
         }
 
     @classmethod
@@ -167,6 +169,7 @@ class SettingsData:
         settings.gaming_mode = data.get('gaming_mode', False)
         settings.show_video_annotations_in_tree = data.get('show_video_annotations_in_tree', True)
         settings.ai_server_url = data.get('ai_server_url', '')
+        settings.ai_search_enabled = data.get('ai_search_enabled', False)
         saved_hotkeys = data.get('hotkeys', {})
         if isinstance(saved_hotkeys, dict):
             settings.hotkeys.update(saved_hotkeys)
@@ -447,7 +450,7 @@ class SettingsUI:
         tk.Label(
             url_body,
             text=(
-                "Run the enhanced_model.py server separately (or on another machine), "
+                "Run the enhanced_model.py (find it inside 'RecursiveVideoPlayer/_internal/') server separately (or on another machine), "
                 "then paste its base URL here.  The app will connect to it for AI search."
             ),
             font=tp.small_font,
@@ -459,18 +462,31 @@ class SettingsUI:
         url_frame.pack(fill=tk.X, pady=(0, 4))
 
         self.ai_server_url_var = tk.StringVar(value=self.settings.ai_server_url)
-        url_entry = tk.Entry(
+        self.ai_search_enabled_var = tk.BooleanVar(value=self.settings.ai_search_enabled)
+        cb = ttk.Checkbutton(
+            url_body, text="Enable AI Search",
+            variable=self.ai_search_enabled_var,
+            style="Modern.TCheckbutton",
+            command=self._toggle_ai_search_url_state
+        )
+        cb.pack(anchor='w', pady=(0, 8))
+
+        # URL field (same as before but with state management)
+        self.url_entry = tk.Entry(
             url_frame,
             textvariable=self.ai_server_url_var,
             font=tp.normal_font,
             bg=getattr(tp, 'entry_bg', tp.surface_color),
             fg=getattr(tp, 'entry_fg', tp.text_color),
             insertbackground=getattr(tp, 'entry_fg', tp.text_color),
+            readonlybackground=getattr(tp, 'entry_bg', tp.surface_color),
+            disabledbackground=getattr(tp, 'entry_bg', tp.surface_color),
             relief=tk.FLAT, bd=0,
             highlightthickness=1,
             highlightbackground=getattr(tp, 'entry_border', tp.border_color),
+            state='normal' if self.ai_search_enabled_var.get() else 'readonly'
         )
-        url_entry.pack(fill=tk.X, ipady=4)
+        self.url_entry.pack(fill=tk.X, ipady=4)
 
         tk.Label(
             url_body,
@@ -487,6 +503,10 @@ class SettingsUI:
         ).pack(anchor='w', pady=(4, 0))
 
         return frame
+
+    def _toggle_ai_search_url_state(self):
+        enabled = self.ai_search_enabled_var.get()
+        self.url_entry.config(state='normal' if enabled else 'readonly')
 
     def _create_general_settings_tab(self, parent):
         tp = self.theme_provider
@@ -1084,6 +1104,9 @@ class SettingsUI:
             self.show_console_var.set(getattr(settings, 'show_console', True))
         if hasattr(self, 'show_annotations_var'):
             self.show_annotations_var.set(settings.show_video_annotations_in_tree)
+        if hasattr(self, 'ai_search_enabled_var'):
+            self.ai_search_enabled_var.set(settings.ai_search_enabled)
+            self._toggle_ai_search_url_state()
         if hasattr(self, '_hotkeys_draft'):
             self._hotkeys_draft = dict(settings.hotkeys)
             badge_bg = getattr(self.theme_provider, 'badge_bg', self.theme_provider.surface_color)
@@ -1114,6 +1137,8 @@ class SettingsUI:
                     self.theme_provider.toggle_console()
         if hasattr(self, '_hotkeys_draft'):
             self.settings.hotkeys = dict(self._hotkeys_draft)
+        if hasattr(self, 'ai_search_enabled_var'):
+            self.settings.ai_search_enabled = self.ai_search_enabled_var.get()
 
     def _save_settings(self):
         self._apply_current_settings()

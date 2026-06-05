@@ -392,9 +392,7 @@ class AISearchUI:
         self._canvas.bind("<Configure>", self._on_canvas_configure)
 
         # Fix mousewheel scrolling
-        self._bind_mousewheel(self._canvas)
-        self._bind_mousewheel(self._results_frame)
-        self._bind_mousewheel(self._results_outer)
+        self._setup_mousewheel_scrolling()
 
         self._canvas.bind("<Button-1>", lambda _e: self._clear_selection())
         self._results_frame.bind("<Button-1>", lambda _e: self._clear_selection())
@@ -403,31 +401,48 @@ class AISearchUI:
 
         self._show_empty_state()
 
-    def _bind_mousewheel(self, widget):
-        """Bind mousewheel scrolling to a widget, accounting for OS differences."""
-        def _on_mousewheel(event):
-            # Determine the direction and amount
-            if event.num == 4:
-                delta = -1
-            elif event.num == 5:
-                delta = 1
-            else:
-                # Windows / macOS: event.delta is positive for up, negative for down
-                # Usually 120 per notch
-                delta = -1 * (event.delta // abs(event.delta)) if event.delta != 0 else 0
+    def _setup_mousewheel_scrolling(self):
+        """Set up global mousewheel bindings that only scroll the results canvas when the mouse is hovering over the AI Search UI."""
+        def _on_global_mousewheel(event):
             try:
-                self._canvas.yview_scroll(delta, "units")
+                if not self._canvas.winfo_exists():
+                    return
+                # Walk up master tree to see if event.widget is inside self._frame
+                w = event.widget
+                while w:
+                    # Try to compare both string paths and widget objects to be robust
+                    w_str = str(w)
+                    frame_str = str(self._frame)
+                    if w == self._frame or w_str == frame_str:
+                        if event.num == 4:
+                            delta = -1
+                        elif event.num == 5:
+                            delta = 1
+                        else:
+                            delta = -1 * (event.delta // abs(event.delta)) if event.delta != 0 else 0
+                        self._canvas.yview_scroll(delta, "units")
+                        return "break"
+                    w = w.master
             except Exception:
                 pass
-            return "break"
 
-        # Bind different event types for different platforms
-        widget.bind("<MouseWheel>", _on_mousewheel)      # Windows / macOS
-        widget.bind("<Button-4>", _on_mousewheel)       # Linux scroll up
-        widget.bind("<Button-5>", _on_mousewheel)       # Linux scroll down
+        self._canvas.bind_all("<MouseWheel>", _on_global_mousewheel)
+        self._canvas.bind_all("<Button-4>", _on_global_mousewheel)
+        self._canvas.bind_all("<Button-5>", _on_global_mousewheel)
 
-    def _on_results_configure(self, _e):
-        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+        def _unbind_all_scroll(e):
+            if e.widget == self._frame:
+                try:
+                    self._canvas.unbind_all("<MouseWheel>")
+                    self._canvas.unbind_all("<Button-4>")
+                    self._canvas.unbind_all("<Button-5>")
+                except Exception:
+                    pass
+
+        self._frame.bind("<Destroy>", _unbind_all_scroll)
+
+    def _on_results_configure(self, e):
+        self._canvas.configure(scrollregion=(0, 0, e.width, e.height))
 
     def _on_canvas_configure(self, e):
         self._canvas.itemconfig(self._results_win, width=e.width)
