@@ -67,7 +67,8 @@ class AISearchManager:
             if self._active_ui:
                 self._active_ui.set_status(
                     "error",
-                    "✗  No AI server URL configured — add one in Settings → AI & Preprocessing"
+                    "⚠  No AI server URL configured — add one in Settings → AI & Preprocessing",
+                    show_settings=True
                 )
             return
 
@@ -89,7 +90,11 @@ class AISearchManager:
 
         if self._connect_attempted and self._bridge and self._bridge.is_alive():
             if not self._index_status.files_present and self._active_ui:
-                self._active_ui.set_status("warn", "⚠  No index found — click Index to build one")
+                self._active_ui.set_status(
+                    "warn",
+                    "⚠  No index found — click Index to build one",
+                    show_settings=False
+                )
                 self._active_ui.set_device_badge("", "")
             return
 
@@ -109,7 +114,6 @@ class AISearchManager:
 
         if self._active_ui:
             self._active_ui.set_status("loading", "⏳  Connecting to AI server…")
-            self._active_ui.set_device_badge("", "")
 
         def _connect_bg():
             ok = self._bridge.connect()
@@ -159,8 +163,9 @@ class AISearchManager:
         if self._active_ui:
             self._active_ui.set_status(
                 "error",
-                "✗  Could not reach AI server — check the URL in Settings and click Retry",
+                "✗  Could not reach AI server — check the URL in Settings → AI & Preprocessing",
                 retry_callback=self._retry_bridge,
+                show_settings=True
             )
 
     def _retry_bridge(self):
@@ -171,7 +176,6 @@ class AISearchManager:
         self._ensure_bridge()
 
     def notify_url_changed(self):
-        """Call this when the user saves a new server URL in settings."""
         self._connect_attempted = False
         if self._bridge:
             self._bridge.disconnect()
@@ -351,8 +355,8 @@ class AISearchUI:
                                     bg=self.surface, fg=self.muted, font=self.fs)
         self._status_lbl.pack(side=tk.LEFT)
 
-        self._retry_lbl = tk.Label(status_row, text="Retry", bg=self.surface,
-                                   fg=self.accent, font=self.fs, cursor="hand2")
+        self._status_actions = tk.Frame(status_row, bg=self.surface)
+        self._status_actions.pack(side=tk.LEFT, padx=(8, 0))
 
         self._device_badge = tk.Label(
             status_row, text="", bg="#34c98a", fg="#ffffff",
@@ -386,8 +390,12 @@ class AISearchUI:
         )
         self._results_frame.bind("<Configure>", self._on_results_configure)
         self._canvas.bind("<Configure>", self._on_canvas_configure)
-        self._canvas.bind("<MouseWheel>", self._on_mousewheel)
-        self._canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+
+        # Fix mousewheel scrolling
+        self._bind_mousewheel(self._canvas)
+        self._bind_mousewheel(self._results_frame)
+        self._bind_mousewheel(self._results_outer)
+
         self._canvas.bind("<Button-1>", lambda _e: self._clear_selection())
         self._results_frame.bind("<Button-1>", lambda _e: self._clear_selection())
         self._frame.bind("<Control-a>", lambda _e: self._select_all())
@@ -395,19 +403,36 @@ class AISearchUI:
 
         self._show_empty_state()
 
+    def _bind_mousewheel(self, widget):
+        """Bind mousewheel scrolling to a widget, accounting for OS differences."""
+        def _on_mousewheel(event):
+            # Determine the direction and amount
+            if event.num == 4:
+                delta = -1
+            elif event.num == 5:
+                delta = 1
+            else:
+                # Windows / macOS: event.delta is positive for up, negative for down
+                # Usually 120 per notch
+                delta = -1 * (event.delta // abs(event.delta)) if event.delta != 0 else 0
+            try:
+                self._canvas.yview_scroll(delta, "units")
+            except Exception:
+                pass
+            return "break"
+
+        # Bind different event types for different platforms
+        widget.bind("<MouseWheel>", _on_mousewheel)      # Windows / macOS
+        widget.bind("<Button-4>", _on_mousewheel)       # Linux scroll up
+        widget.bind("<Button-5>", _on_mousewheel)       # Linux scroll down
+
     def _on_results_configure(self, _e):
         self._canvas.configure(scrollregion=self._canvas.bbox("all"))
 
     def _on_canvas_configure(self, e):
         self._canvas.itemconfig(self._results_win, width=e.width)
 
-    def _on_mousewheel(self, e):
-        try:
-            self._canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
-        except Exception:
-            pass
-
-    def set_status(self, state: str, text: str, retry_callback: Callable = None):
+    def set_status(self, state: str, text: str, retry_callback: Callable = None, show_settings: bool = False):
         icons = {
             "ready": ("✓", "#34c98a"),
             "loading": ("⏳", self.muted),
@@ -418,16 +443,37 @@ class AISearchUI:
         icon, color = icons.get(state, ("●", self.muted))
         try:
             self._status_lbl.config(text=text, fg=color if state != "loading" else self.muted)
-            self._retry_lbl.pack_forget()
-            if state != "ready":
-                self._device_badge.pack_forget()
-                self._stale_lbl.pack_forget()
+            for child in self._status_actions.winfo_children():
+                child.destroy()
             if retry_callback:
-                self._retry_lbl.config(command=retry_callback)
-                self._retry_lbl.bind("<Button-1>", lambda _e: retry_callback())
-                self._retry_lbl.pack(side=tk.LEFT, padx=(8, 0))
+                retry_btn = tk.Label(
+                    self._status_actions, text="Retry", bg=self.surface,
+                    fg=self.accent, font=self.fs, cursor="hand2"
+                )
+                retry_btn.pack(side=tk.LEFT, padx=(0, 6))
+                retry_btn.bind("<Button-1>", lambda _e: retry_callback())
+                retry_btn.bind("<Enter>", lambda _e: retry_btn.config(fg=self.accent2))
+                retry_btn.bind("<Leave>", lambda _e: retry_btn.config(fg=self.accent))
+            if show_settings:
+                settings_btn = tk.Label(
+                    self._status_actions, text="Settings", bg=self.surface,
+                    fg=self.accent, font=self.fs, cursor="hand2"
+                )
+                settings_btn.pack(side=tk.LEFT)
+                settings_btn.bind("<Button-1>", lambda _e: self._open_ai_settings())
+                settings_btn.bind("<Enter>", lambda _e: settings_btn.config(fg=self.accent2))
+                settings_btn.bind("<Leave>", lambda _e: settings_btn.config(fg=self.accent))
+            self._device_badge.pack_forget()
+            self._stale_lbl.pack_forget()
         except Exception:
             pass
+
+    def _open_ai_settings(self):
+        try:
+            if hasattr(self._app, "settings_manager") and self._app.settings_manager:
+                self._app.settings_manager.show_settings(tab_index=1)
+        except Exception as e:
+            self._manager._log(f"Failed to open settings: {e}")
 
     def set_device_badge(self, label: str, hex_color: str):
         try:
@@ -615,7 +661,6 @@ class AISearchUI:
         card._orig_bg = bg
         self._card_frames[video_path] = card
 
-        # ── Thumbnail ─────────────────────────────────────────────────────────
         left = tk.Frame(card, bg=card_bg)
         left.pack(side=tk.LEFT, fill=tk.Y, padx=(10, 0), pady=10)
 
@@ -641,7 +686,6 @@ class AISearchUI:
         bar_fill = tk.Frame(score_bar_bg, bg=self._score_color(score, max_score), height=3)
         bar_fill.place(relx=0, rely=0, relwidth=rel_w, relheight=1.0)
 
-        # ── Info ──────────────────────────────────────────────────────────────
         right = tk.Frame(card, bg=card_bg)
         right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=12, pady=10)
 
@@ -687,12 +731,10 @@ class AISearchUI:
         open_btn.bind("<Enter>", lambda _e: open_btn.config(fg=self.accent, highlightbackground=self.accent))
         open_btn.bind("<Leave>", lambda _e: open_btn.config(fg=self.muted, highlightbackground=self.border))
 
-        # Store refs for selection state updates
         card._name_lbl = name_lbl
         card._content_widgets = [left, right, name_lbl, meta_lbl, dir_lbl, btn_row,
                                   open_btn, score_bar_bg]
 
-        # ── Hover ─────────────────────────────────────────────────────────────
         def _enter(_e, vp=video_path):
             if vp not in self._selected_paths:
                 card.config(highlightbackground=self.accent, highlightthickness=1)
@@ -708,7 +750,6 @@ class AISearchUI:
             w.bind("<Enter>", _enter)
             w.bind("<Leave>", _leave)
 
-        # ── Selection / right-click bindings (card body, NOT action buttons) ──
         select_targets = [card, thumb_container, thumb_lbl, left, right,
                           name_lbl, meta_lbl, dir_lbl, btn_row]
         for w in select_targets:
@@ -717,8 +758,6 @@ class AISearchUI:
             w.bind("<Double-Button-1>", lambda _e, vp=video_path: self._play_video(vp))
 
         return card
-
-    # ── Selection ─────────────────────────────────────────────────────────────
 
     def _on_card_click(self, event, vp: str):
         self._hide_thumbnail_tooltip()
@@ -843,8 +882,6 @@ class AISearchUI:
         except Exception:
             pass
 
-    # ── Context menu ──────────────────────────────────────────────────────────
-
     def _make_context_menu(self):
         tp = getattr(self._app, 'theme_provider', None)
         if tp is None and hasattr(self._app, 'create_manager_context_menu'):
@@ -870,22 +907,18 @@ class AISearchUI:
         single = vp if n == 1 else None
         gvm = getattr(self._app, 'grid_view_manager', None)
 
-        # 1. Play
         menu.add_command(
             label=f"▶  Play Selected  ({n})" if n > 1 else "▶  Play",
             command=self._play_selected,
         )
 
-        # 2. Selection
         menu.add_separator()
         menu.add_command(label="Select All", command=self._select_all)
         menu.add_command(label="Clear Selection", command=self._clear_selection)
 
-        # 3. Gallery
         menu.add_separator()
         menu.add_command(label="Open in Gallery", command=self._open_in_gallery)
 
-        # 4. Playlist / Favourites / Queue
         menu.add_separator()
         menu.add_command(label="Add to Playlist", command=self._ctx_add_to_playlist)
         if gvm and gvm.is_favourite_callback:
@@ -899,7 +932,6 @@ class AISearchUI:
                                  command=self._ctx_add_to_favourites)
         menu.add_command(label="Add to Queue", command=self._ctx_add_to_queue)
 
-        # 5. Dual player Win 1
         if gvm:
             win1_slots = [s for s in (1, 2, 3)
                           if getattr(gvm, f'play_in_dual_player{s}_callback', None)]
@@ -921,7 +953,6 @@ class AISearchUI:
                             command=lambda s=slot: self._ctx_dual_player(2, s),
                         )
 
-        # 6. File actions (single selection only)
         if single and os.path.isfile(single):
             menu.add_separator()
             menu.add_command(label="Open File Location",
@@ -1022,8 +1053,6 @@ class AISearchUI:
         except Exception as e:
             self._manager._log(f"Open in gallery error: {e}")
 
-    # ── Thumbnails ────────────────────────────────────────────────────────────
-
     def _fetch_thumbnail_bg(self, vp: str, vp_norm: str, label: tk.Label):
         try:
             cached = self._photo_cache.get(vp_norm)
@@ -1098,8 +1127,6 @@ class AISearchUI:
                 label.image = photo
         except Exception:
             pass
-
-    # ── Misc ──────────────────────────────────────────────────────────────────
 
     def _score_color(self, score: float, max_score: float = 15.0) -> str:
         ratio = score / max(max_score, 0.01)

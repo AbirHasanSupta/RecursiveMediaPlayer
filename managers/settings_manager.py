@@ -345,9 +345,15 @@ class SettingsUI:
 
     # ── Window management ──────────────────────────────────────────────────────
 
-    def show_settings_window(self):
+    def show_settings_window(self, tab_index: int = 0):
+        """Open settings window and optionally select a tab."""
         if self.settings_window and self.settings_window.winfo_exists():
             self.settings_window.lift()
+            if tab_index is not None and self._notebook:
+                try:
+                    self._notebook.select(tab_index)
+                except Exception:
+                    pass
             return
 
         self._embedded = False
@@ -360,6 +366,12 @@ class SettingsUI:
         self.settings_window.resizable(True, True)
 
         self._setup_settings_ui()
+        if tab_index is not None and self._notebook:
+            try:
+                self._notebook.select(tab_index)
+            except Exception:
+                pass
+
         self.settings_window.transient(self.parent)
         self.settings_window.grab_set()
 
@@ -367,7 +379,7 @@ class SettingsUI:
         apply_icon(self.settings_window)
         self.settings_window.deiconify()
 
-    def show_settings_embedded(self, parent, close_callback=None):
+    def show_settings_embedded(self, parent, close_callback=None, tab_index: int = 0):
         if self.settings_window and self.settings_window.winfo_exists():
             self.settings_window.destroy()
         for child in parent.winfo_children():
@@ -378,6 +390,11 @@ class SettingsUI:
         self.settings_window = tk.Frame(parent, bg=self.theme_provider.bg_color)
         self.settings_window.pack(fill=tk.BOTH, expand=True)
         self._setup_settings_ui()
+        if tab_index is not None and self._notebook:
+            try:
+                self._notebook.select(tab_index)
+            except Exception:
+                pass
 
     def _close_settings(self):
         if self._embedded:
@@ -1123,11 +1140,11 @@ class SettingsManager:
     def set_hotkey_reload_callback(self, callback: Callable):
         self._hotkey_reload_callback = callback
 
-    def show_settings(self):
-        self.ui.show_settings_window()
+    def show_settings(self, tab_index: int = 0):
+        self.ui.show_settings_window(tab_index=tab_index)
 
-    def show_embedded(self, parent, close_callback=None):
-        self.ui.show_settings_embedded(parent, close_callback)
+    def show_embedded(self, parent, close_callback=None, tab_index: int = 0):
+        self.ui.show_settings_embedded(parent, close_callback, tab_index=tab_index)
 
     def get_settings(self) -> SettingsData:
         return self.settings
