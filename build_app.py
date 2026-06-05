@@ -161,8 +161,7 @@ def select_multiple_folders_and_play():
             self.ai_search_manager = AISearchManager(
                 self.root, self, self.update_console
             )
-            self.settings_manager = SettingsManager(self.root, self, self.update_console, enable_ai=True,
-                                                    get_bridge_fn=lambda: getattr(self.ai_search_manager, '_bridge', None))
+            self.settings_manager = SettingsManager(self.root, self, self.update_console, enable_ai=True)
             self.toast = Toast(self.root, self)
             self.setup_exclusion_section()
 
@@ -431,6 +430,7 @@ def select_multiple_folders_and_play():
             self.settings_manager.ui.clear_metadata_callback = lambda: self._clear_metadata_cache()
             self.settings_manager.ui.get_metadata_info_callback = lambda: self._get_metadata_cache_info()
             self.settings_manager.ui.filter_sort_manager = self.filter_sort_manager
+            self.settings_manager.ui._ai_search_manager = self.ai_search_manager
             self.root.after(0, self._fix_pill_colors_initial)
             self.root.after(100, self._show_home_view)
             self._setup_periodic_cleanup()

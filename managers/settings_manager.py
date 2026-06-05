@@ -127,6 +127,7 @@ class SettingsData:
         self.gaming_mode = False
         self.show_video_annotations_in_tree = True
         self.hotkeys: Dict[str, str] = dict(DEFAULT_HOTKEYS)
+        self.ai_server_url: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -145,6 +146,7 @@ class SettingsData:
             'hotkeys': dict(self.hotkeys),
             'gaming_mode': self.gaming_mode,
             'show_video_annotations_in_tree': self.show_video_annotations_in_tree,
+            'ai_server_url': self.ai_server_url,
         }
 
     @classmethod
@@ -164,6 +166,7 @@ class SettingsData:
         settings.dual_window_enabled = data.get('dual_window_enabled', settings.dual_window_enabled)
         settings.gaming_mode = data.get('gaming_mode', False)
         settings.show_video_annotations_in_tree = data.get('show_video_annotations_in_tree', True)
+        settings.ai_server_url = data.get('ai_server_url', '')
         saved_hotkeys = data.get('hotkeys', {})
         if isinstance(saved_hotkeys, dict):
             settings.hotkeys.update(saved_hotkeys)
@@ -198,137 +201,21 @@ class SettingsStorage:
             return SettingsData()
 
 
-class PreprocessingRunner:
-    def __init__(self, console_callback: Callable = None, get_bridge_fn: Callable = None):
-        self.console_callback = console_callback
-        self.get_bridge_fn = get_bridge_fn
-        self.current_process = None
-        self.is_running = False
-        self.output_queue = queue.Queue()
 
-    def start_preprocessing(self, videos_dir: str, settings: SettingsData) -> bool:
-        if self.is_running:
-            return False
-
-        bridge = self.get_bridge_fn() if self.get_bridge_fn else None
-        if bridge is not None and bridge.is_alive():
-            self.is_running = True
-            payload = {
-                "videos_dir": videos_dir,
-                "out_dir": settings.ai_index_path,
-                "workers": settings.preprocessing_workers,
-                "max_frames": settings.max_frames_per_video,
-                "incremental": settings.incremental_preprocessing,
-                "force_rebuild": not settings.incremental_preprocessing,
-                "exclude_dirs": getattr(settings, "excluded_index_dirs", "raw"),
-            }
-
-            def _progress(line: str):
-                self._log(line)
-
-            def _done(success: bool, error: str = None):
-                self.is_running = False
-                if success:
-                    self._log("AI preprocessing completed successfully!")
-                else:
-                    self._log(f"AI preprocessing failed: {error}")
-
-            bridge.start_preprocessing(payload, _progress, _done)
-            return True
-
-        self.is_running = True
-
-        def run_preprocessing():
-            try:
-                import shutil as _shutil, sys as _sys
-                _base = Path(_sys.executable).parent
-                script_path = _base / "enhanced_model.py"
-                if not script_path.exists():
-                    script_path = Path(__file__).parent.parent / "enhanced_model.py"
-                if not script_path.exists():
-                    self._log("Error: enhanced_model.py not found")
-                    return
-                python_exe = (
-                        _shutil.which("python") or _shutil.which("python3") or _sys.executable
-                )
-                cmd = [
-                    python_exe, str(script_path),
-                    "--mode", "preprocess",
-                    "--videos_dir", videos_dir,
-                    "--out_dir", settings.ai_index_path,
-                    "--workers", str(settings.preprocessing_workers),
-                    "--max_frames", str(settings.max_frames_per_video)
-                ]
-                if settings.incremental_preprocessing:
-                    cmd.append("--incremental")
-                else:
-                    cmd.append("--force_rebuild")
-                excluded = getattr(settings, 'excluded_index_dirs', '').strip()
-                if excluded:
-                    cmd += ['--exclude_dirs', excluded]
-                self._log("Starting AI preprocessing...")
-                self._log(f"Command: {' '.join(cmd)}")
-                self.current_process = subprocess.Popen(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    text=True, bufsize=1, universal_newlines=True
-                )
-                while self.current_process.poll() is None:
-                    line = self.current_process.stdout.readline()
-                    if line:
-                        self._log(line.strip())
-                return_code = self.current_process.wait()
-                if return_code == 0:
-                    self._log("AI preprocessing completed successfully!")
-                else:
-                    self._log(f"AI preprocessing failed with return code: {return_code}")
-            except Exception as e:
-                self._log(f"Error during preprocessing: {e}")
-            finally:
-                self.is_running = False
-                self.current_process = None
-
-        threading.Thread(target=run_preprocessing, daemon=True).start()
-        return True
-
-    def stop_preprocessing(self):
-        bridge = self.get_bridge_fn() if self.get_bridge_fn else None
-        if bridge is not None and bridge.is_alive():
-            bridge.cancel_preprocessing()
-            self.is_running = False
-            self._log("AI preprocessing cancelled")
-            return
-        if self.current_process:
-            try:
-                self.current_process.terminate()
-                self.current_process.wait(timeout=5)
-            except:
-                try:
-                    self.current_process.kill()
-                except:
-                    pass
-            finally:
-                self.current_process = None
-                self.is_running = False
-                self._log("AI preprocessing stopped by user")
-
-    def _log(self, message: str):
-        if self.console_callback:
-            self.console_callback(f"[AI Preprocessing] {message}")
 
 
 class SettingsUI:
     def __init__(self, parent, theme_provider, settings: SettingsData,
                  console_callback: Callable = None, on_settings_changed: Callable = None,
-                 enable_ai: bool = True, get_bridge_fn: Callable = None):
+                 enable_ai: bool = True):
         self.parent = parent
         self.theme_provider = theme_provider
         self.settings = settings
         self.console_callback = console_callback
         self.on_settings_changed = on_settings_changed
         self.enable_ai = enable_ai
-
+        self._ai_search_manager = None
         self.settings_window = None
-        self.preprocessing_runner = PreprocessingRunner(console_callback, get_bridge_fn)
 
         self.ai_index_path_var = None
         self.workers_var = None
@@ -338,6 +225,7 @@ class SettingsUI:
         self.incremental_var = None
         self.excluded_dirs_var = None
         self.batch_size_var = None
+        self.ai_server_url_var = None
         self.cleanup_resume_callback = None
         self.cleanup_history_callback = None
         self.clear_thumbnails_callback = None
@@ -530,94 +418,33 @@ class SettingsUI:
         main_container = tk.Frame(frame, bg=tp.bg_color)
         main_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-        path_body = self._make_section(main_container, "AI Index Configuration", pady=(0, 10))
+        url_body = self._make_section(main_container, "AI Server Connection", pady=(0, 10))
 
         tk.Label(
-            path_body,
-            text="AI Index Data Directory:",
-            font=tp.normal_font,
-            bg=tp.bg_color, fg=tp.text_color
-        ).pack(anchor='w', pady=(0, 5))
+            url_body,
+            text="AI Server URL",
+            font=("Segoe UI", 10, "bold"),
+            bg=tp.bg_color, fg=tp.text_color,
+        ).pack(anchor='w', pady=(0, 4))
 
-        path_frame = tk.Frame(path_body, bg=tp.bg_color)
-        path_frame.pack(fill=tk.X, pady=(0, 10))
-
-        self.ai_index_path_var = tk.StringVar(value=self.settings.ai_index_path)
-        path_entry = tk.Entry(
-            path_frame,
-            textvariable=self.ai_index_path_var,
-            font=tp.normal_font,
-            bg=getattr(tp, 'entry_bg', tp.surface_color),
-            fg=getattr(tp, 'entry_fg', tp.text_color),
-            insertbackground=getattr(tp, 'entry_fg', tp.text_color),
-            relief=tk.FLAT, bd=0,
-            highlightthickness=1,
-            highlightbackground=getattr(tp, 'entry_border', tp.border_color),
-        )
-        path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-
-        browse_btn = tp.create_modern_button(path_frame, "Browse", self._browse_index_path, "secondary", "sm")
-        browse_btn.pack(side=tk.RIGHT)
-
-        self.index_info_label = tk.Label(
-            path_body, text="",
+        tk.Label(
+            url_body,
+            text=(
+                "Run the enhanced_model.py server separately (or on another machine), "
+                "then paste its base URL here.  The app will connect to it for AI search."
+            ),
             font=tp.small_font,
-            bg=tp.bg_color, fg=tp.text_muted
-        )
-        self.index_info_label.pack(anchor='w')
+            bg=tp.bg_color, fg=tp.text_muted,
+            wraplength=560, justify=tk.LEFT,
+        ).pack(anchor='w', pady=(0, 8))
 
-        prep_body = self._make_section(main_container, "AI Preprocessing Settings", pady=(0, 10))
+        url_frame = tk.Frame(url_body, bg=tp.bg_color)
+        url_frame.pack(fill=tk.X, pady=(0, 4))
 
-        workers_frame = tk.Frame(prep_body, bg=tp.bg_color)
-        workers_frame.pack(fill=tk.X, pady=5)
-        tk.Label(workers_frame, text="Processing Workers:", font=tp.normal_font,
-                 bg=tp.bg_color, fg=tp.text_color, width=20, anchor='w').pack(side=tk.LEFT)
-        self.workers_var = tk.IntVar(value=self.settings.preprocessing_workers)
-        workers_spin = tk.Spinbox(
-            workers_frame, from_=1, to=8, textvariable=self.workers_var,
-            font=tp.normal_font, width=10,
-            bg=getattr(tp, 'entry_bg', tp.surface_color),
-            fg=getattr(tp, 'entry_fg', tp.text_color),
-            buttonbackground=tp.bg_color,
-            relief=tk.FLAT, bd=1,
-        )
-        workers_spin.pack(side=tk.LEFT, padx=(0, 5))
-        tk.Label(workers_frame, text="(1-8, recommend 2-4)", font=tp.small_font,
-                 bg=tp.bg_color, fg=tp.text_muted).pack(side=tk.LEFT)
-
-        frames_frame = tk.Frame(prep_body, bg=tp.bg_color)
-        frames_frame.pack(fill=tk.X, pady=5)
-        tk.Label(frames_frame, text="Max Frames per Video:", font=tp.normal_font,
-                 bg=tp.bg_color, fg=tp.text_color, width=20, anchor='w').pack(side=tk.LEFT)
-        self.max_frames_var = tk.IntVar(value=self.settings.max_frames_per_video)
-        frames_spin = tk.Spinbox(
-            frames_frame, from_=20, to=200, textvariable=self.max_frames_var,
-            font=tp.normal_font, width=10,
-            bg=getattr(tp, 'entry_bg', tp.surface_color),
-            fg=getattr(tp, 'entry_fg', tp.text_color),
-            buttonbackground=tp.bg_color,
-            relief=tk.FLAT, bd=1,
-        )
-        frames_spin.pack(side=tk.LEFT, padx=(0, 5))
-        tk.Label(frames_frame, text="(20-200, higher = more accurate)", font=tp.small_font,
-                 bg=tp.bg_color, fg=tp.text_muted).pack(side=tk.LEFT)
-
-        self.incremental_var = tk.BooleanVar(value=self.settings.incremental_preprocessing)
-        ttk.Checkbutton(prep_body, text="Incremental Preprocessing (add new videos only)",
-                        variable=self.incremental_var, style="Modern.TCheckbutton").pack(anchor='w', pady=2)
-
-        self.gpu_acceleration_var = tk.BooleanVar(value=self.settings.enable_gpu_acceleration)
-        ttk.Checkbutton(prep_body, text="Enable GPU Acceleration (if available)",
-                        variable=self.gpu_acceleration_var, style="Modern.TCheckbutton").pack(anchor='w', pady=2)
-
-        excl_row = tk.Frame(prep_body, bg=tp.bg_color)
-        excl_row.pack(fill=tk.X, pady=(6, 2))
-        tk.Label(excl_row, text="Exclude directory names (comma-separated, case-insensitive):",
-                 font=tp.normal_font, bg=tp.bg_color, fg=tp.text_color).pack(anchor='w')
-        self.excluded_dirs_var = tk.StringVar(value=self.settings.excluded_index_dirs)
-        excl_entry = tk.Entry(
-            excl_row,
-            textvariable=self.excluded_dirs_var,
+        self.ai_server_url_var = tk.StringVar(value=self.settings.ai_server_url)
+        url_entry = tk.Entry(
+            url_frame,
+            textvariable=self.ai_server_url_var,
             font=tp.normal_font,
             bg=getattr(tp, 'entry_bg', tp.surface_color),
             fg=getattr(tp, 'entry_fg', tp.text_color),
@@ -626,35 +453,22 @@ class SettingsUI:
             highlightthickness=1,
             highlightbackground=getattr(tp, 'entry_border', tp.border_color),
         )
-        excl_entry.pack(fill=tk.X, pady=(3, 0))
-        tk.Label(excl_row, text='e.g. "raw, raws, footage" — exact folder name match (subdirectories only)',
-                 font=tp.small_font, bg=tp.bg_color, fg=tp.text_muted).pack(anchor='w', pady=(2, 0))
-
-        action_body = self._make_section(main_container, "Run AI Preprocessing", pady=(0, 0))
+        url_entry.pack(fill=tk.X, ipady=4)
 
         tk.Label(
-            action_body,
-            text="Select a directory to preprocess videos for AI search functionality:",
-            font=tp.small_font, bg=tp.bg_color, fg=tp.text_color
-        ).pack(anchor='w', pady=(0, 10))
+            url_body,
+            text='e.g.  http://localhost:8000   or   http://192.168.1.10:8000',
+            font=tp.small_font,
+            bg=tp.bg_color, fg=tp.text_muted,
+        ).pack(anchor='w', pady=(3, 0))
 
-        action_frame = tk.Frame(action_body, bg=tp.bg_color)
-        action_frame.pack(fill=tk.X)
+        tk.Label(
+            url_body,
+            text='The URL is saved and applied automatically when you click Save Settings.',
+            font=tp.small_font,
+            bg=tp.bg_color, fg=tp.text_muted,
+        ).pack(anchor='w', pady=(4, 0))
 
-        self.select_preprocess_btn = tp.create_modern_button(
-            action_frame, "Select Directory & Start Preprocessing",
-            self._start_preprocessing, "primary", "md"
-        )
-        self.select_preprocess_btn.pack(side=tk.LEFT, padx=(0, 10))
-
-        self.stop_preprocess_btn = tp.create_modern_button(
-            action_frame, "Stop Preprocessing",
-            self._stop_preprocessing, "danger", "md"
-        )
-        self.stop_preprocess_btn.pack(side=tk.LEFT)
-        self.stop_preprocess_btn.pack_forget()
-
-        self._update_index_info()
         return frame
 
     def _create_general_settings_tab(self, parent):
@@ -1238,20 +1052,10 @@ class SettingsUI:
             self.theme_provider.toast.success("Settings Reset", "All settings restored to defaults")
 
     def _populate_ui_from_settings(self, settings: SettingsData):
-        if self.ai_index_path_var:
-            self.ai_index_path_var.set(settings.ai_index_path)
-        if self.workers_var:
-            self.workers_var.set(settings.preprocessing_workers)
-        if self.max_frames_var:
-            self.max_frames_var.set(settings.max_frames_per_video)
+        if self.ai_server_url_var:
+            self.ai_server_url_var.set(settings.ai_server_url)
         if self.cleanup_days_var:
             self.cleanup_days_var.set(settings.auto_cleanup_days)
-        if self.gpu_acceleration_var:
-            self.gpu_acceleration_var.set(settings.enable_gpu_acceleration)
-        if self.incremental_var:
-            self.incremental_var.set(settings.incremental_preprocessing)
-        if self.excluded_dirs_var:
-            self.excluded_dirs_var.set(settings.excluded_index_dirs)
         self.preview_duration_var.set(settings.preview_duration)
         self.use_video_preview_var.set(settings.use_video_preview)
         self.enable_watch_history_var.set(settings.enable_watch_history)
@@ -1271,23 +1075,12 @@ class SettingsUI:
             for aid, btn in self._hotkey_btn_map.items():
                 btn.config(text=self._hotkeys_draft.get(aid, '—'),
                            bg=badge_bg, fg=badge_fg, relief=tk.FLAT, highlightbackground=badge_border)
-        self._update_index_info()
 
     def _apply_current_settings(self):
-        if self.ai_index_path_var:
-            self.settings.ai_index_path = self.ai_index_path_var.get()
-        if self.workers_var:
-            self.settings.preprocessing_workers = self.workers_var.get()
-        if self.max_frames_var:
-            self.settings.max_frames_per_video = self.max_frames_var.get()
+        if self.ai_server_url_var:
+            self.settings.ai_server_url = self.ai_server_url_var.get().strip()
         if self.cleanup_days_var:
             self.settings.auto_cleanup_days = self.cleanup_days_var.get()
-        if self.gpu_acceleration_var:
-            self.settings.enable_gpu_acceleration = self.gpu_acceleration_var.get()
-        if self.incremental_var:
-            self.settings.incremental_preprocessing = self.incremental_var.get()
-        if self.excluded_dirs_var:
-            self.settings.excluded_index_dirs = self.excluded_dirs_var.get()
         self.settings.preview_duration = self.preview_duration_var.get()
         self.settings.use_video_preview = self.use_video_preview_var.get()
         self.settings.enable_watch_history = self.enable_watch_history_var.get()
@@ -1309,15 +1102,20 @@ class SettingsUI:
         self._apply_current_settings()
         if self.on_settings_changed:
             self.on_settings_changed(self.settings)
+        if self._ai_search_manager is not None:
+            try:
+                self._ai_search_manager.notify_url_changed()
+            except Exception:
+                pass
         self.theme_provider.toast.info("Success", "Settings saved successfully!")
         self._close_settings()
 
 
 class SettingsManager:
-    def __init__(self, parent, theme_provider, console_callback: Callable = None, enable_ai: bool = True, get_bridge_fn: Callable = None):
+    def __init__(self, parent, theme_provider, console_callback: Callable = None, enable_ai: bool = True):
         self.storage = SettingsStorage()
         self.settings = self.storage.load_settings()
-        self.ui = SettingsUI(parent, theme_provider, self.settings, console_callback, self._on_settings_changed, enable_ai=enable_ai, get_bridge_fn=get_bridge_fn)
+        self.ui = SettingsUI(parent, theme_provider, self.settings, console_callback, self._on_settings_changed, enable_ai=enable_ai)
 
         self._settings_changed_callbacks = []
         self._hotkey_reload_callback: Optional[Callable] = None

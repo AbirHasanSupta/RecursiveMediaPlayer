@@ -38,14 +38,20 @@ class AISearchManager:
         )
         self._directory_filter: list = []
         self._active_ui: Optional[AISearchUI] = None
-        self._bridge_start_attempted = False
+        self._connect_attempted = False
         self._index_status: Optional[IndexStatus] = None
         self._persisted_state: Optional[dict] = None
 
     def cleanup(self):
         if self._bridge:
-            self._bridge.stop()
+            self._bridge.disconnect()
             self._bridge = None
+
+    def _get_server_url(self) -> str:
+        try:
+            return (self._app.settings_manager.settings.ai_server_url or "").strip()
+        except Exception:
+            return ""
 
     def _get_index_dir(self) -> str:
         try:
@@ -55,6 +61,16 @@ class AISearchManager:
                        / "Recursive Media Player" / "index_data")
 
     def _ensure_bridge(self):
+        url = self._get_server_url()
+
+        if not url:
+            if self._active_ui:
+                self._active_ui.set_status(
+                    "error",
+                    "✗  No AI server URL configured — add one in Settings → AI & Preprocessing"
+                )
+            return
+
         index_dir = self._get_index_dir()
         checker = IndexStatusChecker(index_dir)
         self._index_status = checker.check_files()
@@ -71,50 +87,45 @@ class AISearchManager:
                     )
             return
 
-        # Server is up but in no_index state — preprocessing is possible, don't restart
-        if self._bridge_start_attempted and self._bridge and self._bridge.is_alive():
+        if self._connect_attempted and self._bridge and self._bridge.is_alive():
             if not self._index_status.files_present and self._active_ui:
                 self._active_ui.set_status("warn", "⚠  No index found — click Index to build one")
                 self._active_ui.set_device_badge("", "")
             return
 
-        # Still loading — wait for poll
-        if self._bridge_start_attempted and self._bridge and not self._bridge.is_ready():
+        if self._connect_attempted and self._bridge and not self._bridge.is_ready():
             return
+
+        if self._bridge:
+            self._bridge.disconnect()
 
         self._bridge = AIServerBridge(
-            index_dir, root=self._root, logger=self._log,
+            base_url=url,
+            root=self._root,
+            logger=self._log,
             on_ready_callback=self._on_bridge_ready,
         )
-        self._bridge_start_attempted = True
+        self._connect_attempted = True
 
         if self._active_ui:
-            self._active_ui.set_status("loading", "⏳  Loading AI models…")
+            self._active_ui.set_status("loading", "⏳  Connecting to AI server…")
             self._active_ui.set_device_badge("", "")
 
-        def _start_bg():
-            ok = self._bridge.start()
+        def _connect_bg():
+            ok = self._bridge.connect()
             if not ok:
                 self._root.after(0, self._on_bridge_error)
-                return
-            self._root.after(200, self._poll_bridge_ready)
 
-        threading.Thread(target=_start_bg, daemon=True).start()
-
-    def _poll_bridge_ready(self, attempts: int = 0):
-        if not self._active_ui:
-            return
-        if self._bridge and self._bridge.is_ready():
-            return
-        # Timeout after ~60 s (120 × 500 ms)
-        if attempts > 120:
-            self._on_bridge_error()
-            return
-        self._root.after(500, lambda: self._poll_bridge_ready(attempts + 1))
+        threading.Thread(target=_connect_bg, daemon=True).start()
 
     def _on_bridge_ready(self, msg: dict):
+        if msg.get("status") == "error":
+            self._root.after(0, self._on_bridge_error)
+            return
+
         if self._index_status is None:
             return
+
         device_str = msg.get("device", "")
         self._index_status.device = device_str
         self._index_status.bridge_ready = True
@@ -144,19 +155,29 @@ class AISearchManager:
         threading.Thread(target=_check, daemon=True).start()
 
     def _on_bridge_error(self):
-        self._bridge_start_attempted = False
+        self._connect_attempted = False
         if self._active_ui:
             self._active_ui.set_status(
-                "error", "✗  AI process error — click Retry to restart",
-                retry_callback=self._retry_bridge
+                "error",
+                "✗  Could not reach AI server — check the URL in Settings and click Retry",
+                retry_callback=self._retry_bridge,
             )
 
     def _retry_bridge(self):
-        self._bridge_start_attempted = False
+        self._connect_attempted = False
         if self._bridge:
-            self._bridge.stop()
+            self._bridge.disconnect()
             self._bridge = None
         self._ensure_bridge()
+
+    def notify_url_changed(self):
+        """Call this when the user saves a new server URL in settings."""
+        self._connect_attempted = False
+        if self._bridge:
+            self._bridge.disconnect()
+            self._bridge = None
+        if self._active_ui:
+            self._ensure_bridge()
 
     def _save_state(self, query: str, results: list, counts: dict, scores: dict):
         self._persisted_state = {"query": query, "results": results, "counts": counts, "scores": scores}
@@ -204,9 +225,7 @@ class AISearchManager:
             if not videos_dir:
                 done_cb(success=False, error="No directory selected")
                 return
-            self._preprocessor.start_preprocessing(
-                videos_dir, settings, progress_cb, done_cb
-            )
+            self._preprocessor.start_preprocessing(videos_dir, settings, progress_cb, done_cb)
         except Exception as e:
             done_cb(success=False, error=str(e))
 
@@ -216,9 +235,9 @@ class AISearchManager:
     def cleanup(self):
         self._active_ui = None
         if self._bridge:
-            self._bridge.stop()
+            self._bridge.disconnect()
             self._bridge = None
-        self._bridge_start_attempted = False
+        self._connect_attempted = False
 
 
 class AISearchUI:
