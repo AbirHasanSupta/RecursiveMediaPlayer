@@ -440,6 +440,16 @@ class SettingsUI:
 
         url_body = self._make_section(main_container, "AI Server Connection", pady=(0, 10))
 
+        self.ai_server_url_var = tk.StringVar(value=self.settings.ai_server_url)
+        self.ai_search_enabled_var = tk.BooleanVar(value=self.settings.ai_search_enabled)
+        cb = ttk.Checkbutton(
+            url_body, text="Enable AI Search",
+            variable=self.ai_search_enabled_var,
+            style="Modern.TCheckbutton",
+            command=self._toggle_ai_search_url_state
+        )
+        cb.pack(anchor='w', pady=(0, 8))
+
         tk.Label(
             url_body,
             text="AI Server URL",
@@ -460,16 +470,6 @@ class SettingsUI:
 
         url_frame = tk.Frame(url_body, bg=tp.bg_color)
         url_frame.pack(fill=tk.X, pady=(0, 4))
-
-        self.ai_server_url_var = tk.StringVar(value=self.settings.ai_server_url)
-        self.ai_search_enabled_var = tk.BooleanVar(value=self.settings.ai_search_enabled)
-        cb = ttk.Checkbutton(
-            url_body, text="Enable AI Search",
-            variable=self.ai_search_enabled_var,
-            style="Modern.TCheckbutton",
-            command=self._toggle_ai_search_url_state
-        )
-        cb.pack(anchor='w', pady=(0, 8))
 
         # URL field (same as before but with state management)
         self.url_entry = tk.Entry(
@@ -502,11 +502,55 @@ class SettingsUI:
             bg=tp.bg_color, fg=tp.text_muted,
         ).pack(anchor='w', pady=(4, 0))
 
+        index_body = self._make_section(main_container, "AI Index Path", pady=(0, 10))
+
+        tk.Label(
+            index_body,
+            text="AI Index Storage Path",
+            font=("Segoe UI", 10, "bold"),
+            bg=tp.bg_color, fg=tp.text_color,
+        ).pack(anchor='w', pady=(0, 4))
+
+        tk.Label(
+            index_body,
+            text="Directory where AI index data (embeddings, metadata) is stored. Changing this requires re-indexing.",
+            font=tp.small_font,
+            bg=tp.bg_color, fg=tp.text_muted,
+            wraplength=560, justify=tk.LEFT,
+        ).pack(anchor='w', pady=(0, 8))
+
+        path_frame = tk.Frame(index_body, bg=tp.bg_color)
+        path_frame.pack(fill=tk.X, pady=(0, 4))
+
+        self.ai_index_path_var = tk.StringVar(value=self.settings.ai_index_path)
+        self.index_path_entry = tk.Entry(
+            path_frame,
+            textvariable=self.ai_index_path_var,
+            font=tp.normal_font,
+            bg=getattr(tp, 'entry_bg', tp.surface_color),
+            fg=getattr(tp, 'entry_fg', tp.text_color),
+            insertbackground=getattr(tp, 'entry_fg', tp.text_color),
+            readonlybackground=getattr(tp, 'entry_bg', tp.surface_color),
+            disabledbackground=getattr(tp, 'entry_bg', tp.surface_color),
+            relief=tk.FLAT, bd=0,
+            highlightthickness=1,
+            highlightbackground=getattr(tp, 'entry_border', tp.border_color),
+            state='normal' if self.ai_search_enabled_var.get() else 'readonly'
+        )
+        self.index_path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=4, padx=(0, 5))
+
+        self.browse_index_btn = tp.create_button(path_frame, "Browse", self._browse_index_path, "secondary", "sm")
+        self.browse_index_btn.pack(side=tk.RIGHT)
+
         return frame
 
     def _toggle_ai_search_url_state(self):
         enabled = self.ai_search_enabled_var.get()
         self.url_entry.config(state='normal' if enabled else 'readonly')
+        if hasattr(self, 'index_path_entry'):
+            self.index_path_entry.config(state='normal' if enabled else 'readonly')
+        if hasattr(self, 'browse_index_btn'):
+            self.browse_index_btn.config(state='normal' if enabled else 'disabled')
 
     def _create_general_settings_tab(self, parent):
         tp = self.theme_provider
@@ -937,61 +981,7 @@ class SettingsUI:
         directory = filedialog.askdirectory(title="Select AI Index Data Directory", initialdir=initial_dir)
         if directory:
             self.ai_index_path_var.set(directory)
-            self._update_index_info()
 
-    def _update_index_info(self):
-        if not self.ai_index_path_var or not self.index_info_label:
-            return
-        index_path = self.ai_index_path_var.get()
-        if not os.path.exists(index_path):
-            info_text = "Directory does not exist - will be created when needed"
-        else:
-            required_files = ["clip_index.faiss", "text_index.faiss", "metadata.pkl", "tfidf_index.pkl"]
-            existing_files = [f for f in required_files if os.path.exists(os.path.join(index_path, f))]
-            if len(existing_files) == len(required_files):
-                try:
-                    import pickle
-                    metadata_path = os.path.join(index_path, "metadata.pkl")
-                    with open(metadata_path, 'rb') as f:
-                        metadata = pickle.load(f)
-                    video_count = len(metadata.get('video_paths', []))
-                    info_text = f"Valid AI index found - {video_count} videos indexed"
-                except:
-                    info_text = "AI index files found"
-            elif existing_files:
-                info_text = f"Incomplete index ({len(existing_files)}/{len(required_files)} files) - needs preprocessing"
-            else:
-                info_text = "Empty directory - needs preprocessing"
-        self.index_info_label.config(text=info_text)
-
-    def _start_preprocessing(self):
-        self._apply_current_settings()
-        directory = filedialog.askdirectory(title="Select Directory to Preprocess for AI Search")
-        if not directory:
-            return
-        result = messagebox.askyesno(
-            "Confirm Preprocessing",
-            f"Start AI preprocessing for:\n{directory}\n\n"
-            f"Output directory: {self.settings.ai_index_path}\n"
-            f"Workers: {self.settings.preprocessing_workers}\n"
-            f"Max frames: {self.settings.max_frames_per_video}\n"
-            f"Mode: {'Incremental' if self.settings.incremental_preprocessing else 'Full rebuild'}\n\n"
-            "This may take a long time for large video collections. Continue?"
-        )
-        if result:
-            success = self.preprocessing_runner.start_preprocessing(directory, self.settings)
-            if success:
-                self.select_preprocess_btn.pack_forget()
-                self.stop_preprocess_btn.pack(side=tk.LEFT)
-            else:
-                self.theme_provider.toast.error("Error", "Failed to start preprocessing - another process may be running")
-
-    def _stop_preprocessing(self):
-        result = messagebox.askyesno("Confirm Stop", "Stop AI preprocessing?")
-        if result:
-            self.preprocessing_runner.stop_preprocessing()
-            self.stop_preprocess_btn.pack_forget()
-            self.select_preprocess_btn.pack(side=tk.LEFT, padx=(0, 10))
 
     def _cleanup_resume_data(self):
         result = messagebox.askyesno(
@@ -1091,6 +1081,8 @@ class SettingsUI:
     def _populate_ui_from_settings(self, settings: SettingsData):
         if self.ai_server_url_var:
             self.ai_server_url_var.set(settings.ai_server_url)
+        if self.ai_index_path_var:
+            self.ai_index_path_var.set(settings.ai_index_path)
         if self.cleanup_days_var:
             self.cleanup_days_var.set(settings.auto_cleanup_days)
         self.preview_duration_var.set(settings.preview_duration)
@@ -1119,6 +1111,8 @@ class SettingsUI:
     def _apply_current_settings(self):
         if self.ai_server_url_var:
             self.settings.ai_server_url = self.ai_server_url_var.get().strip()
+        if self.ai_index_path_var:
+            self.settings.ai_index_path = self.ai_index_path_var.get().strip()
         if self.cleanup_days_var:
             self.settings.auto_cleanup_days = self.cleanup_days_var.get()
         self.settings.preview_duration = self.preview_duration_var.get()

@@ -267,6 +267,7 @@ class AIPreprocessorBridge:
             "force_rebuild": not settings.incremental_preprocessing,
             "exclude_dirs":  getattr(settings, "excluded_index_dirs", "raw"),
         }
+        self._log(f"[bridge] start_preprocessing payload: {payload}")
         bridge.start_preprocessing(payload, progress_cb, done_cb)
 
     def cancel(self):

@@ -394,7 +394,7 @@ class IndexingDialog:
         except Exception:
             from managers.settings_manager import SettingsData
             settings = SettingsData()
-
+        self._log_append(f"Index output dir: {settings.ai_index_path}\n")
         settings.preprocessing_workers = self._workers_var.get()
         settings.max_frames_per_video = self._frames_var.get()
         settings.incremental_preprocessing = self._incremental_var.get()
