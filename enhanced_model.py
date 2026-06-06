@@ -43,19 +43,18 @@ from nltk.corpus import wordnet
 from nltk.tokenize import word_tokenize
 from nltk.stem import WordNetLemmatizer
 
-try:
-    nltk.data.find('tokenizers/punkt')
-    nltk.data.find('corpora/wordnet')
-    nltk.data.find('taggers/averaged_perceptron_tagger')
-except LookupError:
+resources = {
+    'tokenizers/punkt_tab': 'punkt_tab',
+    'corpora/wordnet': 'wordnet',
+    'taggers/averaged_perceptron_tagger': 'averaged_perceptron_tagger',
+}
+
+for path, package in resources.items():
     try:
-        nltk.download('punkt', quiet=True)
-        nltk.download('punkt_tab', quiet=True)
-        nltk.download('wordnet', quiet=True)
-        nltk.download('averaged_perceptron_tagger', quiet=True)
-        print("NLTK data downloaded successfully")
-    except Exception as e:
-        print(f"Warning: NLTK download failed: {e}")
+        nltk.data.find(path)
+    except LookupError:
+        print("Downloading nltk package:", package)
+        nltk.download(package, quiet=True)
 
 try:
     from deepface import DeepFace
