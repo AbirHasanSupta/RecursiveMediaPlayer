@@ -542,6 +542,49 @@ class SettingsUI:
         self.browse_index_btn = tp.create_button(path_frame, "Browse", self._browse_index_path, "secondary", "sm")
         self.browse_index_btn.pack(side=tk.RIGHT)
 
+        preproc_body = self._make_section(main_container, "Preprocessing Defaults", pady=(0, 10))
+
+        for label, var_attr, setting_attr, from_, to_, hint in [
+            ("Workers:", "workers_var", "preprocessing_workers", 1, 8, "1–8"),
+            ("Max Frames per Video:", "max_frames_var", "max_frames_per_video", 10, 200, "10–200"),
+        ]:
+            row = tk.Frame(preproc_body, bg=tp.bg_color)
+            row.pack(fill=tk.X, pady=3)
+            tk.Label(row, text=label, font=tp.normal_font, bg=tp.bg_color, fg=tp.text_color,
+                     width=22, anchor='w').pack(side=tk.LEFT)
+            var = tk.IntVar(value=getattr(self.settings, setting_attr))
+            setattr(self, var_attr, var)
+            tk.Spinbox(row, from_=from_, to=to_, textvariable=var, font=tp.normal_font, width=6,
+                       bg=getattr(tp, 'entry_bg', tp.surface_color),
+                       fg=getattr(tp, 'entry_fg', tp.text_color),
+                       buttonbackground=tp.bg_color, relief=tk.FLAT, bd=1).pack(side=tk.LEFT)
+            tk.Label(row, text=hint, font=tp.small_font, bg=tp.bg_color,
+                     fg=tp.text_muted).pack(side=tk.LEFT, padx=(6, 0))
+
+        self.incremental_var = tk.BooleanVar(value=self.settings.incremental_preprocessing)
+        ttk.Checkbutton(preproc_body, text="Incremental mode (skip already-indexed videos)",
+                        variable=self.incremental_var,
+                        style="Modern.TCheckbutton").pack(anchor='w', pady=2)
+
+        self.gpu_acceleration_var = tk.BooleanVar(value=self.settings.enable_gpu_acceleration)
+        ttk.Checkbutton(preproc_body, text="GPU acceleration (requires CUDA)",
+                        variable=self.gpu_acceleration_var,
+                        style="Modern.TCheckbutton").pack(anchor='w', pady=2)
+
+        tk.Label(preproc_body, text="Exclude directory names:", font=tp.normal_font,
+                 bg=tp.bg_color, fg=tp.text_color).pack(anchor='w', pady=(6, 2))
+        self.excluded_dirs_var = tk.StringVar(value=self.settings.excluded_index_dirs)
+        excl_wrap = tk.Frame(preproc_body, bg=getattr(tp, 'entry_bg', tp.surface_color),
+                             highlightbackground=tp.border_color, highlightthickness=1)
+        excl_wrap.pack(fill=tk.X)
+        tk.Entry(excl_wrap, textvariable=self.excluded_dirs_var,
+                 bg=getattr(tp, 'entry_bg', tp.surface_color),
+                 fg=getattr(tp, 'entry_fg', tp.text_color),
+                 relief='flat', bd=0, font=tp.normal_font,
+                 insertbackground=getattr(tp, 'entry_fg', tp.text_color)).pack(fill=tk.X, ipady=4, padx=6)
+        tk.Label(preproc_body, text='Comma-separated, e.g.  raw, raws, footage',
+                 font=tp.small_font, bg=tp.bg_color, fg=tp.text_muted).pack(anchor='w', pady=(3, 0))
+
         return frame
 
     def _toggle_ai_search_url_state(self):
@@ -1079,6 +1122,16 @@ class SettingsUI:
             self.theme_provider.toast.success("Settings Reset", "All settings restored to defaults")
 
     def _populate_ui_from_settings(self, settings: SettingsData):
+        if self.workers_var:
+            self.workers_var.set(settings.preprocessing_workers)
+        if self.max_frames_var:
+            self.max_frames_var.set(settings.max_frames_per_video)
+        if self.incremental_var:
+            self.incremental_var.set(settings.incremental_preprocessing)
+        if self.gpu_acceleration_var:
+            self.gpu_acceleration_var.set(settings.enable_gpu_acceleration)
+        if self.excluded_dirs_var:
+            self.excluded_dirs_var.set(settings.excluded_index_dirs)
         if self.ai_server_url_var:
             self.ai_server_url_var.set(settings.ai_server_url)
         if self.ai_index_path_var:
@@ -1109,6 +1162,16 @@ class SettingsUI:
                            bg=badge_bg, fg=badge_fg, relief=tk.FLAT, highlightbackground=badge_border)
 
     def _apply_current_settings(self):
+        if self.workers_var:
+            self.settings.preprocessing_workers = self.workers_var.get()
+        if self.max_frames_var:
+            self.settings.max_frames_per_video = self.max_frames_var.get()
+        if self.incremental_var:
+            self.settings.incremental_preprocessing = self.incremental_var.get()
+        if self.gpu_acceleration_var:
+            self.settings.enable_gpu_acceleration = self.gpu_acceleration_var.get()
+        if self.excluded_dirs_var:
+            self.settings.excluded_index_dirs = self.excluded_dirs_var.get()
         if self.ai_server_url_var:
             self.settings.ai_server_url = self.ai_server_url_var.get().strip()
         if self.ai_index_path_var:
