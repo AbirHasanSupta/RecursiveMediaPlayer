@@ -854,6 +854,35 @@ def select_multiple_folders_and_play():
 
             self._render_home_dashboard()
 
+        def _reload_current_view(self):
+            active = getattr(self, '_active_app_view', 'home')
+            if active == 'home':
+                if hasattr(self, 'exclusion_section') and self.exclusion_section.winfo_ismapped():
+                    self.exclusion_section.pack_forget()
+                self._render_home_dashboard()
+            elif active == 'gallery':
+                vids = getattr(self, '_current_gallery_videos', None)
+                if vids:
+                    if hasattr(self, 'grid_view_manager'):
+                        self.grid_view_manager._pending_page = getattr(self.grid_view_manager, '_page', 0)
+                    self._open_grid_view(vids)
+                else:
+                    self._render_home_dashboard()
+            elif active == 'playlist':
+                self._manage_playlists()
+            elif active == 'queue':
+                self._show_queue_manager()
+            elif active == 'favourites':
+                self._show_favorites_manager()
+            elif active == 'history':
+                self._show_watch_history()
+            elif active == 'tags':
+                self._show_annotation_browser()
+            elif active == 'ai_search':
+                self._show_ai_search()
+            else:
+                self._render_home_dashboard()
+
         def _render_home_dashboard(self):
             frame = self._ensure_embedded_view_frame()
             for child in frame.winfo_children():
@@ -1774,6 +1803,9 @@ def select_multiple_folders_and_play():
             self._search_wrap = search_wrap
             self._search_icon = search_icon
 
+            self._breadcrumb_frame = tk.Frame(self.dir_section, bg=self.bg_color)
+            self._breadcrumb_frame.pack(fill=tk.X, padx=6, pady=(0, 2))
+
             self.dir_frame = tk.Frame(self.dir_section, bg=self.bg_color)
             self.dir_frame.pack(fill=tk.BOTH, expand=True)
 
@@ -1926,6 +1958,7 @@ def select_multiple_folders_and_play():
                                      lambda e: (self.exclusion_tree.selection_set(self._tree_get_all_iids()), "break")[1])
             self.exclusion_tree.bind("<Delete>", self._on_key_toggle_exclusion)
             self.exclusion_tree.bind("<space>", self._on_key_toggle_exclusion)
+            self.exclusion_tree.bind("<<TreeviewSelect>>", self._on_tree_selection_changed)
             self._drag_root_iid = None
             self._drag_start_y = None
             self.exclusion_tree.bind("<B1-Motion>", self._on_drag_motion)
@@ -2155,6 +2188,58 @@ def select_multiple_folders_and_play():
                     self.exclusion_tree.delete(child)
                 except Exception:
                     pass
+
+        def _on_tree_selection_changed(self, event=None):
+            sel = self.exclusion_tree.selection()
+            if sel:
+                self._update_breadcrumb(sel[0])
+            else:
+                self._clear_breadcrumb()
+
+        def _update_breadcrumb(self, iid):
+            if not hasattr(self, '_breadcrumb_frame') or not self._breadcrumb_frame.winfo_exists():
+                return
+            for w in self._breadcrumb_frame.winfo_children():
+                w.destroy()
+            parts = []
+            cur = iid
+            while cur:
+                path = self.current_subdirs_mapping.get(cur)
+                if path:
+                    parts.insert(0, (os.path.basename(path) or path, cur))
+                if cur in self._dir_root_iids:
+                    break
+                p = self.exclusion_tree.parent(cur)
+                if not p:
+                    break
+                cur = p
+            if not parts:
+                return
+            if len(parts) > 3:
+                parts = [parts[0], ('…', None)] + parts[-2:]
+            for i, (name, piid) in enumerate(parts):
+                if i:
+                    tk.Label(self._breadcrumb_frame, text="›", bg=self.bg_color,
+                             fg=self.text_muted, font=("Segoe UI", 8)).pack(side=tk.LEFT)
+                is_last = (i == len(parts) - 1)
+                lbl = tk.Label(self._breadcrumb_frame,
+                               text=(name[:14] + "…") if len(name) > 14 else name,
+                               bg=self.bg_color,
+                               fg=self.accent_color if is_last else self.text_muted,
+                               font=("Segoe UI", 8),
+                               cursor="hand2" if (piid and not is_last) else "")
+                lbl.pack(side=tk.LEFT)
+                if piid and not is_last:
+                    def _nav(e, t=piid):
+                        self.exclusion_tree.selection_set(t)
+                        self.exclusion_tree.see(t)
+                        self.exclusion_tree.focus(t)
+                    lbl.bind("<Button-1>", _nav)
+
+        def _clear_breadcrumb(self):
+            if hasattr(self, '_breadcrumb_frame') and self._breadcrumb_frame.winfo_exists():
+                for w in self._breadcrumb_frame.winfo_children():
+                    w.destroy()
 
         def _on_tree_right_click_unified(self, event):
             iid = self.exclusion_tree.identify_row(event.y)
@@ -5411,6 +5496,7 @@ def select_multiple_folders_and_play():
             if not videos:
                 self.toast.warning("Warning", "No videos to display")
                 return
+            self._current_gallery_videos = list(videos)
             self.grid_view_manager.video_preview_manager = self.video_preview_manager
             self._show_embedded_view(
                 "gallery",

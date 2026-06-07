@@ -1184,7 +1184,11 @@ class GridViewManager:
         except Exception:
             return
 
-        # Persist column count and page size across rebuilds / re-opens
+        if getattr(self, '_pending_page', None) is not None:
+            self._page = self._pending_page
+            self._pending_page = None
+            self._pages_cache = None
+
         if hasattr(self, 'grid_size_var'):
             self._grid_cols = self.grid_size_var.get()
 

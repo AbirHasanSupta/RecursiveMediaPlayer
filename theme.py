@@ -302,7 +302,11 @@ class ThemeSelector:
             if label_attr.endswith('_label') and hasattr(self, label_attr):
                 label = getattr(self, label_attr)
                 if isinstance(label, tk.Label):
-                    label.configure(bg=self.bg_color, fg=self.text_color)
+                    try:
+                        if label.winfo_exists():
+                            label.configure(bg=self.bg_color, fg=self.text_color)
+                    except Exception:
+                        pass
 
         # Directory panel tree + scrollbar (ttk needs explicit styling on Windows)
         if hasattr(self, 'exclusion_tree'):
@@ -344,8 +348,9 @@ class ThemeSelector:
         self._apply_menubar_colors()
         self._apply_theme_to_toplevels()
 
-        # Reload home dashboard if visible
-        if getattr(self, '_active_app_view', None) == 'home':
+        if hasattr(self, '_reload_current_view'):
+            self.root.after(0, self._reload_current_view)
+        elif getattr(self, '_active_app_view', None) == 'home':
             if hasattr(self, 'exclusion_section') and self.exclusion_section.winfo_ismapped():
                 self.exclusion_section.pack_forget()
             self._render_home_dashboard()
@@ -964,6 +969,11 @@ class ThemeSelector:
                 pass
         if hasattr(self, '_refresh_dir_action_states'):
             self._refresh_dir_action_states()
+        sel = list(self.exclusion_tree.selection()) if hasattr(self, 'exclusion_tree') else []
+        if sel and hasattr(self, '_update_breadcrumb'):
+            self._update_breadcrumb(sel[0])
+        elif hasattr(self, '_clear_breadcrumb'):
+            self._clear_breadcrumb()
 
     def get_manager_design_tokens(self):
         """Dashboard-aligned palette for embedded manager UIs."""
@@ -1624,7 +1634,6 @@ class ThemeSelector:
         self._fix_toolbar_colors()
 
     def _toggle_theme_menu(self):
-        self._show_home_view()
         self.toggle_theme()
 
     def _toggle_loop_from_menu(self):
