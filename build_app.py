@@ -1763,6 +1763,11 @@ def select_multiple_folders_and_play():
 
             self._refresh_dir_action_states()
 
+            self._breadcrumb_frame = tk.Frame(self.dir_section, bg=self.bg_color, height=18)
+            self._breadcrumb_frame.pack(fill=tk.X, padx=6, pady=(0, 2))
+            self._breadcrumb_frame.pack_propagate(False)
+
+
             # Search bar
             search_wrap = tk.Frame(
                 self.dir_section,
@@ -1802,9 +1807,6 @@ def select_multiple_folders_and_play():
             self.search_entry.bind('<FocusOut>', _search_focus_out)
             self._search_wrap = search_wrap
             self._search_icon = search_icon
-
-            self._breadcrumb_frame = tk.Frame(self.dir_section, bg=self.bg_color)
-            self._breadcrumb_frame.pack(fill=tk.X, padx=6, pady=(0, 2))
 
             self.dir_frame = tk.Frame(self.dir_section, bg=self.bg_color)
             self.dir_frame.pack(fill=tk.BOTH, expand=True)
