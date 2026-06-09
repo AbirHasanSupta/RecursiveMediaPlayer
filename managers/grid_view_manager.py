@@ -1369,27 +1369,35 @@ class GridViewManager:
             thumb_container, bg=_ACTION_STRIP_BG, height=_ACTION_STRIP_H
         )
         action_strip._is_action_strip = True
+        # Use grid inside action_strip so buttons expand evenly
+        action_strip.grid_columnconfigure(0, weight=1)
+        action_strip.grid_columnconfigure(1, weight=0)  # sep
+        action_strip.grid_columnconfigure(2, weight=1)
+        action_strip.grid_columnconfigure(3, weight=0)  # sep
+        action_strip.grid_columnconfigure(4, weight=1)
 
-        def _make_action_btn(parent, text, fg=_ACTION_STRIP_FG, bold=False):
+        def _make_action_btn_grid(parent, text, col, fg=_ACTION_STRIP_FG, bold=False):
             weight = "bold" if bold else "normal"
             lbl = tk.Label(
                 parent, text=text,
                 bg=_ACTION_STRIP_BG, fg=fg,
                 font=("Segoe UI", 8, weight),
-                padx=10, pady=0, cursor="hand2"
+                pady=0, cursor="hand2"
             )
-            lbl.pack(side=tk.LEFT, fill=tk.Y)
+            lbl.grid(row=0, column=col, sticky='nsew')
             return lbl
 
-        def _sep(parent):
-            tk.Frame(parent, bg=_ACTION_STRIP_SEP, width=1).pack(
-                side=tk.LEFT, fill=tk.Y, pady=6)
+        def _sep_grid(parent, col):
+            f = tk.Frame(parent, bg=_ACTION_STRIP_SEP, width=1)
+            f.grid(row=0, column=col, sticky='ns', pady=4)
 
-        play_btn = _make_action_btn(action_strip, "▶  Play", fg="#ffffff", bold=True)
-        _sep(action_strip)
-        q_btn    = _make_action_btn(action_strip, "+ Queue")
-        _sep(action_strip)
-        fav_btn  = _make_action_btn(action_strip, "♥ Fav")
+        play_btn = _make_action_btn_grid(action_strip, "▶  Play", 0, fg="#ffffff", bold=True)
+        _sep_grid(action_strip, 1)
+        q_btn    = _make_action_btn_grid(action_strip, "+ Queue", 2)
+        _sep_grid(action_strip, 3)
+        fav_btn  = _make_action_btn_grid(action_strip, "♥ Fav", 4)
+        # Let the strip expand to its parent width
+        action_strip.grid_rowconfigure(0, weight=1)
 
         _accent = t['accent']
         for _btn, _hfg, _hbg in (
@@ -1400,7 +1408,7 @@ class GridViewManager:
             _btn.bind("<Enter>", lambda e, b=_btn, hf=_hfg, hb=_hbg:
                       b.configure(fg=hf, bg=hb))
             _btn.bind("<Leave>", lambda e, b=_btn:
-                      b.configure(fg="#ffffff" if b is play_btn else (_ACTION_STRIP_FG if b is q_btn else _ACTION_STRIP_FG),
+                      b.configure(fg="#ffffff" if b is play_btn else _ACTION_STRIP_FG,
                                   bg=_ACTION_STRIP_BG))
 
         play_btn.bind("<Button-1>",   lambda e, _vp=vp: self._play_single(_vp))
