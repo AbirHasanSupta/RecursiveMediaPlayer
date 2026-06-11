@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 import threading
 import tkinter as tk
@@ -864,8 +864,9 @@ class PlaylistUI:
     def _copy_path(self, file_path):
         """Copy file path to clipboard"""
         try:
+            norm_path = os.path.normpath(file_path)
             self.parent.clipboard_clear()
-            self.parent.clipboard_append(file_path)
+            self.parent.clipboard_append(norm_path)
         except Exception as e:
             print(f"Error copying path: {e}")
 
@@ -874,12 +875,13 @@ class PlaylistUI:
         try:
             import subprocess
             import sys
+            norm_path = os.path.normpath(file_path)
             if os.name == 'nt':
-                subprocess.Popen(f'explorer /select,"{file_path}"')
+                subprocess.Popen(f'explorer /select,"{norm_path}"')
             elif sys.platform == 'darwin':
-                subprocess.Popen(['open', '-R', file_path])
+                subprocess.Popen(['open', '-R', norm_path])
             else:
-                subprocess.Popen(['xdg-open', os.path.dirname(file_path)])
+                subprocess.Popen(['xdg-open', os.path.dirname(norm_path)])
         except Exception as e:
             print(f"Error opening location: {e}")
 

@@ -3315,14 +3315,15 @@ def select_multiple_folders_and_play():
         def _context_open_folder_location(self, folder_path):
             try:
                 import subprocess
+                norm_path = os.path.normpath(folder_path)
                 if os.name == 'nt':
-                    subprocess.Popen(f'explorer /select,"{folder_path}"')
+                    subprocess.Popen(f'explorer /select,"{norm_path}"')
                 elif os.name == 'posix':
                     if sys.platform == 'darwin':
-                        subprocess.Popen(['open', '-R', folder_path])
+                        subprocess.Popen(['open', '-R', norm_path])
                     else:
-                        subprocess.Popen(['xdg-open', os.path.dirname(folder_path)])
-                self.update_console(f"Opened location: {os.path.dirname(folder_path)}")
+                        subprocess.Popen(['xdg-open', os.path.dirname(norm_path)])
+                self.update_console(f"Opened location: {os.path.dirname(norm_path)}")
             except Exception as e:
                 self.update_console(f"Error opening location: {e}")
                 self.toast.error("Error", f"Could not open folder location: {e}")
@@ -4923,7 +4924,7 @@ def select_multiple_folders_and_play():
                                    f"{len(selected_videos)} video{'s' if len(selected_videos) != 1 else ''} added to playlist")
 
         def _context_copy_selected(self, selection):
-            paths_to_copy = [self.current_subdirs_mapping[iid]
+            paths_to_copy = [os.path.normpath(self.current_subdirs_mapping[iid])
                              for iid in selection if iid in self.current_subdirs_mapping]
             if paths_to_copy:
                 file_list    = "\0".join(paths_to_copy) + "\0"
@@ -4946,9 +4947,10 @@ def select_multiple_folders_and_play():
 
         def _context_copy_path(self, file_path):
             try:
+                norm_path = os.path.normpath(file_path)
                 self.root.clipboard_clear()
-                self.root.clipboard_append(file_path)
-                self.update_console(f"Copied path: {file_path}")
+                self.root.clipboard_append(norm_path)
+                self.update_console(f"Copied path: {norm_path}")
                 self.toast.success("Copied", "Path copied to clipboard")
             except Exception as e:
                 self.update_console(f"Error copying path: {e}")
@@ -5042,14 +5044,15 @@ def select_multiple_folders_and_play():
         def _context_open_location(self, file_path):
             try:
                 import subprocess
+                norm_path = os.path.normpath(file_path)
                 if os.name == 'nt':
-                    subprocess.Popen(f'explorer /select,"{file_path}"')
+                    subprocess.Popen(f'explorer /select,"{norm_path}"')
                 elif os.name == 'posix':
                     if sys.platform == 'darwin':
-                        subprocess.Popen(['open', '-R', file_path])
+                        subprocess.Popen(['open', '-R', norm_path])
                     else:
-                        subprocess.Popen(['xdg-open', os.path.dirname(file_path)])
-                self.update_console(f"Opened location: {os.path.dirname(file_path)}")
+                        subprocess.Popen(['xdg-open', os.path.dirname(norm_path)])
+                self.update_console(f"Opened location: {os.path.dirname(norm_path)}")
             except Exception as e:
                 self.update_console(f"Error opening location: {e}")
                 self.toast.error("Error", f"Could not open file location: {e}")

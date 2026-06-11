@@ -1765,8 +1765,9 @@ class AnnotationBrowserManager:
 
     def _copy_path(self, path: str):
         try:
+            norm_path = os.path.normpath(path)
             self.root.clipboard_clear()
-            self.root.clipboard_append(path)
+            self.root.clipboard_append(norm_path)
             self.tp.toast.info("Copied", f"Path copied to clipboard")
         except Exception:
             pass
@@ -1774,12 +1775,13 @@ class AnnotationBrowserManager:
     def _open_location(self, path: str):
         try:
             import subprocess, sys
+            norm_path = os.path.normpath(path)
             if os.name == "nt":
-                subprocess.Popen(f'explorer /select,"{path}"')
+                subprocess.Popen(f'explorer /select,"{norm_path}"')
             elif sys.platform == "darwin":
-                subprocess.Popen(["open", "-R", path])
+                subprocess.Popen(["open", "-R", norm_path])
             else:
-                subprocess.Popen(["xdg-open", os.path.dirname(path)])
+                subprocess.Popen(["xdg-open", os.path.dirname(norm_path)])
         except Exception:
             pass
 

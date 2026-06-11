@@ -1,4 +1,4 @@
-﻿"""
+"""
 EmbeddedPlayer
 ==============
 A self-contained Toplevel that hosts a VLC instance inside a Tkinter canvas,
@@ -1552,7 +1552,7 @@ class EmbeddedPlayer:
     def _copy_video_path(self):
         try:
             import struct
-            path = self.videos[self.index]
+            path = os.path.normpath(self.videos[self.index])
             try:
                 import win32clipboard as wcb
                 import win32con
