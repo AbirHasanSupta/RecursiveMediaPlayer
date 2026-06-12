@@ -481,14 +481,51 @@ class IndexingDialog:
                 self._file_lbl.config(text="")
             except Exception:
                 pass
-            self._manager._retry_bridge()
-            if self._manager._active_ui:
-                self._manager._active_ui.set_status(
-                    "ready", "✓  Index rebuilt — AI search ready")
+            self._reload_index()
         else:
             self._progress_bar.config(mode="determinate", value=0)
             self._set_progress_text(f"✗  Failed: {error or 'unknown error'}", error=True)
             self._log_append(f"─" * 50 + f"\n✗ Failed: {error}\n")
+
+    def _reload_index(self):
+        bridge = self._manager._bridge
+        if not bridge:
+            self._manager._retry_bridge()
+            return
+        index_dir = self._manager._get_index_dir()
+        bridge.reload_searcher(index_dir, on_done=self._on_reload_done)
+
+    def _on_reload_done(self, data: dict):
+        if not self._win or not self._win.winfo_exists():
+            return
+
+        if data.get("status") == "reloaded":
+            status = self._manager._index_status
+            if status is not None:
+                status.device = data.get("device", "")
+                vc = data.get("video_count")
+                if vc is not None:
+                    status.video_count = int(vc)
+                status.files_present = True
+                status.new_video_count = 0
+                status.missing_video_count = 0
+                status.bridge_ready = True
+
+            self._set_progress_text("✓  Index reloaded — AI search ready")
+            self._log_append("✓ AI search index reloaded.\n")
+
+            if self._manager._active_ui:
+                if status is not None:
+                    label, color = status.format_device()
+                    self._manager._active_ui.set_status("ready", status.ready_status_text())
+                    self._manager._active_ui.set_device_badge(label, color)
+                    self._manager._active_ui.set_stale_warning(0, 0)
+                else:
+                    self._manager._active_ui.set_status("ready", "✓  Index rebuilt — AI search ready")
+        else:
+            err = data.get("error", "unknown error")
+            self._set_progress_text(f"✗  Reload failed: {err}", error=True)
+            self._log_append(f"✗ Reload failed: {err}\n")
 
     def _set_progress_text(self, text: str, error: bool = False):
         try:

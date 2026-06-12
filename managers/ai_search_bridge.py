@@ -107,7 +107,7 @@ class AIServerBridge:
                 self._on_ready_cb(msg)
 
     # ------------------------------------------------------------------
-    # Search
+    # Search (original semantic + new AI-powered)
     # ------------------------------------------------------------------
 
     def query(
@@ -117,6 +117,7 @@ class AIServerBridge:
         top_k: int = 20,
         callback: Callable = None,
     ):
+        """Original semantic search using /search endpoint."""
         if not self.is_ready():
             if callback:
                 self._deliver(callback, {"error": "bridge not ready", "results": [], "counts": {}, "scores": {}})
@@ -129,6 +130,37 @@ class AIServerBridge:
         def _worker():
             try:
                 resp = self._post("/search", payload, timeout=60.0)
+                result = resp.json()
+            except Exception as exc:
+                result = {"error": str(exc), "results": [], "counts": {}, "scores": {}}
+            if callback:
+                self._deliver(callback, result)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def ai_query(
+        self,
+        text: str,
+        directory_filter: str = None,
+        top_k: int = 10,
+        callback: Callable = None,
+    ):
+        """
+        AI-powered natural language query – uses /search/ai.
+        Handles metadata filters, sorting, content search, etc.
+        """
+        if not self.is_ready():
+            if callback:
+                self._deliver(callback, {"error": "bridge not ready", "results": [], "counts": {}, "scores": {}})
+            return
+
+        payload = {"query": text, "top_k": top_k}
+        if directory_filter:
+            payload["directory"] = directory_filter
+
+        def _worker():
+            try:
+                resp = self._post("/search/ai", payload, timeout=60.0)
                 result = resp.json()
             except Exception as exc:
                 result = {"error": str(exc), "results": [], "counts": {}, "scores": {}}

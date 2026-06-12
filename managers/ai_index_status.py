@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-_INDEX_FILES = ("clip_index.faiss", "text_index.faiss", "metadata.pkl", "tfidf_index.pkl")
+_INDEX_FILES = ("clip_index.faiss", "text_index.faiss", "metadata.pkl", "tfidf_index.pkl", "video_meta.pkl")
 _VIDEO_EXTS = frozenset({
     ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv",
     ".webm", ".m4v", ".ts", ".mts", ".m2ts", ".mpg", ".mpeg",

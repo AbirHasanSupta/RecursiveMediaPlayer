@@ -123,11 +123,24 @@ class AISearchManager:
         threading.Thread(target=_connect_bg, daemon=True).start()
 
     def _on_bridge_ready(self, msg: dict):
-        if msg.get("status") == "error":
+        status = msg.get("status")
+
+        if status == "error":
             self._root.after(0, self._on_bridge_error)
             return
 
         if self._index_status is None:
+            return
+
+        if status == "no_index":
+            self._index_status.bridge_ready = False
+            if self._active_ui:
+                self._active_ui.set_status(
+                    "warn",
+                    "⚠  No index found — click Index to build one",
+                    show_settings=False
+                )
+                self._active_ui.set_device_badge("", "")
             return
 
         device_str = msg.get("device", "")
@@ -217,7 +230,7 @@ class AISearchManager:
             self._ensure_bridge()
             callback({"error": "bridge not ready", "results": [], "counts": {}, "scores": {}})
             return
-        self._bridge.query(query, directory_filter=directory_filter, top_k=top_k, callback=callback)
+        self._bridge.ai_query(query, directory_filter=directory_filter, top_k=top_k, callback=callback)
 
     def start_preprocessing(self, progress_cb: Callable, done_cb: Callable):
         try:
