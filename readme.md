@@ -1,4 +1,4 @@
-﻿# Recursive Video Player
+# Recursive Video Player
 
 A feature-rich video player with AI-powered semantic search, built for managing and playing large video collections across multiple directories.
 
@@ -53,19 +53,19 @@ pip install -r requirements\ai_requirements.txt
 
 Launch the app:
 ```cmd
-python build_app.py
+python main.py
 ```
 
 ---
 
 ## AI Search Setup
 
-The AI engine runs as a **separate HTTP server** (`enhanced_model.py`). It can run on the same machine or a remote GPU workstation.
+The AI engine runs as a **separate HTTP server** (`src/core/ai_service.py`). It can run on the same machine or a remote GPU workstation.
 
 ```
 ┌──────────────────────────────┐            HTTP             ┌─────────────────────────────────┐
-│   Recursive Video Player     │ ◄─────────────────────────► │   enhanced_model.py (server)    │
-│       build_app.py           │    e.g. localhost:8000       │   FastAPI · CLIP · BLIP · FAISS │
+│   Recursive Video Player     │ ◄─────────────────────────► │   src/core/ai_service.py (srv)  │
+│          main.py             │    e.g. localhost:8000       │   FastAPI · CLIP · BLIP · FAISS │
 └──────────────────────────────┘                             └─────────────────────────────────┘
         UI / Playback                                           AI Indexing & Semantic Search
 ```
@@ -73,7 +73,7 @@ The AI engine runs as a **separate HTTP server** (`enhanced_model.py`). It can r
 ### 1 — Start the AI Server
 
 ```cmd
-python enhanced_model.py --mode server
+python src/core/ai_service.py --mode server
 ```
 
 Default: `http://0.0.0.0:8000`. Optional flags:
@@ -111,8 +111,8 @@ The server starts even without an index — you can build one from inside the ap
 
 **Or via command line:**
 ```cmd
-python enhanced_model.py --mode preprocess --videos_dir "C:/Videos"
-python enhanced_model.py --mode preprocess --videos_dir "C:/Videos" --workers 2 --max_frames 60 --incremental
+python src/core/ai_service.py --mode preprocess --videos_dir "C:/Videos"
+python src/core/ai_service.py --mode preprocess --videos_dir "C:/Videos" --workers 2 --max_frames 60 --incremental
 ```
 
 | Flag | Default | Description |
@@ -134,7 +134,7 @@ python enhanced_model.py --mode preprocess --videos_dir "C:/Videos" --workers 2 
 | Setting | Default | Description |
 |---|---|---|
 | Enable AI Search | Off | Shows the AI Search tab and activates the server connection |
-| AI Server URL | *(empty)* | URL of the running `enhanced_model.py` server |
+| AI Server URL | *(empty)* | URL of the running `ai_service.py` server |
 | AI Index Path | `%LOCALAPPDATA%\...\index_data` | Where index files are stored |
 | Workers | `3` | Preprocessing parallelism |
 | Max Frames per Video | `60` | Per-video frame sample cap (20–200) |
@@ -169,7 +169,7 @@ python build.py
 ```
 
 Produces `dist/RecursiveVideoPlayer/RecursiveVideoPlayer.exe` and a ZIP package.
-The standalone build excludes AI models to keep the file size small; `enhanced_model.py` is bundled inside `_internal/` and can be run separately.
+The standalone build excludes AI models to keep the file size small; `ai_service.py` is bundled inside `_internal/` and can be run separately.
 
 ---
 

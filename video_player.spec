@@ -59,23 +59,28 @@ hidden_imports = [
 ]
 
 a = Analysis(
-    ['build_app.py'],
-    pathex=[],
+    ['main.py'],
+    pathex=[
+        os.path.abspath('src'),
+        os.path.abspath(os.path.join('src', 'core')),
+        os.path.abspath(os.path.join('src', 'utils')),
+    ],
     binaries=[],
     datas=[
         # ── icon & splash asset ──────────────────────────────────────────────
-        ('icon.ico', '.'),
+        ('assets/icon.ico', '.'),
 
         # ── source files ─────────────────────────────────────────────────────
-        ('icon_helper.py', '.'),
-        ('splash.py', '.'),
-        ('key_press.py', '.'),
-        ('theme.py', '.'),
-        ('utils.py', '.'),
-        ('embedded_player.py', '.'),
-        ('enhanced_model.py', '.'),
+        ('src/utils/icon_helper.py', '.'),
+        ('src/core/splash.py', '.'),
+        ('src/core/key_press.py', '.'),
+        ('src/core/theme.py', '.'),
+        ('src/utils/utils.py', '.'),
+        ('src/core/embedded_player.py', '.'),
+        ('src/core/ai_service.py', '.'),
+        ('src/core/app.py', '.'),
         # ── managers package ─────────────────────────────────────────────────
-        ('managers', 'managers'),
+        ('src/managers', 'managers'),
     ],
     hiddenimports=hidden_imports,
     hookspath=[],
@@ -126,7 +131,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     # ── custom Windows taskbar / .exe icon ───────────────────────────────────
-    icon='icon.ico',
+    icon='assets/icon.ico',
 )
 
 coll = COLLECT(

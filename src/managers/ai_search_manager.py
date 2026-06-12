@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 import threading
@@ -196,8 +196,14 @@ class AISearchManager:
         if self._active_ui:
             self._ensure_bridge()
 
-    def _save_state(self, query: str, results: list, counts: dict, scores: dict):
-        self._persisted_state = {"query": query, "results": results, "counts": counts, "scores": scores}
+    def _save_state(self, query: str, results: list, counts: dict, scores: dict, search_mode: str = "ai"):
+        self._persisted_state = {
+            "query": query,
+            "results": results,
+            "counts": counts,
+            "scores": scores,
+            "search_mode": search_mode
+        }
 
     def _clear_state(self):
         self._persisted_state = None
@@ -225,12 +231,15 @@ class AISearchManager:
         if self._active_ui:
             self._active_ui.set_directory_filter(self._directory_filter)
 
-    def do_query(self, query: str, directory_filter: str, top_k: int, callback: Callable):
+    def do_query(self, query: str, directory_filter: str, top_k: int, callback: Callable, search_mode: str = "ai"):
         if not self._bridge or not self._bridge.is_ready():
             self._ensure_bridge()
             callback({"error": "bridge not ready", "results": [], "counts": {}, "scores": {}})
             return
-        self._bridge.ai_query(query, directory_filter=directory_filter, top_k=top_k, callback=callback)
+        if search_mode == "normal":
+            self._bridge.query(query, directory_filter=directory_filter, top_k=top_k, callback=callback)
+        else:
+            self._bridge.ai_query(query, directory_filter=directory_filter, top_k=top_k, callback=callback)
 
     def start_preprocessing(self, progress_cb: Callable, done_cb: Callable):
         try:
@@ -277,6 +286,7 @@ class AISearchUI:
         self._card_frames: dict = {}
         self._photo_cache: dict = {}
         self._sel_count_lbl: Optional[tk.Label] = None
+        self._search_mode = "ai"
 
         self._pull_theme()
         self._build()
@@ -360,6 +370,45 @@ class AISearchUI:
             fg=self.accent, highlightbackground=self.accent))
         self._index_btn.bind("<Leave>", lambda _e: self._index_btn.config(
             fg=self.muted, highlightbackground=self.border))
+
+        options_row = tk.Frame(top, bg=self.surface)
+        options_row.pack(fill=tk.X, padx=16, pady=(0, 8))
+
+        mode_lbl = tk.Label(
+            options_row, text="Search Type:",
+            bg=self.surface, fg=self.text, font=self.fs
+        )
+        mode_lbl.pack(side=tk.LEFT, padx=(0, 8))
+
+        selector_frame = tk.Frame(
+            options_row, bg=self.surface,
+            highlightbackground=self.border, highlightthickness=1
+        )
+        selector_frame.pack(side=tk.LEFT)
+
+        self._normal_mode_btn = tk.Label(
+            selector_frame, text="Normal Search",
+            bg=self.surface, fg=self.muted, font=self.fs,
+            padx=12, pady=4, cursor="hand2"
+        )
+        self._normal_mode_btn.pack(side=tk.LEFT)
+
+        self._advanced_mode_btn = tk.Label(
+            selector_frame, text="Advanced Search",
+            bg=self.surface, fg=self.muted, font=self.fs,
+            padx=12, pady=4, cursor="hand2"
+        )
+        self._advanced_mode_btn.pack(side=tk.LEFT)
+
+        self._normal_mode_btn.bind("<Button-1>", lambda _e: self._set_search_mode("normal"))
+        self._normal_mode_btn.bind("<Enter>", lambda _e: self._on_mode_hover(self._normal_mode_btn, "normal", True))
+        self._normal_mode_btn.bind("<Leave>", lambda _e: self._on_mode_hover(self._normal_mode_btn, "normal", False))
+
+        self._advanced_mode_btn.bind("<Button-1>", lambda _e: self._set_search_mode("ai"))
+        self._advanced_mode_btn.bind("<Enter>", lambda _e: self._on_mode_hover(self._advanced_mode_btn, "ai", True))
+        self._advanced_mode_btn.bind("<Leave>", lambda _e: self._on_mode_hover(self._advanced_mode_btn, "ai", False))
+
+        self._set_search_mode(self._search_mode)
 
         status_row = tk.Frame(top, bg=self.surface)
         status_row.pack(fill=tk.X, padx=16, pady=(0, 10))
@@ -533,6 +582,28 @@ class AISearchUI:
     def set_directory_filter(self, dirs: list):
         self._directory_filter = dirs[0] if dirs else None
 
+    def _set_search_mode(self, mode: str, rerun_on_change: bool = False):
+        old_mode = getattr(self, "_search_mode", None)
+        self._search_mode = mode
+        if mode == "normal":
+            self._normal_mode_btn.config(bg=self.accent, fg="#ffffff", font=("Segoe UI", 9, "bold"))
+            self._advanced_mode_btn.config(bg=self.surface, fg=self.muted, font=("Segoe UI", 9))
+        else:
+            self._normal_mode_btn.config(bg=self.surface, fg=self.muted, font=("Segoe UI", 9))
+            self._advanced_mode_btn.config(bg=self.accent, fg="#ffffff", font=("Segoe UI", 9, "bold"))
+
+        if rerun_on_change and old_mode and old_mode != mode:
+            query = self._search_var.get().strip()
+            if query:
+                self._on_search_click()
+
+    def _on_mode_hover(self, btn, mode, entered):
+        if self._search_mode != mode:
+            if entered:
+                btn.config(bg=self.hover, fg=self.text)
+            else:
+                btn.config(bg=self.surface, fg=self.muted)
+
     def run_search(self, query: str):
         self._search_var.set(query)
         self._on_search_click()
@@ -543,6 +614,8 @@ class AISearchUI:
     def restore_state(self, state: dict):
         self._search_var.set(state["query"])
         self._last_query = state["query"]
+        mode = state.get("search_mode", "ai")
+        self._set_search_mode(mode)
         self._render_results(state["results"], state["counts"], state["scores"])
 
     def _clear_search(self):
@@ -561,6 +634,7 @@ class AISearchUI:
             query,
             directory_filter=self._directory_filter,
             top_k=20,
+            search_mode=self._search_mode,
             callback=self._on_results,
         )
 
@@ -576,7 +650,7 @@ class AISearchUI:
         results = msg.get("results", [])
         counts = msg.get("counts", {})
         scores = msg.get("scores", {})
-        self._manager._save_state(self._last_query, results, counts, scores)
+        self._manager._save_state(self._last_query, results, counts, scores, self._search_mode)
         self._render_results(results, counts, scores)
 
     def _show_empty_state(self):

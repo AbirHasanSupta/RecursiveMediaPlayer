@@ -20,8 +20,12 @@ _MUTED   = "#8A99B5"
 _DIM     = "#4A5568"
 
 def _icon_path() -> str:
-    base = getattr(__import__('sys'), '_MEIPASS', None) or os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base, "icon.ico")
+    base = getattr(__import__('sys'), '_MEIPASS', None)
+    if base:
+        return os.path.join(base, "icon.ico")
+    # Resolve project root from src/core/splash.py (3 levels up)
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(root, "assets", "icon.ico")
 
 class SplashController:
     """Allows the caller to update progress and close the splash."""

@@ -7,8 +7,12 @@ import sys
 
 
 def _ico_path() -> str:
-    base = getattr(sys, '_MEIPASS', None) or os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base, "icon.ico")
+    base = getattr(sys, '_MEIPASS', None)
+    if base:
+        return os.path.join(base, "icon.ico")
+    # Resolve project root from src/utils/icon_helper.py (3 levels up)
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(root, "assets", "icon.ico")
 
 
 def apply_icon(window) -> None:

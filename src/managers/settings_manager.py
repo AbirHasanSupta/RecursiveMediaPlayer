@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 import threading
 import tkinter as tk
@@ -460,7 +460,7 @@ class SettingsUI:
         tk.Label(
             url_body,
             text=(
-                "Run the enhanced_model.py (find it inside 'RecursiveVideoPlayer/_internal/') server separately (or on another machine), "
+                "Run the ai_service.py (find it inside 'RecursiveVideoPlayer/_internal/') server separately (or on another machine), "
                 "then paste its base URL here.  The app will connect to it for AI search."
             ),
             font=tp.small_font,

@@ -5,7 +5,8 @@ import os
 
 def register_context_menu():
     try:
-        exe_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dist", "RecursiveVideoPlayer", "RecursiveVideoPlayer.exe")
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        exe_path = os.path.join(root, "dist", "RecursiveVideoPlayer", "RecursiveVideoPlayer.exe")
 
         if not os.path.exists(exe_path):
             print(f"Error: Executable not found at {exe_path}")
