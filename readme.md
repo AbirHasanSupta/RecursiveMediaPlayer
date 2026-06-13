@@ -26,7 +26,8 @@ A feature-rich video player with AI-powered semantic search, built for managing 
 
 ### AI-Powered Semantic Search
 - **Natural Language Queries** — describe what you're looking for in plain English
-- **Multi-Modal Engine** — combines CLIP (visual), BLIP (captions), and TF-IDF (keyword) scoring
+- **Multi-Modal Engine** — combines SigLIP (visual), BLIP (captions), mxbai text embeddings, TF-IDF/BM25 (keyword), and cross-encoder reranking
+- **AI Query Parser** — natural language filters and sorting (duration, size, resolution, fps) via rule-based + Qwen2.5-0.5B fallback parser
 - **Adaptive Frame Sampling** — intelligent sampling tuned to video length
 - **Query Expansion** — automatic synonym and semantic expansion for better recall
 - **In-App Indexing** — build and monitor the index via the **⚙ Index** button, no terminal needed
@@ -65,7 +66,7 @@ The AI engine runs as a **separate HTTP server** (`src/core/ai_service.py`). It 
 ```
 ┌──────────────────────────────┐            HTTP             ┌─────────────────────────────────┐
 │   Recursive Video Player     │ ◄─────────────────────────► │   src/core/ai_service.py (srv)  │
-│          main.py             │    e.g. localhost:8000       │   FastAPI · CLIP · BLIP · FAISS │
+│          main.py             │    e.g. localhost:8000       │   FastAPI · SigLIP · BLIP · FAISS │
 └──────────────────────────────┘                             └─────────────────────────────────┘
         UI / Playback                                           AI Indexing & Semantic Search
 ```
@@ -96,12 +97,12 @@ The server starts even without an index — you can build one from inside the ap
   Video Files
       │
       ▼
-  Frame Sampling  ──►  CLIP (visual embedding)
-                  ──►  BLIP (caption generation)  ──►  Sentence Embedding
+  Frame Sampling  ──►  SigLIP (visual embedding)
+                  ──►  BLIP (caption generation)  ──►  mxbai (text embedding)
                   ──►  Semantic Feature Extraction
       │
       ▼
-  FAISS Index  +  TF-IDF Index  +  metadata.pkl
+  FAISS Index  +  TF-IDF/BM25 Index  +  metadata.pkl
       │
       ▼
   AI Server loads index  ──►  Ready to search

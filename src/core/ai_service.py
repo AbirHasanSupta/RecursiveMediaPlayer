@@ -1,15 +1,23 @@
 ﻿"""
 High-Accuracy Video Semantic Search with Smart Resource Management
------------------------------------------------------------------
++ AI-Powered Natural Language Query Parser (Hybrid Rule-Based + Qwen2.5-0.5B)
+------------------------------------------------------------------------------
 
 Maintains accuracy while solving resource issues:
 - Sequential model loading to prevent memory overflow
 - Batch processing with memory management
-- Multi-modal ensemble scoring (CLIP + BLIP + text similarity)
-- Advanced semantic feature extraction
-- Query expansion and synonym matching
-- Temporal consistency scoring
-- Smart frame sampling with multiple strategies
+- Multi-modal ensemble scoring (SigLIP + BLIP + mxbai text similarity)
+- Scene-aware frame sampling with perceptual hash deduplication
+- BM25 sparse retrieval
+- Cross-encoder reranking
+
+AI Query Parser (two-tier, RULE-PRIMARY):
+- Tier 1 (PRIMARY): Rule-based regex+keyword parser — accurate for structured queries
+- Tier 2 (FALLBACK): Qwen2.5-0.5B-Instruct on GPU — handles complex unstructured language
+- No content filtering — parses all queries faithfully
+- Per-video metadata extraction (duration, file size, resolution, etc.)
+- /search/ai endpoint for natural language filters/sorting
+- Automatic fallback to semantic search if parsing fails
 """
 
 import argparse
@@ -24,17 +32,19 @@ from pathlib import Path
 from collections import Counter, defaultdict
 from typing import List, Dict, Any, Tuple, Optional
 import concurrent.futures
-import re
 import psutil
 
 import numpy as np
 import cv2
 
 import torch
+import re
+
+from sentence_transformers import SentenceTransformer, CrossEncoder
 from transformers import (
-    CLIPProcessor, CLIPModel,
+    SiglipModel, SiglipProcessor,
     BlipProcessor, BlipForConditionalGeneration,
-    AutoTokenizer, AutoModel
+    AutoTokenizer, AutoModelForCausalLM,
 )
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -42,31 +52,33 @@ import nltk
 from nltk.corpus import wordnet
 from nltk.tokenize import word_tokenize
 from nltk.stem import WordNetLemmatizer
-
-resources = {
-    'tokenizers/punkt_tab': 'punkt_tab',
-    'corpora/wordnet': 'wordnet',
-    'taggers/averaged_perceptron_tagger': 'averaged_perceptron_tagger',
-}
-
-for path, package in resources.items():
-    try:
-        nltk.data.find(path)
-    except LookupError:
-        print("Downloading nltk package:", package)
-        nltk.download(package, quiet=True)
-
-try:
-    from deepface import DeepFace
-
-    _DEEPFACE_AVAILABLE = True
-except Exception:
-    _DEEPFACE_AVAILABLE = False
+from rank_bm25 import BM25Okapi
+import imagehash
+from PIL import Image as PILImage
 
 import faiss
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 import uvicorn
+
+MODEL_SIGLIP   = "google/siglip-so400m-patch14-384"
+MODEL_BLIP = "Salesforce/blip-image-captioning-large"
+MODEL_EMBED    = "mixedbread-ai/mxbai-embed-large-v1"
+MODEL_RERANKER = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+SIGLIP_DIM = 1152
+EMBED_DIM  = 1024
+
+_NLTK_RESOURCES = {
+    'tokenizers/punkt_tab': 'punkt_tab',
+    'corpora/wordnet': 'wordnet',
+    'taggers/averaged_perceptron_tagger': 'averaged_perceptron_tagger',
+}
+for _path, _pkg in _NLTK_RESOURCES.items():
+    try:
+        nltk.data.find(_path)
+    except LookupError:
+        nltk.download(_pkg, quiet=True)
 
 _api_searcher = None
 _server_out_dir: str = ""   # set at --mode server startup
@@ -121,12 +133,36 @@ async def api_search(req: Request):
                 query_text, directory, top_k, caption_weight=0.4
             )
         else:
-            results, counts, scores = _api_searcher.query(query_text, top_k, caption_weight=0.4)
+            results, counts, scores = _api_searcher.query(
+                query_text, top_k, caption_weight=0.4
+            )
 
         results = [r for r in results if os.path.isfile(r)]
         result_set = set(results)
         counts = {k: v for k, v in counts.items() if k in result_set}
         scores = {k: v for k, v in scores.items() if k in result_set}
+
+        # ----- DEBUG PRINT START -----
+        print(f"\n[SEARCH] Query: '{query_text}', top_k={top_k}, directory={directory}")
+        searcher = _api_searcher
+        for rank, (path, score) in enumerate(
+            sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:top_k], start=1
+        ):
+            cnt = counts.get(path, 0)
+            meta = searcher.video_metadata.get(path, {})
+            dur = meta.get('duration', 0)
+            size_mb = meta.get('file_size', 0) / (1024 * 1024)
+            res = meta.get('resolution', (0, 0))
+            fps_val = meta.get('fps', 0)
+            total_frames_val = meta.get('total_frames', 0)
+            ext = meta.get('extension', '')
+            dir_ = meta.get('directory', '')
+            print(f"  #{rank}: {path}")
+            print(f"        score={score:.4f}  frames_matched={cnt}  dir='{dir_}'  "
+                  f"size={size_mb:.1f}MB  dur={dur:.1f}s  "
+                  f"res={res[0]}x{res[1]}  fps={fps_val:.1f}  total_frames={total_frames_val}  ext={ext}")
+        print("---")
+        # ----- DEBUG PRINT END -----
 
         response = {
             "results": results,
@@ -184,8 +220,7 @@ async def api_index_status():
 async def api_index_cancel():
     """Terminate a running preprocessing subprocess."""
     global _preprocess_state, _preprocess_lock
-    with _preprocess_lock:
-        proc = _preprocess_state.get("_process")
+    proc = _preprocess_state.get("_process")
     if proc and proc.poll() is None:
         try:
             proc.terminate()
@@ -230,8 +265,669 @@ async def api_index_reload(req: Request):
         return {"status": "error", "error": str(exc)}
 
 
+# ── Rule-Based Query Parser (Tier 1 — PRIMARY) ──────────────────────────────
+class RuleBasedQueryParser:
+    """Rule‑based parser, now the primary tier. Highly accurate for structured
+    video‑search queries. Extended with filename/name filters and other patterns."""
+
+    _SIZE_MULTIPLIERS = {
+        'b': 1, 'byte': 1, 'bytes': 1,
+        'kb': 1024, 'kilobyte': 1024, 'kilobytes': 1024,
+        'mb': 1024**2, 'megabyte': 1024**2, 'megabytes': 1024**2,
+        'gb': 1024**3, 'gigabyte': 1024**3, 'gigabytes': 1024**3,
+        'tb': 1024**4, 'terabyte': 1024**4, 'terabytes': 1024**4,
+    }
+
+    _DURATION_MULTIPLIERS = {
+        's': 1, 'sec': 1, 'secs': 1, 'second': 1, 'seconds': 1,
+        'm': 60, 'min': 60, 'mins': 60, 'minute': 60, 'minutes': 60,
+        'h': 3600, 'hr': 3600, 'hrs': 3600, 'hour': 3600, 'hours': 3600,
+    }
+
+    _RESOLUTION_MAP = {
+        '480p': (854, 480), 'sd': (854, 480),
+        '720p': (1280, 720), 'hd': (1280, 720),
+        '1080p': (1920, 1080), 'fullhd': (1920, 1080), 'full hd': (1920, 1080), 'fhd': (1920, 1080),
+        '1440p': (2560, 1440), '2k': (2560, 1440), 'qhd': (2560, 1440),
+        '4k': (3840, 2160), 'uhd': (3840, 2160), '2160p': (3840, 2160),
+        '8k': (7680, 4320), '4320p': (7680, 4320),
+    }
+
+    _SORT_PATTERNS = {
+        'duration':  r'\b(longest|shortest|duration|length)\b',
+        'file_size': r'\b(biggest|smallest|largest|heaviest|lightest|file.?size)\b',
+        'resolution': r'\b(highest.?res|lowest.?res|resolution|most.?pixels)\b',
+        'fps':       r'\b(highest.?fps|lowest.?fps|framerate|frame.?rate|smoothest)\b',
+        'frames':    r'\b(most.?frames|fewest.?frames|frame.?count)\b',
+    }
+
+    _EXTENSIONS = {
+        'mp4', 'mkv', 'avi', 'mov', 'webm', 'wmv', 'flv', 'm4v', '3gp', 'ogv',
+    }
+
+    # Confidence heuristics – if any of these conditions is true, the parse is
+    # considered uncertain and we return None (fallback to LLM).
+    _LOW_CONFIDENCE_PATTERNS = [
+        re.compile(r'\bcontaining\s*$', re.IGNORECASE),  # search_text is only "containing"
+        re.compile(r'^\d{4}$'),                          # search_text is a year
+        re.compile(r'^[a-z]$', re.IGNORECASE),           # single letter
+    ]
+
+    def parse(self, query: str) -> Optional[dict]:
+        """Attempt to parse the query with rules. Returns dict or None if uncertain."""
+        q = query.strip()
+        if not q:
+            return None
+        ql = q.lower()
+
+        intent = None
+        sort_by = "none"
+        order = "desc"
+        filters = []
+        top_k = 10
+        search_text = ""
+        used_quoted = set()
+        filter_phrase = ""
+
+        top_k_explicit = False  # NEW: track whether user gave a number
+
+        # ── 1. Extract top_k ──────────────────────────────────────────────
+        tk_match = re.search(
+            r'\b(?:top|first|show\s+(?:me\s+)?|give\s+(?:me\s+)?|find\s+|get\s+|need\s+)(\d+)\b', ql
+        )
+        if tk_match:
+            top_k = int(tk_match.group(1))
+            top_k_explicit = True
+        else:
+            tk_match2 = re.search(
+                r'\b(?:only\s+|just\s+)?(\d+)\s+(?:videos?|files?|results?|clips?)\b', ql
+            )
+            if tk_match2:
+                top_k = int(tk_match2.group(1))
+                top_k_explicit = True
+            else:
+                tk_match3 = re.search(
+                    r'\b(?:show|give|get|find|fetch|list|want|need)\b.{0,30}\b(\d+)\b', ql
+                )
+                if tk_match3:
+                    top_k = int(tk_match3.group(1))
+                    top_k_explicit = True
+                else:
+                    bare_num = re.match(r'^(\d+)\s+(.+)', ql)
+                    if bare_num:
+                        candidate_num = int(bare_num.group(1))
+                        if not filters and candidate_num > 0:
+                            top_k = candidate_num
+                            top_k_explicit = True
+                            ql = bare_num.group(2).strip()
+                            sub_parse = self.parse(ql)
+                            if sub_parse:
+                                sub_parse['top_k'] = top_k
+                                return sub_parse
+
+        # ── 1b. “all videos” – only override top_k if no explicit number ──
+        if (not top_k_explicit
+                and re.search(r'\b(?:all|every|whole)\s+(?:the\s+)?(?:indexed\s+)?videos?\b',
+                              ql, re.IGNORECASE)):
+            top_k = 1000000  # sentinel for “return everything”
+            intent = "metadata_filter"
+            ql = re.sub(r'\b(?:all|every|whole)\s+(?:the\s+)?(?:indexed\s+)?videos?\b',
+                        '', ql, flags=re.IGNORECASE)
+            if not ql.strip():
+                return {
+                    "intent": intent,
+                    "sort_by": "none",
+                    "order": "desc",
+                    "filters": [],
+                    "top_k": top_k,
+                    "search_text": "",
+                }
+
+        # ── 2. Detect sort intent ─────────────────────────────────────────
+        for field, pattern in self._SORT_PATTERNS.items():
+            if re.search(pattern, ql):
+                sort_by = field
+                intent = "metadata_sort"
+                if re.search(r'\b(shortest|smallest|lightest|lowest|fewest|least|asc)\b', ql):
+                    order = "asc"
+                else:
+                    order = "desc"
+                break
+
+        # ── 3. Size filters ───────────────────────────────────────────────
+        size_patterns = [
+            (r'(?:over|above|greater\s+than|more\s+than|bigger\s+than|larger\s+than|exceeding|>)\s*'
+             r'(\d+(?:\.\d+)?)\s*([a-zA-Z]+)', 'gt'),
+            (r'(?:under|below|less\s+than|smaller\s+than|lighter\s+than|<)\s*'
+             r'(\d+(?:\.\d+)?)\s*([a-zA-Z]+)', 'lt'),
+            (r'(?:at\s+least|minimum|min)\s*(\d+(?:\.\d+)?)\s*([a-zA-Z]+)', 'gte'),
+            (r'(?:at\s+most|maximum|max)\s*(\d+(?:\.\d+)?)\s*([a-zA-Z]+)', 'lte'),
+        ]
+        for pattern, op in size_patterns:
+            m = re.search(pattern, ql)
+            if m:
+                val_str, unit_str = m.group(1), m.group(2).lower().rstrip('s')
+                unit_key = unit_str if unit_str in self._SIZE_MULTIPLIERS else unit_str + 's'
+                if unit_key in self._SIZE_MULTIPLIERS or unit_str in self._SIZE_MULTIPLIERS:
+                    multiplier = self._SIZE_MULTIPLIERS.get(unit_str,
+                                                            self._SIZE_MULTIPLIERS.get(unit_key, 0))
+                    if multiplier > 1:
+                        value = float(val_str) * multiplier
+                        filters.append({"field": "file_size", "operator": op, "value": value})
+                        if intent is None:
+                            intent = "metadata_filter"
+
+        # ── 4. Duration filters (including "no longer than") ──────────────
+        dur_patterns = [
+            (r'(?:longer|more)\s+than\s+(\d+(?:\.\d+)?)\s*([a-zA-Z]+)', 'gt'),
+            (r'(?:shorter|less)\s+than\s+(\d+(?:\.\d+)?)\s*([a-zA-Z]+)', 'lt'),
+            (r'(?:no\s+longer\s+than)\s+(\d+(?:\.\d+)?)\s*([a-zA-Z]+)', 'lte'),
+            (r'(?:over|above|>)\s*(\d+(?:\.\d+)?)\s*([a-zA-Z]+)', 'gt'),
+            (r'(?:under|below|<)\s*(\d+(?:\.\d+)?)\s*([a-zA-Z]+)', 'lt'),
+            (r'(?:at\s+least|minimum)\s*(\d+(?:\.\d+)?)\s*([a-zA-Z]+)', 'gte'),
+            (r'(?:at\s+most|maximum)\s*(\d+(?:\.\d+)?)\s*([a-zA-Z]+)', 'lte'),
+        ]
+        for pattern, op in dur_patterns:
+            m = re.search(pattern, ql)
+            if m:
+                val_str, unit_str = m.group(1), m.group(2).lower()
+                if unit_str in self._DURATION_MULTIPLIERS:
+                    value = float(val_str) * self._DURATION_MULTIPLIERS[unit_str]
+                    if not any(f['field'] == 'duration' for f in filters):
+                        filters.append({"field": "duration", "operator": op, "value": value})
+                        if intent is None:
+                            intent = "metadata_filter"
+
+        # ── 5. Directory / path filter ───────────────────────────────────
+        dir_syn = r'(?:directory|folder|dir|path)'
+        dir_verb = r'(?:contains?|containing|with|has|named?|includes?|including)'
+
+        dir_match_obj = re.search(
+            rf'{dir_syn}\s+{dir_verb}\s+["\']([^"\']{{2,}})["\']', ql
+        )
+        if not dir_match_obj:
+            dir_match_obj = re.search(
+                rf'{dir_syn}\s+{dir_verb}\s+(.+)', ql
+            )
+        if dir_match_obj:
+            full_match = dir_match_obj.group(0)
+            raw_val = dir_match_obj.group(1).strip()
+            dir_name = re.sub(r'[.\s]+$', '', raw_val)
+            if dir_name and len(dir_name) > 1:
+                filters.append({"field": "directory", "operator": "contains", "value": dir_name})
+                used_quoted.add(dir_name)
+                if intent is None:
+                    intent = "metadata_filter"
+                filter_phrase += ' ' + full_match
+        else:
+            dir_match = re.search(
+                r'(?:in(?:\s+the)?|from(?:\s+the)?|inside(?:\s+the)?)\s+'
+                r'["\']?([\w\s.-]+?)["\']?\s+(?:folder|directory|dir|path)',
+                ql
+            )
+            if not dir_match:
+                dir_match = re.search(
+                    rf'(?:folder|directory|dir)\s+(?:named?|called?)?\s*["\']?([\w\s.-]+?)["\']?(?:\s|$)',
+                    ql
+                )
+            if dir_match:
+                full_match = dir_match.group(0)
+                dir_name = dir_match.group(1).strip()
+                if dir_name and len(dir_name) > 1:
+                    filters.append({"field": "directory", "operator": "contains", "value": dir_name})
+                    if intent is None:
+                        intent = "metadata_filter"
+                    filter_phrase += ' ' + full_match
+
+        # ── 6. Extension filter ───────────────────────────────────────────
+        ext_match = re.search(
+            r'\b(?:that\s+are|only|format|type|extension)\s+\.?(' +
+            '|'.join(self._EXTENSIONS) + r')\b', ql
+        )
+        if not ext_match:
+            ext_match = re.search(
+                r'\b\.?(' + '|'.join(self._EXTENSIONS) + r')\s+(?:files?|videos?|clips?)\b', ql
+            )
+        if not ext_match:
+            ext_match = re.search(
+                r'\b(' + '|'.join(self._EXTENSIONS) + r')\s+(?:videos?|files?|clips?)\b', ql
+            )
+        if ext_match:
+            ext = ext_match.group(1).lower()
+            if not ext.startswith('.'):
+                ext = '.' + ext
+            filters.append({"field": "extension", "operator": "eq", "value": ext})
+            if intent is None:
+                intent = "metadata_filter"
+
+        # ── 7. Resolution filter (enhanced with strict inequality) ────────
+        for alias, (w, h) in self._RESOLUTION_MAP.items():
+            if alias in ql:
+                filters.append({"field": "resolution_height", "operator": "gte", "value": h})
+                if intent is None:
+                    intent = "metadata_filter"
+                break
+        if re.search(r'\b(high\s?quality|hq)\b', ql):
+            filters.append({"field": "resolution_height", "operator": "gte", "value": 720})
+            if intent is None:
+                intent = "metadata_filter"
+
+        res_match = re.search(r'resolution\s+(?:higher|greater|more)\s+than\s+(\d{3,4})p', ql)
+        if res_match:
+            height = int(res_match.group(1))
+            filters = [f for f in filters if f.get('field') != 'resolution_height']
+            filters.append({"field": "resolution_height", "operator": "gt", "value": height})
+            if intent is None:
+                intent = "metadata_filter"
+
+        # ── 8. Filename/name filter ───────────────────────────────────────
+        name_match = re.search(
+            r'(?:file|video|clip)\s+(?:named?|called?)\s+["\']([^"\']+)["\']', ql
+        )
+        if not name_match:
+            name_match = re.search(
+                r'(?:file|video|clip)\s+(?:named?|called?)\s+(\w+)', ql
+            )
+        if not name_match:
+            name_match = re.search(
+                r'name\s+(?:contains?|with|has)\s+["\']([^"\']+)["\']', ql
+            )
+        if not name_match:
+            name_match = re.search(
+                r'name\s+(?:contains?|with|has)\s+(\w+)', ql
+            )
+        if not name_match:
+            name_match = re.search(
+                r'(?:videos?|files?)\s+with\s+["\']([^"\']+)["\']\s+in\s+the\s+name', ql
+            )
+        if not name_match:
+            name_match = re.search(
+                r'(?:videos?|files?)\s+with\s+(\w+)\s+in\s+the\s+name', ql
+            )
+        if name_match:
+            fname = name_match.group(1).strip()
+            if fname:
+                filters.append({"field": "filename", "operator": "contains", "value": fname})
+                if intent is None:
+                    intent = "metadata_filter"
+
+        # ── 9. Content remnant extraction (enhanced) ─────────────────────
+        if filter_phrase:
+            ql_clean = ql
+            for phrase in filter_phrase.strip().split('  '):
+                if phrase.strip():
+                    ql_clean = ql_clean.replace(phrase.strip(), ' ')
+        else:
+            ql_clean = ql
+
+        content_remnant = ql_clean
+        remove_patterns = [
+            r'\b(?:i\s+want\s+(?:you\s+(?:to\s+)?)?|please\s+|could\s+you\s+|can\s+you\s+)(?:give|show|find|get|fetch|list|provide)?\s*(?:me\s+)?',
+            r'\b(?:need\s+all\s+|need\s+|want\s+all\s+|want\s+)',
+            r'\b(?:show|find|get|give|search|look|display|list|fetch|provide)\s+(?:me\s+)?',
+            r'\b(?:me|the|my|for|a|an|and|or|with|that|are|is|of|to|in|from|by|be|it|its|only|just|all|any|some|every|each|which|where|when|how|what|who|only|inside|named|called)\b',
+            r'\b(?:top|first|videos?|files?|clips?|results?|folder|directory|dir|path|file|video|clip|name)\b',
+            r'\b(?:contains?|containing|includes?|including)\b',
+            r'\b(?:over|under|above|below|more|less|than|at|least|most|longer|shorter|bigger|smaller|no\s+longer)\b',
+            r'\b(?:longest|shortest|biggest|smallest|largest|heaviest|lightest|highest|lowest)\b',
+            r'\b(?:resolution|duration|length|size|fps|framerate|frames?|high\s?quality|hq)\b',
+            r'\b(?:' + '|'.join(self._EXTENSIONS) + r')\b',
+            r'\d+(?:\.\d+)?\s*(?:' + '|'.join(
+                list(self._SIZE_MULTIPLIERS.keys()) + list(self._DURATION_MULTIPLIERS.keys())) + r')\b',
+            r'\d+',
+        ]
+        for pat in remove_patterns:
+            content_remnant = re.sub(pat, ' ', content_remnant, flags=re.IGNORECASE)
+
+        filter_related_words = {
+            'more', 'less', 'higher', 'lower', 'longer', 'shorter',
+            'bigger', 'smaller', 'heavier', 'lighter', 'larger', 'smaller',
+            'greater', 'above', 'below', 'over', 'under', 'at least', 'at most',
+            'minimum', 'maximum', 'higher than', 'lower than', 'combined',
+            'combine', 'merge', 'both', 'together', 'including', 'excluding',
+            'respectively', 'etc'
+        }
+        for word in filter_related_words:
+            content_remnant = re.sub(rf'\b{re.escape(word)}\b', ' ', content_remnant, flags=re.IGNORECASE)
+
+        content_remnant = re.sub(r'\s+', ' ', content_remnant).strip()
+
+        quotes = re.findall(r'["\']([^"\']{2,})["\']', q)
+        for quote_val in quotes:
+            if quote_val not in used_quoted and quote_val not in content_remnant:
+                content_remnant += ' ' + quote_val
+
+        content_remnant = re.sub(r"""['"\s]+""", ' ', content_remnant).strip()
+        content_remnant = re.sub(r'\b[a-z]\b', '', content_remnant).strip()
+        content_remnant = re.sub(r'\s+', ' ', content_remnant).strip()
+
+        if len(content_remnant) > 3:
+            search_text = content_remnant
+            if intent == "metadata_filter" or intent == "metadata_sort":
+                intent = "combined"
+            elif intent is None:
+                intent = "content_search"
+
+        # ── 10. Confidence checks ────────────────────────────────────────
+        if intent is None and not filters and sort_by == "none" and not search_text:
+            return None
+
+        if search_text and any(pat.search(search_text) for pat in self._LOW_CONFIDENCE_PATTERNS):
+            return None
+
+        if intent is None:
+            if search_text:
+                intent = "content_search"
+            elif filters:
+                intent = "metadata_filter"
+            else:
+                intent = "content_search"
+
+        result = {
+            "intent": intent,
+            "sort_by": sort_by,
+            "order": order,
+            "filters": filters,
+            "top_k": top_k,
+            "search_text": search_text,
+        }
+        print(f"  [RuleParser] ✓ Parsed query: intent={intent}, sort_by={sort_by}, "
+              f"order={order}, top_k={top_k}, filters={len(filters)}, "
+              f"search_text='{search_text[:50]}{'...' if len(search_text) > 50 else ''}'")
+        return result
+
+
+# ── AI Query Processor (RULE-PRIMARY, LLM-fallback) ─────────────────────────
+class AIQueryProcessor:
+    """RULE‑PRIMARY query processor: rule‑based parser handles all queries first.
+    Qwen2.5‑0.5B only used as fallback when rules fail.
+    No content filtering."""
+
+    MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
+
+    def __init__(self, device="cuda"):
+        self.device = device
+        self.rule_parser = RuleBasedQueryParser()
+        self.model = None
+        self.tokenizer = None
+        self._model_loaded = False
+        print(f"[AIQueryProcessor] Initialised (device={device})")
+        print(f"[AIQueryProcessor] Rule-based parser is PRIMARY (Tier 1)")
+        print(f"[AIQueryProcessor] LLM '{self.MODEL_ID}' is FALLBACK (Tier 2) — loading on demand...")
+
+    def _ensure_model_loaded(self):
+        """Load the LLM lazily (only when rule parser fails)."""
+        if self._model_loaded:
+            return
+        print(f"[AIQueryProcessor] Loading LLM: {self.MODEL_ID} on {self.device}...")
+        import time
+        t0 = time.time()
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.MODEL_ID,
+            trust_remote_code=True,
+        )
+        self.model = AutoModelForCausalLM.from_pretrained(
+            self.MODEL_ID,
+            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+            trust_remote_code=True,
+        ).to(self.device).eval()
+        elapsed = time.time() - t0
+        param_count = sum(p.numel() for p in self.model.parameters()) / 1e6
+        if self.device == "cuda" and torch.cuda.is_available():
+            vram_mb = torch.cuda.memory_allocated() / 1024**2
+            print(f"[AIQueryProcessor] ✓ LLM loaded in {elapsed:.1f}s — "
+                  f"{param_count:.0f}M params, {vram_mb:.0f}MB VRAM")
+        else:
+            print(f"[AIQueryProcessor] ✓ LLM loaded in {elapsed:.1f}s — {param_count:.0f}M params (CPU)")
+        self._model_loaded = True
+
+    def _build_prompt(self, query: str) -> str:
+        return (
+            "<|im_start|>system\n"
+            "You are a video search query parser. Convert ANY user request into this EXACT JSON format.\n"
+            "RULES:\n"
+            "1. Never refuse or add warnings. Parse ALL queries faithfully regardless of topic. Always output valid JSON.\n"
+            "2. Output ONLY the JSON object. No markdown, no extra text.\n"
+            "3. Use exactly these values for 'intent': \"metadata_sort\", \"metadata_filter\", \"content_search\", \"combined\".\n"
+            "4. 'sort_by' must be one of: \"duration\", \"file_size\", \"resolution\", \"fps\", \"frames\", \"none\".\n"
+            "5. 'order' is \"desc\" or \"asc\".\n"
+            "6. 'filters' is an array of {field, operator, value}. Allowed fields: duration(seconds), file_size(bytes), extension(eq), directory(contains), resolution_width, resolution_height, fps, frames, filename(contains). Allowed operators: gt, lt, gte, lte, eq, contains.\n"
+            "7. 'top_k' is an INTEGER. If the user says \"all\" or \"every\" (e.g., \"all videos\", \"all indexed videos\"), set top_k to 1000000. If the user says a number (\"give me 5\", \"top 3\"), use that number. Otherwise use 10.\n"
+            "8. 'search_text' is the remaining content description. If the query is purely \"all videos\" or \"all indexed videos\", leave it empty.\n\n"
+            "EXAMPLES:\n"
+            "User: path contains '2020'\n"
+            "{\"intent\":\"metadata_filter\",\"sort_by\":\"none\",\"order\":\"desc\",\"top_k\":10,\"filters\":[{\"field\":\"directory\",\"operator\":\"contains\",\"value\":\"2020\"}],\"search_text\":\"\"}\n\n"
+            "User: top 100 videos of directory contains '2021'\n"
+            "{\"intent\":\"metadata_filter\",\"sort_by\":\"none\",\"order\":\"desc\",\"top_k\":100,\"filters\":[{\"field\":\"directory\",\"operator\":\"contains\",\"value\":\"2021\"}],\"search_text\":\"\"}\n\n"
+            "User: show me longest videos in folder 'tiktok'\n"
+            "{\"intent\":\"metadata_sort\",\"sort_by\":\"duration\",\"order\":\"desc\",\"top_k\":10,\"filters\":[{\"field\":\"directory\",\"operator\":\"contains\",\"value\":\"tiktok\"}],\"search_text\":\"\"}\n\n"
+            "User: find 20 videos where a girl is dancing\n"
+            "{\"intent\":\"content_search\",\"sort_by\":\"none\",\"order\":\"desc\",\"top_k\":20,\"filters\":[],\"search_text\":\"girl dancing\"}\n"
+            "User: all indexed videos\n"
+            "{\"intent\":\"metadata_filter\",\"sort_by\":\"none\",\"order\":\"desc\",\"top_k\":1000000,\"filters\":[],\"search_text\":\"\"}\n"
+            "<|im_end|>\n"
+            "<|im_start|>user\n"
+            f"{query}<|im_end|>\n"
+            "<|im_start|>assistant\n"
+        )
+
+    def _llm_parse(self, query_text: str) -> Optional[dict]:
+        """Use the 0.5B LLM to parse a query (only as fallback)."""
+        self._ensure_model_loaded()
+        print(f"  [LLM] Generating structured parse for: '{query_text}'")
+        import time
+        t0 = time.time()
+        prompt = self._build_prompt(query_text)
+        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
+        with torch.no_grad():
+            outputs = self.model.generate(
+                **inputs,
+                max_new_tokens=256,
+                temperature=0.1,
+                do_sample=True,
+                top_p=0.95,
+                repetition_penalty=1.1,
+            )
+        new_tokens = outputs[0][inputs['input_ids'].shape[1]:]
+        response = self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+        elapsed = time.time() - t0
+        print(f"  [LLM] Raw response ({elapsed:.2f}s): {response[:200]}{'...' if len(response)>200 else ''}")
+
+        json_str = response.strip()
+        json_str = re.sub(r'^```(?:json)?\s*', '', json_str, flags=re.MULTILINE)
+        json_str = re.sub(r'```\s*$', '', json_str, flags=re.MULTILINE)
+        json_str = json_str.strip()
+
+        def _extract_json_object(s: str) -> str:
+            start = s.find('{')
+            if start == -1:
+                return s
+            depth = 0
+            for i, ch in enumerate(s[start:], start):
+                if ch == '{':
+                    depth += 1
+                elif ch == '}':
+                    depth -= 1
+                    if depth == 0:
+                        return s[start:i+1]
+            return s[start:]
+
+        json_str = _extract_json_object(json_str)
+
+        try:
+            parsed = json.loads(json_str)
+            parsed.setdefault("intent", "content_search")
+            parsed.setdefault("sort_by", "none")
+            parsed.setdefault("order", "desc")
+            parsed.setdefault("filters", [])
+            parsed.setdefault("top_k", 10)
+            parsed.setdefault("search_text", "")
+            try:
+                parsed["top_k"] = int(parsed["top_k"])
+            except (TypeError, ValueError):
+                parsed["top_k"] = 10
+            if not isinstance(parsed["filters"], list):
+                parsed["filters"] = []
+            print(f"  [LLM] ✓ Parsed successfully: intent={parsed['intent']}, "
+                  f"sort_by={parsed['sort_by']}, top_k={parsed['top_k']}, "
+                  f"filters={len(parsed['filters'])}, "
+                  f"search_text='{parsed.get('search_text', '')[:50]}'")
+            return parsed
+        except json.JSONDecodeError as je:
+            print(f"  [LLM] ✗ Failed to parse JSON ({je}): {json_str[:200]}")
+            return None
+
+    def parse_query(self, query_text: str) -> Optional[dict]:
+        """Parse a natural language query.
+        Tier 1 (PRIMARY): Rule‑based parser.
+        Tier 2 (FALLBACK): LLM — only if rules fail.
+        """
+        print(f"[AIQueryProcessor] Parsing: '{query_text}'")
+
+        # Tier 1: rule parser (primary)
+        result = self.rule_parser.parse(query_text)
+        if result is not None:
+            print(f"[AIQueryProcessor] → Resolved by rule-based parser (Tier 1 primary)")
+            print(f"  Result: {json.dumps(result, indent=2)}")
+            return result
+
+        # Tier 2: LLM (fallback)
+        print(f"[AIQueryProcessor] → Rule parser returned None, falling back to LLM (Tier 2)...")
+        llm_result = self._llm_parse(query_text)
+        if llm_result is not None:
+            print(f"[AIQueryProcessor] → Resolved by LLM (Tier 2 fallback)")
+            print(f"  Result: {json.dumps(llm_result, indent=2)}")
+            return llm_result
+
+        # All tiers failed — fallback to pure content search
+        print(f"[AIQueryProcessor] → All tiers failed, falling back to pure content search")
+        fallback = {
+            "intent": "content_search",
+            "sort_by": "none",
+            "order": "desc",
+            "filters": [],
+            "top_k": 10,
+            "search_text": query_text,
+        }
+        print(f"  Fallback: {json.dumps(fallback, indent=2)}")
+        return fallback
+
+
+# ── Global AI processor (lazy loaded) ────────────────────────────────────────
+_ai_processor = None
+
+def get_ai_processor():
+    global _ai_processor
+    if _ai_processor is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"[get_ai_processor] Creating AIQueryProcessor on {device}")
+        _ai_processor = AIQueryProcessor(device=device)
+    return _ai_processor
+
+
+# ── New AI search endpoint ───────────────────────────────────────────────────
+@app.post("/search/ai")
+async def api_search_ai(req: Request):
+    global _api_searcher
+    payload = await req.json()
+    query_text = payload.get("query", "").strip()
+    directory = payload.get("directory")  # optional manual directory filter
+    qid = payload.get("_qid")
+
+    if _api_searcher is None:
+        return {"error": "No index loaded", "results": [], "counts": {}, "scores": {}}
+
+    proc = get_ai_processor()
+    parsed = proc.parse_query(query_text)
+    if parsed is None:
+        # Fallback to normal semantic search
+        results, counts, scores = _api_searcher.query(query_text, top_k=20, caption_weight=0.4)
+    else:
+        # Merge explicit directory filter if provided in API request
+        if directory:
+            parsed.setdefault("filters", []).append({
+                "field": "directory", "operator": "contains", "value": directory
+            })
+        try:
+            results, counts, scores = _api_searcher.ai_search(parsed, caption_weight=0.4)
+        except Exception as e:
+            return {"error": str(e), "results": [], "counts": {}, "scores": {}}
+
+    results = [r for r in results if os.path.isfile(r)]
+    result_set = set(results)
+    counts = {k: v for k, v in counts.items() if k in result_set}
+    scores = {k: v for k, v in scores.items() if k in result_set}
+
+    # ----- DEBUG PRINT START -----
+    print(f"\n[SEARCH/AI] Query: '{query_text}'")
+    if parsed:
+        print(f"  Parsed: intent={parsed.get('intent')}, sort_by={parsed.get('sort_by')}, "
+              f"order={parsed.get('order')}, top_k={parsed.get('top_k')}, "
+              f"filters={json.dumps(parsed.get('filters'))}, "
+              f"search_text='{parsed.get('search_text')}'")
+    searcher = _api_searcher
+    for rank, path in enumerate(results, start=1):
+        score = scores.get(path, 0.0)
+        cnt = counts.get(path, 0)
+        meta = searcher.video_metadata.get(path, {})
+        dur = meta.get('duration', 0)
+        size_mb = meta.get('file_size', 0) / (1024 * 1024)
+        res = meta.get('resolution', (0, 0))
+        fps_val = meta.get('fps', 0)
+        total_frames_val = meta.get('total_frames', 0)
+        ext = meta.get('extension', '')
+        dir_ = meta.get('directory', '')
+        print(f"  #{rank}: {path}")
+        print(f"        score={score:.4f}  frames_matched={cnt}  dir='{dir_}'  "
+              f"size={size_mb:.1f}MB  dur={dur:.1f}s  "
+              f"res={res[0]}x{res[1]}  fps={fps_val:.1f}  total_frames={total_frames_val}  ext={ext}")
+    print("---")
+    # ----- DEBUG PRINT END -----
+
+    response = {
+        "results": results,
+        "counts": counts,
+        "scores": {k: float(v) for k, v in scores.items()},
+    }
+    if qid:
+        response["_qid"] = qid
+    return response
+
+
+# ── Video metadata extraction helper ─────────────────────────────────────────
+def extract_video_meta(video_path: str, videos_dir: str) -> Optional[dict]:
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return None
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps <= 0:
+        fps = 25.0
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    duration = total_frames / fps if fps > 0 else 0.0
+    width  = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+    height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+    cap.release()
+    try:
+        file_size = os.path.getsize(video_path)
+    except OSError:
+        file_size = 0
+    rel_path = os.path.relpath(video_path, videos_dir)
+    directory = os.path.dirname(rel_path) if os.path.dirname(rel_path) else "root"
+    ext = Path(video_path).suffix.lower()
+    return {
+        "video_path": os.path.abspath(video_path),
+        "duration": duration,
+        "file_size": file_size,
+        "resolution": (int(width), int(height)),
+        "fps": fps,
+        "total_frames": total_frames,
+        "extension": ext,
+        "directory": directory
+    }
+
+
+# ── Original helper functions (unchanged) ────────────────────────────────────
 def get_memory_info():
-    """Get detailed memory information"""
     process = psutil.Process()
     mem = process.memory_info()
     vm = psutil.virtual_memory()
@@ -244,388 +940,287 @@ def get_memory_info():
         'gpu_used_gb': gpu_mem
     }
 
-
 def norm_l2(v: np.ndarray) -> np.ndarray:
     norms = np.linalg.norm(v, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     return v / norms
 
-
-def adaptive_frame_sampling(video_path: str, base_interval: float = 1.0, max_frames: int = 60):
-    """Intelligent frame sampling based on video characteristics"""
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        return
-
-    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    duration = total_frames / fps
-
-    print(f"Video: {duration:.1f}s, {total_frames} frames, targeting {max_frames} samples")
-
-    if duration <= 5:  # Very short video - dense sampling
-        intervals = [0.25, 0.5]
-    elif duration <= 15:  # Short video - sample more densely
-        intervals = [0.5, 1.0]
-    elif duration <= 45:  # Medium video
-        intervals = [1.0, 2.0]
-    elif duration <= 120:  # Long video
-        intervals = [2.0, 4.0]
-    else:  # Very long video - sample key moments
-        intervals = [3.0, 6.0]
-
-    # Collect sampling points
-    sample_points = set()
-    for interval in intervals:
-        step_frames = max(1, int(interval * fps))
-        for i in range(0, min(total_frames, max_frames * step_frames), step_frames):
-            sample_points.add(i)
-
-    # Ensure we don't exceed max_frames
-    sample_points = sorted(list(sample_points))[:max_frames]
-
-    for frame_idx in sample_points:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-        ret, frame = cap.read()
-        if ret:
-            timestamp = frame_idx / fps
-            yield timestamp, frame
-
-    cap.release()
-
-
-def enhanced_caption_generation(frame_rgb, blip_model, blip_processor, device):
-    """Generate detailed captions with multiple prompting strategies"""
-    captions = []
-
+def extract_advanced_semantic_features(caption: str, lemmatizer=None) -> List[str]:
     try:
-        # Standard caption
-        inputs = blip_processor(images=frame_rgb, return_tensors="pt").to(device)
-        with torch.no_grad():
-            caption_ids = blip_model.generate(**inputs, max_new_tokens=40, num_beams=3,
-                                               do_sample=False)
-            standard_caption = blip_processor.decode(caption_ids[0], skip_special_tokens=True)
-            if standard_caption and len(standard_caption) > 5:
-                captions.append(standard_caption)
-    except Exception as e:
-        print(f"Standard caption failed: {e}")
-
-    # Question-based prompting for specific details
-    questions = [
-        "What is the person wearing?",
-        "What colors are prominent in this image?",
-        "What activity is happening?",
-        "What objects are visible?",
-        "What are the colors of the dress that the person wearing?"
-    ]
-
-    for question in questions:
-        try:
-            inputs = blip_processor(images=frame_rgb, text=question, return_tensors="pt").to(device)
-            with torch.no_grad():
-                answer_ids = blip_model.generate(**inputs, max_new_tokens=25, temperature=0.5)
-                answer = blip_processor.decode(answer_ids[0], skip_special_tokens=True)
-                # Clean up answer
-                if answer and len(answer) > 3:
-                    # Remove question from answer if present
-                    clean_answer = answer.replace(question.lower(), "").strip()
-                    if clean_answer and clean_answer.lower() not in ['yes', 'no', 'maybe', 'unknown']:
-                        captions.append(f"{question.split('?')[0]}: {clean_answer}")
-        except Exception:
-            continue
-
-    # Combine all captions
-    if captions:
-        return " | ".join(captions)
-    else:
-        return "video frame content"
-
-
-def extract_advanced_semantic_features(caption: str, lemmatizer: WordNetLemmatizer = None) -> List[str]:
-    """Extract comprehensive semantic features"""
-    if not lemmatizer:
-        try:
-            lemmatizer = WordNetLemmatizer()
-        except:
-            lemmatizer = None
-
-    try:
-        # Preprocessing
         caption_clean = re.sub(r'[^\w\s]', ' ', caption.lower())
-
-        # Tokenization with fallback
         try:
             words = word_tokenize(caption_clean)
-        except:
+        except Exception:
             words = caption_clean.split()
-
-        # Filter and lemmatize
         meaningful_words = []
         for word in words:
             if len(word) > 2:
                 if lemmatizer:
                     try:
-                        lemmatized = lemmatizer.lemmatize(word)
-                        meaningful_words.append(lemmatized)
-                    except:
+                        meaningful_words.append(lemmatizer.lemmatize(word))
+                    except Exception:
                         meaningful_words.append(word)
                 else:
                     meaningful_words.append(word)
+        visual_terms = {
+            'person', 'woman', 'man', 'girl', 'boy', 'dancer', 'performer',
+            'lady', 'female', 'male', 'model', 'beauty', 'couple',
+            'clothing', 'outfit', 'dress', 'shirt', 'top', 'blouse', 'skirt', 'pants',
+            'shorts', 'leggings', 'hoodie', 'jacket', 'bra', 'underwear', 'bikini',
+            'lingerie', 'swimwear', 'bodysuit', 'fishnet', 'panty', 'panties',
+            'thong', 'corset', 'stockings', 'garter', 'negligee', 'nightgown',
+            'topless', 'shirtless', 'braless', 'barefoot',
+            'naked', 'nude', 'nudity', 'bare', 'exposed', 'uncovered',
+            'skin', 'body', 'chest', 'breast', 'breasts', 'boob', 'boobs',
+            'butt', 'buttocks', 'rear', 'behind', 'booty',
+            'cleavage', 'navel', 'belly', 'stomach', 'abdomen', 'midriff',
+            'thigh', 'thighs', 'leg', 'legs', 'hip', 'hips', 'waist',
+            'shoulder', 'shoulders', 'back', 'spine',
+            'curves', 'curvy', 'figure', 'physique', 'slim', 'petite', 'voluptuous',
+            'sensual', 'intimate',
+            'sexy', 'seductive', 'provocative',
+            'stripping', 'strip', 'dancing', 'grinding',
+            'showering', 'bathing', 'undressing',
+            'red', 'blue', 'green', 'black', 'white', 'pink', 'purple', 'yellow',
+            'dance', 'posing', 'standing', 'sitting', 'walking',
+            'room', 'bedroom', 'indoor', 'studio', 'mirror', 'bathroom', 'shower',
+            'pool', 'beach', 'ocean', 'water', 'bed', 'toilet', 'kitchen', 'couch',
+            'style', 'fashion', 'casual', 'cute', 'elegant', 'hot',
+        }
+        expanded = set(meaningful_words)
+        _FASHION_COLOUR_SYNONYMS = {
+            'top': ['shirt', 'blouse', 'crop top', 'tank top'],
+            'skirt': ['miniskirt', 'miniskirt', 'pleated skirt'],
+            'yellow': ['gold', 'amber', 'mustard'],
+            'pink': ['rose', 'fuchsia', 'magenta'],
+            'black': ['dark', 'ebony'],
+            'white': ['ivory', 'cream', 'snow'],
+            'blue': ['navy', 'azure', 'cobalt'],
+            'green': ['emerald', 'lime', 'olive'],
+            'red': ['crimson', 'scarlet', 'ruby'],
+            'purple': ['violet', 'lavender', 'plum'],
+            'bra': ['brassiere', 'lingerie', 'undergarment'],
+            'bikini': ['swimsuit', 'swimwear', 'two piece'],
+            'shorts': ['hot pants', 'short pants'],
+        }
 
-
-        visual_terms = [
-            # People
-            'person', 'woman', 'man', 'girl', 'boy', 'female', 'male', 'dancer', 'performer',
-            # Clothing & Fashion
-            'clothing', 'outfit', 'dress', 'shirt', 'top', 'blouse', 'skirt', 'pants', 'jeans',
-            'shorts', 'leggings', 'hoodie', 'jacket', 'sweater', 'tank', 'crop', 'mini', 'maxi',
-            'bra', 'underwear', 'fishnet', 'panty', 'bikini', 'lingerie', 'swimwear', 'bodysuit',
-            # Colors
-            'color', 'red', 'blue', 'green', 'black', 'white', 'pink', 'purple', 'yellow',
-            'orange', 'brown', 'gray', 'grey', 'silver', 'gold', 'navy', 'maroon',
-            # Actions & Movement
-            'dancing', 'dance', 'moving', 'posing', 'standing', 'sitting', 'walking', 'jumping',
-            'spinning', 'twirling', 'gesture', 'motion', 'performance',
-            # Room & Environment
-            'room', 'bedroom', 'living', 'background', 'wall', 'floor', 'mirror', 'window',
-            'lighting', 'indoor', 'home', 'studio', 'space',
-            # Style & Appearance
-            'style', 'fashion', 'trendy', 'casual', 'formal', 'cute', 'pretty', 'elegant',
-            'sporty', 'vintage', 'modern', 'chic'
-        ]
-        expanded_terms = set(meaningful_words)
-
-        for word in meaningful_words[:15]:  # Limit expansion to prevent explosion
+        # After tokenizing, expand with these synonyms:
+        for word in meaningful_words[:15]:
             if word in visual_terms or len(word) > 4:
                 try:
-                    synsets = wordnet.synsets(word)
-                    for syn in synsets[:2]:
+                    for syn in wordnet.synsets(word)[:2]:
                         for lemma in syn.lemmas()[:2]:
-                            synonym = lemma.name().replace('_', ' ')
-                            if len(synonym) > 2:
-                                expanded_terms.add(synonym)
-                except:
+                            s = lemma.name().replace('_', ' ')
+                            if len(s) > 2:
+                                expanded.add(s)
+                except Exception:
                     continue
-
-        return list(expanded_terms)
-
-    except Exception as e:
-        # Ultimate fallback
+            # NEW: add fashion/colour synonyms
+            for syn in _FASHION_COLOUR_SYNONYMS.get(word, []):
+                expanded.add(syn)
+        return list(expanded)
+    except Exception:
         return re.sub(r'[^\w\s]', ' ', caption.lower()).split()
 
+def scene_aware_frame_sampling(video_path: str, max_frames: int = 60):
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return
+    fps   = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if total <= 0:
+        cap.release()
+        return
 
-# Worker state - simplified but comprehensive
+    prev_hist, boundaries = None, [0]
+    step = max(1, int(fps * 0.5))
+    for idx in range(0, total, step):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+        ret, frame = cap.read()
+        if not ret:
+            continue
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        hist = cv2.normalize(cv2.calcHist([gray], [0], None, [64], [0, 256]), None).flatten()
+        if prev_hist is not None:
+            if cv2.compareHist(prev_hist, hist, cv2.HISTCMP_BHATTACHARYYA) > 0.4:
+                boundaries.append(idx)
+        prev_hist = hist
+    boundaries.append(total - 1)
+
+    candidates = set()
+    for b in boundaries:
+        candidates.add(min(b, total - 1))
+        if b + int(fps) < total:
+            candidates.add(b + int(fps))
+    fill_step = max(1, total // max(1, max_frames - len(candidates)))
+    for i in range(0, total, fill_step):
+        candidates.add(i)
+        if len(candidates) >= max_frames * 2:
+            break
+
+    seen_hashes, yielded = [], 0
+    for idx in sorted(candidates):
+        if yielded >= max_frames:
+            break
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+        ret, frame = cap.read()
+        if not ret:
+            continue
+        h = imagehash.phash(PILImage.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
+        if any(h - sh < 8 for sh in seen_hashes[-5:]):
+            continue
+        seen_hashes.append(h)
+        yield idx / fps, frame
+        yielded += 1
+
+    cap.release()
+
+def blip_caption_generation(frame_rgb, blip_model, blip_processor, device):
+    pil = PILImage.fromarray(frame_rgb)
+    captions = []
+    try:
+        inputs = blip_processor(images=pil, return_tensors="pt")
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        if device == "cuda":
+            inputs = {k: v.half() if v.dtype == torch.float32 else v for k, v in inputs.items()}
+        with torch.no_grad():
+            out = blip_model.generate(**inputs, max_new_tokens=100, num_beams=3, do_sample=False)
+        caption = blip_processor.decode(out[0], skip_special_tokens=True)
+        if caption and len(caption) > 5:
+            captions.append(caption)
+    except Exception as e:
+        print(f"BLIP caption failed: {e}")
+
+    questions = [
+        "What is the person wearing?",
+        "What colors are prominent?",
+        "What activity is happening?",
+        "What objects are visible?",
+        "How much skin is exposed?",
+        "Is the person clothed or unclothed?",
+    ]
+    for question in questions:
+        try:
+            inputs = blip_processor(images=pil, text=question, return_tensors="pt")
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+            if device == "cuda":
+                inputs = {k: v.half() if v.dtype == torch.float32 else v for k, v in inputs.items()}
+            with torch.no_grad():
+                out = blip_model.generate(**inputs, max_new_tokens=40, num_beams=3)
+            answer = blip_processor.decode(out[0], skip_special_tokens=True)
+            clean = answer.replace(question.lower(), "").strip()
+            if clean and len(clean) > 3 and clean.lower() not in {'yes', 'no', 'maybe', 'unknown'}:
+                captions.append(f"{question.rstrip('?')}: {clean}")
+        except Exception:
+            continue
+
+    return " | ".join(captions) if captions else "video frame"
+
 _worker_state = {
     'device': None,
-    'clip_model': None,
-    'clip_processor': None,
+    'siglip_model': None,
+    'siglip_processor': None,
     'blip_model': None,
     'blip_processor': None,
-    'sentence_model': None,
-    'sentence_tokenizer': None,
+    'embed_model': None,
     'lemmatizer': None,
-    'worker_id': None
+    'worker_id': None,
 }
 
-
 def _init_high_accuracy_worker(worker_id: int = 0, device: str = None):
-    """Initialize worker with sequential model loading to prevent memory issues"""
     global _worker_state
-
     _worker_state['worker_id'] = worker_id
-
-    # Smart device allocation - use CPU for some workers to balance load
-    if device:
-        dev = device
-    elif worker_id == 0:  # Primary worker gets GPU
-        dev = "cuda" if torch.cuda.is_available() else "cpu"
-    else:  # Secondary workers use CPU to avoid GPU memory conflicts
+    dev = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    if worker_id > 0:
         dev = "cpu"
-
     _worker_state['device'] = dev
 
-    print(f"Worker {worker_id} initializing on {dev}")
-    mem_before = get_memory_info()
-    print(f"Memory before: RAM {mem_before['ram_used_gb']:.2f}GB, GPU {mem_before['gpu_used_gb']:.2f}GB")
+    print(f"Worker {worker_id} on {dev}")
+
+    print(f"Worker {worker_id}: loading SigLIP-SO400M...")
+    _worker_state['siglip_model'] = SiglipModel.from_pretrained(
+        MODEL_SIGLIP,
+        dtype=torch.float16 if dev == "cuda" else torch.float32,
+    ).to(dev).eval()
+    _worker_state['siglip_processor'] = SiglipProcessor.from_pretrained(MODEL_SIGLIP, use_fast=True)
+    if dev == "cuda": torch.cuda.empty_cache(); gc.collect()
+
+    print(f"Worker {worker_id}: loading BLIP-large...")
+    _worker_state['blip_model'] = BlipForConditionalGeneration.from_pretrained(
+        MODEL_BLIP,
+        torch_dtype=torch.float16 if dev == "cuda" else torch.float32,
+    ).to(dev).eval()
+    _worker_state['blip_processor'] = BlipProcessor.from_pretrained(MODEL_BLIP)
+    if dev == "cuda": torch.cuda.empty_cache(); gc.collect()
+
+    print(f"Worker {worker_id}: loading mxbai-embed-large-v1...")
+    _worker_state['embed_model'] = SentenceTransformer(MODEL_EMBED, device=dev)
 
     try:
-        # Load models sequentially with memory monitoring
-        # 1. CLIP
-        print(f"Worker {worker_id}: Loading CLIP...")
-        clip_name = "D:/models/models/clip-vit-base-patch32"
-        _worker_state['clip_model'] = CLIPModel.from_pretrained(clip_name).to(dev)
-        _worker_state['clip_processor'] = CLIPProcessor.from_pretrained(clip_name)
+        _worker_state['lemmatizer'] = WordNetLemmatizer()
+    except Exception:
+        _worker_state['lemmatizer'] = None
 
-        if dev == "cuda":
-            torch.cuda.empty_cache()
-        gc.collect()
+    mem = get_memory_info()
+    print(f"Worker {worker_id} ready — RAM {mem['ram_used_gb']:.2f}GB GPU {mem['gpu_used_gb']:.2f}GB")
 
-        mem_after_clip = get_memory_info()
-        print(f"After CLIP: RAM {mem_after_clip['ram_used_gb']:.2f}GB, GPU {mem_after_clip['gpu_used_gb']:.2f}GB")
-
-        # 2. BLIP
-        print(f"Worker {worker_id}: Loading BLIP...")
-        blip_name = "D:/models/models/blip-image-captioning-base"
-        _worker_state['blip_model'] = BlipForConditionalGeneration.from_pretrained(blip_name).to(dev)
-        _worker_state['blip_processor'] = BlipProcessor.from_pretrained(blip_name)
-
-        if dev == "cuda":
-            torch.cuda.empty_cache()
-        gc.collect()
-
-        # 3. Sentence transformer (only for primary worker to save memory)
-        if worker_id == 0:
-            try:
-                print(f"Worker {worker_id}: Loading sentence transformer...")
-                sentence_model_name = "D:/models/models/all-MiniLM-L6-v2"
-                _worker_state['sentence_tokenizer'] = AutoTokenizer.from_pretrained(sentence_model_name)
-                _worker_state['sentence_model'] = AutoModel.from_pretrained(sentence_model_name).to(dev)
-            except Exception as e:
-                print(f"Sentence transformer failed, using CLIP text encoder: {e}")
-                _worker_state['sentence_model'] = None
-                _worker_state['sentence_tokenizer'] = None
-
-        # 4. Lemmatizer
-        try:
-            _worker_state['lemmatizer'] = WordNetLemmatizer()
-        except:
-            _worker_state['lemmatizer'] = None
-
-        mem_final = get_memory_info()
-        print(f"Worker {worker_id} ready: RAM {mem_final['ram_used_gb']:.2f}GB, GPU {mem_final['gpu_used_gb']:.2f}GB")
-
-    except Exception as e:
-        print(f"Worker {worker_id} initialization failed: {e}")
-        raise
-
-
-def mean_pooling(model_output, attention_mask):
-    """Mean pooling for sentence transformers"""
-    token_embeddings = model_output[0]
-    input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
-    return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
-
-
-def _process_video_high_accuracy(args: Tuple[str, int, int]) -> Tuple[np.ndarray, np.ndarray, List[Dict[str, Any]]]:
-    """High-accuracy video processing with memory management"""
+def _process_video_high_accuracy(args: Tuple[str, int, int]) -> Tuple[np.ndarray, np.ndarray, List[Dict]]:
     video_path, max_frames, worker_id = args
     global _worker_state
 
-    print(f"Worker {_worker_state['worker_id']}: Processing {video_path} (max {max_frames} frames)")
+    siglip_model       = _worker_state['siglip_model']
+    siglip_processor   = _worker_state['siglip_processor']
+    blip_model         = _worker_state['blip_model']
+    blip_processor     = _worker_state['blip_processor']
+    embed_model        = _worker_state['embed_model']
+    lemmatizer         = _worker_state['lemmatizer']
+    device             = _worker_state['device']
 
-    # Get models from worker state
-    clip_model = _worker_state['clip_model']
-    clip_processor = _worker_state['clip_processor']
-    blip_model = _worker_state['blip_model']
-    blip_processor = _worker_state['blip_processor']
-    sentence_model = _worker_state['sentence_model']
-    sentence_tokenizer = _worker_state['sentence_tokenizer']
-    lemmatizer = _worker_state['lemmatizer']
-    device = _worker_state['device']
-
-    clip_embeddings = []
-    text_embeddings = []
-    metadata = []
+    siglip_embeddings, text_embeddings, metadata = [], [], []
 
     try:
-        frame_count = 0
-        for timestamp, frame_bgr in adaptive_frame_sampling(video_path, max_frames=max_frames):
+        for frame_count, (timestamp, frame_bgr) in enumerate(
+            scene_aware_frame_sampling(video_path, max_frames=max_frames)
+        ):
             try:
                 frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                pil = PILImage.fromarray(frame_rgb)
 
-                # 1. CLIP image embedding
-                clip_inputs = clip_processor(images=frame_rgb, return_tensors="pt").to(device)
+                pv = siglip_processor(images=pil, return_tensors="pt").pixel_values
+                pv = pv.to(device, dtype=siglip_model.dtype)
                 with torch.no_grad():
-                    clip_emb = clip_model.get_image_features(**clip_inputs).cpu().numpy().astype(np.float32)
-                clip_embeddings.append(clip_emb.reshape(-1))
+                    img_emb = siglip_model.get_image_features(pixel_values=pv).cpu().float().numpy()
+                siglip_embeddings.append(img_emb.reshape(-1))
 
-                # 2. Enhanced caption generation
-                enhanced_caption = enhanced_caption_generation(frame_rgb, blip_model, blip_processor, device)
+                caption = blip_caption_generation(frame_rgb, blip_model, blip_processor, device)
+                semantic_features = extract_advanced_semantic_features(caption, lemmatizer)
 
-                # 3. Semantic feature extraction
-                semantic_features = extract_advanced_semantic_features(enhanced_caption, lemmatizer)
+                text_emb = embed_model.encode(caption, normalize_embeddings=True, convert_to_numpy=True)
+                text_embeddings.append(text_emb.reshape(-1).astype(np.float32))
 
-                # 4. Text embedding (sentence transformer or CLIP fallback)
-                if sentence_model and sentence_tokenizer:
-                    try:
-                        encoded = sentence_tokenizer(enhanced_caption, padding=True, truncation=True,
-                                                     return_tensors='pt').to(device)
-                        with torch.no_grad():
-                            model_output = sentence_model(**encoded)
-                            text_emb = mean_pooling(model_output, encoded['attention_mask']).cpu().numpy().astype(
-                                np.float32)
-                        text_embeddings.append(text_emb.reshape(-1))
-                    except Exception:
-                        # Fallback to CLIP text embedding
-                        text_inputs = clip_processor(text=[enhanced_caption], return_tensors="pt",
-                                                     padding=True, truncation=True).to(device)
-                        with torch.no_grad():
-                            text_emb = clip_model.get_text_features(**text_inputs).cpu().numpy().astype(np.float32)
-                        text_embeddings.append(text_emb.reshape(-1))
-                else:
-                    # Use CLIP text embedding
-                    text_inputs = clip_processor(text=[enhanced_caption], return_tensors="pt",
-                                                 padding=True, truncation=True).to(device)
-                    with torch.no_grad():
-                        text_emb = clip_model.get_text_features(**text_inputs).cpu().numpy().astype(np.float32)
-                    text_embeddings.append(text_emb.reshape(-1))
-
-                # 5. Optional emotion analysis (only if DeepFace available and not too memory intensive)
-                mood = None
-                if _DEEPFACE_AVAILABLE and device == "cuda" and frame_count % 5 == 0:  # Sample emotions sparsely
-                    try:
-                        analysis = DeepFace.analyze(frame_bgr, actions=["emotion"], enforce_detection=False)
-                        if isinstance(analysis, list):
-                            analysis = analysis[0]
-                        mood = analysis.get('dominant_emotion')
-                    except Exception:
-                        mood = None
-
-                # Store metadata
                 metadata.append({
                     'video_path': os.path.abspath(video_path),
                     'timestamp': float(timestamp),
-                    'caption': enhanced_caption,
+                    'caption': caption,
                     'semantic_features': semantic_features,
-                    'mood': mood
                 })
 
-                frame_count += 1
-
-                # Memory management every few frames
-                if frame_count % 10 == 0:
-                    if device == "cuda":
-                        torch.cuda.empty_cache()
+                if frame_count % 10 == 0 and device == "cuda":
+                    torch.cuda.empty_cache()
                     gc.collect()
 
-                    if frame_count % 20 == 0:  # Less frequent memory reporting
-                        mem = get_memory_info()
-                        print(f"Worker {_worker_state['worker_id']}: Processed {frame_count} frames, "
-                              f"RAM: {mem['ram_used_gb']:.2f}GB, GPU: {mem['gpu_used_gb']:.2f}GB")
-
             except Exception as e:
-                print(f"Frame processing error at {timestamp}s: {e}")
+                print(f"Frame {timestamp:.1f}s error: {e}")
                 continue
 
-        print(f"Worker {_worker_state['worker_id']}: Completed {video_path} with {frame_count} frames")
+        print(f"Worker {worker_id}: done {video_path} — {len(metadata)} frames")
 
     except Exception as e:
-        print(f"Video processing error for {video_path}: {e}")
+        print(f"Video error {video_path}: {e}")
 
-    # Convert to arrays with error handling
-    if clip_embeddings:
-        clip_array = np.vstack(clip_embeddings).astype(np.float32)
-    else:
-        clip_array = np.zeros((0, 512), dtype=np.float32)
-
-    if text_embeddings:
-        text_array = np.vstack(text_embeddings).astype(np.float32)
-    else:
-        # Match the expected dimension
-        expected_dim = 512 if not sentence_model else 384
-        text_array = np.zeros((0, expected_dim), dtype=np.float32)
-
-    return clip_array, text_array, metadata
+    siglip_arr = np.vstack(siglip_embeddings).astype(np.float32) if siglip_embeddings else np.zeros((0, SIGLIP_DIM), dtype=np.float32)
+    text_arr   = np.vstack(text_embeddings).astype(np.float32)   if text_embeddings   else np.zeros((0, EMBED_DIM),   dtype=np.float32)
+    return siglip_arr, text_arr, metadata
 
 
 class HighAccuracyVideoIndexer:
@@ -635,16 +1230,15 @@ class HighAccuracyVideoIndexer:
         self.clip_embeddings: List[np.ndarray] = []
         self.text_embeddings: List[np.ndarray] = []
         self.frame_metadata: List[Dict[str, Any]] = []
-        self.next_id = 0  # Track next available ID
+        self.next_id = 0
+        self.video_metadata: Dict[str, dict] = {}
 
     def load_existing_indices(self, out_dir: Path) -> bool:
-        """Load existing indices if they exist"""
         clip_index_path = out_dir / "clip_index.faiss"
         text_index_path = out_dir / "text_index.faiss"
         metadata_path = out_dir / "metadata.pkl"
         tfidf_path = out_dir / "tfidf_index.pkl"
 
-        # Check if all required files exist
         required_files = [clip_index_path, text_index_path, metadata_path, tfidf_path]
         if not all(f.exists() for f in required_files):
             print("No existing index found - starting fresh")
@@ -652,12 +1246,8 @@ class HighAccuracyVideoIndexer:
 
         try:
             print("Loading existing indices...")
-
-            # Load metadata first to get existing data
             with open(metadata_path, 'rb') as f:
                 existing_metadata = pickle.load(f)
-
-            # Extract existing embeddings and metadata
             self.frame_metadata = []
             for i, video_path in enumerate(existing_metadata['video_paths']):
                 self.frame_metadata.append({
@@ -668,39 +1258,33 @@ class HighAccuracyVideoIndexer:
                     'semantic_features': existing_metadata['semantic_features'][i],
                     'mood': existing_metadata['moods'][i] if i < len(existing_metadata['moods']) else None
                 })
-
-            # Set next_id to continue from where we left off
             if existing_metadata['ids'].size > 0:
                 self.next_id = int(existing_metadata['ids'].max()) + 1
             else:
                 self.next_id = 0
 
-            print(f"Loaded existing index with {len(self.frame_metadata)} frames")
-            print(f"Next ID will be: {self.next_id}")
+            video_meta_path = out_dir / "video_meta.pkl"
+            if video_meta_path.exists():
+                with open(video_meta_path, 'rb') as f:
+                    self.video_metadata = pickle.load(f)
 
-            # Load existing FAISS indices to extract embeddings
+            print(f"Loaded existing index with {len(self.frame_metadata)} frames, {len(self.video_metadata)} videos")
+
             clip_index = faiss.read_index(str(clip_index_path))
             text_index = faiss.read_index(str(text_index_path))
-
-            # Extract embeddings from FAISS indices
-            # Note: This is a simplified approach - in production you might want to store embeddings separately
             n_vectors = clip_index.ntotal
             if n_vectors > 0:
-                # Reconstruct embeddings (this works for IndexFlatIP)
                 if hasattr(clip_index, 'index') and hasattr(clip_index.index, 'reconstruct_n'):
-                    # For IndexIDMap with IndexFlatIP
                     clip_embeddings = clip_index.index.reconstruct_n(0, n_vectors)
                     text_embeddings = text_index.index.reconstruct_n(0, n_vectors)
                 elif hasattr(clip_index, 'reconstruct_n'):
-                    # For direct IndexFlatIP
                     clip_embeddings = clip_index.reconstruct_n(0, n_vectors)
                     text_embeddings = text_index.reconstruct_n(0, n_vectors)
                 else:
                     print("Warning: Cannot extract embeddings from existing index type")
-                    clip_embeddings = np.zeros((0, 512), dtype=np.float32)
-                    text_embeddings = np.zeros((0, 384), dtype=np.float32)
+                    clip_embeddings = np.zeros((0, SIGLIP_DIM), dtype=np.float32)
+                    text_embeddings = np.zeros((0, EMBED_DIM), dtype=np.float32)
 
-                # Convert to list of individual embeddings
                 if clip_embeddings.size > 0:
                     self.clip_embeddings = [clip_embeddings[i:i + 1] for i in range(clip_embeddings.shape[0])]
                 if text_embeddings.size > 0:
@@ -715,24 +1299,21 @@ class HighAccuracyVideoIndexer:
             self.text_embeddings = []
             self.frame_metadata = []
             self.next_id = 0
+            self.video_metadata = {}
             return False
 
     def get_existing_video_paths(self) -> set:
-        """Get set of video paths already processed"""
         return set(os.path.abspath(meta['video_path']) for meta in self.frame_metadata)
 
     def process_video_folder(self, videos_dir: str, workers: int = 3, max_frames_per_video: int = 60,
                              out_dir: str = None, incremental: bool = True, excluded_dirs: str = "raw"):
-        """Process videos with incremental support"""
         videos_dir = Path(videos_dir)
-
         if out_dir and incremental:
             out_dir_path = Path(out_dir)
             self.load_existing_indices(out_dir_path)
 
         video_extensions = ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.wmv', '.flv', '.m4v', '.3gp', '.ogv']
         video_files = []
-
         print(f"Recursively scanning {videos_dir} for video files...")
 
         excluded_names = {
@@ -751,7 +1332,6 @@ class HighAccuracyVideoIndexer:
             pattern = f"**/*{ext}"
             found_files = [f for f in videos_dir.glob(pattern) if not should_skip_path(f)]
             video_files.extend(found_files)
-
             pattern_upper = f"**/*{ext.upper()}"
             found_files_upper = [f for f in videos_dir.glob(pattern_upper) if not should_skip_path(f)]
             video_files.extend(found_files_upper)
@@ -759,74 +1339,33 @@ class HighAccuracyVideoIndexer:
         video_files = list(set(str(p) for p in video_files if p.is_file()))
         video_files.sort()
 
-        # Filter out already processed videos if incremental
         if incremental:
             existing_paths = self.get_existing_video_paths()
             new_video_files = []
             skipped_existing = 0
-
             for video_file in video_files:
                 abs_path = os.path.abspath(video_file)
                 if abs_path not in existing_paths:
                     new_video_files.append(video_file)
                 else:
                     skipped_existing += 1
-
             video_files = new_video_files
             print(f"Incremental mode: Skipped {skipped_existing} already processed videos")
 
-        # Report skipped 'Raw' directories
-        def count_all_videos_including_excluded():
-            all_videos = []
-            for ext in video_extensions:
-                all_videos.extend(list(videos_dir.glob(f"**/*{ext}")))
-                all_videos.extend(list(videos_dir.glob(f"**/*{ext.upper()}")))
-            return len(set(str(p) for p in all_videos if p.is_file()))
-
-        def find_excluded_directories():
-            excl_dirs = set()
-            for path in videos_dir.rglob("*"):
-                if path.is_dir() and path.name.lower() in excluded_names:
-                    excl_dirs.add(str(path.relative_to(videos_dir)))
-            return excl_dirs
-
-        total_videos_including_raw = count_all_videos_including_excluded()
-        total_after_raw_filter = len(video_files) + (len(self.get_existing_video_paths()) if incremental else 0)
-        skipped_videos_count = total_videos_including_raw - total_after_raw_filter
-        raw_directories = find_excluded_directories()
-
-        if skipped_videos_count > 0:
-            print(f"Skipped {skipped_videos_count} videos from {len(raw_directories)} excluded directories:")
-            for raw_dir in sorted(raw_directories):
-                print(f"  - Skipped: {raw_dir}/")
-
         print(f"Found {len(video_files)} new video files to process")
-        if incremental:
-            print(f"Total videos in index after processing: {len(self.get_existing_video_paths()) + len(video_files)}")
-
         if not video_files:
             print("No new video files to process")
             return
 
-        directories_found = set()
-        for video_file in video_files:
-            rel_dir = os.path.relpath(os.path.dirname(video_file), videos_dir)
-            if rel_dir != '.':
-                directories_found.add(rel_dir)
-
-        if directories_found:
-            print(f"Processing new videos from {len(directories_found)} subdirectories:")
-            for directory in sorted(directories_found)[:10]:
-                count = sum(1 for vf in video_files if os.path.dirname(vf).endswith(directory.replace('/', os.sep)))
-                print(f"  {directory}: {count} videos")
-            if len(directories_found) > 10:
-                print(f"  ... and {len(directories_found) - 10} more directories")
+        print("Extracting video metadata...")
+        for vf in video_files:
+            meta = extract_video_meta(vf, str(videos_dir))
+            if meta:
+                self.video_metadata[os.path.abspath(vf)] = meta
+        print(f"Video metadata extracted for {len(self.video_metadata)} total videos")
 
         mem_info = get_memory_info()
         print(f"Available RAM: {mem_info['ram_available_gb']:.2f}GB")
-
-        # Each worker needs ~4-6GB RAM, adjust accordingly
-        # max_safe_workers = max(1, min(workers, int(mem_info['ram_available_gb'] // 4)))
         max_safe_workers = max(1, min(3, workers))
         print(f"Using {max_safe_workers} workers (requested: {workers})")
 
@@ -838,57 +1377,37 @@ class HighAccuracyVideoIndexer:
                 initargs=(0,)
         ) as executor:
             global_id = self.next_id
-
             futures = [executor.submit(_process_video_high_accuracy, task) for task in tasks]
-
             for i, future in enumerate(concurrent.futures.as_completed(futures, timeout=None)):
                 try:
                     clip_arr, text_arr, meta_list = future.result(timeout=1800)
-
                     if clip_arr.size > 0:
                         for j in range(clip_arr.shape[0]):
                             self.clip_embeddings.append(clip_arr[j:j + 1])
-
                     if text_arr.size > 0:
                         for j in range(text_arr.shape[0]):
                             self.text_embeddings.append(text_arr[j:j + 1])
-
                     for meta in meta_list:
                         meta['id'] = global_id
                         self.frame_metadata.append(meta)
                         global_id += 1
-
-                    print(
-                        f"Completed video {i + 1}/{len(video_files)}, total frames in index: {len(self.frame_metadata)}")
-
+                    print(f"Completed video {i + 1}/{len(video_files)}, total frames in index: {len(self.frame_metadata)}")
                 except Exception as e:
                     print(f"Video processing failed: {e}")
                     continue
-
-            # Update next_id for future incremental runs
             self.next_id = global_id
 
     def build_high_accuracy_indices(self, clip_index_path: str, text_index_path: str):
-        """Build optimized indices (now handles incremental data)"""
         if not self.clip_embeddings:
             print("No embeddings to index")
             return
-
-        # CLIP index
         clip_X = np.vstack(self.clip_embeddings).astype(np.float32)
         clip_X = norm_l2(clip_X)
-
-        # Text index
         text_X = np.vstack(self.text_embeddings).astype(np.float32)
         text_X = norm_l2(text_X)
-
         n_vectors = clip_X.shape[0]
         ids = np.array([m['id'] for m in self.frame_metadata], dtype=np.int64)
-
-        print(
-            f"Building indices for {n_vectors} total vectors ({n_vectors - (self.next_id - len(self.frame_metadata))} new)")
-
-        # CLIP Index with accuracy-focused parameters
+        print(f"Building indices for {n_vectors} total vectors")
         if n_vectors > 5000:
             nlist = min(2048, max(256, int(np.sqrt(n_vectors) * 1.5)))
             quantizer = faiss.IndexFlatIP(clip_X.shape[1])
@@ -897,12 +1416,10 @@ class HighAccuracyVideoIndexer:
             clip_index.nprobe = max(32, nlist // 4)
         else:
             clip_index = faiss.IndexFlatIP(clip_X.shape[1])
-
         clip_id_map = faiss.IndexIDMap(clip_index)
         clip_id_map.add_with_ids(clip_X, ids)
         faiss.write_index(clip_id_map, clip_index_path)
 
-        # Text Index
         if n_vectors > 5000:
             nlist = min(2048, max(256, int(np.sqrt(n_vectors) * 1.5)))
             quantizer = faiss.IndexFlatIP(text_X.shape[1])
@@ -911,54 +1428,37 @@ class HighAccuracyVideoIndexer:
             text_index.nprobe = max(32, nlist // 4)
         else:
             text_index = faiss.IndexFlatIP(text_X.shape[1])
-
         text_id_map = faiss.IndexIDMap(text_index)
         text_id_map.add_with_ids(text_X, ids)
         faiss.write_index(text_id_map, text_index_path)
-
         print("Incremental indices built successfully")
 
     def build_comprehensive_text_index(self, text_index_path: str):
-        """Build comprehensive text index (handles all data including existing)"""
         captions = [m.get("caption", "") for m in self.frame_metadata]
-        semantic_features = [" ".join(m.get("semantic_features", [])) for m in self.frame_metadata]
-
-        combined_texts = [f"{caption} {features}" for caption, features in zip(captions, semantic_features)]
-
+        sem_feats = [" ".join(m.get("semantic_features", [])) for m in self.frame_metadata]
+        combined = [f"{c} {s}" for c, s in zip(captions, sem_feats)]
         vectorizer = TfidfVectorizer(
-            max_features=15000,
-            stop_words='english',
-            ngram_range=(1, 3),
-            min_df=1,
-            max_df=0.9,
-            strip_accents='ascii',
-            sublinear_tf=True,
-            use_idf=True
+            max_features=15000, stop_words='english', ngram_range=(1, 3),
+            min_df=1, max_df=0.9, strip_accents='ascii', sublinear_tf=True, use_idf=True
         )
-
-        tfidf_matrix = vectorizer.fit_transform(combined_texts)
-
+        tfidf_matrix = vectorizer.fit_transform(combined)
         with open(text_index_path, 'wb') as f:
             pickle.dump({
                 'vectorizer': vectorizer,
                 'tfidf_matrix': tfidf_matrix,
                 'captions': captions,
-                'semantic_features': semantic_features
+                'semantic_features': sem_feats,
             }, f, protocol=pickle.HIGHEST_PROTOCOL)
-
-        print("Comprehensive text index built with all data")
+        print(f"TF-IDF index built: {len(captions)} documents")
 
     def save_metadata(self, metadata_path: str):
-        """Save comprehensive metadata (all data including existing)"""
         video_stats = defaultdict(lambda: {'captions': [], 'moods': [], 'semantic_features': []})
-
         for m in self.frame_metadata:
             vp = os.path.abspath(m['video_path'])
             video_stats[vp]['captions'].append(m.get('caption', ''))
             if m.get('mood'):
                 video_stats[vp]['moods'].append(m['mood'])
             video_stats[vp]['semantic_features'].extend(m.get('semantic_features', []))
-
         for vp, stats in video_stats.items():
             stats['dominant_mood'] = Counter(stats['moods']).most_common(1)[0][0] if stats['moods'] else None
             stats['unique_semantic_features'] = list(set(stats['semantic_features']))
@@ -971,378 +1471,575 @@ class HighAccuracyVideoIndexer:
             'semantic_features': [m.get('semantic_features', []) for m in self.frame_metadata],
             'moods': [m.get('mood') for m in self.frame_metadata],
             'video_stats': dict(video_stats),
-            'next_id': self.next_id  # Save next_id for future incremental runs
+            'next_id': self.next_id
         }
-
         with open(metadata_path, 'wb') as f:
             pickle.dump(metadata, f, protocol=pickle.HIGHEST_PROTOCOL)
-
         print(f"Comprehensive metadata saved ({len(self.frame_metadata)} total frames)")
 
 
 def get_directory_stats(video_files, base_dir):
-    """Get statistics about directory structure and video distribution"""
     stats = {
         'total_videos': len(video_files),
         'directories': defaultdict(int),
         'max_depth': 0,
         'total_size': 0
     }
-
     base_path = Path(base_dir)
-
     for video_file in video_files:
         try:
             video_path = Path(video_file)
             rel_path = video_path.relative_to(base_path)
             depth = len(rel_path.parts) - 1
             stats['max_depth'] = max(stats['max_depth'], depth)
-
             if depth == 0:
                 dir_key = "root"
             else:
                 dir_key = str(rel_path.parent)
             stats['directories'][dir_key] += 1
-
             if os.path.exists(video_file):
                 stats['total_size'] += os.path.getsize(video_file)
-
         except (ValueError, OSError):
             continue
-
     return stats
 
 
-
 class HighAccuracyVideoSearcher:
-    """High-accuracy searcher with multi-modal fusion"""
+    """High-accuracy searcher with multi-modal fusion and metadata filtering."""
 
     def __init__(self, clip_index_path: str, text_index_path: str, metadata_path: str, tfidf_path: str):
-        print("Initializing high-accuracy video searcher...")
-
+        print("Initializing searcher...")
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        dtype = torch.float16 if self.device == "cuda" else torch.float32
 
-        # Load search models
-        self.clip_model = CLIPModel.from_pretrained("D:/models/models/clip-vit-base-patch32").to(self.device)
-        self.clip_processor = CLIPProcessor.from_pretrained("D:/models/models/clip-vit-base-patch32")
+        self.siglip_model = SiglipModel.from_pretrained(MODEL_SIGLIP, dtype=dtype).to(self.device).eval()
+        self.siglip_processor = SiglipProcessor.from_pretrained(MODEL_SIGLIP)
+        self.embed_model = SentenceTransformer(MODEL_EMBED, device=self.device)
 
         try:
-            self.sentence_tokenizer = AutoTokenizer.from_pretrained("D:/models/models/all-MiniLM-L6-v2")
-            self.sentence_model = AutoModel.from_pretrained("D:/models/models/all-MiniLM-L6-v2").to(self.device)
-        except:
-            self.sentence_model = None
-            self.sentence_tokenizer = None
+            self.reranker = CrossEncoder(MODEL_RERANKER, max_length=512, device=self.device)
+        except Exception:
+            self.reranker = None
+            print("Reranker unavailable, skipping")
 
-        self.lemmatizer = WordNetLemmatizer()
+        try:
+            self.lemmatizer = WordNetLemmatizer()
+        except Exception:
+            self.lemmatizer = None
 
-        # Load indices
         self.clip_index = faiss.read_index(clip_index_path)
         self.text_index = faiss.read_index(text_index_path)
 
-        # Load metadata
         with open(metadata_path, 'rb') as f:
             self.metadata = pickle.load(f)
 
         with open(tfidf_path, 'rb') as f:
-            tfidf_data = pickle.load(f)
-            self.vectorizer = tfidf_data['vectorizer']
-            self.tfidf_matrix = tfidf_data['tfidf_matrix']
+            sparse_data = pickle.load(f)
 
-        print("High-accuracy searcher ready!")
+        if 'bm25' in sparse_data:
+            self.bm25 = sparse_data['bm25']
+            self.bm25_captions = sparse_data['captions']
+            self.vectorizer = None
+            self.tfidf_matrix = None
+        else:
+            self.bm25 = None
+            self.vectorizer   = sparse_data['vectorizer']
+            self.tfidf_matrix = sparse_data['tfidf_matrix']
+
+        video_meta_path = Path(metadata_path).parent / "video_meta.pkl"
+        if video_meta_path.exists():
+            with open(video_meta_path, 'rb') as f:
+                self.video_metadata = pickle.load(f)
+        else:
+            self.video_metadata = {}
+            print("Warning: video_meta.pkl not found — metadata filters will be empty.")
+
+        for path, meta in self.video_metadata.items():
+            if meta.get('directory', '') == 'root':
+                parent = os.path.basename(os.path.dirname(path))
+                if parent and parent != os.path.basename(path):
+                    meta['directory'] = parent
+
+        print("Searcher ready!")
+
+    _QUERY_SYNONYMS = {
+        # Nudity & exposure
+        'naked': ['nude', 'bare', 'unclothed', 'undressed', 'exposed', 'without clothes', 'nudity'],
+        'nude': ['naked', 'bare', 'unclothed', 'undressed', 'exposed', 'nudity'],
+        'topless': ['shirtless', 'bare chest', 'no top', 'uncovered chest', 'exposed chest', 'braless'],
+        'shirtless': ['topless', 'bare chest', 'no shirt', 'uncovered torso', 'braless'],
+        'braless': ['topless', 'no bra', 'bare chest', 'shirtless'],
+        'barefoot': ['no shoes', 'bare feet', 'shoeless'],
+        # Clothing & lingerie
+        'bikini': ['swimsuit', 'swimwear', 'two piece', 'bathing suit', 'beachwear'],
+        'bra': ['brassiere', 'underwear', 'lingerie', 'undergarment', 'intimate apparel'],
+        'underwear': ['panties', 'panty', 'underpants', 'lingerie', 'undergarment', 'intimate apparel'],
+        'lingerie': ['underwear', 'intimate apparel', 'negligee', 'nightwear', 'bra', 'panties'],
+        'thong': ['g-string', 'underwear', 'panties', 'lingerie', 'intimate'],
+        'corset': ['bustier', 'bodice', 'lingerie', 'waist trainer'],
+        'stockings': ['thigh highs', 'hosiery', 'nylons', 'fishnet', 'garter'],
+        'garter': ['garter belt', 'stockings', 'suspender belt', 'lingerie'],
+        'negligee': ['nightgown', 'nightwear', 'sleepwear', 'lingerie', 'nightie'],
+        'nightgown': ['negligee', 'nightwear', 'sleepwear', 'nightie'],
+        'fishnet': ['mesh', 'net stockings', 'fishnet stockings', 'see through'],
+        'bodysuit': ['one piece', 'leotard', 'catsuit', 'body'],
+        # Body parts
+        'butt': ['buttocks', 'rear', 'behind', 'backside', 'bottom', 'booty'],
+        'booty': ['butt', 'buttocks', 'rear', 'behind', 'backside'],
+        'boobs': ['breasts', 'breast', 'chest', 'bust', 'boob', 'cleavage'],
+        'breasts': ['breast', 'chest', 'bust', 'boobs', 'boob', 'cleavage'],
+        'cleavage': ['chest', 'bust', 'breasts', 'boobs', 'neckline', 'décolletage'],
+        'navel': ['belly button', 'bellybutton', 'stomach', 'midriff', 'abdomen'],
+        'belly': ['stomach', 'tummy', 'abdomen', 'midriff', 'navel'],
+        'midriff': ['belly', 'stomach', 'abdomen', 'waist', 'midsection'],
+        'thigh': ['thighs', 'upper leg', 'leg'],
+        'hip': ['hips', 'waist', 'pelvis', 'curves'],
+        'waist': ['midsection', 'midriff', 'waistline', 'hips'],
+        'shoulder': ['shoulders', 'bare shoulder', 'off shoulder'],
+        'curves': ['curvy', 'voluptuous', 'shapely', 'hourglass', 'figure'],
+        'curvy': ['curves', 'voluptuous', 'shapely', 'thick', 'hourglass'],
+        'voluptuous': ['curvy', 'busty', 'full figured', 'shapely', 'thick'],
+        'petite': ['slim', 'small', 'tiny', 'slender', 'delicate'],
+        'slim': ['slender', 'thin', 'petite', 'lean', 'fit'],
+        # Intimate situations
+        'intimate': ['close', 'private', 'personal', 'sensual', 'romantic'],
+        'sensual': ['sexy', 'seductive', 'intimate', 'passionate'],
+        'sexy': ['seductive', 'sensual', 'provocative', 'alluring', 'hot', 'attractive'],
+        'seductive': ['sexy', 'sensual', 'provocative', 'alluring', 'tempting'],
+        'provocative': ['sexy', 'seductive', 'suggestive', 'teasing', 'alluring'],
+        'strip': ['stripping', 'undressing', 'taking off clothes', 'disrobing'],
+        'stripping': ['strip', 'undressing', 'disrobing', 'taking off clothes', 'striptease'],
+        'undressing': ['stripping', 'taking off clothes', 'disrobing', 'removing clothes'],
+        'showering': ['bathing', 'washing', 'shower', 'bath', 'wet'],
+        'bathing': ['showering', 'washing', 'bath', 'shower', 'wet', 'soaking'],
+        'dancing': ['dance', 'grinding', 'moving', 'performing'],
+        'grinding': ['dancing', 'rubbing', 'close dancing', 'lap dance'],
+        # Locations
+        'beach': ['ocean', 'seaside', 'shore', 'sand', 'waterfront', 'coastal'],
+        'pool': ['swimming', 'poolside', 'water', 'swim', 'jacuzzi'],
+        'bedroom': ['bed', 'room', 'boudoir', 'private room'],
+        'bathroom': ['shower', 'bath', 'washroom', 'toilet', 'restroom'],
+        'shower': ['showering', 'bathroom', 'bathing', 'wet'],
+        'bed': ['bedroom', 'mattress', 'lying down', 'sheets'],
+        'couch': ['sofa', 'settee', 'loveseat', 'living room'],
+        'kitchen': ['counter', 'cooking', 'home'],
+    }
 
     def expand_query_advanced(self, query: str) -> str:
-        """Advanced query expansion with synonyms and related terms"""
         try:
             words = word_tokenize(query.lower())
             expanded = set(words)
-
             for word in words:
-                # Add synonyms
-                synsets = wordnet.synsets(word)
-                for syn in synsets[:2]:
+                for syn in wordnet.synsets(word)[:2]:
                     for lemma in syn.lemmas()[:2]:
-                        synonym = lemma.name().replace('_', ' ')
-                        if len(synonym) > 2:
-                            expanded.add(synonym)
-
-                # Add lemmatized form
-                try:
-                    lemmatized = self.lemmatizer.lemmatize(word)
-                    expanded.add(lemmatized)
-                except:
-                    pass
-
+                        s = lemma.name().replace('_', ' ')
+                        if len(s) > 2:
+                            expanded.add(s)
+                if self.lemmatizer:
+                    try:
+                        expanded.add(self.lemmatizer.lemmatize(word))
+                    except Exception:
+                        pass
+                if word in self._QUERY_SYNONYMS:
+                    expanded.update(self._QUERY_SYNONYMS[word])
             return " ".join(expanded)
-        except:
+        except Exception:
             return query
 
     def search_with_high_accuracy(self, query: str, top_k: int = 20,
-                                  clip_weight: float = 0.35, text_weight: float = 0.35, tfidf_weight: float = 0.3):
-        """High-accuracy multi-modal search"""
-        print(f"High-accuracy search for: '{query}'")
-
-        # Query expansion
+                                   clip_weight: float = 0.40, text_weight: float = 0.35, tfidf_weight: float = 0.25):
+        search_k = min(top_k * 5, 300)
         expanded_query = self.expand_query_advanced(query)
 
-        # Get embeddings
-        with torch.no_grad():
-            # CLIP embedding
-            clip_inputs = self.clip_processor(text=[query], return_tensors="pt", padding=True).to(self.device)
-            clip_emb = self.clip_model.get_text_features(**clip_inputs).cpu().numpy().astype(np.float32)
-            clip_emb = norm_l2(clip_emb)
+        def _siglip(text):
+            inp = self.siglip_processor(text=[text], return_tensors="pt", padding="max_length", truncation=True)
+            inp = {k: v.to(self.device) for k, v in inp.items()}
+            with torch.no_grad():
+                return norm_l2(self.siglip_model.get_text_features(**inp).cpu().float().numpy().astype(np.float32))
 
-            # Expanded query CLIP embedding
-            exp_clip_inputs = self.clip_processor(text=[expanded_query], return_tensors="pt", padding=True).to(
-                self.device)
-            exp_clip_emb = self.clip_model.get_text_features(**exp_clip_inputs).cpu().numpy().astype(np.float32)
-            exp_clip_emb = norm_l2(exp_clip_emb)
+        siglip_q     = _siglip(query)
+        siglip_q_exp = _siglip(expanded_query)
 
-            # Text embedding (sentence transformer if available)
-            if self.sentence_model and self.sentence_tokenizer:
-                encoded = self.sentence_tokenizer(query, padding=True, truncation=True, return_tensors='pt').to(
-                    self.device)
-                model_output = self.sentence_model(**encoded)
-                text_emb = mean_pooling(model_output, encoded['attention_mask']).cpu().numpy().astype(np.float32)
-                text_emb = norm_l2(text_emb)
+        embed_q = self.embed_model.encode(
+            f"Represent this sentence for searching relevant passages: {query}",
+            normalize_embeddings=True, convert_to_numpy=True,
+        ).reshape(1, -1).astype(np.float32)
+        embed_q_exp = self.embed_model.encode(
+            f"Represent this sentence for searching relevant passages: {expanded_query}",
+            normalize_embeddings=True, convert_to_numpy=True,
+        ).reshape(1, -1).astype(np.float32)
 
-                exp_encoded = self.sentence_tokenizer(expanded_query, padding=True, truncation=True,
-                                                      return_tensors='pt').to(self.device)
-                exp_model_output = self.sentence_model(**exp_encoded)
-                exp_text_emb = mean_pooling(exp_model_output, exp_encoded['attention_mask']).cpu().numpy().astype(
-                    np.float32)
-                exp_text_emb = norm_l2(exp_text_emb)
-            else:
-                text_emb = clip_emb
-                exp_text_emb = exp_clip_emb
+        clip_s,  clip_i  = self.clip_index.search(siglip_q,     search_k)
+        clip_se, clip_ie = self.clip_index.search(siglip_q_exp, search_k)
+        text_s,  text_i  = self.text_index.search(embed_q,      search_k)
+        text_se, text_ie = self.text_index.search(embed_q_exp,  search_k)
 
-        # Multi-modal search with larger candidate pool for reranking
-        search_k = min(top_k * 3, 200)
+        if self.bm25:
+            raw     = np.array(self.bm25.get_scores(query.lower().split()))
+            raw_exp = np.array(self.bm25.get_scores(expanded_query.lower().split()))
+            mn = min(raw.min(), raw_exp.min())
+            mx = max(raw.max(), raw_exp.max()) + 1e-9
+            sparse_norm     = (raw     - mn) / (mx - mn)
+            sparse_norm_exp = (raw_exp - mn) / (mx - mn)
+        else:
+            sparse_norm     = cosine_similarity(self.vectorizer.transform([query]),          self.tfidf_matrix).flatten()
+            sparse_norm_exp = cosine_similarity(self.vectorizer.transform([expanded_query]), self.tfidf_matrix).flatten()
 
-        # CLIP searches
-        clip_scores, clip_ids = self.clip_index.search(clip_emb, search_k)
-        exp_clip_scores, exp_clip_ids = self.clip_index.search(exp_clip_emb, search_k)
+        n = len(self.metadata['ids'])
+        candidates: Dict[int, Dict] = {}
 
-        # Text embedding searches
-        text_scores, text_ids = self.text_index.search(text_emb, search_k)
-        exp_text_scores, exp_text_ids = self.text_index.search(exp_text_emb, search_k)
+        for s, idx in zip(clip_s[0],  clip_i[0]):
+            if 0 <= idx < n: candidates.setdefault(idx, {})['clip'] = float(s)
+        for s, idx in zip(clip_se[0], clip_ie[0]):
+            if 0 <= idx < n:
+                d = candidates.setdefault(idx, {})
+                d['clip'] = max(d.get('clip', 0), float(s))
+        for s, idx in zip(text_s[0],  text_i[0]):
+            if 0 <= idx < n: candidates.setdefault(idx, {})['text'] = float(s)
+        for s, idx in zip(text_se[0], text_ie[0]):
+            if 0 <= idx < n:
+                d = candidates.setdefault(idx, {})
+                d['text'] = max(d.get('text', 0), float(s))
+        for idx in np.argsort(sparse_norm)[-search_k:][::-1]:
+            v = float(sparse_norm[idx])
+            if v > 0.01: candidates.setdefault(int(idx), {})['sparse'] = v
+        for idx in np.argsort(sparse_norm_exp)[-search_k:][::-1]:
+            v = float(sparse_norm_exp[idx])
+            if v > 0.01:
+                d = candidates.setdefault(int(idx), {})
+                d['sparse'] = max(d.get('sparse', 0), v)
 
-        # TF-IDF search
-        query_vec = self.vectorizer.transform([query])
-        exp_query_vec = self.vectorizer.transform([expanded_query])
+        frame_scores: Dict[int, float] = {}
+        for idx, s in candidates.items():
+            cs, ts, ss = s.get('clip', 0), s.get('text', 0), s.get('sparse', 0)
+            base = clip_weight * cs + text_weight * ts + tfidf_weight * ss
+            consistency = 0.05 * max(0, sum(1 for x in [cs, ts, ss] if x > 0.1) - 1)
+            frame_scores[idx] = base + consistency
 
-        tfidf_scores = cosine_similarity(query_vec, self.tfidf_matrix).flatten()
-        exp_tfidf_scores = cosine_similarity(exp_query_vec, self.tfidf_matrix).flatten()
+        video_agg: Dict[str, list] = defaultdict(list)
+        for idx, score in frame_scores.items():
+            vp = os.path.abspath(self.metadata['video_paths'][idx])
+            video_agg[vp].append({'idx': idx, 'score': score, 'timestamp': float(self.metadata['timestamps'][idx])})
 
-        # Collect all candidates with their scores
-        candidates = {}
-
-        # Process CLIP results
-        for score, idx in zip(clip_scores[0], clip_ids[0]):
-            if idx >= 0 and idx < len(self.metadata['ids']):
-                candidates[idx] = candidates.get(idx, {})
-                candidates[idx]['clip'] = float(score)
-
-        for score, idx in zip(exp_clip_scores[0], exp_clip_ids[0]):
-            if idx >= 0 and idx < len(self.metadata['ids']):
-                candidates[idx] = candidates.get(idx, {})
-                candidates[idx]['exp_clip'] = float(score)
-
-        # Process text embedding results
-        for score, idx in zip(text_scores[0], text_ids[0]):
-            if idx >= 0 and idx < len(self.metadata['ids']):
-                candidates[idx] = candidates.get(idx, {})
-                candidates[idx]['text'] = float(score)
-
-        for score, idx in zip(exp_text_scores[0], exp_text_ids[0]):
-            if idx >= 0 and idx < len(self.metadata['ids']):
-                candidates[idx] = candidates.get(idx, {})
-                candidates[idx]['exp_text'] = float(score)
-
-        # Add TF-IDF scores for top candidates
-        tfidf_top_indices = np.argsort(tfidf_scores)[-search_k:][::-1]
-        exp_tfidf_top_indices = np.argsort(exp_tfidf_scores)[-search_k:][::-1]
-
-        for idx in tfidf_top_indices:
-            if idx < len(self.metadata['ids']) and tfidf_scores[idx] > 0.05:
-                candidates[idx] = candidates.get(idx, {})
-                candidates[idx]['tfidf'] = float(tfidf_scores[idx])
-
-        for idx in exp_tfidf_top_indices:
-            if idx < len(self.metadata['ids']) and exp_tfidf_scores[idx] > 0.05:
-                candidates[idx] = candidates.get(idx, {})
-                candidates[idx]['exp_tfidf'] = float(exp_tfidf_scores[idx])
-
-        # Multi-modal fusion with enhanced scoring
-        final_scores = {}
-        for idx, scores in candidates.items():
-            # Get best score from each modality
-            clip_score = max(scores.get('clip', 0), scores.get('exp_clip', 0))
-            text_score = max(scores.get('text', 0), scores.get('exp_text', 0))
-            tfidf_score = max(scores.get('tfidf', 0), scores.get('exp_tfidf', 0))
-
-            # Weighted combination
-            final_score = (clip_weight * clip_score +
-                           text_weight * text_score +
-                           tfidf_weight * tfidf_score)
-
-            # Consistency bonus - reward frames that score well across multiple modalities
-            non_zero_scores = sum(1 for s in [clip_score, text_score, tfidf_score] if s > 0.1)
-            consistency_bonus = 0.05 * max(0, non_zero_scores - 1)
-
-            final_scores[idx] = final_score + consistency_bonus
-
-        # Aggregate by video with temporal clustering
-        video_aggregates = defaultdict(list)
-        for idx in final_scores:
-            video_path = os.path.abspath(self.metadata['video_paths'][idx])
-            timestamp = self.metadata['timestamps'][idx]
-            score = final_scores[idx]
-            video_aggregates[video_path].append({
-                'timestamp': timestamp,
-                'score': score,
-                'idx': idx
-            })
-
-        # Compute video-level scores with temporal consistency
-        video_final_scores = {}
-        for video_path, frame_data in video_aggregates.items():
-            # Sort by timestamp
-            frame_data.sort(key=lambda x: x['timestamp'])
-
-            # Base score: sum of all frame scores
-            base_score = sum(f['score'] for f in frame_data)
-
-            # Temporal clustering bonus
-            temporal_bonus = 0
-            if len(frame_data) > 1:
-                # Group frames that are close in time
-                clusters = []
-                current_cluster = [frame_data[0]]
-
-                for frame in frame_data[1:]:
-                    if frame['timestamp'] - current_cluster[-1]['timestamp'] <= 10.0:  # 10 second window
-                        current_cluster.append(frame)
+        video_scores: Dict[str, float] = {}
+        for vp, frames in video_agg.items():
+            frames.sort(key=lambda f: f['timestamp'])
+            sorted_s = sorted([f['score'] for f in frames], reverse=True)
+            base = 0.6 * sorted_s[0] + 0.4 * float(np.mean(sorted_s[:3]))
+            temporal_bonus = 0.0
+            if len(frames) > 1:
+                clusters, cur = [], [frames[0]]
+                for fr in frames[1:]:
+                    if fr['timestamp'] - cur[-1]['timestamp'] <= 10.0:
+                        cur.append(fr)
                     else:
-                        clusters.append(current_cluster)
-                        current_cluster = [frame]
-                clusters.append(current_cluster)
-
-                # Bonus for having multiple relevant clusters
+                        clusters.append(cur); cur = [fr]
+                clusters.append(cur)
                 if len(clusters) > 1:
-                    temporal_bonus = 0.1 * (len(clusters) - 1)
+                    temporal_bonus += 0.05 * (len(clusters) - 1)
+                for cl in clusters:
+                    if len(cl) >= 2 and float(np.mean([f['score'] for f in cl])) > 0.3:
+                        temporal_bonus += 0.03
+            video_scores[vp] = base + temporal_bonus
 
-                # Bonus for high-scoring clusters
-                for cluster in clusters:
-                    avg_cluster_score = np.mean([f['score'] for f in cluster])
-                    if avg_cluster_score > 0.3 and len(cluster) >= 2:
-                        temporal_bonus += 0.05
+        ranked = sorted(video_scores, key=lambda v: video_scores[v], reverse=True)
 
-            video_final_scores[video_path] = base_score + temporal_bonus
-
-        # Rank videos and return results
-        ranked_videos = sorted(video_final_scores.keys(),
-                               key=lambda v: video_final_scores[v],
-                               reverse=True)
+        if self.reranker and len(ranked) > 1:
+            pool = ranked[:min(50, len(ranked))]
+            pairs = [(query, self.metadata['captions'][max(video_agg[vp], key=lambda f: f['score'])['idx']])
+                     for vp in pool]
+            logits = self.reranker.predict(pairs)
+            orig_max = max(video_scores[v] for v in pool) or 1.0
+            for i, vp in enumerate(pool):
+                norm_orig   = video_scores[vp] / orig_max
+                norm_rerank = float(1 / (1 + np.exp(-float(logits[i]))))
+                video_scores[vp] = 0.35 * norm_orig + 0.65 * norm_rerank
+            ranked = sorted(video_scores, key=lambda v: video_scores[v], reverse=True)
 
         results = []
-        for video_path in ranked_videos[:top_k]:
-            # Get best frame for this video
-            best_frame = max(video_aggregates[video_path], key=lambda f: f['score'])
-
+        for vp in ranked[:top_k]:
+            best = max(video_agg[vp], key=lambda f: f['score'])
             results.append({
-                'video_path': video_path,
-                'timestamp': best_frame['timestamp'],
-                'caption': self.metadata['captions'][best_frame['idx']],
-                'score': video_final_scores[video_path],
-                'frame_count': len(video_aggregates[video_path])
+                'video_path': vp,
+                'timestamp':  best['timestamp'],
+                'caption':    self.metadata['captions'][best['idx']],
+                'score':      video_scores[vp],
+                'frame_count': len(video_agg[vp]),
             })
-
         return results
 
     def query_filtered_by_directory(self, text: str, filter_directory: str, top_k: int = 20,
-                                    clip_weight: float = 0.35, text_weight: float = 0.35, tfidf_weight: float = 0.3):
-        """Search and filter results to only include videos from specified directory"""
+                                    clip_weight: float = 0.40, text_weight: float = 0.35, tfidf_weight: float = 0.25,
+                                    caption_weight: float = 0.4):
         all_results = self.search_with_high_accuracy(text, top_k=top_k * 3,
                                                      clip_weight=clip_weight, text_weight=text_weight,
                                                      tfidf_weight=tfidf_weight)
-
         filter_directory = os.path.normpath(filter_directory)
         filtered_results = []
-
         for result in all_results:
             video_norm = os.path.normpath(result['video_path'])
-
             if (video_norm.startswith(filter_directory + os.sep) or
                     video_norm == filter_directory or
                     os.path.commonpath([filter_directory, video_norm]) == filter_directory):
                 filtered_results.append(result)
-
         return filtered_results[:top_k]
 
-    def has_videos_from_directory(self, directory_path: str) -> bool:
-        """Check if the index contains any videos from the specified directory"""
-        directory_path = os.path.normpath(directory_path)
+    def query(self, text: str, top_k: int = 50, mood=None, allow_mature=True, caption_weight: float = 0.4):
+        results = self.search_with_high_accuracy(text, top_k)
+        return (
+            [r['video_path'] for r in results],
+            {r['video_path']: r['frame_count'] for r in results},
+            {r['video_path']: r['score'] for r in results},
+        )
 
-        for video_path in self.metadata['video_paths']:
-            video_norm = os.path.normpath(video_path)
-            if (video_norm.startswith(directory_path + os.sep) or
-                    video_norm == directory_path or
-                    os.path.commonpath([directory_path, video_norm]) == directory_path):
-                return True
-        return False
+    def _apply_metadata_filters(self, candidate_paths: list, filters: list) -> list:
+        """Filter video paths by metadata conditions, with token-based AND for directory."""
+        if not filters:
+            return candidate_paths
+        filtered = []
+        for path in candidate_paths:
+            meta = self.video_metadata.get(path)
+            if not meta:
+                continue
+            ok = True
+            for cond in filters:
+                field = cond.get("field")
+                op = cond.get("operator")
+                val = cond.get("value")
 
-    def get_video_count_for_directory(self, directory_path: str) -> int:
-        """Get total number of unique videos in index from specified directory"""
-        directory_path = os.path.normpath(directory_path)
-        unique_videos = set()
+                if field == "resolution_width":
+                    actual = meta.get("resolution", (0, 0))[0]
+                elif field == "resolution_height":
+                    actual = meta.get("resolution", (0, 0))[1]
+                elif field == "directory":
+                    actual = path  # full path to the video file
+                elif field == "filename":
+                    actual = os.path.basename(path)
+                elif field in meta:
+                    actual = meta[field]
+                else:
+                    ok = False;
+                    break
 
-        for video_path in self.metadata['video_paths']:
-            video_norm = os.path.normpath(video_path)
-            if (video_norm.startswith(directory_path + os.sep) or
-                    video_norm == directory_path or
-                    os.path.commonpath([directory_path, video_norm]) == directory_path):
-                unique_videos.add(video_norm)
+                # string comparisons (directory, extension, filename)
+                if field in {"directory", "extension", "filename"}:
+                    actual_str = str(actual).lower().replace("\\", "/")
+                    val_str = str(val).lower().replace("\\", "/") if isinstance(val, str) else str(val).lower()
+                    try:
+                        if field == "directory" and op == "contains":
+                            # NEW: token-based AND match – every word must appear in the path
+                            tokens = re.findall(r'\w+', val_str)
+                            if not tokens:
+                                # fallback to simple substring if no word characters
+                                if val_str not in actual_str:
+                                    ok = False;
+                                    break
+                            else:
+                                for token in tokens:
+                                    if token not in actual_str:
+                                        ok = False
+                                        break
+                        elif op == "eq":
+                            if actual_str != val_str: ok = False; break
+                        elif op == "contains":
+                            if val_str not in actual_str: ok = False; break
+                        elif op == "in":
+                            if actual_str not in [str(v).lower() for v in val]: ok = False; break
+                    except TypeError:
+                        ok = False;
+                        break
+                else:
+                    # numeric / other comparisons
+                    try:
+                        if op == "gt" and not (actual > val):
+                            ok = False; break
+                        elif op == "lt" and not (actual < val):
+                            ok = False; break
+                        elif op == "gte" and not (actual >= val):
+                            ok = False; break
+                        elif op == "lte" and not (actual <= val):
+                            ok = False; break
+                        elif op == "eq" and not (actual == val):
+                            ok = False; break
+                        elif op == "contains" and str(val).lower() not in str(actual).lower():
+                            ok = False; break
+                        elif op == "in" and not (actual in val):
+                            ok = False; break
+                    except TypeError:
+                        ok = False;
+                        break
+            if ok:
+                filtered.append(path)
+        return filtered
 
-        return len(unique_videos)
+    def _metadata_sort(self, paths: list, sort_by: str, order: str = "desc") -> list:
+        if sort_by == "none":
+            return paths
+        def get_val(p):
+            meta = self.video_metadata.get(p, {})
+            if sort_by in meta:
+                return meta[sort_by]
+            elif sort_by == "resolution":
+                w, h = meta.get("resolution", (0,0))
+                return w * h
+            return 0
+        return sorted(paths, key=get_val, reverse=(order == "desc"))
 
-    def query(self, text: str, top_k: int = 50, mood: str = None, allow_nsfw: bool = True, caption_weight: float = 0.4):
-        """Wrapper method to match search_model.py interface"""
-        results = self.search_with_high_accuracy(text, top_k,
-                                                 clip_weight=1 - caption_weight,
-                                                 text_weight=caption_weight,
-                                                 tfidf_weight=0.0)
+    def _filter_by_gender(self, video_paths: List[str], require_man: bool = False, require_no_woman: bool = False) -> \
+    List[str]:
+        """
+        Filter videos based on gender presence using captions.
+        - require_no_woman: exclude any video where a woman is mentioned in any frame caption.
+        - require_man: only include videos where at least one frame mentions a man.
+        """
+        if not require_man and not require_no_woman:
+            return video_paths
 
-        video_paths = [r['video_path'] for r in results]
-        video_counts = {r['video_path']: r['frame_count'] for r in results}
-        video_scores = {r['video_path']: r['score'] for r in results}
+        man_keywords = {'man', 'men', 'male', 'boy', 'guy', 'dude'}
+        woman_keywords = {'woman', 'women', 'female', 'girl', 'lady', 'gal'}
 
-        return video_paths, video_counts, video_scores
+        filtered = []
+        for vp in video_paths:
+            # Get all frame indices for this video
+            indices = [i for i, path in enumerate(self.metadata['video_paths']) if os.path.abspath(path) == vp]
+            captions = [self.metadata['captions'][i].lower() for i in indices]
+            semantic_features = [self.metadata['semantic_features'][i] for i in indices]
+
+            # Flatten semantic features list
+            all_words = set()
+            for feats in semantic_features:
+                if isinstance(feats, list):
+                    all_words.update(f.lower() for f in feats)
+            caption_text = ' '.join(captions)
+            all_words.update(caption_text.split())
+
+            has_man = any(kw in all_words for kw in man_keywords)
+            has_woman = any(kw in all_words for kw in woman_keywords)
+
+            if require_no_woman and has_woman:
+                continue
+            if require_man and not has_man:
+                continue
+            filtered.append(vp)
+
+        return filtered
+
+    def ai_search(self, parsed_query: dict, caption_weight=0.4):
+        """
+        Execute a search based on the structured query.
+        Returns: (results, counts, scores)
+        """
+        # --- Sanitisation ---
+        valid_intents = {"metadata_sort", "metadata_filter", "content_search", "combined"}
+        intent = parsed_query.get("intent", "content_search")
+        if intent not in valid_intents:
+            intent = "content_search" if parsed_query.get("search_text", "").strip() else "metadata_filter"
+
+        valid_sort_fields = {"duration", "file_size", "resolution", "fps", "frames", "none"}
+        sort_by = parsed_query.get("sort_by", "none")
+        if sort_by not in valid_sort_fields:
+            sort_by = "none"
+
+        # ---- FIX: treat the sentinel value as “unlimited” ----
+        UNLIMITED_SENTINEL = 1000000
+        raw_top_k = int(parsed_query.get("top_k", 10))
+        if raw_top_k >= UNLIMITED_SENTINEL:
+            # Return all matching videos. Use a safe upper bound.
+            top_k = max(1, len(self.video_metadata) + 1)
+        else:
+            top_k = max(1, min(raw_top_k, 5000))
+
+        filters = parsed_query.get("filters", [])
+        order = parsed_query.get("order", "desc")
+        search_text = parsed_query.get("search_text", "").strip()
+        # --- End sanitisation ---
+
+        # --- Conjunction handling (X and Y) ---
+        if " and " in search_text.lower() and not filters:
+            parts = [p.strip() for p in re.split(r'\s+and\s+', search_text, flags=re.IGNORECASE)]
+            if len(parts) == 2:
+                retrieval_top_k = min(2000, max(500, len(self.video_metadata) * 5))
+                res1, cnt1, scr1 = self.query(parts[0], top_k=retrieval_top_k, caption_weight=caption_weight)
+                res2, cnt2, scr2 = self.query(parts[1], top_k=retrieval_top_k, caption_weight=caption_weight)
+                common_videos = set(res1) & set(res2)
+                if common_videos:
+                    combined_scores = {vp: scr1.get(vp, 0) + scr2.get(vp, 0) for vp in common_videos}
+                    final_set = sorted(combined_scores, key=combined_scores.get, reverse=True)[:top_k]
+                    counts = {vp: cnt1.get(vp, 0) + cnt2.get(vp, 0) for vp in final_set}
+                    scores = {vp: float(combined_scores[vp]) for vp in final_set}
+                    return final_set, counts, scores
+
+        all_videos = list(self.video_metadata.keys())
+        if not all_videos:
+            all_videos = list(set(self.metadata['video_paths']))
+
+        filtered = self._apply_metadata_filters(all_videos, filters)
+
+        # --- Gender‑based filtering (negation / exclusivity) ---
+        gender_query = search_text.lower()
+        if "no woman" in gender_query or "no women" in gender_query:
+            filtered = self._filter_by_gender(filtered, require_no_woman=True)
+            search_text = re.sub(r'\bno\s+woman\w*\b', '', search_text, flags=re.IGNORECASE).strip()
+        elif "only man" in gender_query or "only men" in gender_query:
+            filtered = self._filter_by_gender(filtered, require_man=True, require_no_woman=True)
+            search_text = re.sub(r'\bonly\s+man\w*\b', '', search_text, flags=re.IGNORECASE).strip()
+        elif "only woman" in gender_query or "only women" in gender_query:
+            filtered = self._filter_by_gender(filtered, require_man=False, require_no_woman=False)
+            # Actually "only woman" means no man, and at least one woman – we can refine later if needed
+            search_text = re.sub(r'\bonly\s+woman\w*\b', '', search_text, flags=re.IGNORECASE).strip()
+
+        has_directory_filter = any(f.get("field") == "directory" for f in filters)
+        if has_directory_filter:
+            retrieval_top_k = min(2000, max(500, len(filtered) * 10))
+        else:
+            retrieval_top_k = top_k * 3
+
+        if search_text and filtered:
+            results_full, counts_full, scores_full = self.query(
+                search_text, top_k=retrieval_top_k, caption_weight=caption_weight
+            )
+            final_set = [vp for vp in results_full if vp in filtered]
+            if not final_set:
+                final_set = sorted(filtered, key=lambda vp: vp.lower())
+            scores = {vp: scores_full.get(vp, 0.0) for vp in final_set}
+            counts = {vp: counts_full.get(vp, 1) for vp in final_set}
+        else:
+            # metadata-only query: all scores = 1.0
+            final_set = sorted(filtered, key=lambda vp: vp.lower())
+            scores = {vp: 1.0 for vp in final_set}
+            counts = {vp: 1 for vp in final_set}
+
+        if sort_by != "none":
+            final_set = self._metadata_sort(final_set, sort_by, order)
+
+        # ---- FIX: conditional slicing ----
+        if search_text or raw_top_k < UNLIMITED_SENTINEL:
+            # Normal case: respect top_k (even the large safe bound for unlimited content queries)
+            final_set = final_set[:top_k]
+        # else: raw_top_k >= SENTINEL and no search_text → return everything (no slicing)
+
+        return final_set, counts, scores
 
 
 def select_video_directory():
-    """Manually select video directory using file dialog"""
     try:
         import tkinter as tk
         from tkinter import filedialog
         root = tk.Tk()
         root.withdraw()
         root.attributes('-topmost', True)
-
         print("Opening directory selection dialog...")
         directory = filedialog.askdirectory(
             title="Select Video Directory for Preprocessing",
             initialdir=os.path.expanduser("~")
         )
-
         root.destroy()
-
         if directory:
             print(f"Selected directory: {directory}")
             return directory
         else:
             print("No directory selected. Exiting...")
             return None
-
     except ImportError:
         print("tkinter not available. Please provide --videos_dir argument.")
         return None
@@ -1352,12 +2049,7 @@ def select_video_directory():
 
 
 def _run_preprocess_subprocess(payload: dict) -> None:
-    """
-    Spawn ``enhanced_model.py --mode preprocess ...`` as a child process,
-    capture its stdout into _preprocess_state['pending_lines'] for polling.
-    """
     global _preprocess_state, _preprocess_lock
-
     out_dir       = str(payload.get("out_dir", ""))
     videos_dir    = str(payload.get("videos_dir", ""))
     workers       = int(payload.get("workers", 3))
@@ -1418,7 +2110,7 @@ def _run_preprocess_subprocess(payload: dict) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="High-Accuracy Video Search with Resource Management")
+    parser = argparse.ArgumentParser(description="High-Accuracy Video Search with Resource Management + AI")
     parser.add_argument("--mode", choices=["preprocess", "search", "server"], required=True)
     parser.add_argument("--videos_dir", default=None, help="Video directory (will prompt if not provided)")
     parser.add_argument("--out_dir", default=str(__import__("pathlib").Path(__import__("os").environ.get("LOCALAPPDATA", __import__("pathlib").Path.home() / "AppData" / "Local")) / "Recursive Video Player" / "index_data"),
@@ -1516,6 +2208,12 @@ def main():
         indexer.build_comprehensive_text_index(str(out_dir / "tfidf_index.pkl"))
         indexer.save_metadata(str(out_dir / "metadata.pkl"))
 
+        # Save video-level metadata (NEW)
+        if indexer.video_metadata:
+            with open(out_dir / "video_meta.pkl", 'wb') as f:
+                pickle.dump(indexer.video_metadata, f, protocol=pickle.HIGHEST_PROTOCOL)
+            print(f"Video metadata saved: {len(indexer.video_metadata)} videos")
+
         print(f"Preprocessing complete! Total frames in index: {len(indexer.frame_metadata)}")
 
         final_mem = get_memory_info()
@@ -1523,8 +2221,6 @@ def main():
         print(f"Final memory: {final_mem['ram_used_gb']:.1f}GB RAM, {final_mem['gpu_used_gb']:.1f}GB GPU")
         print(f"Processed {len(indexer.frame_metadata)} frames from {dir_stats['total_videos']} videos")
         print(f"Index files saved to: {out_dir}")
-
-
 
     elif args.mode == "search":
         if not args.query and not args.keep_alive:
@@ -1655,7 +2351,6 @@ def main():
                                        metadata_path, tfidf_path]
                            if not os.path.exists(f)]
         if missing_files:
-            # Start server without search capability — index can be built via /index/start
             print(f"No index found in {out_dir_to_use} — server starting without search.")
             print("Use POST /index/start to build an index, then POST /index/reload.")
             _api_searcher = None
