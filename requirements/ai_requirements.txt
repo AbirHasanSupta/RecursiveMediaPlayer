@@ -12,3 +12,11 @@ accelerate>=0.20.0
 colorama>=0.4.6
 deepface
 nltk
+torch
+numpy
+sentence-transformers
+rank-bm25
+ImageHash
+fastapi
+uvicorn[standard]
+psutil
