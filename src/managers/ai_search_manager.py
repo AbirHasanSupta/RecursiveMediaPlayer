@@ -287,6 +287,7 @@ class AISearchUI:
         self._photo_cache: dict = {}
         self._sel_count_lbl: Optional[tk.Label] = None
         self._search_mode = "ai"
+        self._thumb_semaphore = threading.Semaphore(4)
 
         self._pull_theme()
         self._build()
@@ -1156,58 +1157,59 @@ class AISearchUI:
             self._manager._log(f"Open in gallery error: {e}")
 
     def _fetch_thumbnail_bg(self, vp: str, vp_norm: str, label: tk.Label):
-        try:
-            cached = self._photo_cache.get(vp_norm)
-            if cached:
-                self._root.after(0, lambda lbl=label, p=cached: self._set_thumb_label(lbl, p))
-                return
-
-            vpm = getattr(self._app, 'video_preview_manager', None)
-
-            if vpm and hasattr(vpm, 'lru_cache'):
-                photo = vpm.lru_cache.get(vp_norm)
-                if photo:
-                    self._photo_cache[vp_norm] = photo
-                    self._root.after(0, lambda lbl=label, p=photo: self._set_thumb_label(lbl, p))
+        with self._thumb_semaphore:
+            try:
+                cached = self._photo_cache.get(vp_norm)
+                if cached:
+                    self._root.after(0, lambda lbl=label, p=cached: self._set_thumb_label(lbl, p))
                     return
 
-            pil_img = None
+                vpm = getattr(self._app, 'video_preview_manager', None)
 
-            if vpm and hasattr(vpm, '_thumbnails') and _PIL_OK:
-                th = vpm._thumbnails.get(vp_norm)
-                if th and hasattr(th, 'blob_path') and th.blob_path:
+                if vpm and hasattr(vpm, 'lru_cache'):
+                    photo = vpm.lru_cache.get(vp_norm)
+                    if photo:
+                        self._photo_cache[vp_norm] = photo
+                        self._root.after(0, lambda lbl=label, p=photo: self._set_thumb_label(lbl, p))
+                        return
+
+                pil_img = None
+
+                if vpm and hasattr(vpm, '_thumbnails') and _PIL_OK:
+                    th = vpm._thumbnails.get(vp_norm)
+                    if th and hasattr(th, 'blob_path') and th.blob_path:
+                        try:
+                            if th.blob_path.exists():
+                                pil_img = Image.open(str(th.blob_path)).convert("RGB")
+                        except Exception:
+                            pass
+
+                if pil_img is None and _PIL_OK:
                     try:
-                        if th.blob_path.exists():
-                            pil_img = Image.open(str(th.blob_path)).convert("RGB")
+                        import cv2
+                        cap = cv2.VideoCapture(vp)
+                        ret, frame = cap.read()
+                        cap.release()
+                        if ret and frame is not None:
+                            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                            pil_img = Image.fromarray(frame_rgb)
                     except Exception:
                         pass
 
-            if pil_img is None and _PIL_OK:
-                try:
-                    import cv2
-                    cap = cv2.VideoCapture(vp)
-                    ret, frame = cap.read()
-                    cap.release()
-                    if ret and frame is not None:
-                        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                        pil_img = Image.fromarray(frame_rgb)
-                except Exception:
-                    pass
+                if pil_img is None:
+                    return
 
-            if pil_img is None:
-                return
+                sw, sh = pil_img.size
+                scale = min(_THUMB_W / sw, _THUMB_H / sh)
+                nw, nh = int(sw * scale), int(sh * scale)
+                pil_img = pil_img.resize((nw, nh), Image.Resampling.LANCZOS)
+                canvas = Image.new("RGB", (_THUMB_W, _THUMB_H), (11, 12, 17))
+                canvas.paste(pil_img, ((_THUMB_W - nw) // 2, (_THUMB_H - nh) // 2))
 
-            sw, sh = pil_img.size
-            scale = min(_THUMB_W / sw, _THUMB_H / sh)
-            nw, nh = int(sw * scale), int(sh * scale)
-            pil_img = pil_img.resize((nw, nh), Image.Resampling.LANCZOS)
-            canvas = Image.new("RGB", (_THUMB_W, _THUMB_H), (11, 12, 17))
-            canvas.paste(pil_img, ((_THUMB_W - nw) // 2, (_THUMB_H - nh) // 2))
-
-            self._root.after(0, lambda img=canvas, lbl=label, p=vp_norm:
-                             self._apply_thumbnail(img, lbl, p))
-        except Exception:
-            pass
+                self._root.after(0, lambda img=canvas, lbl=label, p=vp_norm:
+                self._apply_thumbnail(img, lbl, p))
+            except Exception:
+                pass
 
     def _apply_thumbnail(self, pil_img, label: tk.Label, vp_norm: str):
         if not _PIL_OK:
