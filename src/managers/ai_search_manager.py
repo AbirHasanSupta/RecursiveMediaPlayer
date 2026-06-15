@@ -224,7 +224,7 @@ class AISearchManager:
 
     def apply_search(self, query: str):
         if self._active_ui:
-            self._active_ui.run_search(query)
+            self._active_ui.apply_local_filter(query)
 
     def set_directory_filter(self, dirs: list):
         self._directory_filter = list(dirs) if dirs else []
@@ -286,6 +286,7 @@ class AISearchUI:
         self._card_frames: dict = {}
         self._photo_cache: dict = {}
         self._sel_count_lbl: Optional[tk.Label] = None
+        self._result_count_lbl: Optional[tk.Label] = None
         self._search_mode = "ai"
         self._thumb_semaphore = threading.Semaphore(4)
 
@@ -609,8 +610,47 @@ class AISearchUI:
         self._search_var.set(query)
         self._on_search_click()
 
+    def apply_local_filter(self, query: str):
+        """Filter the currently displayed AI result cards locally by filename.
+        This does NOT modify the AI search bar or re-run the AI query."""
+        q = query.strip().lower()
+        if not self._all_results or not self._card_frames:
+            return
+        visible_count = 0
+        for video_path, card in list(self._card_frames.items()):
+            try:
+                if not card.winfo_exists():
+                    continue
+                name = os.path.splitext(os.path.basename(video_path))[0].lower()
+                dir_path = os.path.dirname(video_path).lower()
+                matches = not q or q in name or q in dir_path
+                if matches:
+                    card.pack(fill=tk.X, padx=16, pady=3)
+                    visible_count += 1
+                else:
+                    card.pack_forget()
+            except Exception:
+                pass
+        # Update the header count label to reflect visible results
+        try:
+            if hasattr(self, '_result_count_lbl') and self._result_count_lbl and \
+                    self._result_count_lbl.winfo_exists():
+                if q:
+                    total = len(self._all_results)
+                    self._result_count_lbl.config(
+                        text=f"{visible_count} of {total} result{'s' if total != 1 else ''}"
+                             f" for  \"{self._last_query}\"  ·  filtered by \"{query.strip()}\""
+                    )
+                else:
+                    total = len(self._all_results)
+                    self._result_count_lbl.config(
+                        text=f"{total} result{'s' if total != 1 else ''} for  \"{self._last_query}\""
+                    )
+        except Exception:
+            pass
+
     def apply_search(self, query: str):
-        self.run_search(query)
+        self.apply_local_filter(query)
 
     def restore_state(self, state: dict):
         self._search_var.set(state["query"])
@@ -700,6 +740,7 @@ class AISearchUI:
         self._all_results.clear()
         self._card_frames.clear()
         self._sel_count_lbl = None
+        self._result_count_lbl = None
         for w in self._result_widgets:
             try:
                 w.destroy()
@@ -725,9 +766,11 @@ class AISearchUI:
         header.pack(fill=tk.X, padx=16, pady=(12, 6))
         self._result_widgets.append(header)
 
-        tk.Label(header,
-                 text=f"{len(results)} result{'s' if len(results) != 1 else ''} for  \"{self._last_query}\"",
-                 font=("Segoe UI", 10, "bold"), bg=self.bg, fg=self.text).pack(side=tk.LEFT)
+        self._result_count_lbl = tk.Label(
+            header,
+            text=f"{len(results)} result{'s' if len(results) != 1 else ''} for  \"{self._last_query}\"",
+            font=("Segoe UI", 10, "bold"), bg=self.bg, fg=self.text)
+        self._result_count_lbl.pack(side=tk.LEFT)
         if self._directory_filter:
             dir_lbl = os.path.basename(self._directory_filter) or self._directory_filter
             tk.Label(header, text=f"in {dir_lbl}",
@@ -738,10 +781,14 @@ class AISearchUI:
         )
         self._sel_count_lbl.pack(side=tk.RIGHT, padx=(0, 8))
 
+        self._scores = dict(scores)
+        self._counts = dict(counts)
+        self._max_score = max_score
         for i, video_path in enumerate(results):
             row_bg = self.surface if i % 2 == 0 else self.alt_row
             card = self._make_result_card(video_path, counts, scores, row_bg, max_score)
             card.pack(fill=tk.X, padx=16, pady=3)
+            card._video_path = video_path
             self._result_widgets.append(card)
 
         self._canvas.yview_moveto(0)
