@@ -113,7 +113,8 @@ class FilterSortUI:
         outer = tk.Frame(parent, bg=tp.bg_color)
 
         canvas = tk.Canvas(outer, bg=tp.bg_color, highlightthickness=0)
-        vsb = ttk.Scrollbar(outer, orient=tk.VERTICAL, command=canvas.yview)
+        vsb = ttk.Scrollbar(outer, orient=tk.VERTICAL, command=canvas.yview,
+                            style="ExclusionTree.Vertical.TScrollbar")
         canvas.configure(yscrollcommand=vsb.set)
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -406,7 +407,8 @@ class FilterSortUI:
             padx=16, pady=14,
             state=tk.DISABLED,
         )
-        stats_vsb = ttk.Scrollbar(text_border, orient=tk.VERTICAL, command=self.stats_text.yview)
+        stats_vsb = ttk.Scrollbar(text_border, orient=tk.VERTICAL, command=self.stats_text.yview,
+                                  style="ExclusionTree.Vertical.TScrollbar")
         self.stats_text.configure(yscrollcommand=stats_vsb.set)
         stats_vsb.pack(side=tk.RIGHT, fill=tk.Y)
         self.stats_text.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)

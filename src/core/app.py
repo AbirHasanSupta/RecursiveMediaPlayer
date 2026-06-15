@@ -1592,7 +1592,7 @@ def select_multiple_folders_and_play():
             self.console_frame.pack(fill=tk.BOTH, expand=True)
             console_frame = self.console_frame
 
-            self.console_scrollbar = tk.Scrollbar(console_frame)
+            self.console_scrollbar = ttk.Scrollbar(console_frame, style="ExclusionTree.Vertical.TScrollbar")
             self.console_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
             self.console_text = tk.Text(
@@ -1682,6 +1682,9 @@ def select_multiple_folders_and_play():
             dir_w = self.dir_section.winfo_width() if hasattr(self, 'dir_section') else 0
 
             super().apply_theme()
+
+            if hasattr(self, '_dir_resizer'):
+                self._dir_resizer.config(bg=self.border_color)
 
             self._reapply_tree_columns()
 
