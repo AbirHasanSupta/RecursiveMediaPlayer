@@ -134,55 +134,63 @@ class ThemeSelector:
         self.toast = None
         self._save_timer = None
 
+    def _get_ctypes_dwm(self):
+        """Cache ctypes DWM/user32 references to avoid repeated attribute lookups."""
+        if not hasattr(self, '_ctypes_cache'):
+            import ctypes
+            self._ctypes_cache = (
+                ctypes.c_int,
+                ctypes.byref,
+                ctypes.sizeof,
+                ctypes.windll.dwmapi.DwmSetWindowAttribute,
+                ctypes.windll.user32.GetAncestor,
+            )
+        return self._ctypes_cache
+
     def apply_title_bar_theme(self, window):
+        """Apply DWMWA_USE_IMMERSIVE_DARK_MODE to the given window's HWND.
+
+        Notes
+        -----
+        * Do NOT call window.update_idletasks() here - that flushes a paint
+          cycle which makes the window briefly appear with its default white
+          title bar before the DWM attribute takes effect (the white flash).
+        * Do NOT call SetWindowPos/SWP_FRAMECHANGED here - it triggers a
+          synchronous, blocking frame redraw that visibly staggers the theme
+          switch.  DWM repaints the non-client area on its own schedule
+          without the forced hint.
+        """
         if os.name != 'nt':
             return
         try:
-            window.update_idletasks()
             hwnd_raw = window.winfo_id()
             if not hwnd_raw:
                 return
-            import ctypes
-            hwnd = ctypes.windll.user32.GetAncestor(hwnd_raw, 2)
-            if not hwnd:
-                hwnd = hwnd_raw
-            value = ctypes.c_int(1 if self.dark_mode else 0)
+            c_int, byref, sizeof, DwmSetAttr, GetAncestor = self._get_ctypes_dwm()
+            hwnd = GetAncestor(hwnd_raw, 2) or hwnd_raw
+            value = c_int(1 if self.dark_mode else 0)
             # DWMWA_USE_IMMERSIVE_DARK_MODE = 20 (Windows 11)
-            res = ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd,
-                20,
-                ctypes.byref(value),
-                ctypes.sizeof(value)
-            )
+            res = DwmSetAttr(hwnd, 20, byref(value), sizeof(value))
             if res != 0:
                 # DWMWA_USE_IMMERSIVE_DARK_MODE = 19 (Windows 10)
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                    hwnd,
-                    19,
-                    ctypes.byref(value),
-                    ctypes.sizeof(value)
-                )
-            
-            # Force redraw of the window frame to apply changes immediately
-            # SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED
-            ctypes.windll.user32.SetWindowPos(
-                hwnd,
-                None,
-                0, 0, 0, 0,
-                0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020
-            )
+                DwmSetAttr(hwnd, 19, byref(value), sizeof(value))
         except Exception:
             pass
 
     def setup_title_bar_handling(self):
         if os.name != 'nt':
             return
-        
+
         def on_map(event):
             widget = event.widget
             if isinstance(widget, (tk.Tk, tk.Toplevel)):
-                self.apply_title_bar_theme(widget)
-                
+                # Defer by one event-loop tick so that Tk has already applied
+                # the window's background colour before we push the DWM
+                # attribute.  Without this deferral the window paints once
+                # with the system-default (white) title bar, then again after
+                # our DWM call - producing a visible white flash on popup open.
+                widget.after(0, lambda w=widget: self.apply_title_bar_theme(w))
+
         self.root.bind_class("Tk", "<Map>", on_map, add="+")
         self.root.bind_class("Toplevel", "<Map>", on_map, add="+")
 
@@ -281,6 +289,20 @@ class ThemeSelector:
         if not getattr(self, '_title_bar_handled', False):
             self.setup_title_bar_handling()
             self._title_bar_handled = True
+
+        # ── Apply title bar theme FIRST ──────────────────────────────────────
+        # Pushing the DWM attribute before any widget colour changes means the
+        # title bar flips atomically with the rest of the UI.  If done at the
+        # end, widgets are already half-repainted in the new theme while the
+        # title bar is still the old one, creating a visible per-component
+        # stutter frame.
+        self.apply_title_bar_theme(self.root)
+        try:
+            for child in self.root.winfo_children():
+                if isinstance(child, tk.Toplevel) and child.winfo_exists():
+                    self.apply_title_bar_theme(child)
+        except Exception:
+            pass
 
         if self.dark_mode:
             self.bg_color = "#0F1217"
@@ -403,23 +425,6 @@ class ThemeSelector:
 
         self._apply_menubar_colors()
         self._apply_theme_to_toplevels()
-
-        # Apply immersive dark/light title bar style on Windows
-        self.apply_title_bar_theme(self.root)
-        def get_all_toplevels(parent):
-            toplevels = []
-            try:
-                for child in parent.winfo_children():
-                    if isinstance(child, tk.Toplevel):
-                        toplevels.append(child)
-                    toplevels.extend(get_all_toplevels(child))
-            except Exception:
-                pass
-            return toplevels
-
-        for tl in get_all_toplevels(self.root):
-            if tl.winfo_exists():
-                self.apply_title_bar_theme(tl)
 
         if hasattr(self, '_reload_current_view'):
             self.root.after(0, self._reload_current_view)
