@@ -364,7 +364,7 @@ class SettingsUI:
         self.settings_window = tk.Toplevel(self.parent)
         self.settings_window.withdraw()
         self.settings_window.title("Application Settings")
-        self.settings_window.geometry(_responsive_geometry(self.parent, 700, 880))
+        self.settings_window.geometry(_responsive_geometry(self.parent, 700, 820))
         self.settings_window.configure(bg=self.theme_provider.bg_color)
         self.settings_window.resizable(True, True)
 
@@ -415,7 +415,7 @@ class SettingsUI:
         self._section_parts = []
 
         notebook = ttk.Notebook(self.settings_window)
-        notebook.pack(fill=tk.BOTH, expand=True, padx=20, pady=(20, 0))
+        notebook.pack(fill=tk.BOTH, expand=True, padx=20, pady=(12, 0))
         self._notebook = notebook
         self._style_notebook(notebook)
 
@@ -599,36 +599,57 @@ class SettingsUI:
         tp = self.theme_provider
         frame = ttk.Frame(parent)
 
-        main_container = tk.Frame(frame, bg=tp.bg_color)
-        main_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        # ── Scrollable canvas so all sections fit without cutting off Save button ──
+        canvas_frame = tk.Frame(frame, bg=tp.bg_color)
+        canvas_frame.pack(fill=tk.BOTH, expand=True)
 
-        preview_body = self._make_section(main_container, "Video Preview Settings", pady=(0, 8))
+        canvas = tk.Canvas(canvas_frame, bg=tp.bg_color, highlightthickness=0, bd=0)
+        scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview,
+                                  style="ExclusionTree.Vertical.TScrollbar")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self.enable_watch_history_var = tk.BooleanVar(value=self.settings.enable_watch_history)
-        ttk.Checkbutton(preview_body, text="Enable Watch History tracking",
-                        variable=self.enable_watch_history_var,
-                        style="Modern.TCheckbutton").pack(anchor='w', pady=1)
+        main_container = tk.Frame(canvas, bg=tp.bg_color)
+        canvas_window = canvas.create_window((20, 12), window=main_container, anchor='nw', tags='inner')
 
-        self.show_console_var = tk.BooleanVar(value=getattr(tp, 'show_console', True))
-        ttk.Checkbutton(preview_body, text="Show Player Console panel",
-                        variable=self.show_console_var,
-                        style="Modern.TCheckbutton").pack(anchor='w', pady=(0, 1))
+        def _on_inner_configure(e):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_canvas_configure(e):
+            canvas.itemconfig('inner', width=max(1, e.width - 40))
+
+        main_container.bind("<Configure>", _on_inner_configure)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        def _on_mousewheel(event):
+            try:
+                if canvas.winfo_exists():
+                    canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            except Exception:
+                pass
+
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+
+        # ── 1. Video Preview ──────────────────────────────────────────────────────
+        preview_body = self._make_section(main_container, "Video Preview", pady=(0, 8))
 
         duration_frame = tk.Frame(preview_body, bg=tp.bg_color)
-        duration_frame.pack(fill=tk.X, pady=5)
+        duration_frame.pack(fill=tk.X, pady=(0, 4))
         tk.Label(duration_frame, text="Preview Duration (sec):", font=tp.normal_font,
-                 bg=tp.bg_color, fg=tp.text_color, width=20, anchor='w').pack(side=tk.LEFT)
+                 bg=tp.bg_color, fg=tp.text_color, width=22, anchor='w').pack(side=tk.LEFT)
         self.preview_duration_var = tk.IntVar(value=self.settings.preview_duration)
         duration_spin = tk.Spinbox(
             duration_frame, from_=1, to=10, textvariable=self.preview_duration_var,
-            font=tp.normal_font, width=10,
+            font=tp.normal_font, width=8,
             bg=getattr(tp, 'entry_bg', tp.surface_color),
             fg=getattr(tp, 'entry_fg', tp.text_color),
             buttonbackground=tp.bg_color,
             relief=tk.FLAT, bd=1,
         )
         duration_spin.pack(side=tk.LEFT, padx=(0, 2))
-        tk.Label(duration_frame, text="(1-10 seconds)", font=tp.small_font,
+        tk.Label(duration_frame, text="(1–10 seconds)", font=tp.small_font,
                  bg=tp.bg_color, fg=tp.text_muted).pack(side=tk.LEFT)
 
         self.use_video_preview_var = tk.BooleanVar(value=self.settings.use_video_preview)
@@ -637,7 +658,7 @@ class SettingsUI:
                         style="Modern.TCheckbutton").pack(anchor='w', pady=2)
 
         thumbnail_btn_frame = tk.Frame(preview_body, bg=tp.bg_color)
-        thumbnail_btn_frame.pack(fill=tk.X, pady=(8, 0))
+        thumbnail_btn_frame.pack(fill=tk.X, pady=(6, 0))
         self.clear_thumbnails_btn = tp.create_modern_button(
             thumbnail_btn_frame, "Clear Preview Cache",
             self._clear_thumbnail_cache, "warning", "sm"
@@ -650,6 +671,7 @@ class SettingsUI:
         )
         self.thumbnail_info_label.pack(anchor='w', pady=(4, 0))
 
+        # ── 2. Player Windows ─────────────────────────────────────────────────────
         player_body = self._make_section(main_container, "Player Windows", pady=(0, 8))
 
         self.dual_window_enabled_var = tk.BooleanVar(value=self.settings.dual_window_enabled)
@@ -665,14 +687,45 @@ class SettingsUI:
             style="Modern.TCheckbutton"
         ).pack(anchor='w', pady=2)
 
-        cache_body = self._make_section(main_container, "Metadata Cache Settings", pady=(0, 8))
+        self.show_console_var = tk.BooleanVar(value=getattr(tp, 'show_console', True))
+        ttk.Checkbutton(player_body, text="Show Player Console panel",
+                        variable=self.show_console_var,
+                        style="Modern.TCheckbutton").pack(anchor='w', pady=2)
+
+        # ── 3. Watch History ──────────────────────────────────────────────────────
+        history_body = self._make_section(main_container, "Watch History", pady=(0, 8))
+
+        self.enable_watch_history_var = tk.BooleanVar(value=self.settings.enable_watch_history)
+        ttk.Checkbutton(history_body, text="Enable Watch History tracking",
+                        variable=self.enable_watch_history_var,
+                        style="Modern.TCheckbutton").pack(anchor='w', pady=2)
+
+        cleanup_row = tk.Frame(history_body, bg=tp.bg_color)
+        cleanup_row.pack(fill=tk.X, pady=(6, 0))
+        tk.Label(cleanup_row, text="Auto-cleanup after (days):", font=tp.normal_font,
+                 bg=tp.bg_color, fg=tp.text_color, width=22, anchor='w').pack(side=tk.LEFT)
+        self.cleanup_days_var = tk.IntVar(value=self.settings.auto_cleanup_days)
+        cleanup_spin = tk.Spinbox(
+            cleanup_row, from_=0, to=365, textvariable=self.cleanup_days_var,
+            font=tp.normal_font, width=8,
+            bg=getattr(tp, 'entry_bg', tp.surface_color),
+            fg=getattr(tp, 'entry_fg', tp.text_color),
+            buttonbackground=tp.bg_color,
+            relief=tk.FLAT, bd=1,
+        )
+        cleanup_spin.pack(side=tk.LEFT, padx=(0, 5))
+        tk.Label(cleanup_row, text="(watch history & resume data)", font=tp.small_font,
+                 bg=tp.bg_color, fg=tp.text_muted).pack(side=tk.LEFT)
+
+        # ── 4. Metadata Cache ─────────────────────────────────────────────────────
+        cache_body = self._make_section(main_container, "Metadata Cache", pady=(0, 8))
 
         tk.Label(
             cache_body,
-            text="Video metadata cache stores information like resolution, duration, and play statistics.",
+            text="Stores video info like resolution, duration, and play statistics.",
             font=tp.small_font, bg=tp.bg_color, fg=tp.text_muted,
-            wraplength=600, justify=tk.LEFT
-        ).pack(anchor='w', pady=(0, 8))
+            wraplength=560, justify=tk.LEFT
+        ).pack(anchor='w', pady=(0, 6))
 
         cache_btn_frame = tk.Frame(cache_body, bg=tp.bg_color)
         cache_btn_frame.pack(fill=tk.X)
@@ -686,30 +739,12 @@ class SettingsUI:
             cache_body, text="",
             font=tp.small_font, bg=tp.bg_color, fg=tp.text_muted
         )
-        self.metadata_info_label.pack(anchor='w', pady=(5, 0))
+        self.metadata_info_label.pack(anchor='w', pady=(4, 0))
 
         self._update_metadata_info()
 
-        cleanup_body = self._make_section(main_container, "Data Cleanup Settings", pady=(0, 8))
-
-        cleanup_frame = tk.Frame(cleanup_body, bg=tp.bg_color)
-        cleanup_frame.pack(fill=tk.X, pady=5)
-        tk.Label(cleanup_frame, text="Auto-cleanup after (days):", font=tp.normal_font,
-                 bg=tp.bg_color, fg=tp.text_color, width=25, anchor='w').pack(side=tk.LEFT)
-        self.cleanup_days_var = tk.IntVar(value=self.settings.auto_cleanup_days)
-        cleanup_spin = tk.Spinbox(
-            cleanup_frame, from_=0, to=365, textvariable=self.cleanup_days_var,
-            font=tp.normal_font, width=10,
-            bg=getattr(tp, 'entry_bg', tp.surface_color),
-            fg=getattr(tp, 'entry_fg', tp.text_color),
-            buttonbackground=tp.bg_color,
-            relief=tk.FLAT, bd=1,
-        )
-        cleanup_spin.pack(side=tk.LEFT, padx=(0, 5))
-        tk.Label(cleanup_frame, text="(applies to watch history & resume data)", font=tp.small_font,
-                 bg=tp.bg_color, fg=tp.text_muted).pack(side=tk.LEFT)
-
-        manual_body = self._make_section(main_container, "Manual Data Management", pady=(0, 0))
+        # ── 5. Manual Data Management ─────────────────────────────────────────────
+        manual_body = self._make_section(main_container, "Manual Data Management", pady=(0, 8))
 
         cleanup_btn_frame = tk.Frame(manual_body, bg=tp.bg_color)
         cleanup_btn_frame.pack(fill=tk.X)
@@ -1008,7 +1043,7 @@ class SettingsUI:
         tk.Frame(self.settings_window, bg=tp.border_color, height=1).pack(fill=tk.X, side=tk.BOTTOM)
 
         bar = tk.Frame(self.settings_window, bg=tp.bg_color)
-        bar.pack(fill=tk.X, side=tk.BOTTOM, padx=20, pady=14)
+        bar.pack(fill=tk.X, side=tk.BOTTOM, padx=20, pady=10)
 
         tp.create_modern_button(bar, "↺  Reset to Defaults", self._reset_to_defaults, "warning", "md").pack(
             side=tk.LEFT)
