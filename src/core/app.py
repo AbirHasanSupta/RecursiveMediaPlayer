@@ -245,6 +245,12 @@ def select_multiple_folders_and_play():
             )
             self.root.bind("<Button-1>", self._handle_global_click)
             app_settings = self.settings_manager.get_settings()
+            if hasattr(app_settings, 'dir_panel_width'):
+                self._dir_panel_width = app_settings.dir_panel_width
+            if hasattr(app_settings, 'dir_panel_mode'):
+                self._set_directory_panel_mode(app_settings.dir_panel_mode)
+            else:
+                self._set_directory_panel_mode(self._directory_panel_mode)
 
             self.video_preview_manager = VideoPreviewManager(self.root, self.update_console)
             _orig_attach = self.video_preview_manager.attach_to_listbox
@@ -1726,6 +1732,11 @@ def select_multiple_folders_and_play():
             def _on_resizer_release(e):
                 self._dir_resizer_dragging = False
                 self._dir_resizer.config(bg=self.border_color)
+                if hasattr(self, 'settings_manager'):
+                    settings = self.settings_manager.get_settings()
+                    if getattr(settings, 'dir_panel_width', None) != self._dir_panel_width:
+                        settings.dir_panel_width = self._dir_panel_width
+                        self.settings_manager.storage.save_settings(settings)
 
             self._dir_resizer.bind("<Enter>", _on_resizer_enter)
             self._dir_resizer.bind("<Leave>", _on_resizer_leave)
@@ -2334,6 +2345,11 @@ def select_multiple_folders_and_play():
 
         def _set_directory_panel_mode(self, mode):
             self._directory_panel_mode = mode
+            if hasattr(self, 'settings_manager'):
+                settings = self.settings_manager.get_settings()
+                if getattr(settings, 'dir_panel_mode', None) != mode:
+                    settings.dir_panel_mode = mode
+                    self.settings_manager.storage.save_settings(settings)
             if not hasattr(self, "dir_section"):
                 return
 

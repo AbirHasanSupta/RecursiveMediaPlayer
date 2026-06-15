@@ -129,6 +129,8 @@ class SettingsData:
         self.show_video_annotations_in_tree = True
         self.hotkeys: Dict[str, str] = dict(DEFAULT_HOTKEYS)
         self.ai_server_url: str = ""
+        self.dir_panel_width = 380
+        self.dir_panel_mode = "expanded"
 
     def to_dict(self) -> dict:
         return {
@@ -149,6 +151,8 @@ class SettingsData:
             'show_video_annotations_in_tree': self.show_video_annotations_in_tree,
             'ai_server_url': self.ai_server_url,
             'ai_search_enabled': self.ai_search_enabled,
+            'dir_panel_width': self.dir_panel_width,
+            'dir_panel_mode': self.dir_panel_mode,
         }
 
     @classmethod
@@ -170,6 +174,8 @@ class SettingsData:
         settings.show_video_annotations_in_tree = data.get('show_video_annotations_in_tree', True)
         settings.ai_server_url = data.get('ai_server_url', '')
         settings.ai_search_enabled = data.get('ai_search_enabled', False)
+        settings.dir_panel_width = data.get('dir_panel_width', settings.dir_panel_width)
+        settings.dir_panel_mode = data.get('dir_panel_mode', settings.dir_panel_mode)
         saved_hotkeys = data.get('hotkeys', {})
         if isinstance(saved_hotkeys, dict):
             settings.hotkeys.update(saved_hotkeys)
