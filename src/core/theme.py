@@ -821,15 +821,15 @@ class ThemeSelector:
 
     def _play_toolbar_font_idle(self):
         from tkinter.font import Font
-        return Font(family="Segoe UI", size=20, weight="bold", underline=False)
+        return Font(family="Segoe UI", size=16, weight="bold", underline=False)
 
     def _play_toolbar_font_hover(self):
         from tkinter.font import Font
-        return Font(family="Segoe UI", size=20, weight="bold", underline=False)
+        return Font(family="Segoe UI", size=16, weight="bold", underline=False)
 
     def _play_toolbar_font_active(self):
         from tkinter.font import Font
-        return Font(family="Segoe UI", size=20, weight="bold", underline=False)
+        return Font(family="Segoe UI", size=16, weight="bold", underline=False)
 
     def _ensure_play_toolbar_fonts(self):
         """Legacy helper for initial widget creation in build_app."""
@@ -1587,6 +1587,10 @@ class ThemeSelector:
             _hide_tip()
             self._toggle_theme_menu()
 
+        btn.unbind("<Enter>")
+        btn.unbind("<Leave>")
+        btn.unbind("<ButtonPress-1>")
+        btn.unbind("<ButtonRelease-1>")
         btn.bind("<Enter>", on_enter)
         btn.bind("<Leave>", on_leave)
         btn.bind("<ButtonPress-1>", on_press)
@@ -1647,13 +1651,18 @@ class ThemeSelector:
         self._apply_play_toolbar_idle()
 
     def _bind_media_pill_hover(self, btn, label):
+        container = getattr(btn, '_pill_container', btn.master)
         def on_enter(_e):
             if label != self._active_tab_label():
                 btn.config(bg=self.hover_color, fg=self.accent_color)
+                try: container.configure(bg=self.hover_color)
+                except: pass
 
         def on_leave(_e):
             if label != self._active_tab_label():
                 btn.config(bg=self.bg_color, fg=self.text_muted)
+                try: container.configure(bg=self.bg_color)
+                except: pass
 
         btn.bind("<Enter>", on_enter)
         btn.bind("<Leave>", on_leave)

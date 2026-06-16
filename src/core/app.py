@@ -244,6 +244,16 @@ def select_multiple_folders_and_play():
                 lambda hk: reload_hotkeys(self.controller, hk)
             )
             self.root.bind("<Button-1>", self._handle_global_click)
+            self.root.bind("<Control-f>", lambda e: self._show_filter_dialog_shortcut())
+            self.root.bind("<Control-F>", lambda e: self._show_filter_dialog_shortcut())
+            self.root.bind("<Control-comma>", lambda e: self._show_settings_shortcut())
+            self.root.bind("<Control-t>", lambda e: self._toggle_theme_shortcut())
+            self.root.bind("<Control-T>", lambda e: self._toggle_theme_shortcut())
+            self.root.bind("<Tab>", lambda e: self._cycle_tabs(1))
+            self.root.bind("<Shift-Tab>", lambda e: self._cycle_tabs(-1))
+            for i in range(1, 9):
+                self.root.bind(f"<Control-Key-{i}>", lambda e, idx=i-1: self._switch_to_tab_by_index(idx))
+                self.root.bind(f"<Control-KP_{i}>", lambda e, idx=i-1: self._switch_to_tab_by_index(idx))
             app_settings = self.settings_manager.get_settings()
             if hasattr(app_settings, 'dir_panel_width'):
                 self._dir_panel_width = app_settings.dir_panel_width
@@ -1539,6 +1549,20 @@ def select_multiple_folders_and_play():
                     underline = tk.Frame(container, bg=self.accent_color, height=2)
                     underline._underline = True
                     underline.pack(fill=tk.X)
+                    
+                    # 100ms background pulse feedback
+                    try:
+                        btn.config(bg=self.hover_color)
+                        container.configure(bg=self.hover_color)
+                        def _restore_pulse(b=btn, c=container, obg=self.bg_color):
+                            try:
+                                b.config(bg=obg)
+                                c.configure(bg=obg)
+                            except:
+                                pass
+                        self.root.after(100, _restore_pulse)
+                    except:
+                        pass
                 else:
                     btn.config(
                         bg=self.bg_color, fg=self.text_muted,
@@ -5704,6 +5728,73 @@ def select_multiple_folders_and_play():
 
         def _show_settings(self):
             self.settings_manager.show_settings()
+
+        def _switch_to_tab_by_index(self, index):
+            tab_keys = ["home", "gallery", "playlist", "favourites", "queue", "tags", "history", "ai_search"]
+            if 0 <= index < len(tab_keys):
+                view_name = tab_keys[index]
+                if view_name == "ai_search" and not getattr(self.settings_manager.get_settings(), 'ai_search_enabled', True):
+                    return "break"
+                cmd = {
+                    "home": self._show_home_view,
+                    "gallery": self._show_grid_view,
+                    "playlist": self._manage_playlists,
+                    "queue": self._show_queue_manager,
+                    "favourites": self._show_favorites_manager,
+                    "tags": self._show_annotation_browser,
+                    "history": self._show_watch_history,
+                    "ai_search": self._show_ai_search,
+                }[view_name]
+                cmd()
+            return "break"
+
+        def _cycle_tabs(self, direction=1):
+            tab_keys = ["home", "gallery", "playlist", "favourites", "queue", "tags", "history", "ai_search"]
+            enabled_keys = []
+            for k in tab_keys:
+                if k == "ai_search" and not getattr(self.settings_manager.get_settings(), 'ai_search_enabled', True):
+                    continue
+                enabled_keys.append(k)
+            
+            if not enabled_keys:
+                return "break"
+                
+            current_view = getattr(self, '_active_app_view', 'home')
+            if current_view not in enabled_keys:
+                current_view = 'home'
+            
+            try:
+                curr_idx = enabled_keys.index(current_view)
+            except ValueError:
+                curr_idx = 0
+            
+            next_idx = (curr_idx + direction) % len(enabled_keys)
+            view_name = enabled_keys[next_idx]
+            
+            cmd = {
+                "home": self._show_home_view,
+                "gallery": self._show_grid_view,
+                "playlist": self._manage_playlists,
+                "queue": self._show_queue_manager,
+                "favourites": self._show_favorites_manager,
+                "tags": self._show_annotation_browser,
+                "history": self._show_watch_history,
+                "ai_search": self._show_ai_search,
+            }[view_name]
+            cmd()
+            return "break"
+
+        def _toggle_theme_shortcut(self):
+            self.toggle_theme()
+            return "break"
+
+        def _show_settings_shortcut(self):
+            self._show_settings()
+            return "break"
+
+        def _show_filter_dialog_shortcut(self):
+            self._show_filter_dialog()
+            return "break"
 
         def _open_dual_player(self, win_id=1):
             selected_dir = self.get_current_selected_directory()

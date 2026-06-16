@@ -370,7 +370,7 @@ class SettingsUI:
         self.settings_window = tk.Toplevel(self.parent)
         self.settings_window.withdraw()
         self.settings_window.title("Application Settings")
-        self.settings_window.geometry(_responsive_geometry(self.parent, 700, 820))
+        self.settings_window.geometry(_responsive_geometry(self.parent, 700, 840))
         self.settings_window.configure(bg=self.theme_provider.bg_color)
         self.settings_window.resizable(True, True)
 
@@ -552,6 +552,7 @@ class SettingsUI:
 
         for label, var_attr, setting_attr, from_, to_, hint in [
             ("Workers:", "workers_var", "preprocessing_workers", 1, 8, "1–8"),
+            ("Batch Size:", "batch_size_var", "preprocessing_batch_size", 1, 50, "1–50"),
             ("Max Frames per Video:", "max_frames_var", "max_frames_per_video", 10, 200, "10–200"),
         ]:
             row = tk.Frame(preproc_body, bg=tp.bg_color)
@@ -1165,6 +1166,8 @@ class SettingsUI:
     def _populate_ui_from_settings(self, settings: SettingsData):
         if self.workers_var:
             self.workers_var.set(settings.preprocessing_workers)
+        if hasattr(self, 'batch_size_var') and self.batch_size_var:
+            self.batch_size_var.set(settings.preprocessing_batch_size)
         if self.max_frames_var:
             self.max_frames_var.set(settings.max_frames_per_video)
         if self.incremental_var:
@@ -1205,6 +1208,8 @@ class SettingsUI:
     def _apply_current_settings(self):
         if self.workers_var:
             self.settings.preprocessing_workers = self.workers_var.get()
+        if hasattr(self, 'batch_size_var') and self.batch_size_var:
+            self.settings.preprocessing_batch_size = self.batch_size_var.get()
         if self.max_frames_var:
             self.settings.max_frames_per_video = self.max_frames_var.get()
         if self.incremental_var:
