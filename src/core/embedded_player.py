@@ -623,7 +623,9 @@ class EmbeddedPlayer:
                                  highlightthickness=0, cursor="none")
         self._canvas.pack(fill=tk.BOTH, expand=True)
 
-        self._bar = tk.Frame(self._win, bg=_CTRL_BG, highlightthickness=0)
+        self._bar = tk.Frame(self._win, bg=_CTRL_BG, highlightbackground=_BORDER, highlightthickness=1, bd=0)
+        self._anim_job = None
+        self._bar.bind("<Configure>", self._on_bar_configure)
         self._build_bar()
         self._bar.place_forget()
 
@@ -642,11 +644,10 @@ class EmbeddedPlayer:
         self._schedule_refresh()
         self._win.after(100, lambda: self._refresh_display())
 
-
-
     def _build_bar(self):
         bar = self._bar
-        bar.configure(bg=_CTRL_BG)
+        if isinstance(bar, tk.Frame):
+            bar.configure(bg=_CTRL_BG)
 
         F_TITLE = tkfont.Font(family="Segoe UI", size=9, weight="bold")
         F_SM    = tkfont.Font(family="Segoe UI", size=8)
@@ -693,7 +694,7 @@ class EmbeddedPlayer:
 
         # ── ROW 0: info row ──────────────────────────────────────────────
         info = tk.Frame(bar, bg=_CTRL_BG)
-        info.pack(fill=tk.X, padx=14, pady=(3, 0))
+        info.pack(fill=tk.X, padx=14, pady=(8, 0))
 
         # Left: title + tags
         info_left = tk.Frame(info, bg=_CTRL_BG)
@@ -766,12 +767,12 @@ class EmbeddedPlayer:
         self._seek_preview_mgr = None
 
         # ── ROW 2: button row ────────────────────────────────────────────
-        btn_row = tk.Frame(bar, bg=_CTRL_BG2)
-        btn_row.pack(fill=tk.X, pady=(3, 0))
+        btn_row = tk.Frame(bar, bg=_CTRL_BG)
+        btn_row.pack(fill=tk.X, pady=(3, 8))
 
         # ZONE A: Transport (⏮ ▶ ⏭) — accent play button
-        zone_a = tk.Frame(btn_row, bg=_CTRL_BG2)
-        zone_a.pack(side=tk.LEFT, padx=(10, 0), pady=3)
+        zone_a = tk.Frame(btn_row, bg=_CTRL_BG)
+        zone_a.pack(side=tk.LEFT, padx=(14, 0), pady=3)
 
         btn_prev = _btn(zone_a, "⏮", None, font=F_ICO, fg=_TXT_MED, padx=7)
         btn_prev.pack(side=tk.LEFT, padx=(0, 2))
@@ -787,7 +788,7 @@ class EmbeddedPlayer:
         _sep(btn_row)
 
         # ZONE B: Loop mode
-        zone_b = tk.Frame(btn_row, bg=_CTRL_BG2)
+        zone_b = tk.Frame(btn_row, bg=_CTRL_BG)
         zone_b.pack(side=tk.LEFT, pady=3)
 
         self._btn_loop = _btn(zone_b, "↺  Loop", self._cycle_loop,
@@ -797,7 +798,7 @@ class EmbeddedPlayer:
         _sep(btn_row)
 
         # ZONE C: Speed · Bookmark · Ch nav · A-B loop  (center, expands)
-        zone_c = tk.Frame(btn_row, bg=_CTRL_BG2)
+        zone_c = tk.Frame(btn_row, bg=_CTRL_BG)
         zone_c.pack(side=tk.LEFT, expand=True, pady=3)
 
         self._lbl_speed = tk.Label(zone_c, text="1.00×", cursor="hand2",
@@ -821,7 +822,7 @@ class EmbeddedPlayer:
                                       fg=_TXT_MED, padx=5)
         self._btn_next_chapter = _btn(zone_c, "Ch ❯", self._next_chapter, font=F_XS,
                                       fg=_TXT_MED, padx=5)
-        self._divider_before_ab = tk.Frame(zone_c, width=0, bg=_CTRL_BG2)
+        self._divider_before_ab = tk.Frame(zone_c, width=0, bg=_CTRL_BG)
         self._divider_before_ab.pack(side=tk.LEFT)
         self._chapters_visible = False
 
@@ -839,15 +840,15 @@ class EmbeddedPlayer:
         _sep(btn_row)
 
         # ZONE D: Star rating
-        zone_d = tk.Frame(btn_row, bg=_CTRL_BG2)
+        zone_d = tk.Frame(btn_row, bg=_CTRL_BG)
         zone_d.pack(side=tk.LEFT, pady=3)
 
-        self._rating_frame = tk.Frame(zone_d, bg=_CTRL_BG2)
+        self._rating_frame = tk.Frame(zone_d, bg=_CTRL_BG)
         self._rating_frame.pack(side=tk.LEFT, padx=(0, 4))
         self._rating_btns = []
         for star_i in range(1, 6):
             s = tk.Label(self._rating_frame, text="☆", font=F_MD,
-                         bg=_CTRL_BG2, fg=_TXT_DIM, cursor="hand2")
+                         bg=_CTRL_BG, fg=_TXT_DIM, cursor="hand2")
             s.pack(side=tk.LEFT, padx=1)
             s.bind("<Button-1>", lambda e, n=star_i: self._set_rating(n))
             s.bind("<Enter>",    lambda e, n=star_i: self._hover_rating(n))
@@ -857,18 +858,18 @@ class EmbeddedPlayer:
         _sep(btn_row)
 
         # ZONE E: Vol · Fullscreen · More
-        zone_e = tk.Frame(btn_row, bg=_CTRL_BG2)
-        zone_e.pack(side=tk.LEFT, padx=(0, 10), pady=3)
+        zone_e = tk.Frame(btn_row, bg=_CTRL_BG)
+        zone_e.pack(side=tk.LEFT, padx=(0, 14), pady=3)
 
         self._lbl_mute = tk.Label(zone_e, text="🔊", cursor="hand2",
-                                  font=F_MD, bg=_CTRL_BG2, fg=_TXT_MED)
+                                  font=F_MD, bg=_CTRL_BG, fg=_TXT_MED)
         self._lbl_mute.pack(side=tk.LEFT, padx=(0, 2))
         self._lbl_mute.bind("<Button-1>",   lambda e: self._toggle_mute())
         self._lbl_mute.bind("<MouseWheel>", self._vol_scroll)
         self._lbl_mute.bind("<Enter>", lambda e: self._cancel_hide())
         self._lbl_mute.bind("<Leave>", lambda e: self._schedule_hide())
 
-        self._vol_canvas = tk.Canvas(zone_e, width=60, height=6, bg=_CTRL_BG2,
+        self._vol_canvas = tk.Canvas(zone_e, width=60, height=6, bg=_CTRL_BG,
                                      highlightthickness=0, cursor="hand2")
         self._vol_canvas.pack(side=tk.LEFT, padx=(0, 4))
         self._vol_canvas.bind("<Button-1>",   self._vol_click)
@@ -3067,8 +3068,15 @@ class EmbeddedPlayer:
         self._cancel_hide()
         if not self._ctrl_visible:
             self._ctrl_visible = True
-            self._place_bar()
-            self._bar.lift()
+            if getattr(self, '_anim_job', None):
+                try: self._win.after_cancel(self._anim_job)
+                except: pass
+                self._anim_job = None
+            ww = self._win.winfo_width()
+            wh = self._win.winfo_height()
+            pad_x = 24
+            self._bar.place(x=pad_x, y=wh, width=ww - 2 * pad_x, height=self.CTRL_H)
+            self._animate_bar(wh - self.CTRL_H - 6)
         try:
             self._win.configure(cursor="")
             self._canvas.configure(cursor="")
@@ -3077,11 +3085,14 @@ class EmbeddedPlayer:
 
     def _hide_bar(self):
         self._hide_job     = None
-        self._ctrl_visible = False
-        try:
-            self._bar.place_forget()
-        except Exception:
-            pass
+        if self._ctrl_visible:
+            self._ctrl_visible = False
+            if getattr(self, '_anim_job', None):
+                try: self._win.after_cancel(self._anim_job)
+                except: pass
+                self._anim_job = None
+            wh = self._win.winfo_height()
+            self._animate_bar(wh)
         try:
             self._win.configure(cursor="none")
             self._canvas.configure(cursor="none")
@@ -3112,8 +3123,83 @@ class EmbeddedPlayer:
             if ww < 10 or wh < 10:
                 return
             if self._ctrl_visible:
-                self._bar.place(x=0, y=wh - self.CTRL_H,
-                                width=ww, height=self.CTRL_H)
+                pad_x = 24
+                pad_y = 6
+                self._bar.place(x=pad_x, y=wh - self.CTRL_H - pad_y,
+                                width=ww - 2 * pad_x, height=self.CTRL_H)
+            else:
+                self._bar.place_forget()
+        except Exception:
+            pass
+
+    def _animate_bar(self, target_y, duration_ms=150):
+        try:
+            if not self._win.winfo_exists() or not self._bar.winfo_exists():
+                return
+            steps = duration_ms // 10
+            current_y = self._bar.winfo_y()
+            if current_y == 1 or not self._bar.winfo_ismapped():
+                current_y = self._win.winfo_height()
+                
+            diff = target_y - current_y
+            if abs(diff) < 2:
+                ww = self._win.winfo_width()
+                pad_x = 24
+                if target_y >= self._win.winfo_height():
+                    self._bar.place_forget()
+                else:
+                    self._bar.place(x=pad_x, y=target_y, width=ww - 2 * pad_x, height=self.CTRL_H)
+                    self._bar.lift()
+                return
+
+            step_y = current_y + diff // 3
+            if abs(step_y - target_y) < 2:
+                step_y = target_y
+                
+            ww = self._win.winfo_width()
+            pad_x = 24
+            self._bar.place(x=pad_x, y=step_y, width=ww - 2 * pad_x, height=self.CTRL_H)
+            self._bar.lift()
+            
+            if step_y != target_y:
+                self._anim_job = self._win.after(10, lambda: self._animate_bar(target_y))
+        except Exception:
+            pass
+
+    def _draw_round_rect(self, canvas, x1, y1, x2, y2, radius, fill, outline="", width=1):
+        try:
+            x1 += width
+            y1 += width
+            x2 -= width
+            y2 -= width
+            points = [
+                x1+radius, y1,
+                x2-radius, y1,
+                x2, y1,
+                x2, y1+radius,
+                x2, y2-radius,
+                x2, y2,
+                x2-radius, y2,
+                x1+radius, y2,
+                x1, y2,
+                x1, y2-radius,
+                x1, y1+radius,
+                x1, y1
+            ]
+            return canvas.create_polygon(points, smooth=True, fill=fill, outline=outline, width=width, tags="bg")
+        except Exception:
+            pass
+
+    def _on_bar_configure(self, event):
+        if not isinstance(self._bar, tk.Canvas):
+            return
+        try:
+            self._bar.delete("bg")
+            w = event.width
+            h = event.height
+            if w > 10 and h > 10:
+                self._draw_round_rect(self._bar, 0, 0, w, h, radius=12, fill=_CTRL_BG, outline=_BORDER, width=1)
+                self._bar.tag_lower("bg")
         except Exception:
             pass
 

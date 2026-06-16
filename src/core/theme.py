@@ -174,6 +174,25 @@ class ThemeSelector:
             if res != 0:
                 # DWMWA_USE_IMMERSIVE_DARK_MODE = 19 (Windows 10)
                 DwmSetAttr(hwnd, 19, byref(value), sizeof(value))
+            
+            # Blend title bar (DWMWA_CAPTION_COLOR=35, DWMWA_TEXT_COLOR=36)
+            try:
+                def hex_to_bgr(hex_str):
+                    hex_str = hex_str.lstrip('#')
+                    r = int(hex_str[0:2], 16)
+                    g = int(hex_str[2:4], 16)
+                    b = int(hex_str[4:6], 16)
+                    return (b << 16) | (g << 8) | r
+                
+                bg = getattr(self, 'bg_color', None)
+                fg = getattr(self, 'text_color', None)
+                if bg and fg:
+                    cap_val = c_int(hex_to_bgr(bg))
+                    txt_val = c_int(hex_to_bgr(fg))
+                    DwmSetAttr(hwnd, 35, byref(cap_val), sizeof(cap_val))
+                    DwmSetAttr(hwnd, 36, byref(txt_val), sizeof(txt_val))
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -290,20 +309,6 @@ class ThemeSelector:
             self.setup_title_bar_handling()
             self._title_bar_handled = True
 
-        # ── Apply title bar theme FIRST ──────────────────────────────────────
-        # Pushing the DWM attribute before any widget colour changes means the
-        # title bar flips atomically with the rest of the UI.  If done at the
-        # end, widgets are already half-repainted in the new theme while the
-        # title bar is still the old one, creating a visible per-component
-        # stutter frame.
-        self.apply_title_bar_theme(self.root)
-        try:
-            for child in self.root.winfo_children():
-                if isinstance(child, tk.Toplevel) and child.winfo_exists():
-                    self.apply_title_bar_theme(child)
-        except Exception:
-            pass
-
         if self.dark_mode:
             self.bg_color = "#0F1217"
             self.surface_color = "#1A1E26"
@@ -353,6 +358,20 @@ class ThemeSelector:
         self.excluded_color = "#C24E4E" if self.dark_mode else "#C44A4A"
         self.favorite_color = "#B8890A" if self.dark_mode else "#8F6B08"
 
+        # ── Apply title bar theme FIRST ──────────────────────────────────────
+        # Pushing the DWM attribute before any widget colour changes means the
+        # title bar flips atomically with the rest of the UI.  If done at the
+        # end, widgets are already half-repainted in the new theme while the
+        # title bar is still the old one, creating a visible per-component
+        # stutter frame.
+        self.apply_title_bar_theme(self.root)
+        try:
+            for child in self.root.winfo_children():
+                if isinstance(child, tk.Toplevel) and child.winfo_exists():
+                    self.apply_title_bar_theme(child)
+        except Exception:
+            pass
+
         # Apply colours to root and main frames
         self.root.configure(bg=self.bg_color)
 
@@ -369,6 +388,8 @@ class ThemeSelector:
                 bg=self.bg_color, highlightbackground=self.entry_border
             )
 
+        if hasattr(self, 'root_container'):
+            self.root_container.configure(bg=self.bg_color)
         self.main_frame.configure(bg=self.bg_color)
         self.content_frame.configure(bg=self.bg_color)
         for section in ['dir_section', 'status_frame', 'button_frame']:
@@ -770,7 +791,7 @@ class ThemeSelector:
 
     def _apply_workspace_chrome_theme(self):
         frame_names = (
-            'workspace_frame', 'workspace_header', 'workspace_body', 'workspace_nav',
+            'root_container', 'workspace_frame', 'workspace_header', 'workspace_body', 'workspace_nav',
             'content_frame', 'dir_section', 'dir_frame',
             'exclusion_buttons_frame', 'embedded_view_frame', 'console_section',
             'console_header_frame', 'console_container', 'console_inner_pad', 'console_frame',
@@ -839,21 +860,29 @@ class ThemeSelector:
 
     def _apply_play_toolbar_idle(self):
         btn = getattr(self, 'play_toolbar_btn', None)
+        container = getattr(self, 'play_container', None)
+        indicator = getattr(self, 'play_indicator', None)
         if btn is None:
             return
         try:
             btn.config(bg=self.surface_color, fg="#2ecc71",
                        font=self._play_toolbar_font_idle())
+            if container: container.config(bg=self.surface_color)
+            if indicator: indicator.config(bg=self.surface_color)
         except tk.TclError:
             pass
 
     def _apply_play_toolbar_hover(self):
         btn = getattr(self, 'play_toolbar_btn', None)
+        container = getattr(self, 'play_container', None)
+        indicator = getattr(self, 'play_indicator', None)
         if btn is None:
             return
         try:
-            btn.config(bg="#2ecc71", fg="#ffffff",
+            btn.config(bg=self.hover_color, fg="#2ecc71",
                        font=self._play_toolbar_font_hover())
+            if container: container.config(bg=self.hover_color)
+            if indicator: indicator.config(bg="#2ecc71")
         except tk.TclError:
             pass
 
@@ -862,7 +891,9 @@ class ThemeSelector:
         btn = getattr(self, 'play_toolbar_btn', None)
         if btn is None:
             return
-        if self._pointer_over_widget(btn):
+        container = getattr(self, 'play_container', None)
+        over = self._pointer_over_widget(btn) or (container and self._pointer_over_widget(container))
+        if over:
             self._apply_play_toolbar_hover()
         else:
             self._apply_play_toolbar_idle()
@@ -870,49 +901,86 @@ class ThemeSelector:
     def _sync_play_toolbar_btn(self):
         self._restore_play_toolbar_after_click()
 
-    def _create_sidebar_icon_btn(self, parent, icon, command, tooltip=None):
+    def _create_sidebar_icon_btn(self, parent, icon, command, tooltip=None, side=tk.TOP, pady=(4, 0)):
+        container = tk.Frame(parent, bg=self.surface_color)
+        container.pack(fill=tk.X, side=side, pady=pady)
+        
+        indicator = tk.Frame(container, bg=self.surface_color, width=3)
+        indicator.pack(side=tk.LEFT, fill=tk.Y)
+
         btn = tk.Label(
-            parent, text=icon,
+            container, text=icon,
             bg=self.surface_color, fg=self.text_color,
             font=("Segoe UI", 15, "bold"), anchor="center",
-            pady=10, cursor="hand2",
+            pady=8, cursor="hand2",
             relief=tk.FLAT, bd=0, highlightthickness=0,
         )
+        btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 8))
         btn._sb_command = command
+        btn._container = container
+        btn._indicator = indicator
 
-        def on_enter(_e):
-            btn.config(bg=self.accent_color, fg="#ffffff")
-        def on_leave(_e):
-            btn.config(bg=self.surface_color, fg=self.text_color)
-        def on_click(_e):
-            btn.config(bg=self.accent_color, fg="#ffffff")
-            if command:
-                btn.after(80, command)
-
-        btn.bind("<Enter>", on_enter)
-        btn.bind("<Leave>", on_leave)
-        btn.bind("<Button-1>", on_click)
-
-        if tooltip:
-            import tkinter as _tk
-            _tip_win = [None]
-            def _show_tip(e):
-                if _tip_win[0]: return
+        _tip_win = [None]
+        def _show_tip(e):
+            if not tooltip or _tip_win[0]: return
+            try:
                 x = btn.winfo_rootx() + btn.winfo_width() + 6
                 y = btn.winfo_rooty() + 4
+                import tkinter as _tk
                 tw = _tk.Toplevel(btn)
                 tw.wm_overrideredirect(True)
                 tw.wm_geometry(f"+{x}+{y}")
                 _tk.Label(tw, text=tooltip, bg=self.console_bg, fg=self.console_fg,
                           font=("Segoe UI", 9), padx=8, pady=4, relief="flat").pack()
                 _tip_win[0] = tw
-            def _hide_tip(e):
-                if _tip_win[0]:
-                    try: _tip_win[0].destroy()
-                    except: pass
-                    _tip_win[0] = None
-            btn.bind("<Enter>", lambda e: (_show_tip(e), on_enter(e)))
-            btn.bind("<Leave>", lambda e: (_hide_tip(e), on_leave(e)))
+            except:
+                pass
+
+        def _hide_tip(e):
+            if _tip_win[0]:
+                try: _tip_win[0].destroy()
+                except: pass
+                _tip_win[0] = None
+
+        def on_enter(e):
+            try:
+                btn.config(bg=self.hover_color, fg=self.accent_color)
+                container.config(bg=self.hover_color)
+                indicator.config(bg=self.accent_color)
+            except:
+                pass
+            _show_tip(e)
+
+        def on_leave(e):
+            try:
+                btn.config(bg=self.surface_color, fg=self.text_color)
+                container.config(bg=self.surface_color)
+                indicator.config(bg=self.surface_color)
+            except:
+                pass
+            _hide_tip(e)
+
+        def on_press(e):
+            try:
+                btn.config(bg=self.accent_color, fg="#ffffff")
+                container.config(bg=self.accent_color)
+            except:
+                pass
+
+        def on_release(e):
+            try:
+                btn.config(bg=self.hover_color, fg=self.accent_color)
+                container.config(bg=self.hover_color)
+            except:
+                pass
+            if command:
+                btn.after(80, command)
+
+        for w in (btn, container):
+            w.bind("<Enter>", on_enter)
+            w.bind("<Leave>", on_leave)
+            w.bind("<ButtonPress-1>", on_press)
+            w.bind("<ButtonRelease-1>", on_release)
 
         return btn
 
@@ -933,7 +1001,20 @@ class ThemeSelector:
             for child in panel.winfo_children():
                 try:
                     if isinstance(child, tk.Frame):
-                        child.configure(bg=self.border_color)
+                        if getattr(child, '_is_separator', False) or child.cget("height") == 1:
+                            child.configure(bg=self.border_color)
+                        else:
+                            child.configure(bg=self.surface_color)
+                            for sub in child.winfo_children():
+                                if isinstance(sub, tk.Frame):
+                                    sub.configure(bg=self.surface_color)
+                                elif isinstance(sub, tk.Label):
+                                    if sub is play_btn:
+                                        sub.configure(bg=self.surface_color, fg=self.accent_secondary)
+                                    elif sub is theme_btn:
+                                        sub.configure(bg=self.surface_color, fg=self.text_color)
+                                    else:
+                                        sub.configure(bg=self.surface_color, fg=self.text_color)
                     elif isinstance(child, tk.Label):
                         if child is play_btn:
                             child.configure(bg=self.surface_color, fg=self.accent_secondary)
@@ -1546,6 +1627,8 @@ class ThemeSelector:
 
     def _bind_theme_toolbar_hover(self):
         btn = getattr(self, 'theme_toolbar_btn', None)
+        container = getattr(self, 'theme_container', None)
+        indicator = getattr(self, 'theme_indicator', None)
         if btn is None:
             return
 
@@ -1568,36 +1651,51 @@ class ThemeSelector:
                 btn._tip_win = None
 
         def on_enter(_e):
-            try: btn.config(bg=self.accent_color, fg="#ffffff")
+            try:
+                btn.config(bg=self.hover_color, fg=self.accent_color)
+                if container: container.config(bg=self.hover_color)
+                if indicator: indicator.config(bg=self.accent_color)
             except tk.TclError: pass
             _show_tip(_e)
 
         def on_leave(_e):
-            try: btn.config(bg=self.surface_color, fg=self.text_color)
+            try:
+                btn.config(bg=self.surface_color, fg=self.text_color)
+                if container: container.config(bg=self.surface_color)
+                if indicator: indicator.config(bg=self.surface_color)
             except tk.TclError: pass
             _hide_tip()
 
         def on_press(_e):
-            try: btn.config(bg=self.accent_color, fg="#ffffff")
+            try:
+                btn.config(bg=self.accent_color, fg="#ffffff")
+                if container: container.config(bg=self.accent_color)
             except tk.TclError: pass
 
         def on_release(_e):
-            try: btn.config(bg=self.accent_color, fg="#ffffff")
+            try:
+                btn.config(bg=self.hover_color, fg=self.accent_color)
+                if container: container.config(bg=self.hover_color)
             except tk.TclError: pass
             _hide_tip()
             self._toggle_theme_menu()
 
-        btn.unbind("<Enter>")
-        btn.unbind("<Leave>")
-        btn.unbind("<ButtonPress-1>")
-        btn.unbind("<ButtonRelease-1>")
-        btn.bind("<Enter>", on_enter)
-        btn.bind("<Leave>", on_leave)
-        btn.bind("<ButtonPress-1>", on_press)
-        btn.bind("<ButtonRelease-1>", on_release)
+        for w in (btn, container) if container else (btn,):
+            try:
+                w.unbind("<Enter>")
+                w.unbind("<Leave>")
+                w.unbind("<ButtonPress-1>")
+                w.unbind("<ButtonRelease-1>")
+                w.bind("<Enter>", on_enter)
+                w.bind("<Leave>", on_leave)
+                w.bind("<ButtonPress-1>", on_press)
+                w.bind("<ButtonRelease-1>", on_release)
+            except:
+                pass
 
     def _bind_play_toolbar_hover(self):
         btn = getattr(self, 'play_toolbar_btn', None)
+        container = getattr(self, 'play_container', None)
         if btn is None:
             return
         self._ensure_play_toolbar_fonts()
@@ -1633,6 +1731,7 @@ class ThemeSelector:
             try:
                 btn.config(bg="#27ae60", fg="#ffffff",
                            font=self._play_toolbar_font_active())
+                if container: container.config(bg="#27ae60")
             except tk.TclError:
                 pass
 
@@ -1640,14 +1739,18 @@ class ThemeSelector:
             self.global_play()
             btn.after(20, self._restore_play_toolbar_after_click)
 
-        btn.unbind("<Enter>")
-        btn.unbind("<Leave>")
-        btn.unbind("<ButtonPress-1>")
-        btn.unbind("<ButtonRelease-1>")
-        btn.bind("<Enter>", on_enter)
-        btn.bind("<Leave>", on_leave)
-        btn.bind("<ButtonPress-1>", on_press)
-        btn.bind("<ButtonRelease-1>", on_release)
+        for w in (btn, container) if container else (btn,):
+            try:
+                w.unbind("<Enter>")
+                w.unbind("<Leave>")
+                w.unbind("<ButtonPress-1>")
+                w.unbind("<ButtonRelease-1>")
+                w.bind("<Enter>", on_enter)
+                w.bind("<Leave>", on_leave)
+                w.bind("<ButtonPress-1>", on_press)
+                w.bind("<ButtonRelease-1>", on_release)
+            except:
+                pass
         self._apply_play_toolbar_idle()
 
     def _bind_media_pill_hover(self, btn, label):
@@ -1682,11 +1785,19 @@ class ThemeSelector:
             for text, btn in self._toolbar_btns.items():
                 try:
                     btn.config(bg=self.surface_color, fg=self.text_color)
+                    container = getattr(btn, '_container', None)
+                    indicator = getattr(btn, '_indicator', None)
+                    if container: container.config(bg=self.surface_color)
+                    if indicator: indicator.config(bg=self.surface_color)
                 except tk.TclError:
                     pass
         if hasattr(self, 'play_toolbar_btn'):
             try:
                 self.play_toolbar_btn.config(bg=self.surface_color, fg=self.accent_secondary)
+                container = getattr(self, 'play_container', None)
+                indicator = getattr(self, 'play_indicator', None)
+                if container: container.config(bg=self.surface_color)
+                if indicator: indicator.config(bg=self.surface_color)
             except tk.TclError:
                 pass
             self._bind_play_toolbar_hover()
@@ -1695,6 +1806,10 @@ class ThemeSelector:
                 self.theme_toolbar_btn.config(
                     text="☀" if self.dark_mode else "🌙",
                     bg=self.surface_color, fg=self.text_color)
+                container = getattr(self, 'theme_container', None)
+                indicator = getattr(self, 'theme_indicator', None)
+                if container: container.config(bg=self.surface_color)
+                if indicator: indicator.config(bg=self.surface_color)
             except tk.TclError:
                 pass
             self._bind_theme_toolbar_hover()

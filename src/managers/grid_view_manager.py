@@ -1313,7 +1313,7 @@ class GridViewManager:
         # ── State-driven colours ──────────────────────────────────────────────
         dark = getattr(self.theme_provider, 'dark_mode', False)
         if is_sel:
-            border_col, border_w = t['accent'], 3
+            border_col, border_w = t['accent'], 2
             card_bg = info_bg  = t['accent_dim']
             name_fg, name_w    = t['accent'], "bold"
         elif is_excl:
@@ -1321,7 +1321,7 @@ class GridViewManager:
             card_bg = info_bg  = t['surface']
             name_fg, name_w    = t['text_muted'], "normal"
         else:
-            border_col, border_w = t['border'], 1
+            border_col, border_w = t['border'], 2
             card_bg = info_bg  = t['surface']
             name_fg, name_w    = t['text'], "normal"
 
@@ -1338,7 +1338,7 @@ class GridViewManager:
 
         # ── Thumbnail container ───────────────────────────────────────────────
         thumb_container = tk.Frame(
-            card, bg=t['thumb_bg'],
+            card, bg=card_bg,
             width=_CARD_W, height=_CARD_H, highlightthickness=0
         )
         thumb_container._is_thumb = True
@@ -1346,7 +1346,7 @@ class GridViewManager:
         thumb_container.pack_propagate(False)
 
         thumb_label = tk.Label(
-            thumb_container, bg=t['thumb_bg'], fg="#2e323c",
+            thumb_container, bg=card_bg, fg="#2e323c",
             text="▶", font=("Segoe UI", 18)
         )
         thumb_label.pack(fill=tk.BOTH, expand=True)
@@ -1518,13 +1518,13 @@ class GridViewManager:
             is_excluded = video_path in self.excluded_items
 
             if is_playing:
-                border_col, border_w = t['now_playing'], 3
+                border_col, border_w = t['now_playing'], 2
             elif is_selected:
                 border_col, border_w = t['accent'], 2
             elif is_excluded:
                 border_col, border_w = t['excluded'], 2
             else:
-                border_col, border_w = t['border'], 1
+                border_col, border_w = t['border'], 2
 
             card.config(highlightbackground=border_col, highlightthickness=border_w)
 
@@ -1580,7 +1580,7 @@ class GridViewManager:
         is_excl = video_path in self.excluded_items
 
         if is_sel:
-            border_col, border_w = t['accent'],    3
+            border_col, border_w = t['accent'],    2
             card_bg = info_bg    = t['accent_dim']
             name_fg, name_w      = t['accent'], "bold"
         elif is_excl:
@@ -1588,7 +1588,7 @@ class GridViewManager:
             card_bg = info_bg    = t['surface']
             name_fg, name_w      = t['text_muted'], "normal"
         else:
-            border_col, border_w = t['border'],    1
+            border_col, border_w = t['border'],    2
             card_bg = info_bg    = t['surface']
             name_fg, name_w      = t['text'], "normal"
 
@@ -1613,6 +1613,14 @@ class GridViewManager:
                     lbl.configure(bg=info_bg)
                 except tk.TclError:
                     pass
+        if thumb_container:
+            try:
+                thumb_container.configure(bg=card_bg)
+                for sub in thumb_container.winfo_children():
+                    if not getattr(sub, '_is_action_strip', False):
+                        sub.configure(bg=card_bg)
+            except:
+                pass
         # Update the thin divider frame between thumb and info
         for child in card.winfo_children():
             if not getattr(child, '_is_thumb', False) and not getattr(child, '_is_info', False):
@@ -1842,7 +1850,15 @@ class GridViewManager:
                             lbl.configure(bg=t['card_hover'])
                         except tk.TclError:
                             pass
-                elif not getattr(child, '_is_thumb', False):
+                elif getattr(child, '_is_thumb', False):
+                    try:
+                        child.configure(bg=t['card_hover'])
+                        for sub in child.winfo_children():
+                            if not getattr(sub, '_is_action_strip', False):
+                                sub.configure(bg=t['card_hover'])
+                    except:
+                        pass
+                else:
                     try:
                         child.configure(bg=t['card_hover'])
                     except tk.TclError:
@@ -1870,11 +1886,11 @@ class GridViewManager:
 
         # Restore border
         if is_sel:
-            card.configure(highlightbackground=t['accent'], highlightthickness=3)
+            card.configure(highlightbackground=t['accent'], highlightthickness=2)
         elif is_excl:
             card.configure(highlightbackground=t['excluded'], highlightthickness=2)
         else:
-            card.configure(highlightbackground=t['border'], highlightthickness=1,
+            card.configure(highlightbackground=t['border'], highlightthickness=2,
                            bg=t['surface'])
             for child in card.winfo_children():
                 if getattr(child, '_is_info', False):
@@ -1884,7 +1900,15 @@ class GridViewManager:
                             lbl.configure(bg=t['surface'])
                         except tk.TclError:
                             pass
-                elif not getattr(child, '_is_thumb', False):
+                elif getattr(child, '_is_thumb', False):
+                    try:
+                        child.configure(bg=t['surface'])
+                        for sub in child.winfo_children():
+                            if not getattr(sub, '_is_action_strip', False):
+                                sub.configure(bg=t['surface'])
+                    except:
+                        pass
+                else:
                     try:
                         child.configure(bg=t['border'])
                     except tk.TclError:
@@ -2649,6 +2673,18 @@ class GridViewManager:
         except Exception:
             self.root.after(0, lambda: label.winfo_exists() and label.configure(text="Error"))
 
+    def _round_thumbnail(self, canvas, bg_color):
+        try:
+            from PIL import Image, ImageDraw
+            im = canvas.convert("RGBA")
+            mask = Image.new('L', canvas.size, 0)
+            draw = ImageDraw.Draw(mask)
+            draw.rounded_rectangle((0, 0, canvas.size[0], canvas.size[1]), radius=8, fill=255)
+            im.putalpha(mask)
+            return im
+        except Exception:
+            return canvas
+
     def _photo_from_blob(self, blob_path, is_video, item):
         """Decode a raw JPEG or MP4 blob file directly – with letterboxing."""
         import shutil, tempfile as _tf
@@ -2680,6 +2716,11 @@ class GridViewManager:
             pil_image = pil_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
             canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
             canvas.paste(pil_image, ((target_w - new_w) // 2, (target_h - new_h) // 2))
+            
+            # Apply rounded corners composite over card surface background color
+            t = self._tok()
+            canvas = self._round_thumbnail(canvas, t['surface'])
+            
             photo = ImageTk.PhotoImage(canvas)
             item.thumbnail_image = photo
             return photo
@@ -2721,6 +2762,11 @@ class GridViewManager:
                     pil_image = pil_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
                     canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
                     canvas.paste(pil_image, ((target_w - new_w) // 2, (target_h - new_h) // 2))
+                    
+                    # Apply rounded corners composite over card surface background color
+                    t = self._tok()
+                    canvas = self._round_thumbnail(canvas, t['surface'])
+                    
                     photo = ImageTk.PhotoImage(canvas)
                     item.thumbnail_image = photo
                     if video_path_norm:
@@ -2740,6 +2786,11 @@ class GridViewManager:
                 img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
                 canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
                 canvas.paste(img, ((target_w - new_w) // 2, (target_h - new_h) // 2))
+                
+                # Apply rounded corners composite over card surface background color
+                t = self._tok()
+                canvas = self._round_thumbnail(canvas, t['surface'])
+                
                 photo = ImageTk.PhotoImage(canvas)
                 item.thumbnail_image = photo
                 if video_path_norm:

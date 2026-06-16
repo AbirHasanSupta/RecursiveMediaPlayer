@@ -776,7 +776,7 @@ def select_multiple_folders_and_play():
                 insertbackground=self.accent_color,
             )
             self.global_search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=6)
-            self.global_search_entry.bind('<KeyRelease>', self._on_global_search_changed)
+            self.global_search_entry.bind('<KeyRelease>', lambda e: (self._on_global_search_changed(e), self._show_search_suggestions()))
 
             def _search_focus_in(e):
                 search_wrap.config(highlightbackground=self.accent_color, highlightthickness=1)
@@ -785,9 +785,101 @@ def select_multiple_folders_and_play():
             def _search_focus_out(e):
                 search_wrap.config(highlightbackground=self.entry_border, highlightthickness=1)
                 self.global_search_icon.config(fg=self.text_muted)
+                self.root.after(200, self._hide_search_suggestions)
 
             self.global_search_entry.bind('<FocusIn>', _search_focus_in)
             self.global_search_entry.bind('<FocusOut>', _search_focus_out)
+
+            def _on_root_configure(e):
+                if e.widget == self.root:
+                    self._hide_search_suggestions()
+            self.root.bind("<Configure>", _on_root_configure, add="+")
+
+        def _show_search_suggestions(self):
+            import os
+            query = self.global_search_entry.get().strip().lower()
+            if not query:
+                self._hide_search_suggestions()
+                return
+
+            suggestions = []
+            seen = set()
+            for d in getattr(self, 'selected_dirs', []):
+                cache = getattr(self, 'scan_cache', None)
+                if cache:
+                    val = cache.get(d)
+                    if val:
+                        videos, _, _ = val
+                        for v in videos:
+                            base = os.path.basename(v)
+                            if query in base.lower():
+                                if v not in seen:
+                                    seen.add(v)
+                                    suggestions.append((base, v))
+                                    if len(suggestions) >= 6:
+                                        break
+                if len(suggestions) >= 6:
+                    break
+
+            if not suggestions:
+                self._hide_search_suggestions()
+                return
+
+            if not getattr(self, '_suggest_win', None) or not self._suggest_win.winfo_exists():
+                self._suggest_win = tk.Toplevel(self.root)
+                self._suggest_win.wm_overrideredirect(True)
+                self._suggest_win.configure(bg=self.border_color)
+                self._suggest_win.bind("<Escape>", lambda e: self._hide_search_suggestions())
+            else:
+                for child in self._suggest_win.winfo_children():
+                    child.destroy()
+
+            try:
+                x = self._global_search_wrap.winfo_rootx()
+                y = self._global_search_wrap.winfo_rooty() + self._global_search_wrap.winfo_height() + 2
+                w = self._global_search_wrap.winfo_width()
+                self._suggest_win.wm_geometry(f"{w}x{len(suggestions)*30}+{x}+{y}")
+                self._suggest_win.deiconify()
+            except:
+                return
+
+            for name, path in suggestions:
+                lbl = tk.Label(
+                    self._suggest_win, text=name, anchor='w',
+                    bg=self.surface_color, fg=self.text_color,
+                    font=("Segoe UI", 9), padx=10, cursor="hand2"
+                )
+                lbl.pack(fill=tk.BOTH, expand=True)
+
+                def _on_enter(e, l=lbl):
+                    try: l.config(bg=self.hover_color, fg=self.accent_color)
+                    except: pass
+
+                def _on_leave(e, l=lbl):
+                    try: l.config(bg=self.surface_color, fg=self.text_color)
+                    except: pass
+
+                lbl.bind("<Enter>", _on_enter)
+                lbl.bind("<Leave>", _on_leave)
+
+                def _on_click(e, p=path):
+                    try:
+                        self.global_search_entry.delete(0, tk.END)
+                        self.global_search_entry.insert(0, os.path.basename(p))
+                        self._on_global_search_changed()
+                        self._hide_search_suggestions()
+                    except:
+                        pass
+
+                lbl.bind("<Button-1>", _on_click)
+
+        def _hide_search_suggestions(self, event=None):
+            win = getattr(self, '_suggest_win', None)
+            if win:
+                try:
+                    win.withdraw()
+                except:
+                    pass
 
         def _on_global_search_changed(self, event=None):
             if hasattr(self, '_global_search_debounce_id') and self._global_search_debounce_id:
@@ -811,16 +903,19 @@ def select_multiple_folders_and_play():
             self.embedded_view_frame = None
             self._directory_panel_mode = "expanded"
             self._dir_panel_width = 380
-            self.main_frame = tk.Frame(self.root, bg=self.bg_color, padx=16, pady=14)
-            self.main_frame.pack(fill=tk.BOTH, expand=True)
-            self.content_frame = tk.Frame(self.main_frame, bg=self.bg_color)
-            self.content_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
+            self.root_container = tk.Frame(self.root, bg=self.bg_color)
+            self.root_container.pack(fill=tk.BOTH, expand=True)
 
-            self._sidebar_panel = tk.Frame(self.content_frame, bg=self.surface_color, width=48)
+            self._sidebar_panel = tk.Frame(self.root_container, bg=self.surface_color, width=48)
             self._sidebar_panel.pack(side=tk.LEFT, fill=tk.Y)
             self._sidebar_panel.pack_propagate(False)
-            self._sidebar_divider = tk.Frame(self.content_frame, bg=self.border_color, width=1)
+            self._sidebar_divider = tk.Frame(self.root_container, bg=self.border_color, width=1)
             self._sidebar_divider.pack(side=tk.LEFT, fill=tk.Y)
+
+            self.main_frame = tk.Frame(self.root_container, bg=self.bg_color)
+            self.main_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 16), pady=14)
+            self.content_frame = tk.Frame(self.main_frame, bg=self.bg_color)
+            self.content_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
 
             self.workspace_frame = tk.Frame(self.content_frame, bg=self.bg_color)
             self.workspace_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
@@ -1769,12 +1864,10 @@ def select_multiple_folders_and_play():
             self._dir_resizer.bind("<ButtonRelease-1>", _on_resizer_release)
 
             self._sb_toggle_btn = self._create_sidebar_icon_btn(
-                self._sidebar_panel, "◁", self._toggle_directory_panel, tooltip="Toggle Panel")
-            self._sb_toggle_btn.pack(fill=tk.X, pady=(12, 0))
+                self._sidebar_panel, "◁", self._toggle_directory_panel, tooltip="Toggle Panel", pady=(12, 0))
 
             self._sb_add_btn = self._create_sidebar_icon_btn(
-                self._sidebar_panel, "+", self.add_directory, tooltip="Add Directory")
-            self._sb_add_btn.pack(fill=tk.X, pady=(2, 0))
+                self._sidebar_panel, "+", self.add_directory, tooltip="Add Directory", pady=(2, 0))
 
             dir_header_frame = tk.Frame(self.dir_section, bg=self.bg_color)
             dir_header_frame.pack(fill=tk.X, pady=(0, 6))
@@ -2383,7 +2476,7 @@ def select_multiple_folders_and_play():
                     self._dir_resizer.pack_forget()
                 if hasattr(self, '_sb_toggle_btn'):
                     self._sb_toggle_btn.config(text="▷")
-                self.workspace_frame.pack_configure(padx=(10, 0))
+                self.workspace_frame.pack_configure(padx=(12, 0))
                 return
 
             if not self.dir_section.winfo_ismapped():
@@ -6125,17 +6218,30 @@ def select_multiple_folders_and_play():
                 return menu
 
             def _sb_sep():
-                tk.Frame(sb, bg=self.border_color, height=1).pack(fill=tk.X, padx=10, pady=(5, 5))
+                sep = tk.Frame(sb, bg=self.border_color, height=1)
+                sep._is_separator = True
+                sep.pack(fill=tk.X, padx=10, pady=(5, 5))
 
-            def _sb_btn(icon, tip, menu=None, command=None):
+            def _sb_btn(icon, tip, menu=None, command=None, side=tk.TOP, pady=(4, 0)):
+                container = tk.Frame(sb, bg=self.surface_color)
+                container.pack(fill=tk.X, side=side, pady=pady)
+                
+                # Left accent indicator strip
+                indicator = tk.Frame(container, bg=self.surface_color, width=3)
+                indicator.pack(side=tk.LEFT, fill=tk.Y)
+                
                 btn = tk.Label(
-                    sb, text=icon,
+                    container, text=icon,
                     bg=self.surface_color, fg=self.text_color,
                     font=("Segoe UI", 15, "bold"), anchor="center",
-                    pady=10, cursor="hand2",
+                    pady=8, cursor="hand2",
                     relief=tk.FLAT, bd=0, highlightthickness=0,
                 )
-                btn.pack(fill=tk.X, pady=(2, 0))
+                btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 8))
+                
+                btn._container = container
+                btn._indicator = indicator
+                
                 _tip_win = [None]
 
                 def _show_tip(e):
@@ -6156,18 +6262,36 @@ def select_multiple_folders_and_play():
                         _tip_win[0] = None
 
                 def on_enter(e):
-                    btn.config(bg=self.accent_color, fg="#ffffff")
+                    try:
+                        btn.config(bg=self.hover_color, fg=self.accent_color)
+                        indicator.config(bg=self.accent_color)
+                        container.config(bg=self.hover_color)
+                    except:
+                        pass
                     _show_tip(e)
 
                 def on_leave(e):
-                    btn.config(bg=self.surface_color, fg=self.text_color)
+                    try:
+                        btn.config(bg=self.surface_color, fg=self.text_color)
+                        indicator.config(bg=self.surface_color)
+                        container.config(bg=self.surface_color)
+                    except:
+                        pass
                     _hide_tip(e)
 
                 def on_press(e):
-                    btn.config(bg=self.accent_color, fg="#ffffff")
+                    try:
+                        btn.config(bg=self.accent_color, fg="#ffffff")
+                        container.config(bg=self.accent_color)
+                    except:
+                        pass
 
                 def on_release(e):
-                    btn.config(bg=self.accent_color, fg="#ffffff")
+                    try:
+                        btn.config(bg=self.hover_color, fg=self.accent_color)
+                        container.config(bg=self.hover_color)
+                    except:
+                        pass
                     if menu is not None:
                         try:
                             menu.tk_popup(btn.winfo_rootx() + btn.winfo_width() + 4, btn.winfo_rooty())
@@ -6176,10 +6300,12 @@ def select_multiple_folders_and_play():
                     elif command is not None:
                         command()
 
-                btn.bind("<Enter>", on_enter)
-                btn.bind("<Leave>", on_leave)
-                btn.bind("<ButtonPress-1>", on_press)
-                btn.bind("<ButtonRelease-1>", on_release)
+                # Bind hover events to container and btn to be seamless
+                for w in (btn, container):
+                    w.bind("<Enter>", on_enter)
+                    w.bind("<Leave>", on_leave)
+                    w.bind("<ButtonPress-1>", on_press)
+                    w.bind("<ButtonRelease-1>", on_release)
                 return btn
 
             _sb_sep()
@@ -6225,31 +6351,33 @@ def select_multiple_folders_and_play():
 
             _sb_sep()
             self._ensure_play_toolbar_fonts()
+            self.play_container = tk.Frame(sb, bg=self.surface_color)
+            self.play_container.pack(fill=tk.X, pady=(6, 0))
+            self.play_indicator = tk.Frame(self.play_container, bg=self.surface_color, width=3)
+            self.play_indicator.pack(side=tk.LEFT, fill=tk.Y)
             self.play_toolbar_btn = tk.Label(
-                sb, text="▶",
+                self.play_container, text="▶",
                 bg=self.surface_color, fg="#2ecc71",
-                font=("Segoe UI", 20, "bold"), pady=12, cursor="hand2",
+                font=("Segoe UI", 16, "bold"), pady=10, cursor="hand2",
                 relief=tk.FLAT, bd=0, highlightthickness=0, anchor="center"
             )
-            self.play_toolbar_btn.pack(fill=tk.X, pady=(6, 0))
+            self.play_toolbar_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 8))
             self._bind_play_toolbar_hover()
 
-            _sb_sep()
-
-            self._toolbar_btns["Settings"] = _sb_btn("⚙", "Settings", command=self._show_settings)
-            self._toolbar_btns["Settings"].pack_forget()
-
+            self.theme_container = tk.Frame(sb, bg=self.surface_color)
+            self.theme_container.pack(fill=tk.X, side=tk.BOTTOM, pady=(2, 10))
+            self.theme_indicator = tk.Frame(self.theme_container, bg=self.surface_color, width=3)
+            self.theme_indicator.pack(side=tk.LEFT, fill=tk.Y)
             self.theme_toolbar_btn = tk.Label(
-                sb, text="🌙" if not self.dark_mode else "☀",
+                self.theme_container, text="🌙" if not self.dark_mode else "☀",
                 bg=self.surface_color, fg=self.text_color,
                 font=("Segoe UI", 15, "bold"), pady=10, cursor="hand2",
                 relief=tk.FLAT, bd=0, highlightthickness=0, anchor="center"
             )
+            self.theme_toolbar_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 8))
             self._bind_theme_toolbar_hover()
 
-            self.theme_toolbar_btn.pack(fill=tk.X, side=tk.BOTTOM, pady=(2, 10))
-            self._toolbar_btns["Settings"].pack(fill=tk.X, side=tk.BOTTOM, pady=(18, 2))
-            self._bind_play_toolbar_hover()
+            self._toolbar_btns["Settings"] = _sb_btn("⚙", "Settings", command=self._show_settings, side=tk.BOTTOM, pady=(18, 2))
 
             self.button_frame = tk.Frame(self.main_frame, bg=self.bg_color)
             self.button_frame.pack(fill=tk.X)
