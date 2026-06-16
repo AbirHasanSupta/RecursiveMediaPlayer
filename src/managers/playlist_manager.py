@@ -397,7 +397,7 @@ class PlaylistUI:
         cols = tk.Frame(self.playlist_window, bg=t['bg'])
         cols._manager_role = "body"
         self._pl_cols = cols
-        cols.pack(fill=tk.BOTH, expand=True, padx=20, pady=12)
+        cols.pack(fill=tk.BOTH, expand=True, pady=(6, 10))
 
         left_card = tk.Frame(cols, bg=t['surface2'], width=310,
                              highlightbackground=t['border'], highlightthickness=1)

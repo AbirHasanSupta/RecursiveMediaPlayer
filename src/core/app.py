@@ -913,9 +913,9 @@ def select_multiple_folders_and_play():
             self._sidebar_divider.pack(side=tk.LEFT, fill=tk.Y)
 
             self.main_frame = tk.Frame(self.root_container, bg=self.bg_color)
-            self.main_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 16), pady=14)
+            self.main_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 16), pady=(14, 0))
             self.content_frame = tk.Frame(self.main_frame, bg=self.bg_color)
-            self.content_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
+            self.content_frame.pack(fill=tk.BOTH, expand=True)
 
             self.workspace_frame = tk.Frame(self.content_frame, bg=self.bg_color)
             self.workspace_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)

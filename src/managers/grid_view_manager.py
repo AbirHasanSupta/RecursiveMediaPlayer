@@ -600,7 +600,7 @@ class GridViewManager:
 
         # ── Canvas / scrollable grid ───────────────────────────────────────────
         body = tk.Frame(gw, bg=t['bg'])
-        body.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
+        body.pack(fill=tk.BOTH, expand=True, padx=0, pady=(2, 10))
 
         self.canvas = tk.Canvas(body, bg=t['bg'], highlightthickness=0)
         scrollbar = ttk.Scrollbar(body, orient=tk.VERTICAL, command=self.canvas.yview,

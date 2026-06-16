@@ -565,7 +565,7 @@ class WatchHistoryUI:
         filter_row = tk.Frame(self.history_window, bg=t['bg'])
         filter_row._manager_role = "body"
         self._hist_filter_row = filter_row
-        filter_row.pack(fill=tk.X, padx=20, pady=(12, 0))
+        filter_row.pack(fill=tk.X, pady=(6, 0))
 
         tk.Label(filter_row, text="Filter by:", font=tp.small_font,
                  bg=t['bg'], fg=t['text_muted']).pack(side=tk.LEFT, padx=(0, 10))
@@ -619,7 +619,7 @@ class WatchHistoryUI:
         body = tk.Frame(self.history_window, bg=t['bg'])
         body._manager_role = "body"
         self._hist_body = body
-        body.pack(fill=tk.BOTH, expand=True, padx=20, pady=(12, 0))
+        body.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
 
         card = tk.Frame(body, bg=t['surface'],
                         highlightbackground=t['border'], highlightthickness=1)

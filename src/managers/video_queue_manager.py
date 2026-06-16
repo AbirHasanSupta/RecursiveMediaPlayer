@@ -590,7 +590,7 @@ class QueueUI:
         body = tk.Frame(self.queue_window, bg=t['bg'])
         body._manager_role = "body"
         self._queue_body = body
-        body.pack(fill=tk.BOTH, expand=True, padx=20, pady=(12, 0))
+        body.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
 
         card = tk.Frame(body, bg=t['surface'],
                         highlightbackground=t['border'], highlightthickness=1)

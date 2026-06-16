@@ -507,7 +507,7 @@ class AnnotationBrowserManager:
             win.geometry(_responsive_geometry(self.root, 1600, 900))
         win.configure(bg=P["panel"])
         if embedded:
-            win.pack(fill=tk.BOTH, expand=True)
+            win.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         else:
             win.minsize(820, 520)
             win.protocol("WM_DELETE_WINDOW", win.destroy)
