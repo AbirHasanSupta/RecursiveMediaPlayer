@@ -28,6 +28,7 @@ class FilterSortUI:
         self.filter_window.configure(bg=self.theme_provider.bg_color)
         self.filter_window.transient(self.parent)
         self.filter_window.grab_set()
+        self.filter_window.bind("<Escape>", lambda e: self.filter_window.destroy())
 
         self._setup_filter_ui()
 

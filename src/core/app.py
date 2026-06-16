@@ -5729,7 +5729,37 @@ def select_multiple_folders_and_play():
         def _show_settings(self):
             self.settings_manager.show_settings()
 
+        def _shortcuts_allowed(self):
+            focused = self.root.focus_get()
+            if focused is None:
+                return True
+            
+            # Check if focused widget is inside settings window
+            if getattr(self, 'settings_manager', None) is not None:
+                ui = getattr(self.settings_manager, 'ui', None)
+                if ui and ui.settings_window and ui.settings_window.winfo_exists():
+                    if str(focused).startswith(str(ui.settings_window)):
+                        return False
+            
+            # Check if focused widget is inside filter window
+            if getattr(self, 'filter_sort_ui', None) is not None:
+                win = getattr(self.filter_sort_ui, 'filter_window', None)
+                if win and win.winfo_exists():
+                    if str(focused).startswith(str(win)):
+                        return False
+            
+            # Check if focused widget is inside active player
+            if getattr(self, '_active_player', None) is not None:
+                player = self._active_player
+                if hasattr(player, '_win') and player._win and player._win.winfo_exists():
+                    if str(focused).startswith(str(player._win)):
+                        return False
+            
+            return True
+
         def _switch_to_tab_by_index(self, index):
+            if not self._shortcuts_allowed():
+                return
             tab_keys = ["home", "gallery", "playlist", "favourites", "queue", "tags", "history", "ai_search"]
             if 0 <= index < len(tab_keys):
                 view_name = tab_keys[index]
@@ -5749,6 +5779,8 @@ def select_multiple_folders_and_play():
             return "break"
 
         def _cycle_tabs(self, direction=1):
+            if not self._shortcuts_allowed():
+                return
             tab_keys = ["home", "gallery", "playlist", "favourites", "queue", "tags", "history", "ai_search"]
             enabled_keys = []
             for k in tab_keys:
@@ -5785,14 +5817,20 @@ def select_multiple_folders_and_play():
             return "break"
 
         def _toggle_theme_shortcut(self):
+            if not self._shortcuts_allowed():
+                return
             self.toggle_theme()
             return "break"
 
         def _show_settings_shortcut(self):
+            if not self._shortcuts_allowed():
+                return
             self._show_settings()
             return "break"
 
         def _show_filter_dialog_shortcut(self):
+            if not self._shortcuts_allowed():
+                return
             self._show_filter_dialog()
             return "break"
 

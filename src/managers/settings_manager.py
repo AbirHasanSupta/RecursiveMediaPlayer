@@ -369,10 +369,13 @@ class SettingsUI:
         self._close_callback = None
         self.settings_window = tk.Toplevel(self.parent)
         self.settings_window.withdraw()
+        self.settings_window.protocol("WM_DELETE_WINDOW", self._close_settings)
+        self.settings_window.bind("<Escape>", lambda e: self._close_settings())
         self.settings_window.title("Application Settings")
         self.settings_window.geometry(_responsive_geometry(self.parent, 700, 840))
         self.settings_window.configure(bg=self.theme_provider.bg_color)
         self.settings_window.resizable(True, True)
+        self.settings_window.minsize(600, 500)
 
         self._setup_settings_ui()
         if tab_index is not None and self._notebook:
