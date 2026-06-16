@@ -1630,10 +1630,7 @@ def select_multiple_folders_and_play():
                 self.console_section.pack(fill=tk.X, pady=(0, 15), before=self.button_frame)
             else:
                 self.console_section.pack_forget()
-            try:
-                self._view_menu.entryconfig(0, label="Hide Console" if self.show_console else "Show Console")
-            except Exception:
-                pass
+            # Show Console is managed via Settings Manager; no toolbar menu entry to update.
             self.save_preferences()
 
         def _submit_scan(self, directory):
@@ -6066,13 +6063,7 @@ def select_multiple_folders_and_play():
             self._toolbar_menus["File"] = file_menu
             self._toolbar_btns["File"] = _sb_btn("📁", "File", menu=file_menu)
 
-            self._view_menu = make_dropdown_menu([
-                ("Hide Console" if self.show_console else "Show Console", self.toggle_console),
-                None,
-                ("Filter / Sort", self._show_filter_dialog),
-            ])
-            self._toolbar_menus["View"] = self._view_menu
-            self._toolbar_btns["View"] = _sb_btn("☰", "View", menu=self._view_menu)
+            self._toolbar_btns["Filter"] = _sb_btn("⇅", "Filter / Sort", command=self._show_filter_dialog)
 
             self._loop_mode_var = tk.StringVar(value=self.loop_mode)
             c = _tb_colors()
