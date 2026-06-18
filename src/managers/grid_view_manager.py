@@ -1276,6 +1276,8 @@ class GridViewManager:
             self.grid_frame.columnconfigure(i, weight=1, uniform="col")
 
         self._update_selection_label()
+        self._kb_focus_path = None
+        self._last_anchor_path = None
 
     # ─────────────────────────────────────────────────────────────────────────
     # Header row (new UI)
@@ -2039,7 +2041,12 @@ class GridViewManager:
         current = self._kb_focus_path
         if current not in self._card_positions:
             if self.selected_items:
-                current = next(iter(self.selected_items))
+                for sel in list(self.selected_items):
+                    if sel in self._card_positions:
+                        current = sel
+                        break
+                else:
+                    current = paths[0]
             else:
                 current = paths[0]
 
