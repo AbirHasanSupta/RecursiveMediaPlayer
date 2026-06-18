@@ -619,12 +619,15 @@ class AnnotationBrowserManager:
             rb._val = i
             rb.bind("<Button-1>", lambda e, v=i: self._on_rating_click(v))
             rb.bind("<Enter>", lambda e, b=rb, v=i: b.config(
-                bg=_p(self.tp.dark_mode, self.tp)["rb_sel"] if self._rating_var.get() != v else _p(self.tp.dark_mode, self.tp)["rb_sel"],
+                bg=_p(self.tp.dark_mode, self.tp)["rb_sel"] if self._rating_var.get() != v else
+                _p(self.tp.dark_mode, self.tp)["rb_sel"],
                 highlightbackground=_p(self.tp.dark_mode, self.tp)["search_hl"]
             ))
             rb.bind("<Leave>", lambda e, b=rb, v=i: b.config(
-                bg=_p(self.tp.dark_mode, self.tp)["rb_sel"] if self._rating_var.get() == v else _p(self.tp.dark_mode, self.tp)["rb_nor"],
-                highlightbackground=_p(self.tp.dark_mode, self.tp)["search_hl"] if self._rating_var.get() == v else _p(self.tp.dark_mode, self.tp)["sep"]
+                bg=_p(self.tp.dark_mode, self.tp)["rb_sel"] if self._rating_var.get() == v else
+                _p(self.tp.dark_mode, self.tp)["rb_nor"],
+                highlightbackground=_p(self.tp.dark_mode, self.tp)["search_hl"] if self._rating_var.get() == v else
+                _p(self.tp.dark_mode, self.tp)["sep"]
             ))
             self._rb_btns.append(rb)
 
@@ -686,7 +689,8 @@ class AnnotationBrowserManager:
         add_tag_btn.bind("<Enter>", lambda e: add_tag_btn.config(bg=self._lighten(P["accent"])))
         add_tag_btn.bind("<Leave>", lambda e: add_tag_btn.config(bg=P["accent"]))
 
-        tk.Frame(sidebar, bg=P["sep"], height=1).pack(fill=tk.X, padx=10)
+        self._tag_focus_sep = tk.Frame(sidebar, bg=P["sep"], height=1)
+        self._tag_focus_sep.pack(fill=tk.X, padx=10)
 
         tag_scroll_area = tk.Frame(sidebar, bg=P["sidebar"])
         tag_scroll_area.pack(fill=tk.BOTH, expand=True)
@@ -699,6 +703,7 @@ class AnnotationBrowserManager:
                                      highlightthickness=0, yscrollcommand=tag_sb.set)
         self._tag_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         tag_sb.config(command=self._tag_canvas.yview)
+        self._tag_canvas._focus_separator = self._tag_focus_sep
 
         self._tag_frame_inner = tk.Frame(self._tag_canvas, bg=P["sidebar"])
         self._tag_canvas_win = self._tag_canvas.create_window(
@@ -762,7 +767,9 @@ class AnnotationBrowserManager:
             tk.Label(col_hdr, text=txt.upper(), font=("Segoe UI", 7, "bold"),
                      bg=P["sidebar"], fg=tp.muted_fg, padx=8, anchor="w")
         col_hdr.bind("<Configure>", _place_headers)
-        tk.Frame(list_outer, bg=P["sep"], height=1).pack(fill=tk.X)
+
+        self._video_focus_sep = tk.Frame(list_outer, bg=P["sep"], height=1)
+        self._video_focus_sep.pack(fill=tk.X)
 
         vid_body = tk.Frame(list_outer, bg=P["panel"])
         vid_body.pack(fill=tk.BOTH, expand=True)
@@ -776,6 +783,7 @@ class AnnotationBrowserManager:
                                      yscrollcommand=vid_sb.set)
         self._vid_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         vid_sb.config(command=self._vid_canvas.yview)
+        self._vid_canvas._focus_separator = self._video_focus_sep
 
         self._vid_inner = tk.Frame(self._vid_canvas, bg=P["panel"])
         self._vid_canvas_win = self._vid_canvas.create_window(
@@ -879,6 +887,8 @@ class AnnotationBrowserManager:
             self._vid_canvas, 'videos',
             activate=self._play_selected,
         )
+        # Attach focus separators (already set on canvases, but ensure they are set)
+        # The separators were assigned in _build_window.
         self.search_entry.bind("<Escape>", lambda _e: self.focus_primary(), add="+")
 
     def _rating_step(self, delta):
