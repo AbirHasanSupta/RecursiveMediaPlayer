@@ -1611,6 +1611,8 @@ def select_multiple_folders_and_play():
             self._refresh_media_pill_state()
             self._set_keyboard_focus_zone('workspace')
             self.active_embedded_manager = builder(frame)
+            if hasattr(self.active_embedded_manager, 'focus_primary'):
+                self.root.after(50, self.active_embedded_manager.focus_primary)
 
             # Re-apply global search to new manager if query exists
             if hasattr(self, 'global_search_entry'):
@@ -2112,6 +2114,9 @@ def select_multiple_folders_and_play():
             self._drag_start_y = None
             self.exclusion_tree.bind("<B1-Motion>", self._on_drag_motion)
             self.exclusion_tree.bind("<ButtonRelease-1>", self._on_drag_release)
+            self.exclusion_tree.bind("<Escape>",
+                                     lambda e: (self.exclusion_tree.selection_set([]),
+                                                self.exclusion_tree.focus("")) and None)
 
             self._hovered_iid = None
 
@@ -5872,6 +5877,14 @@ def select_multiple_folders_and_play():
             self.root.bind("<Control-O>", lambda e: self._add_directory_shortcut())
             for seq in ("<Up>", "<Down>", "<Left>", "<Right>", "<Return>", "<KP_Enter>"):
                 self.root.bind_all(seq, self._global_keyboard_nav, add="+")
+            self.root.bind("<Menu>", self._open_context_menu_for_focused)
+            self.root.bind("<Shift-F10>", self._open_context_menu_for_focused)
+            self.root.bind("<Control-Tab>", lambda e: self._cycle_ui_focus(e, reverse=False))
+            self.root.bind("<Control-Shift-Tab>", lambda e: self._cycle_ui_focus(e, reverse=True))
+            self.root.bind("<Control-p>", self._global_play_shortcut)
+            self.root.bind("<Control-P>", self._global_play_shortcut)
+            self.root.bind("<Control-BackSpace>", lambda e: self._focus_directory_panel())
+            self.root.bind("<Escape>", self._on_global_escape)
 
         def _setup_directory_tree_keyboard(self):
             skip = {getattr(self, 'search_entry', None)}
@@ -5934,6 +5947,92 @@ def select_multiple_folders_and_play():
                     return
                 if mgr.handle_keyboard_nav(event):
                     return "break"
+
+        def _focus_directory_panel(self, event=None):
+            if not self._shortcuts_allowed():
+                return "break"
+            tree = getattr(self, 'exclusion_tree', None)
+            if tree and tree.winfo_exists() and tree.winfo_ismapped():
+                tree.focus_set()
+                self._set_keyboard_focus_zone('directory')
+            return "break"
+
+        def _on_global_escape(self, event=None):
+            if not self._shortcuts_allowed():
+                return
+            focused = self.root.focus_get()
+            tree = getattr(self, 'exclusion_tree', None)
+            if tree and focused == tree:
+                tree.selection_set([])
+                tree.focus("")
+                return "break"
+
+        def _open_context_menu_for_focused(self, event=None):
+            if not self._shortcuts_allowed():
+                return "break"
+            focused = self.root.focus_get()
+            if focused is None:
+                return "break"
+            if focused == getattr(self, 'exclusion_tree', None):
+                tree = self.exclusion_tree
+                iid = tree.focus() or (tree.selection()[0] if tree.selection() else None)
+                if iid:
+                    bbox = tree.bbox(iid)
+                    if bbox:
+                        x, y, w, h = bbox
+                        root_x = tree.winfo_rootx() + x + w // 2
+                        root_y = tree.winfo_rooty() + y + h // 2
+                    else:
+                        root_x = tree.winfo_rootx() + 10
+                        root_y = tree.winfo_rooty() + 10
+                    ev = type('Event', (), {'x_root': root_x, 'y_root': root_y, 'x': x + w // 2, 'y': y + h // 2})()
+                    self._show_context_menu(ev)
+            else:
+                mgr = getattr(self, 'active_embedded_manager', None)
+                if mgr and hasattr(mgr, 'open_context_menu_for_focused'):
+                    mgr.open_context_menu_for_focused()
+            return "break"
+
+        def _cycle_ui_focus(self, event=None, reverse=False):
+            if not self._shortcuts_allowed():
+                return "break"
+            focused = self.root.focus_get()
+            mgr = getattr(self, 'active_embedded_manager', None)
+            workspace_widget = None
+            if mgr:
+                if hasattr(mgr, 'get_primary_widget'):
+                    workspace_widget = mgr.get_primary_widget()
+            if workspace_widget is None:
+                workspace_widget = getattr(self, 'workspace_body', None)
+            regions = []
+            tree = getattr(self, 'exclusion_tree', None)
+            if tree and tree.winfo_exists() and tree.winfo_ismapped():
+                regions.append(('directory', tree))
+            dir_search = getattr(self, 'search_entry', None)
+            if dir_search and dir_search.winfo_exists() and dir_search.winfo_ismapped():
+                regions.append(('dir_search', dir_search))
+            global_search = getattr(self, 'global_search_entry', None)
+            if global_search and global_search.winfo_exists() and global_search.winfo_ismapped():
+                regions.append(('global_search', global_search))
+            if workspace_widget and workspace_widget.winfo_exists() and workspace_widget.winfo_ismapped():
+                regions.append(('workspace', workspace_widget))
+            if not regions:
+                return "break"
+            cur_idx = next((i for i, (_, w) in enumerate(regions) if w == focused), -1)
+            if cur_idx == -1:
+                next_idx = 0
+            else:
+                next_idx = (cur_idx + (- 1 if reverse else 1)) % len(regions)
+            zone, widget = regions[next_idx]
+            widget.focus_set()
+            self._set_keyboard_focus_zone('directory' if zone == 'directory' else 'workspace')
+            return "break"
+
+        def _global_play_shortcut(self, event=None):
+            if not self._shortcuts_allowed():
+                return "break"
+            self.global_play()
+            return "break"
 
         def _shortcuts_allowed(self):
             try:

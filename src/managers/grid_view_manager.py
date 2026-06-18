@@ -1771,6 +1771,26 @@ class GridViewManager:
             for seq in ("<Up>", "<Down>", "<Left>", "<Right>", "<Return>", "<KP_Enter>"):
                 self.grid_frame.bind(seq, self._on_grid_keyboard, add="+")
 
+    def focus_primary(self):
+        if hasattr(self, 'canvas') and self.canvas.winfo_exists():
+            self.canvas.focus_set()
+            self._claim_workspace_keyboard_focus(self.canvas)
+
+    def get_primary_widget(self):
+        return self.canvas if hasattr(self, 'canvas') else None
+
+    def open_context_menu_for_focused(self):
+        vp = self._kb_focus_path
+        if not vp and self.selected_items:
+            vp = next(iter(self.selected_items))
+        if not vp or vp not in self.card_widgets:
+            return
+        card = self.card_widgets[vp]
+        x = card.winfo_rootx() + card.winfo_width() // 2
+        y = card.winfo_rooty() + card.winfo_height() // 2
+        event = type('Event', (), {'x_root': x, 'y_root': y})()
+        self._show_context_menu(event, vp)
+
     def handle_keyboard_nav(self, event):
         if not keyboard_navigation.is_workspace_zone(self.theme_provider):
             return False
