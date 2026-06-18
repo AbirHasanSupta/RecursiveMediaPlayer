@@ -37,6 +37,7 @@ from managers.playlist_manager import PlaylistManager
 from managers.watch_history_manager import WatchHistoryManager
 from managers.resume_playback_manager import ResumePlaybackManager
 from managers.settings_manager import SettingsManager
+from managers.help_manager import HelpManager
 from managers.video_preview_manager import VideoPreviewManager
 from managers.video_queue_manager import VideoQueueManager
 from managers.google_drive_manager import GoogleDriveManager
@@ -163,6 +164,7 @@ def select_multiple_folders_and_play():
                 self.root, self, self.update_console
             )
             self.settings_manager = SettingsManager(self.root, self, self.update_console, enable_ai=True)
+            self.help_manager = HelpManager(self.root, self)
             self._update_ai_search_visibility()
             self.toast = Toast(self.root, self)
             self.setup_exclusion_section()
@@ -1827,6 +1829,9 @@ def select_multiple_folders_and_play():
             if dir_w > 10:
                 self.dir_section.config(width=dir_w)
                 self.dir_section.pack_propagate(False)
+
+            if hasattr(self, 'help_manager'):
+                self.help_manager.apply_theme()
 
         def _reapply_tree_columns(self):
             if not hasattr(self, 'exclusion_tree'):
@@ -5870,6 +5875,9 @@ def select_multiple_folders_and_play():
         def _show_settings(self):
             self.settings_manager.show_settings()
 
+        def _show_help(self):
+            self.help_manager.show_help()
+
         def _setup_app_keyboard_navigation(self):
             self.root.bind("<Control-D>", lambda e: self._toggle_directory_panel_shortcut())
             self.root.bind("<Control-d>", lambda e: self._toggle_directory_panel_shortcut())
@@ -6662,7 +6670,8 @@ def select_multiple_folders_and_play():
             self.theme_toolbar_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 8))
             self._bind_theme_toolbar_hover()
 
-            self._toolbar_btns["Settings"] = _sb_btn("⚙", "Settings", command=self._show_settings, side=tk.BOTTOM, pady=(18, 2))
+            self._toolbar_btns["Settings"] = _sb_btn("⚙", "Settings", command=self._show_settings, side=tk.BOTTOM, pady=(4, 2))
+            self._toolbar_btns["Help"] = _sb_btn("?", "Keyboard Shortcuts", command=self._show_help, side=tk.BOTTOM)
 
             self.button_frame = tk.Frame(self.main_frame, bg=self.bg_color)
             self.button_frame.pack(fill=tk.X)
