@@ -371,7 +371,13 @@ class FocusRing:
         return None
 
     def _on_focus_in(self, widget):
-        if getattr(widget, '_no_focus_border', False):
+        sep = getattr(widget, '_focus_separator', None)
+        if sep is not None:
+            try:
+                sep.config(bg=self._accent_color)
+                widget.config(highlightthickness=0)
+            except tk.TclError:
+                pass
             return
         try:
             widget.configure(highlightthickness=2,
@@ -386,7 +392,12 @@ class FocusRing:
                 break
 
     def _on_focus_out(self, widget):
-        if getattr(widget, '_no_focus_border', False):
+        sep = getattr(widget, '_focus_separator', None)
+        if sep is not None:
+            try:
+                sep.config(bg=self._border_color)
+            except tk.TclError:
+                pass
             return
         try:
             widget.configure(highlightthickness=1,

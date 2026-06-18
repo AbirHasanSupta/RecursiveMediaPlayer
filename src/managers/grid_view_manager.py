@@ -606,16 +606,16 @@ class GridViewManager:
         # Pagination — centered between left controls and right controls
         self._pagination_frame = tk.Frame(inner_tb, bg=toolbar_bg)
         self._pagination_frame.pack(side=tk.LEFT, expand=True, fill=tk.X)
-        self._build_pagination_bar()
 
-        tk.Frame(gw, bg=t['divider'], height=1).pack(fill=tk.X)
+        self._focus_separator = tk.Frame(gw, bg=t['divider'], height=1)
+        self._focus_separator.pack(fill=tk.X)
 
         # ── Canvas / scrollable grid ───────────────────────────────────────────
         body = tk.Frame(gw, bg=t['bg'])
         body.pack(fill=tk.BOTH, expand=True, padx=0, pady=(2, 10))
 
         self.canvas = tk.Canvas(body, bg=t['bg'], highlightthickness=0)
-        self.canvas._no_focus_border = True
+        self.canvas._focus_separator = self._focus_separator  # attach to canvas
         self.canvas.configure(takefocus=1)
         scrollbar = ttk.Scrollbar(body, orient=tk.VERTICAL, command=self.canvas.yview,
                                   style="ExclusionTree.Vertical.TScrollbar")
@@ -677,8 +677,9 @@ class GridViewManager:
 
         self._claim_workspace_keyboard_focus(self.canvas)
 
-        # Start loading videos (unchanged)
         ManagedThread(target=self._load_videos, args=(videos,), name="LoadGridVideos").start()
+
+        self._build_pagination_bar()
 
     # ─────────────────────────────────────────────────────────────────────────
     # Widget helpers (new UI)
@@ -1855,8 +1856,16 @@ class GridViewManager:
         return None
 
     def _on_toolbar_focus_in(self, widget):
-        if getattr(widget, '_no_focus_border', False):
+        sep = getattr(widget, '_focus_separator', None)
+        if sep is not None:
+            t = self._tok()
+            try:
+                sep.config(bg=t['accent'])
+                widget.config(highlightthickness=0)
+            except tk.TclError:
+                pass
             return
+
         t = self._tok()
         try:
             widget.configure(highlightthickness=2, highlightbackground=t['accent'], highlightcolor=t['accent'])
@@ -1868,8 +1877,15 @@ class GridViewManager:
                 break
 
     def _on_toolbar_focus_out(self, widget):
-        if getattr(widget, '_no_focus_border', False):
+        sep = getattr(widget, '_focus_separator', None)
+        if sep is not None:
+            t = self._tok()
+            try:
+                sep.config(bg=t['divider'])
+            except tk.TclError:
+                pass
             return
+
         t = self._tok()
         try:
             widget.configure(highlightthickness=1, highlightbackground=t['border'], highlightcolor=t['border'])

@@ -435,14 +435,15 @@ class AISearchUI:
         )
         self._stale_lbl.bind("<Button-1>", lambda _e: self._on_index_click())
 
-        divider = tk.Frame(self._frame, bg=self.border, height=1)
-        divider.pack(fill=tk.X)
+        self._focus_separator = tk.Frame(self._frame, bg=self.border, height=1)
+        self._focus_separator.pack(fill=tk.X)
 
         self._results_outer = tk.Frame(self._frame, bg=self.bg)
         self._results_outer.pack(fill=tk.BOTH, expand=True)
 
         self._canvas = tk.Canvas(self._results_outer, bg=self.bg,
                                  highlightthickness=0, bd=0)
+        self._canvas._focus_separator = self._focus_separator  # attach to canvas
         self._scrollbar = ttk.Scrollbar(self._results_outer, orient="vertical",
                                         command=self._canvas.yview,
                                         style="ExclusionTree.Vertical.TScrollbar")
