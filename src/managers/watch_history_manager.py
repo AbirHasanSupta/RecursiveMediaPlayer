@@ -726,6 +726,8 @@ class WatchHistoryUI:
     def handle_keyboard_nav(self, event):
         if not keyboard_navigation.is_workspace_zone(self.theme_provider):
             return False
+        if not self.current_entries:
+            return False
         if event.keysym in ("Up", "Down", "Return", "KP_Enter"):
             keyboard_navigation.claim_workspace_focus(self.theme_provider, self.history_tree)
             self.history_tree.event_generate(f'<{event.keysym}>')

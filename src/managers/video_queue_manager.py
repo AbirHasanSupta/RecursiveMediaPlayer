@@ -683,6 +683,8 @@ class QueueUI:
     def handle_keyboard_nav(self, event):
         if not keyboard_navigation.is_workspace_zone(self.theme_provider):
             return False
+        if not self.queue_service.get_queue():
+            return False
         if event.keysym in ("Up", "Down", "Return", "KP_Enter"):
             keyboard_navigation.claim_workspace_focus(self.theme_provider, self.queue_tree)
             self.queue_tree.event_generate(f'<{event.keysym}>')

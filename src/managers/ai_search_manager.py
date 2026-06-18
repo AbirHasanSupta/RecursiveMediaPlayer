@@ -1318,6 +1318,8 @@ class AISearchUI:
                 return False
         except ImportError:
             return False
+        if not self._all_results:
+            return False
         return self._on_ai_search_keyboard(event) == "break"
 
     def _on_ai_search_keyboard(self, event):
