@@ -577,6 +577,7 @@ class PlaylistUI:
 
     def _unselect_all(self, event=None):
         self.video_tree.selection_remove(*self.video_tree.get_children())
+        self.video_tree._selection_anchor = None
 
     def _on_video_right_click_wrapper(self, event):
         if not hasattr(self, 'playlist_window') or not self.playlist_window:
@@ -679,10 +680,19 @@ class PlaylistUI:
         shift_held = bool(event.state & 0x1)
         current_selection = list(self.video_tree.selection())
         if shift_held and current_selection:
-            anchor = int(current_selection[-1])
-            start, end = min(anchor, index), max(anchor, index)
-            self.video_tree.selection_set(*[str(i) for i in range(start, end + 1)
-                                            if self.video_tree.exists(str(i))])
+            anchor = getattr(self.video_tree, '_selection_anchor', current_selection[-1])
+            if anchor not in self.video_tree.get_children():
+                anchor = current_selection[-1]
+            all_iids = list(self.video_tree.get_children())
+            try:
+                a_idx = all_iids.index(anchor)
+                b_idx = all_iids.index(iid)
+            except ValueError:
+                return "break"
+            start, end = min(a_idx, b_idx), max(a_idx, b_idx)
+            self.video_tree.selection_set(all_iids[start:end + 1])
+            self.video_tree.focus(iid)
+            self.video_tree.see(iid)
             return "break"
         elif ctrl_held:
             if iid in current_selection:
@@ -692,6 +702,7 @@ class PlaylistUI:
             return "break"
         else:
             self.video_tree.selection_set(iid)
+            self.video_tree._selection_anchor = iid
             self.dragging_index = index
             return "break"
 

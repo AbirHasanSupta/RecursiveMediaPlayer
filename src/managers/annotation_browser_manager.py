@@ -1641,18 +1641,19 @@ class AnnotationBrowserManager:
             self.video_preview_manager.tooltip.hide_preview()
 
         index = self._row_at_y(event.y)
-
         if index < 0 or index >= len(self._filtered_videos):
             return
 
-        ctrl_held  = bool(event.state & 0x4)
+        ctrl_held = bool(event.state & 0x4)
         shift_held = bool(event.state & 0x1)
         current_selection = sorted(self._vid_selection)
 
         if shift_held and current_selection:
-            anchor = current_selection[-1]
-            start  = min(anchor, index)
-            end    = max(anchor, index)
+            anchor = getattr(self._vid_canvas, '_selection_anchor', current_selection[-1])
+            if anchor is None:
+                anchor = current_selection[-1]
+            start = min(anchor, index)
+            end = max(anchor, index)
             self._vid_selection = set(range(start, end + 1))
             self._refresh_row_colors()
             self._on_video_select()
@@ -1667,6 +1668,7 @@ class AnnotationBrowserManager:
             return "break"
         else:
             self._vid_selection = {index}
+            self._vid_canvas._selection_anchor = index
             self._dragging_index = index
             self._refresh_row_colors()
             self._on_video_select()
@@ -1841,6 +1843,7 @@ class AnnotationBrowserManager:
 
     def _unselect_all(self, event=None):
         self._vid_selection.clear()
+        self._vid_canvas._selection_anchor = None
         self._refresh_row_colors()
 
     # ── Playback ──────────────────────────────────────────────────────────────

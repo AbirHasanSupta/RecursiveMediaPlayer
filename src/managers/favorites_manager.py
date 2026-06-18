@@ -948,20 +948,33 @@ class FavoritesUI:
         ctrl_held = bool(event.state & 0x4)
         shift_held = bool(event.state & 0x1)
         current_selection = list(self.favorites_tree.selection())
-        if shift_held and current_selection:
-            anchor = int(current_selection[-1])
-            start, end = min(anchor, index), max(anchor, index)
-            self.favorites_tree.selection_set(*[str(i) for i in range(start, end + 1)
-                                                if self.favorites_tree.exists(str(i))])
+        if shift_held:
+            if current_selection:
+                anchor = getattr(self.favorites_tree, '_selection_anchor', current_selection[-1])
+                if anchor not in self.favorites_tree.get_children():
+                    anchor = current_selection[-1]
+                all_iids = list(self.favorites_tree.get_children())
+                try:
+                    a_idx = all_iids.index(anchor)
+                    b_idx = all_iids.index(iid)
+                except ValueError:
+                    return "break"
+                start, end = min(a_idx, b_idx), max(a_idx, b_idx)
+                self.favorites_tree.selection_set(all_iids[start:end + 1])
+                self.favorites_tree.focus(iid)
+                self.favorites_tree.see(iid)
             return "break"
         elif ctrl_held:
             if iid in current_selection:
                 self.favorites_tree.selection_remove(iid)
             else:
                 self.favorites_tree.selection_add(iid)
+            # Do NOT update anchor on Ctrl+click
             return "break"
         else:
+            # Plain click – clear previous, set new anchor
             self.favorites_tree.selection_set(iid)
+            self.favorites_tree._selection_anchor = iid
             if 0 <= index < len(self.favorite_entries):
                 self.dragging_index = index
             return "break"

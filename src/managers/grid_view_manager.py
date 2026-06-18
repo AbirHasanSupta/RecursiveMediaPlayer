@@ -1787,13 +1787,44 @@ class GridViewManager:
         direction = {
             "Up": "up", "Down": "down", "Left": "left", "Right": "right",
         }.get(keysym)
-        if direction and self._kb_navigate_card(direction):
-            return "break"
+        if direction:
+            # Store current anchor before navigation
+            old_anchor = getattr(self, '_last_anchor_path', None)
+            if not old_anchor and self.selected_items:
+                old_anchor = next(iter(self.selected_items))
+            new_path = self._kb_navigate_card(direction, return_new=True)
+            if new_path:
+                # If Shift is held, extend selection from anchor to new_path
+                if event.state & 0x1 and old_anchor:
+                    # Get all video paths in current page order
+                    page_items = self._pages_cache[self._page] if self._pages_cache else self.items
+                    video_paths = [it['path'] for it in page_items if it['type'] == 'video']
+                    if old_anchor in video_paths and new_path in video_paths:
+                        a_idx = video_paths.index(old_anchor)
+                        b_idx = video_paths.index(new_path)
+                        start, end = min(a_idx, b_idx), max(a_idx, b_idx)
+                        self.selected_items = set(video_paths[start:end + 1])
+                        for vp in video_paths:
+                            self._update_card_selection(vp)
+                        self._update_selection_label()
+                        self._last_anchor_path = old_anchor  # keep anchor unchanged
+                else:
+                    # Without Shift, replace selection and update anchor
+                    self.selected_items = {new_path}
+                    self._last_anchor_path = new_path
+                    for vp in list(self.card_widgets.keys()):
+                        self._update_card_selection(vp)
+                    self._update_selection_label()
+                self._kb_focus_path = new_path
+                card = self.card_widgets.get(new_path)
+                if card:
+                    keyboard_navigation.scroll_widget_into_view(self.canvas, card)
+                return "break"
 
-    def _kb_navigate_card(self, direction):
+    def _kb_navigate_card(self, direction, return_new=False):
         paths = list(self._card_positions.keys())
         if not paths:
-            return False
+            return False if not return_new else None
 
         current = self._kb_focus_path
         if current not in self._card_positions:
@@ -1823,16 +1854,22 @@ class GridViewManager:
                 elif direction == "right" and idx < len(ordered) - 1:
                     target = ordered[idx + 1][0]
                 else:
-                    return False
+                    return False if not return_new else None
+                if return_new:
+                    return target
                 self._kb_select_card(target)
                 return True
-            return False
+            return False if not return_new else None
 
         if direction in ("up", "down"):
-            target = max(candidates, key=lambda x: x[0])[1] if direction == "up" else min(candidates, key=lambda x: x[0])[1]
+            target = max(candidates, key=lambda x: x[0])[1] if direction == "up" else \
+            min(candidates, key=lambda x: x[0])[1]
         else:
-            target = max(candidates, key=lambda x: x[0])[1] if direction == "left" else min(candidates, key=lambda x: x[0])[1]
+            target = max(candidates, key=lambda x: x[0])[1] if direction == "left" else \
+            min(candidates, key=lambda x: x[0])[1]
 
+        if return_new:
+            return target
         self._kb_select_card(target)
         return True
 

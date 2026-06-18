@@ -841,6 +841,7 @@ class QueueUI:
 
     def _unselect_all(self, event=None):
         self.queue_tree.selection_remove(*self.queue_tree.get_children())
+        self.queue_tree._selection_anchor = None
 
     def _on_mouse_leave(self, event):
         if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
@@ -1024,10 +1025,19 @@ class QueueUI:
         shift_held = bool(event.state & 0x1)
         current_selection = list(self.queue_tree.selection())
         if shift_held and current_selection:
-            anchor = int(current_selection[-1])
-            start, end = min(anchor, index), max(anchor, index)
-            self.queue_tree.selection_set(*[str(i) for i in range(start, end + 1)
-                                            if self.queue_tree.exists(str(i))])
+            anchor = getattr(self.queue_tree, '_selection_anchor', current_selection[-1])
+            if anchor not in self.queue_tree.get_children():
+                anchor = current_selection[-1]
+            all_iids = list(self.queue_tree.get_children())
+            try:
+                a_idx = all_iids.index(anchor)
+                b_idx = all_iids.index(iid)
+            except ValueError:
+                return "break"
+            start, end = min(a_idx, b_idx), max(a_idx, b_idx)
+            self.queue_tree.selection_set(all_iids[start:end + 1])
+            self.queue_tree.focus(iid)
+            self.queue_tree.see(iid)
             self.drag_start_index = None
             return "break"
         elif ctrl_held:
@@ -1039,6 +1049,7 @@ class QueueUI:
             return "break"
         else:
             self.queue_tree.selection_set(iid)
+            self.queue_tree._selection_anchor = iid
             self.drag_start_index = index
             self.drag_data = None
             return "break"

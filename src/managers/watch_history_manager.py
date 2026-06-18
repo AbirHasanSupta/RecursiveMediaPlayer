@@ -687,7 +687,7 @@ class WatchHistoryUI:
 
         self.history_tree.bind("<Double-Button-1>", self._on_history_double_click)
         self.history_tree.bind("<Button-3>", self._on_history_right_click)
-        self.history_tree.bind("<Button-1>", self._on_history_left_click)
+        self.history_tree.bind("<Button-1>", self._on_history_left_click, add="+")
         self.history_tree.bind("<Leave>", self._on_combined_leave)
         self.history_tree.bind("<Motion>", self._on_tree_hover)
         self._setup_history_keyboard_nav()
@@ -789,8 +789,11 @@ class WatchHistoryUI:
         if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
             self.video_preview_manager.tooltip.hide_preview()
         iid = self.history_tree.identify_row(event.y)
-        if iid:
-            self._claim_workspace_keyboard_focus(self.history_tree)
+        if not iid:
+            return
+        self._claim_workspace_keyboard_focus(self.history_tree)
+        if not (event.state & 0x4) and not (event.state & 0x1):
+            self.history_tree._selection_anchor = iid
 
     def _on_tree_hover(self, event):
         iid = self.history_tree.identify_row(event.y)
@@ -856,6 +859,7 @@ class WatchHistoryUI:
 
     def _unselect_all(self, event=None):
         self.history_tree.selection_remove(self.history_tree.selection())
+        self.history_tree._selection_anchor = None  # <-- ADD THIS
 
     def _show_history_context_menu(self, event):
         selection = self.history_tree.selection()

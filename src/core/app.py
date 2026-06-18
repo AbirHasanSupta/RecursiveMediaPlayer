@@ -2247,9 +2247,9 @@ def select_multiple_folders_and_play():
 
             is_root = iid in self._dir_root_iids
 
-            ctrl_held  = bool(event.state & 0x4)
+            ctrl_held = bool(event.state & 0x4)
             shift_held = bool(event.state & 0x1)
-            current    = list(self.exclusion_tree.selection())
+            current = list(self.exclusion_tree.selection())
 
             if shift_held:
                 if self._selection_anchor is None:
@@ -2271,19 +2271,20 @@ def select_multiple_folders_and_play():
                     self.exclusion_tree.selection_remove(iid)
                 else:
                     self.exclusion_tree.selection_add(iid)
-                self._selection_anchor = iid
+                # Do NOT update anchor on Ctrl+click
                 if is_root:
                     self._trigger_root_selection(iid)
                 return "break"
 
-            # Plain click
+            # Plain click – clear previous selection, set new anchor
             if is_root:
                 if current == [iid]:
-                    # toggle off
+                    # Toggle off
                     self.exclusion_tree.selection_remove(iid)
                     self.current_selected_dir_index = None
                     self._is_filtered_mode = False
                     self._selection_anchor = None
+                    self.exclusion_tree._selection_anchor = None
                     self._refresh_active_manager_for_directory_context()
                     if getattr(self, 'search_query', ''):
                         self.refresh_search_results(auto_expand=False)
@@ -2291,12 +2292,14 @@ def select_multiple_folders_and_play():
                         self.clear_exclusion_children(iid)
                     return "break"
                 self.exclusion_tree.selection_set(iid)
+                self.exclusion_tree._selection_anchor = iid
                 self._selection_anchor = iid
                 self._trigger_root_selection(iid)
                 return "break"
 
             # Non-root item
             self.exclusion_tree.selection_set(iid)
+            self.exclusion_tree._selection_anchor = iid
             self._selection_anchor = iid
             return "break"
 
@@ -4133,6 +4136,7 @@ def select_multiple_folders_and_play():
         def clear_tree_selection(self):
             if hasattr(self, 'exclusion_tree'):
                 self.exclusion_tree.selection_remove(self.exclusion_tree.selection())
+                self.exclusion_tree._selection_anchor = None
             self._selection_anchor = None
             self.current_selected_dir_index = None
             self._refresh_active_manager_for_directory_context()

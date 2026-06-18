@@ -289,7 +289,7 @@ class AISearchUI:
         self._result_count_lbl: Optional[tk.Label] = None
         self._search_mode = "ai"
         self._thumb_semaphore = threading.Semaphore(4)
-
+        self._focus_path: Optional[str] = None
         self._pull_theme()
         self._build()
 
@@ -919,16 +919,16 @@ class AISearchUI:
         if shift and self._last_anchor_path and self._last_anchor_path in self._all_results:
             ai = self._all_results.index(self._last_anchor_path)
             bi = self._all_results.index(vp) if vp in self._all_results else 0
-            for i in range(min(ai, bi), max(ai, bi) + 1):
-                self._selected_paths.add(self._all_results[i])
-                self._update_card_selection(self._all_results[i])
+            start, end = min(ai, bi), max(ai, bi)
+            self._selected_paths = set(self._all_results[start:end + 1])
+            for path in self._all_results[start:end + 1]:
+                self._update_card_selection(path)
         elif ctrl:
             if vp in self._selected_paths:
                 self._selected_paths.discard(vp)
             else:
                 self._selected_paths.add(vp)
             self._update_card_selection(vp)
-            self._last_anchor_path = vp
         else:
             old = set(self._selected_paths)
             self._selected_paths = {vp}
@@ -1328,6 +1328,8 @@ class AISearchUI:
         except ImportError:
             return
         keysym = event.keysym
+        shift_held = bool(event.state & 0x1)
+
         if keysym in ("Return", "KP_Enter"):
             selected = self._get_selected_videos()
             if selected:
@@ -1335,36 +1337,61 @@ class AISearchUI:
             elif self._all_results:
                 self._play_video(self._all_results[0])
             return "break"
+
         if keysym not in ("Up", "Down") or not self._all_results:
             return
 
-        current = None
-        if self._selected_paths:
-            for vp in self._all_results:
-                if vp in self._selected_paths:
-                    current = vp
-                    break
-        if current is None:
-            current = self._all_results[0]
-            idx = 0
-        else:
+        # Determine current focus index
+        # Use self._focus_path if valid, else fallback to first selected, else first result
+        current = self._focus_path
+        if current is None or current not in self._all_results:
+            if self._selected_paths:
+                # pick the most recently added? We'll just take the first selected.
+                current = next(iter(self._selected_paths))
+            else:
+                current = self._all_results[0]
+        try:
             idx = self._all_results.index(current)
+        except ValueError:
+            idx = 0
 
+        # Move one step
         if keysym == "Up":
             idx = max(0, idx - 1)
         else:
             idx = min(len(self._all_results) - 1, idx + 1)
 
-        vp = self._all_results[idx]
-        old = set(self._selected_paths)
-        self._selected_paths = {vp}
-        for path in old:
-            if path != vp:
-                self._update_card_selection(path)
-        self._update_card_selection(vp)
-        self._last_anchor_path = vp
+        new_vp = self._all_results[idx]
+        self._focus_path = new_vp  # always update focus
 
-        card = self._card_frames.get(vp)
+        if shift_held:
+            # If no anchor exists, set it to the item we were on before moving
+            if self._last_anchor_path is None or self._last_anchor_path not in self._all_results:
+                self._last_anchor_path = current
+            anchor = self._last_anchor_path
+            try:
+                a_idx = self._all_results.index(anchor)
+                b_idx = idx
+                start, end = min(a_idx, b_idx), max(a_idx, b_idx)
+                self._selected_paths = set(self._all_results[start:end + 1])
+                for path in self._all_results[start:end + 1]:
+                    self._update_card_selection(path)
+            except ValueError:
+                return "break"
+            # Do NOT update anchor here – keep it fixed
+        else:
+            # Without Shift, replace selection and update anchor
+            old = set(self._selected_paths)
+            self._selected_paths = {new_vp}
+            for path in old:
+                if path != new_vp:
+                    self._update_card_selection(path)
+            self._update_card_selection(new_vp)
+            self._last_anchor_path = new_vp  # anchor follows the single selection
+
+        self._update_selection_label()
+
+        card = self._card_frames.get(new_vp)
         if card:
             try:
                 import keyboard_navigation

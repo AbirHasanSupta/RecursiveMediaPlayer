@@ -6,7 +6,6 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable, Iterable, Optional, Sequence
 
-
 TEXT_INPUT_CLASSES = (tk.Entry, tk.Text, ttk.Entry, ttk.Combobox, tk.Spinbox)
 
 
@@ -51,7 +50,6 @@ def claim_workspace_focus(app, focus_widget=None):
 
 
 def bind_focus_target(container, focus_target, skip_widgets: Optional[Iterable] = None):
-    """Focus *focus_target* when *container* is clicked (except skipped widgets)."""
     skip = set(skip_widgets or ())
 
     def _on_click(event):
@@ -70,7 +68,6 @@ def bind_focus_target(container, focus_target, skip_widgets: Optional[Iterable] 
 
 def bind_keyboard_zone(container, zone: str, on_zone_change: Callable[[str], None],
                        skip_widgets: Optional[Iterable] = None):
-    """Track which UI region should receive keyboard navigation."""
     skip = set(skip_widgets or ())
 
     def _on_click(event):
@@ -84,7 +81,28 @@ def bind_keyboard_zone(container, zone: str, on_zone_change: Callable[[str], Non
         pass
 
 
-def navigate_flat_tree(tree: ttk.Treeview, direction: str, *, skip_iids: Optional[set] = None) -> bool:
+# ---------- anchor helpers ----------
+def _get_anchor(tree):
+    return getattr(tree, '_selection_anchor', None)
+
+
+def _set_anchor(tree, iid):
+    tree._selection_anchor = iid
+
+
+def _select_range(tree, iids, anchor_idx, new_idx):
+    """Select all items between anchor_idx and new_idx (inclusive)."""
+    if not iids:
+        return
+    start, end = min(anchor_idx, new_idx), max(anchor_idx, new_idx)
+    to_select = iids[start:end+1]
+    tree.selection_set(to_select)
+    tree.focus(iids[new_idx])
+    tree.see(iids[new_idx])
+
+
+def navigate_flat_tree(tree: ttk.Treeview, direction: str, *, shift_held: bool = False,
+                       skip_iids: Optional[set] = None) -> bool:
     skip = skip_iids or set()
     children = [iid for iid in tree.get_children("") if iid not in skip]
     if not children:
@@ -112,10 +130,23 @@ def navigate_flat_tree(tree: ttk.Treeview, direction: str, *, skip_iids: Optiona
     else:
         return False
 
-    iid = children[idx]
-    tree.selection_set(iid)
-    tree.focus(iid)
-    tree.see(iid)
+    new_iid = children[idx]
+
+    if shift_held:
+        anchor = _get_anchor(tree)
+        if anchor is None or anchor not in children:
+            anchor = focused
+        try:
+            anchor_idx = children.index(anchor)
+        except ValueError:
+            anchor_idx = idx
+        _select_range(tree, children, anchor_idx, idx)
+    else:
+        tree.selection_set(new_iid)
+        _set_anchor(tree, new_iid)
+        tree.focus(new_iid)
+        tree.see(new_iid)
+
     return True
 
 
@@ -123,18 +154,17 @@ def navigate_hierarchical_tree(
     tree: ttk.Treeview,
     direction: str,
     *,
+    shift_held: bool = False,
     all_iids_fn: Optional[Callable[[], Sequence[str]]] = None,
     arrows_expand: bool = True,
 ) -> bool:
     if all_iids_fn is None:
         def all_iids_fn():
             result = []
-
             def _walk(parent):
                 for iid in tree.get_children(parent):
                     result.append(iid)
                     _walk(iid)
-
             _walk("")
             return result
 
@@ -161,10 +191,22 @@ def navigate_hierarchical_tree(
             idx = max(0, idx - 1)
         else:
             idx = min(len(all_iids) - 1, idx + 1)
-        iid = all_iids[idx]
-        tree.selection_set(iid)
-        tree.focus(iid)
-        tree.see(iid)
+        new_iid = all_iids[idx]
+
+        if shift_held:
+            anchor = _get_anchor(tree)
+            if anchor is None or anchor not in all_iids:
+                anchor = focused
+            try:
+                anchor_idx = all_iids.index(anchor)
+            except ValueError:
+                anchor_idx = idx
+            _select_range(tree, all_iids, anchor_idx, idx)
+        else:
+            tree.selection_set(new_iid)
+            _set_anchor(tree, new_iid)
+            tree.focus(new_iid)
+            tree.see(new_iid)
         return True
 
     if not arrows_expand:
@@ -178,6 +220,7 @@ def navigate_hierarchical_tree(
         parent = tree.parent(focused)
         if parent:
             tree.selection_set(parent)
+            _set_anchor(tree, parent)
             tree.focus(parent)
             tree.see(parent)
             return True
@@ -190,6 +233,7 @@ def navigate_hierarchical_tree(
                 return True
             child = tree.get_children(focused)[0]
             tree.selection_set(child)
+            _set_anchor(tree, child)
             tree.focus(child)
             tree.see(child)
             return True
@@ -208,22 +252,27 @@ def bind_tree_keyboard(
     arrows_expand: bool = True,
     is_active: Optional[Callable[[], bool]] = None,
 ):
-    """Bind arrow keys and Enter on a tree widget."""
-
     def _handle(event):
         if is_active is not None and not is_active():
             return
         keysym = event.keysym
+        shift_held = bool(event.state & 0x1)
+
         if keysym in ("Up", "Down", "Left", "Right"):
             direction = keysym.lower()
             if hierarchical:
                 handled = navigate_hierarchical_tree(
                     tree, direction,
+                    shift_held=shift_held,
                     all_iids_fn=all_iids_fn,
                     arrows_expand=arrows_expand,
                 )
             else:
-                handled = navigate_flat_tree(tree, direction, skip_iids=skip_iids)
+                handled = navigate_flat_tree(
+                    tree, direction,
+                    shift_held=shift_held,
+                    skip_iids=skip_iids,
+                )
             if handled:
                 return "break"
             return
