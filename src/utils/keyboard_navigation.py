@@ -45,7 +45,7 @@ def claim_workspace_focus(app, focus_widget=None):
     if focus_widget is not None:
         try:
             focus_widget.configure(takefocus=1)
-            focus_widget.focus_set()
+            focus_widget.focus_force()
         except tk.TclError:
             pass
 

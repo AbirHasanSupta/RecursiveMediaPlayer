@@ -2231,6 +2231,7 @@ def select_multiple_folders_and_play():
 
         def _on_tree_left_click_unified(self, event):
             self._set_keyboard_focus_zone('directory')
+            self.exclusion_tree.focus_set()
             iid = self.exclusion_tree.identify_row(event.y)
             region = self.exclusion_tree.identify_region(event.x, event.y)
 
@@ -5855,10 +5856,10 @@ def select_multiple_folders_and_play():
             self.settings_manager.show_settings()
 
         def _setup_app_keyboard_navigation(self):
-            self.root.bind("<Control-Shift-D>", lambda e: self._toggle_directory_panel_shortcut())
-            self.root.bind("<Control-Shift-d>", lambda e: self._toggle_directory_panel_shortcut())
-            self.root.bind("<Control-Shift-A>", lambda e: self._add_directory_shortcut())
-            self.root.bind("<Control-Shift-a>", lambda e: self._add_directory_shortcut())
+            self.root.bind("<Control-D>", lambda e: self._toggle_directory_panel_shortcut())
+            self.root.bind("<Control-d>", lambda e: self._toggle_directory_panel_shortcut())
+            self.root.bind("<Control-o>", lambda e: self._add_directory_shortcut())
+            self.root.bind("<Control-O>", lambda e: self._add_directory_shortcut())
             for seq in ("<Up>", "<Down>", "<Left>", "<Right>", "<Return>", "<KP_Enter>"):
                 self.root.bind_all(seq, self._global_keyboard_nav, add="+")
 
@@ -5909,7 +5910,7 @@ def select_multiple_folders_and_play():
                 if tree is None:
                     return
                 if focused is not tree:
-                    tree.focus_set()
+                    return
                 keyboard_navigation.navigate_hierarchical_tree(
                     tree, event.keysym.lower(),
                     all_iids_fn=self._tree_get_visible_iids,
@@ -5919,6 +5920,8 @@ def select_multiple_folders_and_play():
 
             mgr = getattr(self, 'active_embedded_manager', None)
             if mgr and hasattr(mgr, 'handle_keyboard_nav'):
+                if focused is not getattr(mgr, 'canvas', focused):
+                    return
                 if mgr.handle_keyboard_nav(event):
                     return "break"
 

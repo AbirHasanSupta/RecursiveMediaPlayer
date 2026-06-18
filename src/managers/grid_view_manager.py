@@ -620,8 +620,10 @@ class GridViewManager:
                              lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
         self.canvas.bind("<Configure>",
                          lambda e: self.canvas.itemconfig(canvas_frame, width=e.width))
-        self.canvas.bind("<Button-1>", lambda e: self._clear_selection())
-        self.grid_frame.bind("<Button-1>", lambda e: self._clear_selection())
+        self.canvas.bind("<Button-1>",
+                         lambda e: (self._claim_workspace_keyboard_focus(self.canvas), self._clear_selection()))
+        self.grid_frame.bind("<Button-1>",
+                             lambda e: (self._claim_workspace_keyboard_focus(self.canvas), self._clear_selection()))
 
         def _on_mousewheel(e):
             if self.canvas.winfo_exists():
@@ -660,6 +662,8 @@ class GridViewManager:
 
         if hasattr(gw, "protocol"):
             gw.protocol("WM_DELETE_WINDOW", _on_closing)
+
+        self._claim_workspace_keyboard_focus(self.canvas)
 
         # Start loading videos (unchanged)
         ManagedThread(target=self._load_videos, args=(videos,), name="LoadGridVideos").start()
@@ -1751,6 +1755,11 @@ class GridViewManager:
         if widget is None and hasattr(self, 'canvas') and self.canvas:
             widget = self.canvas
         keyboard_navigation.claim_workspace_focus(self.theme_provider, widget)
+        if widget is not None:
+            try:
+                widget.focus_force()
+            except Exception:
+                pass
 
     def _setup_grid_keyboard_nav(self, widget):
         for seq in ("<Up>", "<Down>", "<Left>", "<Right>", "<Return>", "<KP_Enter>"):
@@ -1850,7 +1859,7 @@ class GridViewManager:
         self._on_card_click(event, vp)
 
     def _on_card_click(self, event, vp):
-        self._claim_workspace_keyboard_focus()
+        self._claim_workspace_keyboard_focus(self.canvas)
         if self.video_preview_manager:
             self.video_preview_manager.tooltip.hide_preview()
 
