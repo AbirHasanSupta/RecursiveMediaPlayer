@@ -5930,7 +5930,10 @@ def select_multiple_folders_and_play():
                     return "break"
 
         def _shortcuts_allowed(self):
-            focused = self.root.focus_get()
+            try:
+                focused = self.root.focus_get()
+            except (RecursionError, tk.TclError):
+                return True
             if focused is None:
                 return True
             

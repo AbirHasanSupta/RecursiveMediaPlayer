@@ -43,9 +43,10 @@ def claim_workspace_focus(app, focus_widget=None):
         app._set_keyboard_focus_zone('workspace')
     if focus_widget is not None:
         try:
-            focus_widget.configure(takefocus=1)
-            focus_widget.focus_force()
-        except tk.TclError:
+            if focus_widget.winfo_exists():
+                focus_widget.configure(takefocus=1)
+                focus_widget.focus_force()
+        except (tk.TclError, AttributeError):
             pass
 
 

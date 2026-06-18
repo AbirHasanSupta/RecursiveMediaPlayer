@@ -426,6 +426,7 @@ class PlaylistUI:
         self.playlist_listbox.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
         self.playlist_listbox.bind("<<ListboxSelect>>", self._on_playlist_select)
         self.playlist_listbox.bind("<Button-3>", self._on_playlist_right_click)
+        self.playlist_listbox.focus_set()
         pl_sb.config(command=self.playlist_listbox.yview)
 
         tk.Frame(left_card, bg=t['divider'], height=1).pack(fill=tk.X)
@@ -541,6 +542,9 @@ class PlaylistUI:
             on_activate=lambda idx: self._on_playlist_select(),
             is_active=zone_active,
         )
+
+        self.playlist_listbox.bind("<Return>", self._on_playlist_listbox_enter, add="+")
+        self.video_tree.bind("<Escape>", self._on_video_tree_escape, add="+")
 
     def handle_keyboard_nav(self, event):
         if not keyboard_navigation.is_workspace_zone(self.theme_provider):
@@ -1078,6 +1082,18 @@ class PlaylistUI:
         else:
             self.parent.after(0, refresh)
 
+    def _on_playlist_listbox_enter(self, event):
+        """Handle Enter key on the playlist listbox: select playlist and move focus to video tree."""
+        self._on_playlist_select(event)
+        # Move focus to video tree after selection
+        self.video_tree.focus_set()
+        return "break"
+
+    def _on_video_tree_escape(self, event):
+        """Handle Escape key on the video tree: move focus back to playlist listbox."""
+        self.playlist_listbox.focus_set()
+        return "break"
+
     def _on_playlist_select(self, event=None):
         self._claim_workspace_keyboard_focus(self.playlist_listbox)
         # Prevent recursive calls
@@ -1103,6 +1119,11 @@ class PlaylistUI:
             info_text += f" ({len(self.current_playlist.videos)} videos)"
 
             self.playlist_info_label.config(text=info_text)
+
+            if self.current_playlist.videos:
+                self.video_tree.focus_set()
+            else:
+                self.playlist_listbox.focus_set()
         finally:
             delattr(self, '_selecting_playlist')
 
