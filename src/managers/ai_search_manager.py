@@ -21,6 +21,8 @@ try:
 except ImportError:
     _PIL_OK = False
 
+import keyboard_navigation
+
 _THUMB_W = 120
 _THUMB_H = 68
 
@@ -463,6 +465,7 @@ class AISearchUI:
         self._frame.bind("<Control-a>", lambda _e: self._select_all())
         self._frame.bind("<Escape>", lambda _e: self._clear_selection())
         self._setup_ai_search_keyboard_nav()
+        self._setup_focus_ring()
 
         self._show_empty_state()
 
@@ -1292,17 +1295,56 @@ class AISearchUI:
         return "#aaaaaa"
 
     def _claim_workspace_keyboard_focus(self, widget=None):
-        try:
-            import keyboard_navigation
-            keyboard_navigation.claim_workspace_focus(self._app, widget)
-        except ImportError:
-            pass
+        keyboard_navigation.claim_workspace_focus(self._app, widget)
+
+    def _setup_focus_ring(self):
+        self.focus_ring = keyboard_navigation.FocusRing(
+            container=self._frame,
+            on_escape=self.focus_primary,
+            accent_color=self.accent,
+            border_color=self.border,
+        )
+        self.focus_ring.register(self.search_entry, 'search', activate=self._on_search_click)
+        self.focus_ring.register(self._search_btn, 'search_btn', activate=self._on_search_click)
+        self.focus_ring.register(self._index_btn, 'index_btn', activate=self._on_index_click)
+        self.focus_ring.register(
+            self._normal_mode_btn, 'mode_normal',
+            activate=lambda: self._set_search_mode("normal"),
+            right=lambda: self._set_search_mode("ai"),
+        )
+        self.focus_ring.register(
+            self._advanced_mode_btn, 'mode_ai',
+            activate=lambda: self._set_search_mode("ai"),
+            left=lambda: self._set_search_mode("normal"),
+        )
+        self.focus_ring.register(self._canvas, 'results', activate=self._play_selected)
+        self.search_entry.bind("<Escape>", lambda _e: self.focus_primary(), add="+")
+
+    def cycle_focus_ring(self, reverse=False):
+        if not keyboard_navigation.is_workspace_zone(self._app):
+            return False
+        return self.focus_ring.handle_ctrl_tab(reverse=reverse)
+
+    def focus_primary(self):
+        if self._canvas.winfo_exists():
+            self._claim_workspace_keyboard_focus(self._canvas)
+
+    def get_primary_widget(self):
+        return self._canvas
+
+    def open_context_menu_for_focused(self):
+        vp = self._focus_path
+        if not vp and self._selected_paths:
+            vp = next(iter(self._selected_paths))
+        if not vp or vp not in self._card_frames:
+            return
+        card = self._card_frames[vp]
+        x = card.winfo_rootx() + card.winfo_width() // 2
+        y = card.winfo_rooty() + card.winfo_height() // 2
+        event = type('Event', (), {'x_root': x, 'y_root': y})()
+        self._show_context_menu(event, vp)
 
     def _setup_ai_search_keyboard_nav(self):
-        try:
-            import keyboard_navigation
-        except ImportError:
-            return
         keyboard_navigation.bind_keyboard_zone(
             self._frame, "workspace", self._app._set_keyboard_focus_zone)
         self._canvas.configure(takefocus=1)
@@ -1312,22 +1354,18 @@ class AISearchUI:
             self._frame.bind(seq, self._on_ai_search_keyboard, add="+")
 
     def handle_keyboard_nav(self, event):
-        try:
-            import keyboard_navigation
-            if not keyboard_navigation.is_workspace_zone(self._app):
-                return False
-        except ImportError:
+        if not keyboard_navigation.is_workspace_zone(self._app):
             return False
+        focused = self._frame.focus_get()
+        if hasattr(self, 'focus_ring') and self.focus_ring.is_in_ring(focused):
+            if focused is not self._canvas:
+                return False
         if not self._all_results:
             return False
         return self._on_ai_search_keyboard(event) == "break"
 
     def _on_ai_search_keyboard(self, event):
-        try:
-            import keyboard_navigation
-            if not keyboard_navigation.is_workspace_zone(self._app):
-                return
-        except ImportError:
+        if not keyboard_navigation.is_workspace_zone(self._app):
             return
         keysym = event.keysym
         shift_held = bool(event.state & 0x1)
@@ -1395,11 +1433,7 @@ class AISearchUI:
 
         card = self._card_frames.get(new_vp)
         if card:
-            try:
-                import keyboard_navigation
-                keyboard_navigation.scroll_widget_into_view(self._canvas, card)
-            except ImportError:
-                pass
+            keyboard_navigation.scroll_widget_into_view(self._canvas, card)
         return "break"
 
     def _play_video(self, video_path: str):
@@ -1422,4 +1456,5 @@ class AISearchUI:
             self._manager._log(f"AI Search queue error: {e}")
 
     def _on_index_click(self):
-        IndexingDialog(self._root, self._app, self._manager).show()
+        self._indexing_dialog = IndexingDialog(self._root, self._app, self._manager)
+        self._indexing_dialog.show()

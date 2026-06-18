@@ -5942,11 +5942,18 @@ def select_multiple_folders_and_play():
                 return "break"
 
             mgr = getattr(self, 'active_embedded_manager', None)
-            if mgr and hasattr(mgr, 'handle_keyboard_nav'):
-                if focused is not getattr(mgr, 'canvas', focused):
+            if mgr:
+                ring = getattr(mgr, 'focus_ring', None)
+                if ring and ring.is_in_ring(focused):
                     return
-                if mgr.handle_keyboard_nav(event):
-                    return "break"
+                primary = mgr.get_primary_widget() if hasattr(mgr, 'get_primary_widget') else getattr(mgr, 'canvas', None)
+                if hasattr(mgr, 'handle_keyboard_nav'):
+                    if primary and focused is not primary:
+                        sec = getattr(mgr, 'get_secondary_widget', lambda: None)()
+                        if focused is not sec:
+                            return
+                    if mgr.handle_keyboard_nav(event):
+                        return "break"
 
         def _focus_directory_panel(self, event=None):
             if not self._shortcuts_allowed():
@@ -5998,6 +6005,9 @@ def select_multiple_folders_and_play():
                 return "break"
             focused = self.root.focus_get()
             mgr = getattr(self, 'active_embedded_manager', None)
+            if mgr and hasattr(mgr, 'cycle_focus_ring'):
+                if mgr.cycle_focus_ring(reverse=reverse):
+                    return "break"
             workspace_widget = None
             if mgr:
                 if hasattr(mgr, 'get_primary_widget'):
@@ -6061,6 +6071,15 @@ def select_multiple_folders_and_play():
                 player = self._active_player
                 if hasattr(player, '_win') and player._win and player._win.winfo_exists():
                     if str(focused).startswith(str(player._win)):
+                        return False
+
+            # Check if focused widget is inside AI indexing dialog
+            ai_ui = getattr(getattr(self, 'ai_search_manager', None), '_active_ui', None)
+            if ai_ui is not None:
+                idx_dlg = getattr(ai_ui, '_indexing_dialog', None)
+                if idx_dlg is not None:
+                    win = getattr(idx_dlg, '_win', None)
+                    if win and win.winfo_exists() and str(focused).startswith(str(win)):
                         return False
             
             return True

@@ -545,6 +545,70 @@ class PlaylistUI:
 
         self.playlist_listbox.bind("<Return>", self._on_playlist_listbox_enter, add="+")
         self.video_tree.bind("<Escape>", self._on_video_tree_escape, add="+")
+        self._setup_focus_ring()
+
+    def _setup_focus_ring(self):
+        t = self._get_design_tokens()
+        self.focus_ring = keyboard_navigation.FocusRing(
+            container=self.playlist_window,
+            on_escape=self.focus_primary,
+            accent_color=t['accent'],
+            border_color=t['border'],
+        )
+        self.focus_ring.register(self.playlist_listbox, 'playlists')
+        self.focus_ring.register(
+            self.shuffle_playlist_btn, 'shuffle',
+            activate=self._shuffle_current_playlist,
+        )
+        self.focus_ring.register(
+            self.new_playlist_btn, 'new_playlist',
+            activate=self._create_new_playlist,
+        )
+        self.focus_ring.register(self.video_tree, 'videos', activate=self._activate_focused_video)
+
+    def _activate_focused_video(self):
+        iid = self.video_tree.focus() or (self.video_tree.selection()[0] if self.video_tree.selection() else None)
+        if iid:
+            self._activate_video_tree_item(iid)
+
+    def cycle_focus_ring(self, reverse=False):
+        if not keyboard_navigation.is_workspace_zone(self.theme_provider):
+            return False
+        return self.focus_ring.handle_ctrl_tab(reverse=reverse)
+
+    def focus_primary(self):
+        self._claim_workspace_keyboard_focus(self.video_tree)
+
+    def get_primary_widget(self):
+        return self.video_tree
+
+    def get_secondary_widget(self):
+        return self.playlist_listbox
+
+    def open_context_menu_for_focused(self):
+        focused = self.parent.focus_get()
+        if focused is self.playlist_listbox:
+            sel = self.playlist_listbox.curselection()
+            if not sel:
+                return
+            x = self.playlist_listbox.winfo_rootx() + 20
+            y = self.playlist_listbox.winfo_rooty() + 20
+            event = type('Event', (), {'x_root': x, 'y_root': y, 'y': 10})()
+            self._on_playlist_right_click(event)
+            return
+        iid = self.video_tree.focus() or (self.video_tree.selection()[0] if self.video_tree.selection() else None)
+        if not iid or iid == "empty":
+            return
+        bbox = self.video_tree.bbox(iid)
+        if bbox:
+            x, y, w, h = bbox
+            root_x = self.video_tree.winfo_rootx() + x + w // 2
+            root_y = self.video_tree.winfo_rooty() + y + h // 2
+        else:
+            root_x = self.video_tree.winfo_rootx() + 10
+            root_y = self.video_tree.winfo_rooty() + 10
+        event = type('Event', (), {'x_root': root_x, 'y_root': root_y})()
+        self._show_video_context_menu(event)
 
     def handle_keyboard_nav(self, event):
         if not keyboard_navigation.is_workspace_zone(self.theme_provider):
@@ -553,6 +617,8 @@ class PlaylistUI:
         if focused is self.playlist_listbox:
             if event.keysym in ("Up", "Down", "Return", "KP_Enter"):
                 return True
+            return False
+        if self.focus_ring.is_in_ring(focused) and focused is not self.video_tree:
             return False
         if event.keysym in ("Up", "Down", "Return", "KP_Enter"):
             keyboard_navigation.claim_workspace_focus(self.theme_provider, self.video_tree)

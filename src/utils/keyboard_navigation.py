@@ -325,6 +325,149 @@ def bind_listbox_keyboard(listbox: tk.Listbox, *, on_activate: Optional[Callable
         listbox.bind(seq, _handle, add="+")
 
 
+class FocusRing:
+    """Cycle focus among registered widgets with Ctrl+Tab; use arrows/Enter/Esc in each."""
+
+    def __init__(self, container=None, on_escape=None,
+                 accent_color="#5E81F4", border_color="#E2E8F0"):
+        self._entries: list = []
+        self._focus_idx = -1
+        self._container = container
+        self._on_escape = on_escape
+        self._accent_color = accent_color
+        self._border_color = border_color
+
+    def register(self, widget, key: str, *, activate=None, up=None, down=None,
+                 left=None, right=None):
+        self._entries = [e for e in self._entries if e['key'] != key]
+        try:
+            widget.configure(takefocus=1)
+        except (tk.TclError, AttributeError):
+            pass
+        widget.bind("<FocusIn>", lambda e, w=widget: self._on_focus_in(w), add="+")
+        widget.bind("<FocusOut>", lambda e, w=widget: self._on_focus_out(w), add="+")
+        widget.bind("<Return>", lambda e: self._activate(), add="+")
+        widget.bind("<KP_Enter>", lambda e: self._activate(), add="+")
+        widget.bind("<Escape>", lambda e: self._escape(), add="+")
+        if not is_text_input(widget):
+            widget.bind("<Up>", lambda e: self._step(1), add="+")
+            widget.bind("<Down>", lambda e: self._step(-1), add="+")
+            widget.bind("<Left>", lambda e: self._nav_or_step(False), add="+")
+            widget.bind("<Right>", lambda e: self._nav_or_step(True), add="+")
+        self._entries.append({
+            'key': key, 'widget': widget,
+            'activate': activate, 'up': up, 'down': down,
+            'left': left, 'right': right,
+        })
+
+    def _visible_entries(self):
+        return [e for e in self._entries
+                if e['widget'].winfo_exists() and e['widget'].winfo_ismapped()]
+
+    def _entry_for(self, widget):
+        for e in self._entries:
+            if e['widget'] == widget:
+                return e
+        return None
+
+    def _on_focus_in(self, widget):
+        try:
+            widget.configure(highlightthickness=2,
+                             highlightbackground=self._accent_color,
+                             highlightcolor=self._accent_color)
+        except tk.TclError:
+            pass
+        visible = self._visible_entries()
+        for i, e in enumerate(visible):
+            if e['widget'] == widget:
+                self._focus_idx = i
+                break
+
+    def _on_focus_out(self, widget):
+        try:
+            widget.configure(highlightthickness=1,
+                             highlightbackground=self._border_color,
+                             highlightcolor=self._border_color)
+        except tk.TclError:
+            pass
+
+    def _activate(self):
+        visible = self._visible_entries()
+        if 0 <= self._focus_idx < len(visible):
+            fn = visible[self._focus_idx].get('activate')
+            if fn:
+                fn()
+        return "break"
+
+    def _step(self, delta):
+        visible = self._visible_entries()
+        if 0 <= self._focus_idx < len(visible):
+            entry = visible[self._focus_idx]
+            fn = entry['up'] if delta > 0 else entry['down']
+            if fn:
+                fn()
+                return "break"
+        return "break"
+
+    def _nav_or_step(self, forward):
+        visible = self._visible_entries()
+        if 0 <= self._focus_idx < len(visible):
+            entry = visible[self._focus_idx]
+            fn = entry['right'] if forward else entry['left']
+            if fn:
+                fn()
+                return "break"
+        self.cycle(reverse=not forward)
+        return "break"
+
+    def _escape(self):
+        if self._on_escape:
+            self._on_escape()
+        return "break"
+
+    def cycle(self, reverse=False) -> bool:
+        visible = self._visible_entries()
+        if not visible:
+            return False
+        try:
+            focused = visible[0]['widget'].winfo_toplevel().focus_get()
+        except tk.TclError:
+            focused = None
+        cur_idx = next((i for i, e in enumerate(visible) if e['widget'] == focused), -1)
+        if cur_idx < 0:
+            new_idx = len(visible) - 1 if reverse else 0
+        else:
+            new_idx = (cur_idx + (-1 if reverse else 1)) % len(visible)
+        visible[new_idx]['widget'].focus_set()
+        self._focus_idx = new_idx
+        return True
+
+    def handle_ctrl_tab(self, event=None, reverse=False) -> bool:
+        if self._container is not None:
+            try:
+                focused = event.widget.winfo_toplevel().focus_get() if event else None
+            except tk.TclError:
+                focused = None
+            if focused is not None and not widget_in_container(focused, self._container):
+                return False
+        return self.cycle(reverse=reverse)
+
+    def is_in_ring(self, widget) -> bool:
+        if widget is None:
+            return False
+        for e in self._entries:
+            if e['widget'] == widget:
+                return True
+        return False
+
+    def focus_key(self, key: str):
+        for e in self._entries:
+            if e['key'] == key and e['widget'].winfo_exists():
+                e['widget'].focus_set()
+                return True
+        return False
+
+
 def scroll_widget_into_view(canvas: tk.Canvas, widget, padding: int = 8):
     if canvas is None or widget is None:
         return

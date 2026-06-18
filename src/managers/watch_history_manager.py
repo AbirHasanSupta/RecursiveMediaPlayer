@@ -699,12 +699,54 @@ class WatchHistoryUI:
 
         hist_actions = tk.Frame(btn_container, bg=t["bg"])
         hist_actions.pack(side=tk.RIGHT)
-        tp.create_manager_action_link(
+        self._hist_refresh_btn = tp.create_manager_action_link(
             hist_actions, "↺  Refresh", self._refresh_history_list, style="secondary"
-        ).pack(side=tk.LEFT)
-        tp.create_manager_action_link(
+        )
+        self._hist_refresh_btn.pack(side=tk.LEFT)
+        self._hist_clear_btn = tp.create_manager_action_link(
             hist_actions, "✕  Clear all history", self._clear_all_history, style="warning"
-        ).pack(side=tk.LEFT)
+        )
+        self._hist_clear_btn.pack(side=tk.LEFT)
+        self._setup_focus_ring()
+
+    def _setup_focus_ring(self):
+        t = self._get_design_tokens()
+        self.focus_ring = keyboard_navigation.FocusRing(
+            container=self.history_window,
+            on_escape=self.focus_primary,
+            accent_color=t['accent'],
+            border_color=t['border'],
+        )
+        self.focus_ring.register(self.history_tree, 'tree', activate=lambda: self._play_selected_video())
+        self.focus_ring.register(self._hist_refresh_btn, 'refresh', activate=self._refresh_history_list)
+        self.focus_ring.register(self._hist_clear_btn, 'clear', activate=self._clear_all_history)
+
+    def cycle_focus_ring(self, reverse=False):
+        if not keyboard_navigation.is_workspace_zone(self.theme_provider):
+            return False
+        return self.focus_ring.handle_ctrl_tab(reverse=reverse)
+
+    def focus_primary(self):
+        self._claim_workspace_keyboard_focus(self.history_tree)
+
+    def get_primary_widget(self):
+        return self.history_tree
+
+    def open_context_menu_for_focused(self):
+        selection = self.history_tree.selection()
+        if not selection:
+            return
+        iid = self.history_tree.focus() or selection[0]
+        bbox = self.history_tree.bbox(iid)
+        if bbox:
+            x, y, w, h = bbox
+            root_x = self.history_tree.winfo_rootx() + x + w // 2
+            root_y = self.history_tree.winfo_rooty() + y + h // 2
+        else:
+            root_x = self.history_tree.winfo_rootx() + 10
+            root_y = self.history_tree.winfo_rooty() + 10
+        event = type('Event', (), {'x_root': root_x, 'y_root': root_y})()
+        self._show_history_context_menu(event)
 
     def _claim_workspace_keyboard_focus(self, widget=None):
         keyboard_navigation.claim_workspace_focus(self.theme_provider, widget)
@@ -727,6 +769,9 @@ class WatchHistoryUI:
         if not keyboard_navigation.is_workspace_zone(self.theme_provider):
             return False
         if not self.current_entries:
+            return False
+        focused = self.parent.focus_get()
+        if self.focus_ring.is_in_ring(focused) and focused is not self.history_tree:
             return False
         if event.keysym in ("Up", "Down", "Return", "KP_Enter"):
             keyboard_navigation.claim_workspace_focus(self.theme_provider, self.history_tree)

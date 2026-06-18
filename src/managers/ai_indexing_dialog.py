@@ -8,6 +8,11 @@ from pathlib import Path
 from tkinter import filedialog, ttk
 from typing import TYPE_CHECKING, Optional
 
+try:
+    import keyboard_navigation
+except ImportError:
+    keyboard_navigation = None
+
 if TYPE_CHECKING:
     from managers.ai_search_manager import AISearchManager
 
@@ -194,21 +199,21 @@ class IndexingDialog:
         dir_wrap = tk.Frame(dir_row, bg=surface,
                             highlightbackground=border, highlightthickness=1)
         dir_wrap.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        dir_entry = tk.Entry(dir_wrap, textvariable=self._dir_var,
+        self._dir_entry = tk.Entry(dir_wrap, textvariable=self._dir_var,
                              bg=surface, fg=text, relief="flat", bd=0,
                              font=fn, insertbackground=accent)
-        dir_entry.pack(fill=tk.X, ipady=6, padx=8)
+        self._dir_entry.pack(fill=tk.X, ipady=6, padx=8)
 
-        browse_lbl = tk.Label(dir_row, text="Browse",
+        self._browse_lbl = tk.Label(dir_row, text="Browse",
                               bg=surface, fg=accent,
                               font=("Segoe UI", 9),
                               padx=12, pady=6, cursor="hand2",
                               highlightbackground=border, highlightthickness=1)
-        browse_lbl.pack(side=tk.LEFT, padx=(6, 0))
-        browse_lbl.bind("<Button-1>", lambda _e: self._browse_dir())
-        browse_lbl.bind("<Enter>", lambda _e: browse_lbl.config(
+        self._browse_lbl.pack(side=tk.LEFT, padx=(6, 0))
+        self._browse_lbl.bind("<Button-1>", lambda _e: self._browse_dir())
+        self._browse_lbl.bind("<Enter>", lambda _e: self._browse_lbl.config(
             bg=accent, fg="#ffffff", highlightbackground=accent))
-        browse_lbl.bind("<Leave>", lambda _e: browse_lbl.config(
+        self._browse_lbl.bind("<Leave>", lambda _e: self._browse_lbl.config(
             bg=surface, fg=accent, highlightbackground=border))
 
         _section_lbl("PREPROCESSING SETTINGS")
@@ -340,6 +345,8 @@ class IndexingDialog:
         self._start_btn.bind("<Enter>", lambda _e: self._start_btn.config(bg=accent2))
         self._start_btn.bind("<Leave>", lambda _e: self._start_btn.config(bg=accent))
 
+        self._setup_dialog_keyboard(accent, border)
+
         self._win.update_idletasks()
         w, h = 540, self._win.winfo_reqheight() + 10
         sw = self._root.winfo_screenwidth()
@@ -349,6 +356,29 @@ class IndexingDialog:
         self._win.geometry(f"{w}x{h}+{x}+{y}")
         self._win.deiconify()
         self._win.lift()
+
+    def _setup_dialog_keyboard(self, accent, border):
+        if keyboard_navigation is None:
+            return
+        self._focus_ring = keyboard_navigation.FocusRing(
+            container=self._win,
+            on_escape=self._on_close,
+            accent_color=accent,
+            border_color=border,
+        )
+        self._focus_ring.register(self._dir_entry, 'dir')
+        self._focus_ring.register(self._browse_lbl, 'browse', activate=self._browse_dir)
+        self._focus_ring.register(self._start_btn, 'start', activate=self._start_indexing)
+        self._focus_ring.register(self._cancel_btn, 'cancel', activate=self._cancel_indexing)
+        self._focus_ring.register(self._close_btn, 'close', activate=self._on_close)
+        self._win.bind("<Control-Tab>", lambda e: self._dialog_ctrl_tab(e, False), add="+")
+        self._win.bind("<Control-Shift-Tab>", lambda e: self._dialog_ctrl_tab(e, True), add="+")
+        self._win.bind("<Escape>", lambda e: self._on_close(), add="+")
+
+    def _dialog_ctrl_tab(self, event, reverse=False):
+        if self._focus_ring.handle_ctrl_tab(event, reverse=reverse):
+            return "break"
+        return "break"
 
     def _browse_dir(self):
         current = self._dir_var.get()

@@ -661,6 +661,51 @@ class QueueUI:
         self._clear_queue_btn = tp.create_manager_action_link(
             queue_actions, "✕  Clear all", self._clear_queue, style="warning")
         self._clear_queue_btn.pack(side=tk.LEFT)
+        self._setup_focus_ring()
+
+    def _setup_focus_ring(self):
+        t = self._get_design_tokens()
+        self.focus_ring = keyboard_navigation.FocusRing(
+            container=self.queue_window,
+            on_escape=self.focus_primary,
+            accent_color=t['accent'],
+            border_color=t['border'],
+        )
+        self.focus_ring.register(self.queue_tree, 'tree', activate=self._activate_focused_queue_item)
+        self.focus_ring.register(self._clear_played_btn, 'clear_played', activate=self._clear_played)
+        self.focus_ring.register(self._clear_queue_btn, 'clear_all', activate=self._clear_queue)
+
+    def _activate_focused_queue_item(self):
+        iid = self.queue_tree.focus() or (self.queue_tree.selection()[0] if self.queue_tree.selection() else None)
+        if iid:
+            self._activate_queue_item(iid)
+
+    def cycle_focus_ring(self, reverse=False):
+        if not keyboard_navigation.is_workspace_zone(self.theme_provider):
+            return False
+        return self.focus_ring.handle_ctrl_tab(reverse=reverse)
+
+    def focus_primary(self):
+        self._claim_workspace_keyboard_focus(self.queue_tree)
+
+    def get_primary_widget(self):
+        return self.queue_tree
+
+    def open_context_menu_for_focused(self):
+        selection = self._get_tv_selected_indices()
+        if not selection:
+            return
+        iid = self.queue_tree.focus() or str(selection[0])
+        bbox = self.queue_tree.bbox(iid)
+        if bbox:
+            x, y, w, h = bbox
+            root_x = self.queue_tree.winfo_rootx() + x + w // 2
+            root_y = self.queue_tree.winfo_rooty() + y + h // 2
+        else:
+            root_x = self.queue_tree.winfo_rootx() + 10
+            root_y = self.queue_tree.winfo_rooty() + 10
+        event = type('Event', (), {'x_root': root_x, 'y_root': root_y})()
+        self._show_queue_context_menu(event)
 
     def _claim_workspace_keyboard_focus(self, widget=None):
         keyboard_navigation.claim_workspace_focus(self.theme_provider, widget)
@@ -684,6 +729,9 @@ class QueueUI:
         if not keyboard_navigation.is_workspace_zone(self.theme_provider):
             return False
         if not self.queue_service.get_queue():
+            return False
+        focused = self.parent.focus_get()
+        if self.focus_ring.is_in_ring(focused) and focused is not self.queue_tree:
             return False
         if event.keysym in ("Up", "Down", "Return", "KP_Enter"):
             keyboard_navigation.claim_workspace_focus(self.theme_provider, self.queue_tree)

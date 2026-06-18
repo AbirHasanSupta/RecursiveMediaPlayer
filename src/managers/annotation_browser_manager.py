@@ -638,12 +638,14 @@ class AnnotationBrowserManager:
                  bg=P["sidebar"]).pack(anchor="w")
         btn_wrap = tk.Frame(action_wrap, bg=P["sidebar"])
         btn_wrap.pack()
-        self.tp.create_manager_action_link(
+        self._clear_filter_btn = self.tp.create_manager_action_link(
             btn_wrap, "✕  Clear", self._clear_filters, style="warning"
-        ).pack(side=tk.LEFT, padx=(0, 2))
-        self.tp.create_manager_action_link(
+        )
+        self._clear_filter_btn.pack(side=tk.LEFT, padx=(0, 2))
+        self._refresh_btn = self.tp.create_manager_action_link(
             btn_wrap, "⟳  Refresh", self.refresh, style="secondary"
-        ).pack(side=tk.LEFT)
+        )
+        self._refresh_btn.pack(side=tk.LEFT)
 
         filter_lbl_wrap = tk.Frame(fb, bg=P["sidebar"])
         filter_lbl_wrap.pack(side=tk.RIGHT, fill=tk.Y)
@@ -831,11 +833,140 @@ class AnnotationBrowserManager:
         act_inner.pack(fill=tk.X, padx=18, pady=10)
 
         self._setup_annotation_keyboard_nav()
+        self._tag_kb_idx = 0
+        self._setup_focus_ring()
 
         # Start async loading (shows loading indicators, then populates UI)
         self._start_async_load()
         if hasattr(win, "deiconify"):
             win.deiconify()
+
+    def _setup_focus_ring(self):
+        if keyboard_navigation is None:
+            return
+        P = _p(self.tp.dark_mode, self.tp)
+        self.focus_ring = keyboard_navigation.FocusRing(
+            container=self._win,
+            on_escape=self.focus_primary,
+            accent_color=P["accent"],
+            border_color=P["sep"],
+        )
+        self.focus_ring.register(self.search_entry, 'search')
+        if self._rb_btns:
+            self.focus_ring.register(
+                self._rb_btns[0], 'rating',
+                left=self._rating_step(-1),
+                right=self._rating_step(1),
+                up=self._rating_step(1),
+                down=self._rating_step(-1),
+                activate=lambda: self._on_rating_click(self._rating_var.get()),
+            )
+        self.focus_ring.register(
+            self._tag_canvas, 'tags',
+            up=self._tag_kb_step(-1),
+            down=self._tag_kb_step(1),
+            activate=self._tag_kb_activate,
+        )
+        self.focus_ring.register(
+            self._clear_filter_btn, 'clear',
+            activate=self._clear_filters,
+        )
+        self.focus_ring.register(
+            self._refresh_btn, 'refresh',
+            activate=self.refresh,
+        )
+        self.focus_ring.register(
+            self._vid_canvas, 'videos',
+            activate=self._play_selected,
+        )
+        self.search_entry.bind("<Escape>", lambda _e: self.focus_primary(), add="+")
+
+    def _rating_step(self, delta):
+        def _step():
+            cur = self._rating_var.get()
+            new = max(0, min(5, cur + delta))
+            self._on_rating_click(new)
+        return _step
+
+    def _tag_kb_keys(self):
+        return [k for k in self._tag_btns if self._tag_btns[k].winfo_exists()]
+
+    def _tag_kb_step(self, delta):
+        def _step():
+            keys = self._tag_kb_keys()
+            if not keys:
+                return
+            self._tag_kb_idx = max(0, min(len(keys) - 1, self._tag_kb_idx + delta))
+            self._highlight_tag_kb_focus()
+        return _step
+
+    def _tag_kb_activate(self):
+        keys = self._tag_kb_keys()
+        if not keys:
+            return
+        key = keys[self._tag_kb_idx]
+        tag = None if key == "__ALL__" else key
+        self._toggle_tag(tag)
+
+    def _highlight_tag_kb_focus(self):
+        keys = self._tag_kb_keys()
+        if not keys:
+            return
+        P = _p(self.tp.dark_mode, self.tp)
+        for i, key in enumerate(keys):
+            row = self._tag_btns.get(key)
+            if not row or not row.winfo_exists():
+                continue
+            is_kb = (i == self._tag_kb_idx)
+            is_sel = (key == "__ALL__" and not self._selected_tags) or key in self._selected_tags
+            if is_kb:
+                row.config(bg=P["search_hl"], highlightbackground=P["accent"], highlightthickness=2)
+            elif is_sel:
+                row.config(bg=P["tag_sel_bg"], highlightthickness=0)
+            else:
+                row.config(bg=P["sidebar"], highlightthickness=0)
+        key = keys[self._tag_kb_idx]
+        row = self._tag_btns.get(key)
+        if row and keyboard_navigation is not None:
+            keyboard_navigation.scroll_widget_into_view(self._tag_canvas, row)
+
+    def cycle_focus_ring(self, reverse=False):
+        if keyboard_navigation is None or not keyboard_navigation.is_workspace_zone(self.tp):
+            return False
+        return self.focus_ring.handle_ctrl_tab(reverse=reverse)
+
+    def focus_primary(self):
+        if hasattr(self, '_vid_canvas') and self._vid_canvas.winfo_exists():
+            self._claim_workspace_keyboard_focus(self._vid_canvas)
+
+    def get_primary_widget(self):
+        return getattr(self, '_vid_canvas', None)
+
+    def open_context_menu_for_focused(self):
+        focused = self._win.focus_get()
+        if keyboard_navigation and self.focus_ring.is_in_ring(focused) and focused is self._tag_canvas:
+            keys = self._tag_kb_keys()
+            if not keys:
+                return
+            key = keys[self._tag_kb_idx]
+            if key == "__ALL__":
+                return
+            row = self._tag_btns.get(key)
+            if row:
+                x = row.winfo_rootx() + row.winfo_width() // 2
+                y = row.winfo_rooty() + row.winfo_height() // 2
+                event = type('Event', (), {'x_root': x, 'y_root': y})()
+                self._on_tag_right_click(event, key)
+            return
+        if not self._vid_selection:
+            return
+        idx = sorted(self._vid_selection)[0]
+        if idx < len(self._vid_rows):
+            row = self._vid_rows[idx]
+            x = row.winfo_rootx() + row.winfo_width() // 2
+            y = row.winfo_rooty() + row.winfo_height() // 2
+            event = type('Event', (), {'x_root': x, 'y_root': y, 'y': 10})()
+            self._on_video_right_click(event)
 
     def _claim_workspace_keyboard_focus(self, widget=None):
         if keyboard_navigation is not None:
@@ -855,6 +986,10 @@ class AnnotationBrowserManager:
     def handle_keyboard_nav(self, event):
         if keyboard_navigation is None or not keyboard_navigation.is_workspace_zone(self.tp):
             return False
+        focused = self._win.focus_get()
+        if hasattr(self, 'focus_ring') and self.focus_ring.is_in_ring(focused):
+            if focused is not self._vid_canvas:
+                return False
         return self._on_annotation_keyboard(event) == "break"
 
     def _on_annotation_keyboard(self, event):
@@ -1031,6 +1166,7 @@ class AnnotationBrowserManager:
         for w in self._tag_frame_inner.winfo_children():
             w.destroy()
         self._tag_btns.clear()
+        self._tag_kb_idx = 0
 
         query = (self._search_var.get().strip().lower()) if self._search_var else ""
         visible_tags = [t for t in self._cached_all_tags if not query or query in t.lower()]

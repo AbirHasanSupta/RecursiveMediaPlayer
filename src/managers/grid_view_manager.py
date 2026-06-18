@@ -57,6 +57,8 @@ class GridViewManager:
         self.card_widgets = {}
         self._card_positions = {}
         self._kb_focus_path = None
+        self._toolbar_widgets = []
+        self._toolbar_focus_idx = -1
         self.excluded_items = set()
         self.is_loading = False
         self.loading_lock = threading.Lock()
@@ -548,6 +550,7 @@ class GridViewManager:
         )
         self._sort_btn.pack(side=tk.LEFT, padx=(0, 4), pady=12)
         self._sort_btn.bind("<Button-1>", lambda e: self._show_sort_menu(e))
+        self._register_toolbar_widget(self._sort_btn, 'sort', activate=lambda: self._show_sort_menu(None))
 
         tk.Frame(inner_tb, bg=t['border'], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=8, padx=8)
 
@@ -556,6 +559,8 @@ class GridViewManager:
         )
         self._tag_filter_btn.pack(side=tk.LEFT, padx=(0, 4), pady=12)
         self._tag_filter_btn.bind("<Button-1>", lambda e: self._show_tag_filter_menu(e))
+        self._register_toolbar_widget(self._tag_filter_btn, 'tag_filter',
+                                      activate=lambda: self._show_tag_filter_menu(None))
 
         right_tb = tk.Frame(inner_tb, bg=toolbar_bg)
         right_tb.pack(side=tk.RIGHT)
@@ -576,6 +581,7 @@ class GridViewManager:
             relief=tk.FLAT, bd=0
         )
         om.pack(side=tk.LEFT, padx=(5, 16), pady=12)
+        self._register_toolbar_widget(om, 'page_size', up=self._page_size_step(1), down=self._page_size_step(-1))
 
         tk.Frame(right_tb, bg=t['border'], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=8)
 
@@ -593,6 +599,9 @@ class GridViewManager:
             insertbackground=t['text']
         )
         spin.pack(side=tk.LEFT, pady=12)
+        self.grid_size_var.trace_add('write', lambda *a: self._rebuild_grid())
+        self._register_toolbar_widget(spin, 'columns', up=lambda: self._step_spinbox(spin, 1),
+                                      down=lambda: self._step_spinbox(spin, -1))
 
         # Pagination — centered between left controls and right controls
         self._pagination_frame = tk.Frame(inner_tb, bg=toolbar_bg)
@@ -646,6 +655,8 @@ class GridViewManager:
         gw.bind("<Delete>", lambda e: self._clear_selection())
         gw.bind("<Return>", lambda e: self._play_selected())
         self._setup_grid_keyboard_nav(gw)
+        self._register_toolbar_widget(self.canvas, 'grid_canvas', activate=self._play_selected)
+        self._init_focus_ring_proxy()
         tp = self.theme_provider
         if hasattr(tp, '_set_keyboard_focus_zone'):
             keyboard_navigation.bind_keyboard_zone(gw, "workspace", tp._set_keyboard_focus_zone)
@@ -1134,6 +1145,8 @@ class GridViewManager:
             return
         for w in self._pagination_frame.winfo_children():
             w.destroy()
+        self._toolbar_widgets = [e for e in self._toolbar_widgets if
+                                 e['key'] not in ('prev_page', 'next_page', 'jump_page')]
 
         t = self._tok()
         self._get_page_items()
@@ -1158,14 +1171,20 @@ class GridViewManager:
                 lbl.bind("<Leave>", lambda e: lbl.config(fg=fg))
             return lbl
 
-        _nav("‹", self._prev_page, self._page > 0).pack(side=tk.LEFT, padx=(0, 2))
+        prev_lbl = _nav("‹", self._prev_page, self._page > 0)
+        prev_lbl.pack(side=tk.LEFT, padx=(0, 2))
+        self._register_toolbar_widget(prev_lbl, 'prev_page', activate=self._prev_page,
+                                      up=self._prev_page, down=self._next_page)
 
         pill = tk.Frame(pg, bg=t['border_soft'], padx=6, pady=0)
         pill.pack(side=tk.LEFT, padx=4)
         tk.Label(pill, text=f"{self._page + 1} / {total_pages}",
                  font=("Segoe UI", 10), bg=t['border_soft'], fg=t['text_sub']).pack(pady=2)
 
-        _nav("›", self._next_page, self._page < total_pages - 1).pack(side=tk.LEFT, padx=(2, 8))
+        next_lbl = _nav("›", self._next_page, self._page < total_pages - 1)
+        next_lbl.pack(side=tk.LEFT, padx=(2, 8))
+        self._register_toolbar_widget(next_lbl, 'next_page', activate=self._next_page,
+                                      up=self._prev_page, down=self._next_page)
 
         tk.Label(pg, text="·", font=("Segoe UI", 10), bg=bar_bg, fg=t['border']).pack(side=tk.LEFT, padx=3)
         tk.Label(pg, text=f"{total_videos:,} videos",
@@ -1185,6 +1204,7 @@ class GridViewManager:
         )
         jump_entry.pack(side=tk.LEFT, padx=(0, 2), ipady=1)
         jump_entry.bind("<Return>", lambda e: self._jump_to_page())
+        self._register_toolbar_widget(jump_entry, 'jump_page', activate=self._jump_to_page)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Grid rebuild (new UI cards with original thumbnail loading)
@@ -1778,6 +1798,141 @@ class GridViewManager:
 
     def get_primary_widget(self):
         return self.canvas if hasattr(self, 'canvas') else None
+
+    def _init_focus_ring_proxy(self):
+        mgr = self
+
+        class _RingProxy:
+            def is_in_ring(self, widget):
+                if widget is mgr.canvas:
+                    return True
+                return any(e['widget'] == widget for e in mgr._toolbar_widgets)
+
+        self.focus_ring = _RingProxy()
+
+    def cycle_focus_ring(self, reverse=False):
+        if not keyboard_navigation.is_workspace_zone(self.theme_provider):
+            return False
+        try:
+            if not self.canvas.winfo_exists():
+                return False
+        except tk.TclError:
+            return False
+        return self.cycle_toolbar_focus(reverse=reverse)
+
+    def _register_toolbar_widget(self, widget, key, activate=None, up=None, down=None):
+        self._toolbar_widgets = [e for e in self._toolbar_widgets if e['key'] != key]
+        widget.configure(takefocus=1)
+        widget.bind("<FocusIn>", lambda e, w=widget: self._on_toolbar_focus_in(w))
+        widget.bind("<FocusOut>", lambda e, w=widget: self._on_toolbar_focus_out(w))
+        widget.bind("<Return>", lambda e: self._toolbar_activate())
+        widget.bind("<KP_Enter>", lambda e: self._toolbar_activate())
+        widget.bind("<Escape>", lambda e: self._toolbar_escape())
+        widget.bind("<Up>", lambda e: self._toolbar_step(1), add="+")
+        widget.bind("<Down>", lambda e: self._toolbar_step(-1), add="+")
+        widget.bind("<Left>", lambda e: self._toolbar_nav_or_step(False), add="+")
+        widget.bind("<Right>", lambda e: self._toolbar_nav_or_step(True), add="+")
+        self._toolbar_widgets.append({
+            'key': key, 'widget': widget,
+            'activate': activate, 'up': up, 'down': down,
+        })
+
+    def _toolbar_nav_or_step(self, forward=True):
+        if 0 <= self._toolbar_focus_idx < len(self._toolbar_widgets):
+            entry = self._toolbar_widgets[self._toolbar_focus_idx]
+            fn = entry['up'] if forward else entry['down']
+            if fn:
+                fn()
+                return "break"
+        self.cycle_toolbar_focus(reverse=not forward)
+        return "break"
+
+    def _toolbar_entry(self, widget):
+        for e in self._toolbar_widgets:
+            if e['widget'] == widget:
+                return e
+        return None
+
+    def _on_toolbar_focus_in(self, widget):
+        t = self._tok()
+        try:
+            widget.configure(highlightthickness=2, highlightbackground=t['accent'], highlightcolor=t['accent'])
+        except tk.TclError:
+            pass
+        for i, e in enumerate(self._toolbar_widgets):
+            if e['widget'] == widget:
+                self._toolbar_focus_idx = i
+                break
+
+    def _on_toolbar_focus_out(self, widget):
+        t = self._tok()
+        try:
+            widget.configure(highlightthickness=1, highlightbackground=t['border'], highlightcolor=t['border'])
+        except tk.TclError:
+            pass
+
+    def _toolbar_activate(self):
+        if not (0 <= self._toolbar_focus_idx < len(self._toolbar_widgets)):
+            return
+        entry = self._toolbar_widgets[self._toolbar_focus_idx]
+        if entry['activate']:
+            entry['activate']()
+        return "break"
+
+    def _toolbar_step(self, delta):
+        if not (0 <= self._toolbar_focus_idx < len(self._toolbar_widgets)):
+            return
+        entry = self._toolbar_widgets[self._toolbar_focus_idx]
+        fn = entry['up'] if delta > 0 else entry['down']
+        if fn:
+            fn()
+            return "break"
+
+    def _toolbar_escape(self):
+        self.focus_primary()
+        return "break"
+
+    def _on_grid_ctrl_tab(self, event, reverse=False):
+        if not keyboard_navigation.is_workspace_zone(self.theme_provider):
+            return
+        try:
+            if not self.canvas.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        focused = self.canvas.winfo_toplevel().focus_get()
+        if focused is not None and not keyboard_navigation.widget_in_container(focused, self.canvas.master.master):
+            return
+        self.cycle_toolbar_focus(reverse=reverse)
+        return "break"
+
+    def cycle_toolbar_focus(self, reverse=False):
+        widgets = [e for e in self._toolbar_widgets if e['widget'].winfo_exists() and e['widget'].winfo_ismapped()]
+        if not widgets:
+            return False
+        focused = self.canvas.winfo_toplevel().focus_get()
+        cur_idx = next((i for i, e in enumerate(widgets) if e['widget'] == focused), -1)
+        new_idx = (0 if not reverse else len(widgets) - 1) if cur_idx < 0 else (cur_idx + (-1 if reverse else 1)) % len(
+            widgets)
+        widgets[new_idx]['widget'].focus_set()
+        self._toolbar_focus_idx = new_idx
+        return True
+
+    def _page_size_step(self, delta):
+        options = [25, 50, 100, 200, 500]
+
+        def _step():
+            idx = options.index(self._page_size) if self._page_size in options else 0
+            idx = max(0, min(len(options) - 1, idx + delta))
+            self._page_size_var.set(str(options[idx]))
+            self._on_page_size_changed(str(options[idx]))
+
+        return _step
+
+    def _step_spinbox(self, spin, delta):
+        cur = self.grid_size_var.get()
+        new = max(2, min(12, cur + delta))
+        self.grid_size_var.set(new)
 
     def open_context_menu_for_focused(self):
         vp = self._kb_focus_path
