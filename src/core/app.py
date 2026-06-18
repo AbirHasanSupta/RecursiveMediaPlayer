@@ -5910,7 +5910,11 @@ def select_multiple_folders_and_play():
                     return
                 if focused is not tree:
                     tree.focus_set()
-                tree.event_generate(f'<{event.keysym}>')
+                keyboard_navigation.navigate_hierarchical_tree(
+                    tree, event.keysym.lower(),
+                    all_iids_fn=self._tree_get_visible_iids,
+                    arrows_expand=False,
+                )
                 return "break"
 
             mgr = getattr(self, 'active_embedded_manager', None)
