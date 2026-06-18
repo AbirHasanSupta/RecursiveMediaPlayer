@@ -269,6 +269,18 @@ def select_multiple_folders_and_play():
             self.video_preview_manager = VideoPreviewManager(self.root, self.update_console)
             _orig_attach = self.video_preview_manager.attach_to_listbox
 
+            def _patch_preview_hide():
+                tooltip = self.video_preview_manager.tooltip
+                _orig_hide = tooltip.hide_preview
+
+                def _patched_hide(*args, **kwargs):
+                    self._preview_kb_open = False
+                    return _orig_hide(*args, **kwargs)
+
+                tooltip.hide_preview = _patched_hide
+
+            self.root.after(200, _patch_preview_hide)
+
             def _patched_attach(widget, mapping, _orig=_orig_attach):
                 _orig(widget, mapping)
                 if widget is self.exclusion_tree:
@@ -2354,6 +2366,7 @@ def select_multiple_folders_and_play():
                     pass
 
         def _on_tree_selection_changed(self, event=None):
+            self._close_kb_preview_if_open()
             sel = self.exclusion_tree.selection()
             if sel:
                 self._update_breadcrumb(sel[0])
@@ -5939,11 +5952,42 @@ def select_multiple_folders_and_play():
                 self._set_keyboard_focus_zone('workspace')
             return "break"
 
+        def _close_kb_preview_if_open(self, event=None):
+            if getattr(self, '_preview_kb_open', False):
+                try:
+                    self.video_preview_manager.tooltip.hide_preview()
+                except Exception:
+                    pass
+                self._preview_kb_open = False
+
+        def _is_preview_tooltip_visible(self):
+            try:
+                tooltip = self.video_preview_manager.tooltip
+                for attr in ('_window', '_toplevel', '_preview_window', 'window', 'toplevel'):
+                    win = getattr(tooltip, attr, None)
+                    if win is not None:
+                        try:
+                            return win.winfo_exists() and win.winfo_ismapped()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            return getattr(self, '_preview_kb_open', False)
+
         def _show_preview_shortcut(self, event=None):
             if not self._shortcuts_allowed():
                 return "break"
             if keyboard_navigation.is_text_input(self.root.focus_get()):
                 return
+
+            if self._is_preview_tooltip_visible() or getattr(self, '_preview_kb_open', False):
+                try:
+                    self.video_preview_manager.tooltip.hide_preview()
+                except Exception:
+                    pass
+                self._preview_kb_open = False
+                return "break"
+
             focused = self.root.focus_get()
             tree = getattr(self, 'exclusion_tree', None)
             if focused == tree:
@@ -5955,10 +5999,12 @@ def select_multiple_folders_and_play():
                     self.video_preview_manager.right_clicked_item = selection[0]
                     x, y = keyboard_navigation.preview_coords_for_tree_item(tree, selection[0])
                     self.video_preview_manager._show_video_preview(path, x, y)
+                    self._preview_kb_open = True
                 return "break"
             mgr = getattr(self, 'active_embedded_manager', None)
             if mgr and hasattr(mgr, 'show_preview_for_focused'):
                 mgr.show_preview_for_focused()
+                self._preview_kb_open = True
                 return "break"
             return "break"
 
