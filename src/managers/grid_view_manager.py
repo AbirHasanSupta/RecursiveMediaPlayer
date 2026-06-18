@@ -615,6 +615,7 @@ class GridViewManager:
         body.pack(fill=tk.BOTH, expand=True, padx=0, pady=(2, 10))
 
         self.canvas = tk.Canvas(body, bg=t['bg'], highlightthickness=0)
+        self.canvas._no_focus_border = True
         self.canvas.configure(takefocus=1)
         scrollbar = ttk.Scrollbar(body, orient=tk.VERTICAL, command=self.canvas.yview,
                                   style="ExclusionTree.Vertical.TScrollbar")
@@ -1854,6 +1855,8 @@ class GridViewManager:
         return None
 
     def _on_toolbar_focus_in(self, widget):
+        if getattr(widget, '_no_focus_border', False):
+            return
         t = self._tok()
         try:
             widget.configure(highlightthickness=2, highlightbackground=t['accent'], highlightcolor=t['accent'])
@@ -1865,6 +1868,8 @@ class GridViewManager:
                 break
 
     def _on_toolbar_focus_out(self, widget):
+        if getattr(widget, '_no_focus_border', False):
+            return
         t = self._tok()
         try:
             widget.configure(highlightthickness=1, highlightbackground=t['border'], highlightcolor=t['border'])

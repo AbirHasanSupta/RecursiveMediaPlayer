@@ -371,6 +371,8 @@ class FocusRing:
         return None
 
     def _on_focus_in(self, widget):
+        if getattr(widget, '_no_focus_border', False):
+            return
         try:
             widget.configure(highlightthickness=2,
                              highlightbackground=self._accent_color,
@@ -384,6 +386,8 @@ class FocusRing:
                 break
 
     def _on_focus_out(self, widget):
+        if getattr(widget, '_no_focus_border', False):
+            return
         try:
             widget.configure(highlightthickness=1,
                              highlightbackground=self._border_color,

@@ -1318,6 +1318,7 @@ class AISearchUI:
             left=lambda: self._set_search_mode("normal"),
         )
         self.focus_ring.register(self._canvas, 'results', activate=self._play_selected)
+        self._canvas._no_focus_border = True
         self.search_entry.bind("<Escape>", lambda _e: self.focus_primary(), add="+")
 
     def cycle_focus_ring(self, reverse=False):
