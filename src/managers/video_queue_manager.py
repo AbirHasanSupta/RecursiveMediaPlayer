@@ -9,6 +9,7 @@ import uuid
 
 from managers.toast_manager import Toast
 from utils import _responsive_geometry
+import keyboard_navigation
 
 
 def _get_app_dirs():
@@ -644,6 +645,7 @@ class QueueUI:
         self.queue_tree.bind("<ButtonRelease-1>", self._on_drag_release)
         self.queue_tree.bind("<Leave>", self._on_combined_leave)
         self.queue_tree.bind("<Motion>", self._on_tree_hover)
+        self._setup_queue_keyboard_nav()
 
         # ---- Buttons placed directly on body, no extra bar ----
         btn_container = tk.Frame(body, bg=t['bg'])
@@ -659,6 +661,42 @@ class QueueUI:
         self._clear_queue_btn = tp.create_manager_action_link(
             queue_actions, "✕  Clear all", self._clear_queue, style="warning")
         self._clear_queue_btn.pack(side=tk.LEFT)
+
+    def _claim_workspace_keyboard_focus(self, widget=None):
+        keyboard_navigation.claim_workspace_focus(self.theme_provider, widget)
+
+    def _setup_queue_keyboard_nav(self):
+        tp = self.theme_provider
+        zone_active = lambda: keyboard_navigation.is_workspace_zone(tp)
+        keyboard_navigation.bind_keyboard_zone(
+            self.queue_window, "workspace", tp._set_keyboard_focus_zone)
+        keyboard_navigation.bind_focus_target(
+            self.queue_tree.master, self.queue_tree)
+        self.queue_tree.configure(takefocus=1)
+        keyboard_navigation.bind_tree_keyboard(
+            self.queue_tree,
+            on_activate=self._activate_queue_item,
+            skip_iids={"empty"},
+            is_active=zone_active,
+        )
+
+    def handle_keyboard_nav(self, event):
+        if not keyboard_navigation.is_workspace_zone(self.theme_provider):
+            return False
+        if event.keysym in ("Up", "Down", "Return", "KP_Enter"):
+            keyboard_navigation.claim_workspace_focus(self.theme_provider, self.queue_tree)
+            self.queue_tree.event_generate(f'<{event.keysym}>')
+            return True
+        return False
+
+    def _activate_queue_item(self, iid):
+        if not iid or iid == "empty":
+            return
+        index = int(iid)
+        video_path = self.queue_service.jump_to_index(index)
+        if video_path and self.on_jump_callback:
+            self.on_jump_callback(video_path)
+        self._refresh_queue()
 
     def play_from_global(self):
         """Play the queue from the current position."""
@@ -980,6 +1018,7 @@ class QueueUI:
         iid = self.queue_tree.identify_row(event.y)
         if not iid or iid == "empty":
             return
+        self._claim_workspace_keyboard_focus(self.queue_tree)
         index = int(iid)
         ctrl_held = bool(event.state & 0x4)
         shift_held = bool(event.state & 0x1)

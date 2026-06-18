@@ -12,6 +12,7 @@ from tkinter import ttk
 from managers.resource_manager import get_resource_manager
 from managers.toast_manager import Toast
 from utils import _responsive_geometry
+import keyboard_navigation
 
 
 class PlaylistData:
@@ -515,6 +516,60 @@ class PlaylistUI:
         self._right_click_binding = self.video_tree.bind_all(
             "<Button-3>", self._on_video_right_click_wrapper)
         vid_sb.config(command=self.video_tree.yview)
+        self._setup_playlist_keyboard_nav()
+
+    def _claim_workspace_keyboard_focus(self, widget=None):
+        keyboard_navigation.claim_workspace_focus(self.theme_provider, widget)
+
+    def _setup_playlist_keyboard_nav(self):
+        tp = self.theme_provider
+        zone_active = lambda: keyboard_navigation.is_workspace_zone(tp)
+        keyboard_navigation.bind_keyboard_zone(
+            self.playlist_window, "workspace", tp._set_keyboard_focus_zone)
+        keyboard_navigation.bind_focus_target(
+            self.video_tree.master, self.video_tree)
+        self.video_tree.configure(takefocus=1)
+        self.playlist_listbox.configure(takefocus=1)
+        keyboard_navigation.bind_tree_keyboard(
+            self.video_tree,
+            on_activate=self._activate_video_tree_item,
+            skip_iids={"empty"},
+            is_active=zone_active,
+        )
+        keyboard_navigation.bind_listbox_keyboard(
+            self.playlist_listbox,
+            on_activate=lambda idx: self._on_playlist_select(),
+            is_active=zone_active,
+        )
+
+    def handle_keyboard_nav(self, event):
+        if not keyboard_navigation.is_workspace_zone(self.theme_provider):
+            return False
+        focused = self.parent.focus_get()
+        if focused is self.playlist_listbox:
+            if event.keysym in ("Up", "Down", "Return", "KP_Enter"):
+                return True
+            return False
+        if event.keysym in ("Up", "Down", "Return", "KP_Enter"):
+            keyboard_navigation.claim_workspace_focus(self.theme_provider, self.video_tree)
+            self.video_tree.event_generate(f'<{event.keysym}>')
+            return True
+        return False
+
+    def _activate_video_tree_item(self, iid):
+        if not self.current_playlist or iid == "empty":
+            return
+        try:
+            index = int(iid)
+        except (TypeError, ValueError):
+            return
+        if 0 <= index < len(self.current_playlist.videos):
+            video_path = self.current_playlist.videos[index]
+            if not os.path.exists(video_path):
+                self.theme_provider.toast.warning("File Not Found", f"Video file not found:\n{video_path}")
+                return
+            if self.on_play_callback:
+                self.on_play_callback(self.current_playlist.videos[index:])
 
     def _select_all(self, event=None):
         self.video_tree.selection_set(*self.video_tree.get_children())
@@ -616,6 +671,7 @@ class PlaylistUI:
         iid = self.video_tree.identify_row(event.y)
         if not self.current_playlist or not iid or iid == "empty":
             return
+        self._claim_workspace_keyboard_focus(self.video_tree)
         index = int(iid)
         if index >= len(self.current_playlist.videos):
             return
@@ -1011,7 +1067,8 @@ class PlaylistUI:
         else:
             self.parent.after(0, refresh)
 
-    def _on_playlist_select(self, event):
+    def _on_playlist_select(self, event=None):
+        self._claim_workspace_keyboard_focus(self.playlist_listbox)
         # Prevent recursive calls
         if hasattr(self, '_selecting_playlist'):
             return

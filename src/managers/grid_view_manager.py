@@ -8,6 +8,7 @@ import multiprocessing
 
 from managers.resource_manager import ManagedExecutor, get_resource_manager, ManagedThread
 from utils import _responsive_geometry
+import keyboard_navigation
 from managers.video_preview_manager import get_thumb_pool, generate_thumbnail_worker
 
 
@@ -54,6 +55,8 @@ class GridViewManager:
         self.items = []
         self.selected_items = set()
         self.card_widgets = {}
+        self._card_positions = {}
+        self._kb_focus_path = None
         self.excluded_items = set()
         self.is_loading = False
         self.loading_lock = threading.Lock()
@@ -603,6 +606,7 @@ class GridViewManager:
         body.pack(fill=tk.BOTH, expand=True, padx=0, pady=(2, 10))
 
         self.canvas = tk.Canvas(body, bg=t['bg'], highlightthickness=0)
+        self.canvas.configure(takefocus=1)
         scrollbar = ttk.Scrollbar(body, orient=tk.VERTICAL, command=self.canvas.yview,
                                   style="ExclusionTree.Vertical.TScrollbar")
         self.canvas.configure(yscrollcommand=scrollbar.set)
@@ -639,6 +643,13 @@ class GridViewManager:
         gw.bind("<Escape>", lambda e: self._clear_selection())
         gw.bind("<Delete>", lambda e: self._clear_selection())
         gw.bind("<Return>", lambda e: self._play_selected())
+        self._setup_grid_keyboard_nav(gw)
+        tp = self.theme_provider
+        if hasattr(tp, '_set_keyboard_focus_zone'):
+            keyboard_navigation.bind_keyboard_zone(gw, "workspace", tp._set_keyboard_focus_zone)
+            keyboard_navigation.bind_keyboard_zone(body, "workspace", tp._set_keyboard_focus_zone)
+            keyboard_navigation.bind_keyboard_zone(self.canvas, "workspace", tp._set_keyboard_focus_zone)
+            keyboard_navigation.bind_keyboard_zone(self.grid_frame, "workspace", tp._set_keyboard_focus_zone)
 
         def _on_closing():
             self._teardown_grid_view()
@@ -1195,6 +1206,7 @@ class GridViewManager:
         for w in self.grid_frame.winfo_children():
             w.destroy()
         self.card_widgets.clear()
+        self._card_positions = {}
 
         t = self._tok()
         cols = self.grid_size_var.get()
@@ -1335,6 +1347,7 @@ class GridViewManager:
         card.grid(row=grid_row, column=video_col,
                   padx=_CARD_PAD_X, pady=_CARD_PAD_Y, sticky='nsew')
         self.card_widgets[vp] = card
+        self._card_positions[vp] = (grid_row, video_col)
 
         # ── Thumbnail container ───────────────────────────────────────────────
         thumb_container = tk.Frame(
@@ -1734,6 +1747,100 @@ class GridViewManager:
                 and it['path'] in self.selected_items
                 and it['path'] not in self.excluded_items]
 
+    def _claim_workspace_keyboard_focus(self, widget=None):
+        if widget is None and hasattr(self, 'canvas') and self.canvas:
+            widget = self.canvas
+        keyboard_navigation.claim_workspace_focus(self.theme_provider, widget)
+
+    def _setup_grid_keyboard_nav(self, widget):
+        for seq in ("<Up>", "<Down>", "<Left>", "<Right>", "<Return>", "<KP_Enter>"):
+            widget.bind(seq, self._on_grid_keyboard, add="+")
+        if hasattr(self, 'canvas') and self.canvas:
+            for seq in ("<Up>", "<Down>", "<Left>", "<Right>", "<Return>", "<KP_Enter>"):
+                self.canvas.bind(seq, self._on_grid_keyboard, add="+")
+        if hasattr(self, 'grid_frame') and self.grid_frame:
+            for seq in ("<Up>", "<Down>", "<Left>", "<Right>", "<Return>", "<KP_Enter>"):
+                self.grid_frame.bind(seq, self._on_grid_keyboard, add="+")
+
+    def handle_keyboard_nav(self, event):
+        if not keyboard_navigation.is_workspace_zone(self.theme_provider):
+            return False
+        return self._on_grid_keyboard(event) == "break"
+
+    def _on_grid_keyboard(self, event):
+        if not keyboard_navigation.is_workspace_zone(self.theme_provider):
+            return
+        keysym = event.keysym
+        if keysym in ("Return", "KP_Enter"):
+            if self.selected_items or self._kb_focus_path:
+                self._play_selected()
+            return "break"
+        direction = {
+            "Up": "up", "Down": "down", "Left": "left", "Right": "right",
+        }.get(keysym)
+        if direction and self._kb_navigate_card(direction):
+            return "break"
+
+    def _kb_navigate_card(self, direction):
+        paths = list(self._card_positions.keys())
+        if not paths:
+            return False
+
+        current = self._kb_focus_path
+        if current not in self._card_positions:
+            if self.selected_items:
+                current = next(iter(self.selected_items))
+            else:
+                current = paths[0]
+
+        row, col = self._card_positions[current]
+        candidates = []
+        for vp, (r, c) in self._card_positions.items():
+            if direction == "up" and c == col and r < row:
+                candidates.append((r, vp))
+            elif direction == "down" and c == col and r > row:
+                candidates.append((r, vp))
+            elif direction == "left" and r == row and c < col:
+                candidates.append((c, vp))
+            elif direction == "right" and r == row and c > col:
+                candidates.append((c, vp))
+
+        if not candidates:
+            if direction in ("left", "right"):
+                ordered = sorted(self._card_positions.items(), key=lambda x: (x[1][0], x[1][1]))
+                idx = next((i for i, (vp, _) in enumerate(ordered) if vp == current), 0)
+                if direction == "left" and idx > 0:
+                    target = ordered[idx - 1][0]
+                elif direction == "right" and idx < len(ordered) - 1:
+                    target = ordered[idx + 1][0]
+                else:
+                    return False
+                self._kb_select_card(target)
+                return True
+            return False
+
+        if direction in ("up", "down"):
+            target = max(candidates, key=lambda x: x[0])[1] if direction == "up" else min(candidates, key=lambda x: x[0])[1]
+        else:
+            target = max(candidates, key=lambda x: x[0])[1] if direction == "left" else min(candidates, key=lambda x: x[0])[1]
+
+        self._kb_select_card(target)
+        return True
+
+    def _kb_select_card(self, vp):
+        self._kb_focus_path = vp
+        old = self.selected_items.copy()
+        self.selected_items = {vp}
+        for op in old:
+            if op != vp:
+                self._update_card_selection(op)
+        if vp not in old:
+            self._update_card_selection(vp)
+        self._update_selection_label()
+        card = self.card_widgets.get(vp)
+        if card and hasattr(self, 'canvas') and self.canvas:
+            keyboard_navigation.scroll_widget_into_view(self.canvas, card)
+
     # ─────────────────────────────────────────────────────────────────────────
     # Click handlers (original, using new selection label)
     # ─────────────────────────────────────────────────────────────────────────
@@ -1743,6 +1850,7 @@ class GridViewManager:
         self._on_card_click(event, vp)
 
     def _on_card_click(self, event, vp):
+        self._claim_workspace_keyboard_focus()
         if self.video_preview_manager:
             self.video_preview_manager.tooltip.hide_preview()
 

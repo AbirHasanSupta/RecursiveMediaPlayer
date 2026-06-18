@@ -12,9 +12,11 @@ except ImportError:
 
 try:
     from utils import _responsive_geometry
+    import keyboard_navigation
 except ImportError:
     def _responsive_geometry(parent, w, h):
         return f"{w}x{h}"
+    keyboard_navigation = None
 
 
 def _fmt_ms(ms: int) -> str:
@@ -828,11 +830,57 @@ class AnnotationBrowserManager:
         act_inner = tk.Frame(action, bg=P["status_bg"])
         act_inner.pack(fill=tk.X, padx=18, pady=10)
 
+        self._setup_annotation_keyboard_nav()
 
         # Start async loading (shows loading indicators, then populates UI)
         self._start_async_load()
         if hasattr(win, "deiconify"):
             win.deiconify()
+
+    def _claim_workspace_keyboard_focus(self, widget=None):
+        if keyboard_navigation is not None:
+            keyboard_navigation.claim_workspace_focus(self.tp, widget)
+
+    def _setup_annotation_keyboard_nav(self):
+        if keyboard_navigation is None:
+            return
+        zone_active = lambda: keyboard_navigation.is_workspace_zone(self.tp)
+        keyboard_navigation.bind_keyboard_zone(
+            self._win, "workspace", self.tp._set_keyboard_focus_zone)
+        self._vid_canvas.configure(takefocus=1)
+        keyboard_navigation.bind_focus_target(self._vid_canvas, self._vid_canvas)
+        for seq in ("<Up>", "<Down>", "<Return>", "<KP_Enter>"):
+            self._vid_canvas.bind(seq, self._on_annotation_keyboard, add="+")
+
+    def handle_keyboard_nav(self, event):
+        if keyboard_navigation is None or not keyboard_navigation.is_workspace_zone(self.tp):
+            return False
+        return self._on_annotation_keyboard(event) == "break"
+
+    def _on_annotation_keyboard(self, event):
+        if keyboard_navigation is not None and not keyboard_navigation.is_workspace_zone(self.tp):
+            return
+        keysym = event.keysym
+        if keysym in ("Return", "KP_Enter"):
+            if self._vid_selection:
+                self._play_selected()
+            return "break"
+        if keysym not in ("Up", "Down") or not self._filtered_videos:
+            return
+
+        sel = sorted(self._vid_selection) if self._vid_selection else [0]
+        idx = sel[0]
+        if keysym == "Up":
+            idx = max(0, idx - 1)
+        else:
+            idx = min(len(self._filtered_videos) - 1, idx + 1)
+
+        self._vid_selection = {idx}
+        self._refresh_row_colors()
+        self._on_video_select()
+        if idx < len(self._vid_rows) and keyboard_navigation is not None:
+            keyboard_navigation.scroll_widget_into_view(self._vid_canvas, self._vid_rows[idx])
+        return "break"
 
     def apply_theme(self):
         if not self._win or not self._win.winfo_exists():
@@ -1376,6 +1424,7 @@ class AnnotationBrowserManager:
 
             def _bind_row(r, idx_, cells_):
                 def on_click(e):
+                    self._claim_workspace_keyboard_focus(self._vid_canvas)
                     if self.video_preview_manager and hasattr(self.video_preview_manager, 'tooltip'):
                         try:
                             self.video_preview_manager.tooltip.hide_preview()

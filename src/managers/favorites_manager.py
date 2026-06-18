@@ -11,6 +11,7 @@ from tkinter import ttk
 
 from managers.resource_manager import get_resource_manager
 from utils import _responsive_geometry
+import keyboard_navigation
 
 
 class FavoriteEntry:
@@ -549,6 +550,7 @@ class FavoritesUI:
         self.favorites_tree.bind("<Leave>", self._on_combined_leave)
         self.favorites_tree.bind("<Motion>", self._on_tree_hover)
         self._hovered_iid = None
+        self._setup_favorites_keyboard_nav()
 
         # ---- Buttons placed directly on body, no extra bar ----
         btn_container = tk.Frame(body, bg=t['bg'])
@@ -561,6 +563,48 @@ class FavoritesUI:
         self._clear_all_btn = tp.create_manager_action_link(
             fav_actions, "✕  Clear all", self._clear_all, style="warning")
         self._clear_all_btn.pack(side=tk.LEFT)
+
+    def _claim_workspace_keyboard_focus(self, widget=None):
+        keyboard_navigation.claim_workspace_focus(self.theme_provider, widget)
+
+    def _setup_favorites_keyboard_nav(self):
+        tp = self.theme_provider
+        zone_active = lambda: keyboard_navigation.is_workspace_zone(tp)
+        keyboard_navigation.bind_keyboard_zone(
+            self.favorites_window, "workspace", tp._set_keyboard_focus_zone)
+        keyboard_navigation.bind_focus_target(
+            self.favorites_tree.master, self.favorites_tree)
+        self.favorites_tree.configure(takefocus=1)
+        keyboard_navigation.bind_tree_keyboard(
+            self.favorites_tree,
+            on_activate=self._activate_favorite_item,
+            skip_iids={"empty"},
+            is_active=zone_active,
+        )
+
+    def handle_keyboard_nav(self, event):
+        if not keyboard_navigation.is_workspace_zone(self.theme_provider):
+            return False
+        if event.keysym in ("Up", "Down", "Return", "KP_Enter"):
+            keyboard_navigation.claim_workspace_focus(self.theme_provider, self.favorites_tree)
+            self.favorites_tree.event_generate(f'<{event.keysym}>')
+            return True
+        return False
+
+    def _activate_favorite_item(self, iid):
+        if not iid or iid == "empty":
+            return
+        index = int(iid)
+        if 0 <= index < len(self.favorite_entries):
+            favorite = self.favorite_entries[index]
+            if os.path.isfile(favorite.video_path):
+                if self.on_play_callback:
+                    self.on_play_callback([favorite.video_path])
+            else:
+                self.theme_provider.toast.warning(
+                    "File Not Found",
+                    f"Video file not found:\n{favorite.video_path}",
+                )
 
     def _on_tree_hover(self, event):
         t = self._get_design_tokens()
@@ -899,6 +943,7 @@ class FavoritesUI:
         iid = self.favorites_tree.identify_row(event.y)
         if not iid or iid == "empty":
             return
+        self._claim_workspace_keyboard_focus(self.favorites_tree)
         index = int(iid)
         ctrl_held = bool(event.state & 0x4)
         shift_held = bool(event.state & 0x1)

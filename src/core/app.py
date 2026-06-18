@@ -32,6 +32,7 @@ from managers.resource_manager import ThreadSafeDict, get_resource_manager, Mana
     ManagedThread
 from theme import ThemeSelector
 from utils import gather_videos_with_directories, is_video, gather_videos, check_vlc, show_vlc_missing_and_exit
+import keyboard_navigation
 from managers.playlist_manager import PlaylistManager
 from managers.watch_history_manager import WatchHistoryManager
 from managers.resume_playback_manager import ResumePlaybackManager
@@ -254,6 +255,7 @@ def select_multiple_folders_and_play():
             for i in range(1, 9):
                 self.root.bind(f"<Control-Key-{i}>", lambda e, idx=i-1: self._switch_to_tab_by_index(idx))
                 self.root.bind(f"<Control-KP_{i}>", lambda e, idx=i-1: self._switch_to_tab_by_index(idx))
+            self._setup_app_keyboard_navigation()
             app_settings = self.settings_manager.get_settings()
             if hasattr(app_settings, 'dir_panel_width'):
                 self._dir_panel_width = app_settings.dir_panel_width
@@ -901,6 +903,7 @@ def select_multiple_folders_and_play():
             self._active_app_view = "home"
             self.active_embedded_manager = None
             self.embedded_view_frame = None
+            self._keyboard_focus_zone = "workspace"
             self._directory_panel_mode = "expanded"
             self._dir_panel_width = 380
             self.root_container = tk.Frame(self.root, bg=self.bg_color)
@@ -944,6 +947,13 @@ def select_multiple_folders_and_play():
 
             self.workspace_body = tk.Frame(self.workspace_frame, bg=self.bg_color)
             self.workspace_body.pack(fill=tk.BOTH, expand=True)
+            keyboard_navigation.bind_keyboard_zone(
+                self.workspace_frame, "workspace", self._set_keyboard_focus_zone)
+            keyboard_navigation.bind_keyboard_zone(
+                self.workspace_body, "workspace", self._set_keyboard_focus_zone)
+
+        def _set_keyboard_focus_zone(self, zone):
+            self._keyboard_focus_zone = zone
 
         def _show_home_view(self):
             self._cleanup_active_manager()
@@ -955,6 +965,7 @@ def select_multiple_folders_and_play():
 
             self._set_workspace_title("Home", "Welcome to Recursive Video Player")
             self._active_app_view = "home"
+            self._set_keyboard_focus_zone('workspace')
             self._refresh_media_pill_state()
 
             # Re-apply global search to new manager if query exists
@@ -1592,6 +1603,7 @@ def select_multiple_folders_and_play():
                 self._selected_directory_summary()
             )
             self._refresh_media_pill_state()
+            self._set_keyboard_focus_zone('workspace')
             self.active_embedded_manager = builder(frame)
 
             # Re-apply global search to new manager if query exists
@@ -2089,6 +2101,7 @@ def select_multiple_folders_and_play():
             self.exclusion_tree.bind("<Delete>", self._on_key_toggle_exclusion)
             self.exclusion_tree.bind("<space>", self._on_key_toggle_exclusion)
             self.exclusion_tree.bind("<<TreeviewSelect>>", self._on_tree_selection_changed)
+            self._setup_directory_tree_keyboard()
             self._drag_root_iid = None
             self._drag_start_y = None
             self.exclusion_tree.bind("<B1-Motion>", self._on_drag_motion)
@@ -2217,6 +2230,7 @@ def select_multiple_folders_and_play():
             self.update_video_count()
 
         def _on_tree_left_click_unified(self, event):
+            self._set_keyboard_focus_zone('directory')
             iid = self.exclusion_tree.identify_row(event.y)
             region = self.exclusion_tree.identify_region(event.x, event.y)
 
@@ -2710,6 +2724,19 @@ def select_multiple_folders_and_play():
             _walk("")
             return result
 
+        def _tree_get_visible_iids(self):
+            """Return iids visible in the tree (respecting collapsed nodes)."""
+            result = []
+
+            def _walk(parent):
+                for iid in self.exclusion_tree.get_children(parent):
+                    result.append(iid)
+                    if self.exclusion_tree.item(iid, "open"):
+                        _walk(iid)
+
+            _walk("")
+            return result
+
         def _tree_size(self):
             return len(self._tree_get_all_iids())
 
@@ -2793,6 +2820,12 @@ def select_multiple_folders_and_play():
             iid = self.exclusion_tree.identify_row(event.y)
             if not iid:
                 return
+            self._activate_directory_tree_item(iid)
+            return "break"
+
+        def _activate_directory_tree_item(self, iid):
+            if not iid:
+                return
 
             target_path = self.current_subdirs_mapping.get(iid)
             if not target_path:
@@ -2804,7 +2837,7 @@ def select_multiple_folders_and_play():
                 if os.path.isfile(target_path) and is_video(target_path):
                     self.exclusion_tree.selection_set(iid)
                     self.root.after(100, lambda p=target_path: self._play_from_double_click(p))
-                return "break"
+                return
 
             if os.path.isdir(target_path):
                 norm_target = os.path.normpath(target_path)
@@ -2816,14 +2849,13 @@ def select_multiple_folders_and_play():
                     self.expanded_paths.add(norm_target)
                     self.collapsed_paths.discard(norm_target)
                     self._lazy_expand_node(iid, target_path)
-                return "break"
+                return
 
             if not os.path.isfile(target_path) or not is_video(target_path):
                 return
 
             self.exclusion_tree.selection_set(iid)
-            self.root.after(100, lambda: self._play_from_double_click(target_path))
-            return "break"
+            self.root.after(100, lambda p=target_path: self._play_from_double_click(p))
 
         def _on_any_annotation_changed(self):
             if hasattr(self, 'current_subdirs_mapping'):
@@ -5821,6 +5853,70 @@ def select_multiple_folders_and_play():
 
         def _show_settings(self):
             self.settings_manager.show_settings()
+
+        def _setup_app_keyboard_navigation(self):
+            self.root.bind("<Control-Shift-D>", lambda e: self._toggle_directory_panel_shortcut())
+            self.root.bind("<Control-Shift-d>", lambda e: self._toggle_directory_panel_shortcut())
+            self.root.bind("<Control-Shift-A>", lambda e: self._add_directory_shortcut())
+            self.root.bind("<Control-Shift-a>", lambda e: self._add_directory_shortcut())
+            for seq in ("<Up>", "<Down>", "<Left>", "<Right>", "<Return>", "<KP_Enter>"):
+                self.root.bind_all(seq, self._global_keyboard_nav, add="+")
+
+        def _setup_directory_tree_keyboard(self):
+            skip = {getattr(self, 'search_entry', None)}
+            keyboard_navigation.bind_keyboard_zone(
+                self.dir_section, "directory", self._set_keyboard_focus_zone, skip_widgets=skip)
+            keyboard_navigation.bind_keyboard_zone(
+                self.dir_tree_container, "directory", self._set_keyboard_focus_zone)
+            keyboard_navigation.bind_focus_target(
+                self.dir_section, self.exclusion_tree, skip_widgets=skip)
+            keyboard_navigation.bind_focus_target(
+                self.dir_tree_container, self.exclusion_tree)
+            keyboard_navigation.bind_tree_keyboard(
+                self.exclusion_tree,
+                on_activate=self._activate_directory_tree_item,
+                hierarchical=True,
+                all_iids_fn=self._tree_get_visible_iids,
+                arrows_expand=False,
+                is_active=lambda: getattr(self, '_keyboard_focus_zone', None) == 'directory',
+            )
+
+        def _toggle_directory_panel_shortcut(self):
+            if not self._shortcuts_allowed():
+                return
+            self._toggle_directory_panel()
+            return "break"
+
+        def _add_directory_shortcut(self):
+            if not self._shortcuts_allowed():
+                return
+            self.add_directory()
+            return "break"
+
+        def _global_keyboard_nav(self, event):
+            if not self._shortcuts_allowed():
+                return
+            focused = self.root.focus_get()
+            if keyboard_navigation.is_text_input(focused):
+                return
+
+            zone = getattr(self, '_keyboard_focus_zone', 'workspace')
+
+            if zone == 'directory':
+                if focused is getattr(self, 'search_entry', None):
+                    return
+                tree = getattr(self, 'exclusion_tree', None)
+                if tree is None:
+                    return
+                if focused is not tree:
+                    tree.focus_set()
+                tree.event_generate(f'<{event.keysym}>')
+                return "break"
+
+            mgr = getattr(self, 'active_embedded_manager', None)
+            if mgr and hasattr(mgr, 'handle_keyboard_nav'):
+                if mgr.handle_keyboard_nav(event):
+                    return "break"
 
         def _shortcuts_allowed(self):
             focused = self.root.focus_get()

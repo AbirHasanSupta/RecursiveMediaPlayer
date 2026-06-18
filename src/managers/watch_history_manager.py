@@ -10,6 +10,7 @@ import uuid
 
 from managers.resource_manager import get_resource_manager
 from utils import _responsive_geometry
+import keyboard_navigation
 
 
 def _get_app_dirs():
@@ -689,6 +690,7 @@ class WatchHistoryUI:
         self.history_tree.bind("<Button-1>", self._on_history_left_click)
         self.history_tree.bind("<Leave>", self._on_combined_leave)
         self.history_tree.bind("<Motion>", self._on_tree_hover)
+        self._setup_history_keyboard_nav()
 
         btn_container = tk.Frame(body, bg=t['bg'])
         btn_container._manager_role = "body"
@@ -703,6 +705,32 @@ class WatchHistoryUI:
         tp.create_manager_action_link(
             hist_actions, "✕  Clear all history", self._clear_all_history, style="warning"
         ).pack(side=tk.LEFT)
+
+    def _claim_workspace_keyboard_focus(self, widget=None):
+        keyboard_navigation.claim_workspace_focus(self.theme_provider, widget)
+
+    def _setup_history_keyboard_nav(self):
+        tp = self.theme_provider
+        zone_active = lambda: keyboard_navigation.is_workspace_zone(tp)
+        keyboard_navigation.bind_keyboard_zone(
+            self.history_window, "workspace", tp._set_keyboard_focus_zone)
+        keyboard_navigation.bind_focus_target(
+            self.history_tree.master, self.history_tree)
+        self.history_tree.configure(takefocus=1)
+        keyboard_navigation.bind_tree_keyboard(
+            self.history_tree,
+            on_activate=lambda _iid: self._play_selected_video(),
+            is_active=zone_active,
+        )
+
+    def handle_keyboard_nav(self, event):
+        if not keyboard_navigation.is_workspace_zone(self.theme_provider):
+            return False
+        if event.keysym in ("Up", "Down", "Return", "KP_Enter"):
+            keyboard_navigation.claim_workspace_focus(self.theme_provider, self.history_tree)
+            self.history_tree.event_generate(f'<{event.keysym}>')
+            return True
+        return False
 
     def _update_stats_label(self):
         total = len(self.history_service.get_all_history())
@@ -760,6 +788,9 @@ class WatchHistoryUI:
     def _on_history_left_click(self, event):
         if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
             self.video_preview_manager.tooltip.hide_preview()
+        iid = self.history_tree.identify_row(event.y)
+        if iid:
+            self._claim_workspace_keyboard_focus(self.history_tree)
 
     def _on_tree_hover(self, event):
         iid = self.history_tree.identify_row(event.y)
