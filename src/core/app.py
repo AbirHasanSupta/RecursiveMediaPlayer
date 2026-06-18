@@ -1074,7 +1074,6 @@ def select_multiple_folders_and_play():
                 canvas.itemconfig(inner_win, width=e.width)
             inner.bind("<Configure>", _on_inner_configure)
             canvas.bind("<Configure>", _on_canvas_configure)
-            self._home_canvas_ref = canvas
             pad = tk.Frame(inner, bg=bg)
             pad.pack(fill=tk.BOTH, expand=True, padx=1, pady=(35, 20))
 
@@ -1100,8 +1099,6 @@ def select_multiple_folders_and_play():
             play_btn.bind("<Button-1>", lambda e: self.play_videos())
             play_btn.bind("<Enter>", lambda e: play_btn.config(bg=accent))
             play_btn.bind("<Leave>", lambda e: play_btn.config(bg=accent2))
-
-            self._home_nav_widgets = [(play_btn, self.play_videos, 'action', None)]
 
             body_row = tk.Frame(pad, bg=bg)
             body_row.pack(fill=tk.BOTH, expand=True)
@@ -1151,7 +1148,6 @@ def select_multiple_folders_and_play():
                         w.bind("<Button-1>", lambda e, c=cmd: c())
                         w.bind("<Enter>", lambda e, f=card: f.config(bg=self.hover_color, highlightbackground=accent))
                         w.bind("<Leave>", lambda e, f=card: f.config(bg=surface, highlightbackground=border))
-                    self._home_nav_widgets.append((card, cmd, 'action', None))
 
             all_actions = [
                 ("🖼", "Gallery", "Browse as grid", accent, self._show_grid_view),
@@ -1194,7 +1190,6 @@ def select_multiple_folders_and_play():
                          font=Font(family="Segoe UI", size=9),
                          bg=surface, fg=text_sec).pack(anchor="w", pady=(2, 0))
                 _bind_hover(card, inner_card, cmd, col)
-                self._home_nav_widgets.append((card, cmd, 'action', None))
 
             analytics_card = tk.Frame(right_col, bg=surface,
                                       highlightbackground=border, highlightthickness=1)
@@ -1290,8 +1285,6 @@ def select_multiple_folders_and_play():
                      font=Font(family="Segoe UI", size=9),
                      bg=tip_bg, fg=text_sec,
                      wraplength=680, justify="left").pack(side=tk.LEFT)
-
-            self._setup_home_keyboard_nav(self._home_nav_widgets, self._home_canvas_ref)
 
             def _load_stats():
                 try:
@@ -1424,8 +1417,6 @@ def select_multiple_folders_and_play():
                     _see_all_lbl.bind("<Button-1>", lambda e: self._show_watch_history())
                     _see_all_lbl.bind("<Enter>", lambda e: _see_all_lbl.config(fg=accent2))
                     _see_all_lbl.bind("<Leave>", lambda e: _see_all_lbl.config(fg=accent))
-                    self._home_nav_widgets.append(
-                        (_see_all_lbl, self._show_watch_history, 'action', None))
 
                     cw_grid = tk.Frame(cw_placeholder, bg=bg)
                     cw_grid.pack(fill=tk.X)
@@ -1577,17 +1568,6 @@ def select_multiple_folders_and_play():
                         for _cw_w in (_cw_card, _cw_body, _accent_bar):
                             _cw_w.bind("<Enter>", _cw_enter)
                             _cw_w.bind("<Leave>", _cw_leave)
-
-                        self._home_nav_widgets.append(
-                            (_cw_card, _do_play_cw, 'cw_card', (_cw_entry.video_path, _cw_entry, _cw_card)))
-
-                    def _finish_home_keyboard():
-                        try:
-                            self._setup_home_keyboard_nav(self._home_nav_widgets, self._home_canvas_ref)
-                        except Exception:
-                            pass
-
-                    self.root.after(0, _finish_home_keyboard)
 
                 except Exception:
                     pass
@@ -5972,25 +5952,6 @@ def select_multiple_folders_and_play():
             if mgr and hasattr(mgr, 'show_preview_for_focused'):
                 mgr.show_preview_for_focused()
                 return "break"
-            if getattr(self, '_active_app_view', None) == 'home':
-                cw_cards = getattr(self, '_home_cw_cards', [])
-                idx = getattr(self, '_home_cw_focus_idx', -1)
-                if 0 <= idx < len(cw_cards):
-                    path, entry, card = cw_cards[idx]
-                    if hasattr(self, 'video_preview_manager') and os.path.isfile(path):
-                        vpm = self.video_preview_manager
-                        resume_sec = 0.0
-                        try:
-                            if entry.duration_watched:
-                                resume_sec = float(entry.duration_watched)
-                        except Exception:
-                            pass
-                        x, y = keyboard_navigation.preview_coords_for_widget(card)
-                        cached_td = vpm.cw_preview_cache.get(path, resume_sec)
-                        if cached_td:
-                            vpm.tooltip.show_preview(path, cached_td, x, y)
-                        else:
-                            vpm.show_preview_at_position(path, resume_sec, x, y)
             return "break"
 
         def _toggle_directory_panel_shortcut(self):
@@ -6017,9 +5978,6 @@ def select_multiple_folders_and_play():
             if zone == 'directory':
                 if focused is getattr(self, 'search_entry', None):
                     return
-                sidebar = getattr(self, '_sidebar_focus_ring', None)
-                if sidebar and sidebar.is_in_ring(focused):
-                    return
                 tree = getattr(self, 'exclusion_tree', None)
                 if tree is None:
                     return
@@ -6031,14 +5989,6 @@ def select_multiple_folders_and_play():
                     arrows_expand=False,
                 )
                 return "break"
-
-            sidebar = getattr(self, '_sidebar_focus_ring', None)
-            if sidebar and sidebar.is_in_ring(focused):
-                return
-            if getattr(self, '_active_app_view', None) == 'home':
-                home = getattr(self, '_home_focus_ring', None)
-                if home and home.is_in_ring(focused):
-                    return
 
             mgr = getattr(self, 'active_embedded_manager', None)
             if mgr:
@@ -6105,219 +6055,40 @@ def select_multiple_folders_and_play():
             if not self._shortcuts_allowed():
                 return "break"
             focused = self.root.focus_get()
-
-            for ring in self._active_focus_rings():
-                if ring.is_in_ring(focused) and not ring.at_boundary(focused, reverse):
-                    ring.cycle(reverse=reverse)
+            mgr = getattr(self, 'active_embedded_manager', None)
+            if mgr and hasattr(mgr, 'cycle_focus_ring'):
+                if mgr.cycle_focus_ring(reverse=reverse):
                     return "break"
-
-            regions = self._build_focus_regions()
+            workspace_widget = None
+            if mgr:
+                if hasattr(mgr, 'get_primary_widget'):
+                    workspace_widget = mgr.get_primary_widget()
+            if workspace_widget is None:
+                workspace_widget = getattr(self, 'workspace_body', None)
+            regions = []
+            tree = getattr(self, 'exclusion_tree', None)
+            if tree and tree.winfo_exists() and tree.winfo_ismapped():
+                regions.append(('directory', tree))
+            dir_search = getattr(self, 'search_entry', None)
+            if dir_search and dir_search.winfo_exists() and dir_search.winfo_ismapped():
+                regions.append(('dir_search', dir_search))
+            global_search = getattr(self, 'global_search_entry', None)
+            if global_search and global_search.winfo_exists() and global_search.winfo_ismapped():
+                regions.append(('global_search', global_search))
+            if workspace_widget and workspace_widget.winfo_exists() and workspace_widget.winfo_ismapped():
+                regions.append(('workspace', workspace_widget))
             if not regions:
                 return "break"
-
-            cur_idx = -1
-            for i, region in enumerate(regions):
-                ring = region.get('ring')
-                if ring and ring.is_in_ring(focused):
-                    cur_idx = i
-                    break
-                for w in region['widgets']:
-                    if w == focused or keyboard_navigation.widget_in_container(focused, w):
-                        cur_idx = i
-                        break
-                if cur_idx >= 0:
-                    break
-
+            cur_idx = next((i for i, (_, w) in enumerate(regions) if w == focused), -1)
             if cur_idx == -1:
                 next_idx = 0
             else:
-                next_idx = (cur_idx + (-1 if reverse else 1)) % len(regions)
-
-            region = regions[next_idx]
-            target = region['widgets'][-1 if reverse else 0]
-            target.focus_set()
-            self._set_keyboard_focus_zone(region['zone'])
-            if region.get('scroll_canvas') and region.get('ring'):
-                self.root.after(10, lambda: keyboard_navigation.scroll_widget_into_view(
-                    region['scroll_canvas'], target))
+                next_idx = (cur_idx + (- 1 if reverse else 1)) % len(regions)
+            zone, widget = regions[next_idx]
+            widget.focus_set()
+            self._set_keyboard_focus_zone('directory' if zone == 'directory' else 'workspace')
             return "break"
 
-        def _active_focus_rings(self):
-            rings = []
-            sidebar = getattr(self, '_sidebar_focus_ring', None)
-            if sidebar:
-                rings.append(sidebar)
-            if getattr(self, '_active_app_view', None) == 'home':
-                home = getattr(self, '_home_focus_ring', None)
-                if home:
-                    rings.append(home)
-            mgr = getattr(self, 'active_embedded_manager', None)
-            if mgr:
-                ring = getattr(mgr, 'focus_ring', None)
-                if ring:
-                    rings.append(ring)
-            return rings
-
-        def _build_focus_regions(self):
-            regions = []
-            sidebar = getattr(self, '_sidebar_focus_ring', None)
-            if sidebar:
-                widgets = sidebar.visible_widgets()
-                if widgets:
-                    regions.append({
-                        'name': 'sidebar', 'widgets': widgets,
-                        'zone': 'directory', 'ring': sidebar,
-                    })
-            tree = getattr(self, 'exclusion_tree', None)
-            if tree and tree.winfo_exists() and tree.winfo_ismapped():
-                regions.append({'name': 'directory', 'widgets': [tree], 'zone': 'directory'})
-            dir_search = getattr(self, 'search_entry', None)
-            if dir_search and dir_search.winfo_exists() and dir_search.winfo_ismapped():
-                regions.append({'name': 'dir_search', 'widgets': [dir_search], 'zone': 'directory'})
-            global_search = getattr(self, 'global_search_entry', None)
-            if global_search and global_search.winfo_exists() and global_search.winfo_ismapped():
-                regions.append({'name': 'global_search', 'widgets': [global_search], 'zone': 'workspace'})
-            if getattr(self, '_active_app_view', None) == 'home':
-                home = getattr(self, '_home_focus_ring', None)
-                if home:
-                    widgets = home.visible_widgets()
-                    if widgets:
-                        regions.append({
-                            'name': 'home', 'widgets': widgets,
-                            'zone': 'workspace', 'ring': home,
-                            'scroll_canvas': getattr(self, '_home_canvas', None),
-                        })
-            else:
-                mgr = getattr(self, 'active_embedded_manager', None)
-                if mgr:
-                    pw = mgr.get_primary_widget() if hasattr(mgr, 'get_primary_widget') else None
-                    if pw and pw.winfo_exists() and pw.winfo_ismapped():
-                        regions.append({
-                            'name': 'workspace', 'widgets': [pw],
-                            'zone': 'workspace',
-                            'ring': getattr(mgr, 'focus_ring', None),
-                        })
-            return regions
-
-        def _setup_sidebar_keyboard_nav(self):
-            widgets = []
-            for key in ('_sb_toggle_btn', '_sb_add_btn'):
-                w = getattr(self, key, None)
-                if w and w.winfo_exists():
-                    widgets.append(w)
-            for key in ('File', 'Filter', 'Playback', 'Settings'):
-                w = self._toolbar_btns.get(key)
-                if w and w.winfo_exists():
-                    widgets.append(w)
-            for key in ('play_toolbar_btn', 'theme_toolbar_btn'):
-                w = getattr(self, key, None)
-                if w and w.winfo_exists():
-                    widgets.append(w)
-            for btn in self._media_pill_btns.values():
-                if btn.winfo_exists():
-                    widgets.append(btn)
-
-            self._sidebar_focus_ring = keyboard_navigation.FocusRing(
-                container=self.root_container,
-                accent_color=self.accent_color,
-                border_color=self.border_color,
-            )
-            pill_cmds = {
-                "Home": self._show_home_view,
-                "Gallery": self._show_grid_view,
-                "Playlist": self._manage_playlists,
-                "Queue": self._show_queue_manager,
-                "Favourites": self._show_favorites_manager,
-                "Tags & Ratings": self._show_annotation_browser,
-                "History": self._show_watch_history,
-                "AI Search": self._show_ai_search,
-            }
-
-            def _activate_sidebar(widget):
-                if widget is self._sb_toggle_btn:
-                    self._toggle_directory_panel()
-                elif widget is self._sb_add_btn:
-                    self.add_directory()
-                elif widget is self._toolbar_btns.get('Filter'):
-                    self._show_filter_dialog()
-                elif widget is self._toolbar_btns.get('Settings'):
-                    self._show_settings()
-                elif widget is self.play_toolbar_btn:
-                    self.global_play()
-                elif widget is self.theme_toolbar_btn:
-                    self.toggle_theme()
-                elif widget is self._toolbar_btns.get('File'):
-                    menu = self._toolbar_menus.get('File')
-                    if menu:
-                        try:
-                            menu.tk_popup(widget.winfo_rootx() + widget.winfo_width() + 4,
-                                          widget.winfo_rooty())
-                        finally:
-                            menu.grab_release()
-                elif widget is self._toolbar_btns.get('Playback'):
-                    menu = self._toolbar_menus.get('Playback')
-                    if menu:
-                        try:
-                            menu.tk_popup(widget.winfo_rootx() + widget.winfo_width() + 4,
-                                          widget.winfo_rooty())
-                        finally:
-                            menu.grab_release()
-                else:
-                    for label, btn in self._media_pill_btns.items():
-                        if widget is btn:
-                            cmd = pill_cmds.get(label)
-                            if cmd:
-                                cmd()
-                            break
-
-            for i, w in enumerate(widgets):
-                self._sidebar_focus_ring.register(
-                    w, f'sidebar_{i}',
-                    activate=lambda ww=w: _activate_sidebar(ww),
-                    up=lambda: self._sidebar_focus_ring.cycle(reverse=True),
-                    down=lambda: self._sidebar_focus_ring.cycle(reverse=False),
-                )
-
-        def _setup_home_keyboard_nav(self, interactive_widgets, canvas):
-            if not interactive_widgets or canvas is None:
-                return
-            self._home_canvas = canvas
-            self._home_cw_cards = []
-            self._home_cw_focus_idx = -1
-            self._home_focus_ring = keyboard_navigation.FocusRing(
-                container=self.workspace_body,
-                accent_color=self.accent_color,
-                border_color=self.border_color,
-            )
-            for i, item in enumerate(interactive_widgets):
-                widget, cmd, kind, extra = item
-                if not widget.winfo_exists():
-                    continue
-                try:
-                    widget.configure(takefocus=1, cursor="hand2")
-                except tk.TclError:
-                    pass
-                if kind == 'cw_card':
-                    self._home_cw_cards.append(extra)
-                    idx = len(self._home_cw_cards) - 1
-                    self._home_focus_ring.register(
-                        widget, f'home_{i}',
-                        activate=cmd,
-                        up=lambda: self._home_focus_ring.cycle(reverse=True),
-                        down=lambda: self._home_focus_ring.cycle(reverse=False),
-                        left=lambda: self._home_focus_ring.cycle(reverse=True),
-                        right=lambda: self._home_focus_ring.cycle(reverse=False),
-                    )
-                    widget.bind("<FocusIn>", lambda e, ix=idx: setattr(self, '_home_cw_focus_idx', ix), add="+")
-                else:
-                    self._home_focus_ring.register(
-                        widget, f'home_{i}',
-                        activate=cmd,
-                        up=lambda: self._home_focus_ring.cycle(reverse=True),
-                        down=lambda: self._home_focus_ring.cycle(reverse=False),
-                        left=lambda: self._home_focus_ring.cycle(reverse=True),
-                        right=lambda: self._home_focus_ring.cycle(reverse=False),
-                    )
 
         def _global_play_shortcut(self, event=None):
             if not self._shortcuts_allowed():
@@ -6636,7 +6407,6 @@ def select_multiple_folders_and_play():
                     self.ai_search_pill_container.pack_forget()
                     self._ai_search_pill_packed = False
 
-
         def _make_media_pill(self, label):
             container = tk.Frame(self.workspace_nav, bg=self.bg_color)
             container.pack(side=tk.LEFT, padx=2)
@@ -6644,8 +6414,7 @@ def select_multiple_folders_and_play():
             btn = tk.Label(container, text=label,
                            bg=self.bg_color, fg=self.text_muted,
                            font=("Segoe UI", 10, "normal"),
-                           padx=14, pady=3, cursor="hand2",
-                           takefocus=1)
+                           padx=14, pady=3, cursor="hand2")
             btn.pack(fill=tk.X)
             btn._pill_container = container
 
@@ -6897,8 +6666,6 @@ def select_multiple_folders_and_play():
 
             self.button_frame = tk.Frame(self.main_frame, bg=self.bg_color)
             self.button_frame.pack(fill=tk.X)
-            self._setup_sidebar_keyboard_nav()
-
         # ------------------------------------------------------------------
         # Cancel / shutdown
         # ------------------------------------------------------------------
