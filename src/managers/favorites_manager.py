@@ -490,7 +490,8 @@ class FavoritesUI:
         )
         self.directory_label.pack(side=tk.LEFT, padx=(12, 0), pady=14)
 
-        tk.Frame(self.favorites_window, bg=t['divider'], height=1).pack(fill=tk.X)
+        self._focus_separator = tk.Frame(self.favorites_window, bg=t['divider'], height=1)
+        self._focus_separator.pack(fill=tk.X)
 
         body = tk.Frame(self.favorites_window, bg=t['bg'])
         body._manager_role = "body"
@@ -503,7 +504,6 @@ class FavoritesUI:
         self._fav_card = card
         card.pack(fill=tk.BOTH, expand=True)
 
-        # NEW
         tree_frame = tk.Frame(card, bg=t['surface'])
         tree_frame._manager_role = "surface"
         self._fav_col_hdr = tree_frame
@@ -523,6 +523,7 @@ class FavoritesUI:
             selectmode="extended",
             yscrollcommand=sb.set,
         )
+        self.favorites_tree._focus_separator = self._focus_separator
         self.favorites_listbox = self.favorites_tree
 
         for cid, heading, width, anchor, stretch in [
@@ -552,7 +553,6 @@ class FavoritesUI:
         self._hovered_iid = None
         self._setup_favorites_keyboard_nav()
 
-        # ---- Buttons placed directly on body, no extra bar ----
         btn_container = tk.Frame(body, bg=t['bg'])
         btn_container._manager_role = "body"
         self._fav_btn_row = btn_container

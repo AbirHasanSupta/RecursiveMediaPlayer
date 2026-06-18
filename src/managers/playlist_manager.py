@@ -393,7 +393,8 @@ class PlaylistUI:
             close_btn.bind("<Enter>", lambda e: close_btn.config(fg=t['accent_secondary']))
             close_btn.bind("<Leave>", lambda e: close_btn.config(fg=t['text_muted']))
 
-        tk.Frame(self.playlist_window, bg=t['divider'], height=1).pack(fill=tk.X)
+        self._general_separator = tk.Frame(self.playlist_window, bg=t['divider'], height=1)
+        self._general_separator.pack(fill=tk.X)
 
         cols = tk.Frame(self.playlist_window, bg=t['bg'])
         cols._manager_role = "body"
@@ -464,6 +465,7 @@ class PlaylistUI:
         right_card._manager_role = "surface"
         self._pl_right_card = right_card
         right_card.pack(fill=tk.BOTH, expand=True)
+
         vid_hdr = tk.Frame(right_card, bg=t['surface2'])
         vid_hdr._manager_role = "surface2"
         self._pl_vid_hdr = vid_hdr
@@ -471,7 +473,9 @@ class PlaylistUI:
         tk.Label(vid_hdr, text="  VIDEOS  —  drag to reorder  •  double‑click to play",
                  font=tp.small_font, bg=t['surface2'], fg=t['text_muted'],
                  pady=6, anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
-        tk.Frame(right_card, bg=t['divider'], height=1).pack(fill=tk.X)
+
+        self._video_separator = tk.Frame(right_card, bg=t['divider'], height=1)
+        self._video_separator.pack(fill=tk.X, pady=(0, 6))
 
         vid_body = tk.Frame(right_card, bg=t['surface'])
         vid_body._manager_role = "surface"
@@ -491,6 +495,7 @@ class PlaylistUI:
             selectmode="extended",
             yscrollcommand=vid_sb.set,
         )
+        self.video_tree._focus_separator = self._video_separator
         self.video_listbox = self.video_tree
 
         for cid, heading, width, anchor, stretch in [

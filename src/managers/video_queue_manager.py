@@ -586,7 +586,8 @@ class QueueUI:
         info_lbl.pack(side=tk.RIGHT, padx=(0, 10))
         self.queue_info_label = info_lbl
 
-        tk.Frame(self.queue_window, bg=t['divider'], height=1).pack(fill=tk.X)
+        self._focus_separator = tk.Frame(self.queue_window, bg=t['divider'], height=1)
+        self._focus_separator.pack(fill=tk.X)
 
         body = tk.Frame(self.queue_window, bg=t['bg'])
         body._manager_role = "body"
@@ -618,6 +619,7 @@ class QueueUI:
             selectmode="extended",
             yscrollcommand=sb.set,
         )
+        self.queue_tree._focus_separator = self._focus_separator
         self.queue_listbox = self.queue_tree
 
         for cid, heading, width, anchor, stretch in [
@@ -647,7 +649,6 @@ class QueueUI:
         self.queue_tree.bind("<Motion>", self._on_tree_hover)
         self._setup_queue_keyboard_nav()
 
-        # ---- Buttons placed directly on body, no extra bar ----
         btn_container = tk.Frame(body, bg=t['bg'])
         btn_container._manager_role = "body"
         self._queue_btn_row = btn_container

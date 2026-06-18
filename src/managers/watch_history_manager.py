@@ -617,6 +617,9 @@ class WatchHistoryUI:
             lbl.bind("<Enter>", on_enter)
             lbl.bind("<Leave>", on_leave)
 
+        self._focus_separator = tk.Frame(self.history_window, bg=t['divider'], height=1)
+        self._focus_separator.pack(fill=tk.X)
+
         body = tk.Frame(self.history_window, bg=t['bg'])
         body._manager_role = "body"
         self._hist_body = body
@@ -666,6 +669,8 @@ class WatchHistoryUI:
         columns = ("video", "directory", "watched_at", "duration", "completion")
         self.history_tree = ttk.Treeview(card, columns=columns,
                                          show="headings", style="Hist.Treeview")
+        self.history_tree._focus_separator = self._focus_separator
+
         for col, heading, width, anchor in [
             ("video", "Video", 260, "w"),
             ("directory", "Directory", 190, "w"),
@@ -700,12 +705,10 @@ class WatchHistoryUI:
         hist_actions = tk.Frame(btn_container, bg=t["bg"])
         hist_actions.pack(side=tk.RIGHT)
         self._hist_refresh_btn = tp.create_manager_action_link(
-            hist_actions, "↺  Refresh", self._refresh_history_list, style="secondary"
-        )
+            hist_actions, "↺  Refresh", self._refresh_history_list, style="secondary")
         self._hist_refresh_btn.pack(side=tk.LEFT)
         self._hist_clear_btn = tp.create_manager_action_link(
-            hist_actions, "✕  Clear all history", self._clear_all_history, style="warning"
-        )
+            hist_actions, "✕  Clear all history", self._clear_all_history, style="warning")
         self._hist_clear_btn.pack(side=tk.LEFT)
         self._setup_focus_ring()
 
