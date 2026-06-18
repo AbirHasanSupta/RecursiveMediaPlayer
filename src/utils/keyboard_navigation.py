@@ -460,12 +460,47 @@ class FocusRing:
                 return True
         return False
 
+    def visible_widgets(self):
+        return [e['widget'] for e in self._visible_entries()]
+
+    def at_boundary(self, focused, reverse=False) -> bool:
+        visible = self._visible_entries()
+        if not visible:
+            return True
+        cur_idx = next((i for i, e in enumerate(visible) if e['widget'] == focused), -1)
+        if cur_idx < 0:
+            return False
+        if reverse:
+            return cur_idx == 0
+        return cur_idx == len(visible) - 1
+
     def focus_key(self, key: str):
         for e in self._entries:
             if e['key'] == key and e['widget'].winfo_exists():
                 e['widget'].focus_set()
                 return True
         return False
+
+
+def preview_coords_for_widget(widget):
+    try:
+        return (
+            widget.winfo_rootx() + max(10, widget.winfo_width() // 2),
+            widget.winfo_rooty() + max(10, widget.winfo_height() // 2),
+        )
+    except tk.TclError:
+        return 100, 100
+
+
+def preview_coords_for_tree_item(tree, iid):
+    try:
+        bbox = tree.bbox(iid)
+        if bbox:
+            x, y, w, h = bbox
+            return tree.winfo_rootx() + x + w // 2, tree.winfo_rooty() + y + h // 2
+        return tree.winfo_rootx() + 10, tree.winfo_rooty() + 10
+    except tk.TclError:
+        return 100, 100
 
 
 def scroll_widget_into_view(canvas: tk.Canvas, widget, padding: int = 8):

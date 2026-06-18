@@ -1344,6 +1344,20 @@ class AISearchUI:
         event = type('Event', (), {'x_root': x, 'y_root': y})()
         self._show_context_menu(event, vp)
 
+    def show_preview_for_focused(self):
+        vp = self._focus_path
+        if not vp and self._selected_paths:
+            if len(self._selected_paths) != 1:
+                return
+            vp = next(iter(self._selected_paths))
+        if not vp or vp not in self._card_frames:
+            return
+        if not self.video_preview_manager:
+            return
+        card = self._card_frames[vp]
+        x, y = keyboard_navigation.preview_coords_for_widget(card)
+        self.video_preview_manager._show_video_preview(vp, x, y)
+
     def _setup_ai_search_keyboard_nav(self):
         keyboard_navigation.bind_keyboard_zone(
             self._frame, "workspace", self._app._set_keyboard_focus_zone)

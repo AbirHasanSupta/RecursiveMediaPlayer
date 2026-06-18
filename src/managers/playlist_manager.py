@@ -610,6 +610,29 @@ class PlaylistUI:
         event = type('Event', (), {'x_root': root_x, 'y_root': root_y})()
         self._show_video_context_menu(event)
 
+    def show_preview_for_focused(self):
+        focused = self.parent.focus_get()
+        if focused is self.playlist_listbox:
+            return
+        selection = self.video_tree.selection()
+        if len(selection) != 1:
+            return
+        iid = selection[0]
+        if iid == "empty" or not self.current_playlist:
+            return
+        if not self.video_preview_manager:
+            return
+        index = int(iid)
+        if not (0 <= index < len(self.current_playlist.videos)):
+            return
+        video_path = self.current_playlist.videos[index]
+        if not os.path.isfile(video_path):
+            return
+        self.video_preview_manager.tooltip.hide_preview()
+        self.video_preview_manager.right_clicked_item = index
+        x, y = keyboard_navigation.preview_coords_for_tree_item(self.video_tree, iid)
+        self.video_preview_manager._show_video_preview(video_path, x, y)
+
     def handle_keyboard_nav(self, event):
         if not keyboard_navigation.is_workspace_zone(self.theme_provider):
             return False

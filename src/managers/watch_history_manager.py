@@ -717,9 +717,37 @@ class WatchHistoryUI:
             accent_color=t['accent'],
             border_color=t['border'],
         )
+        for lbl, val in self.filter_buttons:
+            self.focus_ring.register(
+                lbl, f'filter_{val}',
+                activate=lambda v=val, b=lbl: self._apply_filter_value(v, b),
+                left=lambda: self._cycle_history_filter(-1),
+                right=lambda: self._cycle_history_filter(1),
+            )
         self.focus_ring.register(self.history_tree, 'tree', activate=lambda: self._play_selected_video())
         self.focus_ring.register(self._hist_refresh_btn, 'refresh', activate=self._refresh_history_list)
         self.focus_ring.register(self._hist_clear_btn, 'clear', activate=self._clear_all_history)
+
+    def _apply_filter_value(self, val, focus_lbl=None):
+        self.filter_var.set(val)
+        self._restyle_filter_buttons()
+        self._apply_filter()
+        self._update_stats_label()
+        if focus_lbl and focus_lbl.winfo_exists():
+            focus_lbl.focus_set()
+
+    def _cycle_history_filter(self, direction):
+        order = [v for _, v in self.filter_buttons]
+        cur = self.filter_var.get()
+        try:
+            idx = order.index(cur)
+        except ValueError:
+            idx = 0
+        new_val = order[(idx + direction) % len(order)]
+        for lbl, val in self.filter_buttons:
+            if val == new_val:
+                self._apply_filter_value(new_val, lbl)
+                return
 
     def cycle_focus_ring(self, reverse=False):
         if not keyboard_navigation.is_workspace_zone(self.theme_provider):
@@ -747,6 +775,28 @@ class WatchHistoryUI:
             root_y = self.history_tree.winfo_rooty() + 10
         event = type('Event', (), {'x_root': root_x, 'y_root': root_y})()
         self._show_history_context_menu(event)
+
+    def show_preview_for_focused(self):
+        selection = self.history_tree.selection()
+        if len(selection) != 1:
+            return
+        if not hasattr(self, 'video_preview_manager') or not self.video_preview_manager:
+            return
+        iid = selection[0]
+        tags = self.history_tree.item(iid, 'tags')
+        if not tags:
+            return
+        entry_id = tags[0]
+        for entry in self.current_entries:
+            if entry.id == entry_id and os.path.isfile(entry.video_path):
+                try:
+                    idx = self.current_entries.index(entry)
+                    self.video_preview_manager.right_clicked_item = idx
+                except ValueError:
+                    pass
+                x, y = keyboard_navigation.preview_coords_for_tree_item(self.history_tree, iid)
+                self.video_preview_manager._show_video_preview(entry.video_path, x, y)
+                return
 
     def _claim_workspace_keyboard_focus(self, widget=None):
         keyboard_navigation.claim_workspace_focus(self.theme_provider, widget)

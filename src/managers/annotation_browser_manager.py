@@ -968,6 +968,22 @@ class AnnotationBrowserManager:
             event = type('Event', (), {'x_root': x, 'y_root': y, 'y': 10})()
             self._on_video_right_click(event)
 
+    def show_preview_for_focused(self):
+        if len(self._vid_selection) != 1:
+            return
+        if not self.video_preview_manager:
+            return
+        idx = next(iter(self._vid_selection))
+        if idx >= len(self._filtered_videos) or idx >= len(self._vid_rows):
+            return
+        video_path = self._filtered_videos[idx]
+        if not os.path.isfile(video_path):
+            return
+        row = self._vid_rows[idx]
+        self.video_preview_manager.right_clicked_item = idx
+        x, y = keyboard_navigation.preview_coords_for_widget(row)
+        self.video_preview_manager._show_video_preview(video_path, x, y)
+
     def _claim_workspace_keyboard_focus(self, widget=None):
         if keyboard_navigation is not None:
             keyboard_navigation.claim_workspace_focus(self.tp, widget)

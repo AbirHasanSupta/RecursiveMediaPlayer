@@ -608,6 +608,24 @@ class FavoritesUI:
         event = type('Event', (), {'x_root': root_x, 'y_root': root_y})()
         self._show_context_menu(event)
 
+    def show_preview_for_focused(self):
+        selection = self._get_tv_selected_indices()
+        if len(selection) != 1:
+            return
+        if not self.video_preview_manager:
+            return
+        index = selection[0]
+        if not (0 <= index < len(self.favorite_entries)):
+            return
+        favorite = self.favorite_entries[index]
+        if not os.path.isfile(favorite.video_path):
+            return
+        self.video_preview_manager.tooltip.hide_preview()
+        self.video_preview_manager.right_clicked_item = index
+        iid = str(index)
+        x, y = keyboard_navigation.preview_coords_for_tree_item(self.favorites_tree, iid)
+        self.video_preview_manager._show_video_preview(favorite.video_path, x, y)
+
     def _claim_workspace_keyboard_focus(self, widget=None):
         keyboard_navigation.claim_workspace_focus(self.theme_provider, widget)
 

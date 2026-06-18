@@ -1946,6 +1946,20 @@ class GridViewManager:
         event = type('Event', (), {'x_root': x, 'y_root': y})()
         self._show_context_menu(event, vp)
 
+    def show_preview_for_focused(self):
+        vp = self._kb_focus_path
+        if not vp and self.selected_items:
+            if len(self.selected_items) != 1:
+                return
+            vp = next(iter(self.selected_items))
+        if not vp or vp not in self.card_widgets:
+            return
+        if not self.video_preview_manager:
+            return
+        card = self.card_widgets[vp]
+        x, y = keyboard_navigation.preview_coords_for_widget(card)
+        self.video_preview_manager._show_video_preview(vp, x, y)
+
     def handle_keyboard_nav(self, event):
         if not keyboard_navigation.is_workspace_zone(self.theme_provider):
             return False
