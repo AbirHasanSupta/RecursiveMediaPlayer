@@ -955,6 +955,11 @@ def select_multiple_folders_and_play():
         def _set_keyboard_focus_zone(self, zone):
             self._keyboard_focus_zone = zone
 
+        def _focus_directory_tree(self):
+            """Set keyboard focus to the directory tree (exclusion_tree) if visible."""
+            if hasattr(self, 'exclusion_tree') and self.exclusion_tree.winfo_exists():
+                self.exclusion_tree.focus_set()
+
         def _show_home_view(self):
             self._cleanup_active_manager()
             if self.embedded_view_frame and self.embedded_view_frame.winfo_exists():
@@ -965,7 +970,7 @@ def select_multiple_folders_and_play():
 
             self._set_workspace_title("Home", "Welcome to Recursive Video Player")
             self._active_app_view = "home"
-            self._set_keyboard_focus_zone('workspace')
+            self._set_keyboard_focus_zone('directory')
             self._refresh_media_pill_state()
 
             # Re-apply global search to new manager if query exists
@@ -975,6 +980,7 @@ def select_multiple_folders_and_play():
                     self.active_embedded_manager.apply_search(query)
 
             self._render_home_dashboard()
+            self.root.after(10, self._focus_directory_tree)
 
         def _reload_current_view(self):
             active = getattr(self, '_active_app_view', 'home')
