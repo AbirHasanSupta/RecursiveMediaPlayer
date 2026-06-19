@@ -1175,6 +1175,8 @@ class GridViewManager:
 
         prev_lbl = _nav("‹", self._prev_page, self._page > 0)
         prev_lbl.pack(side=tk.LEFT, padx=(0, 2))
+        prev_lbl.bind("<Control-Left>", lambda e: (self._prev_page(), "break")[1])
+        prev_lbl.bind("<Control-Right>", lambda e: (self._next_page(), "break")[1])
         self._register_toolbar_widget(prev_lbl, 'prev_page', activate=self._prev_page,
                                       up=self._prev_page, down=self._next_page)
 
@@ -1185,6 +1187,8 @@ class GridViewManager:
 
         next_lbl = _nav("›", self._next_page, self._page < total_pages - 1)
         next_lbl.pack(side=tk.LEFT, padx=(2, 8))
+        next_lbl.bind("<Control-Left>", lambda e: (self._prev_page(), "break")[1])
+        next_lbl.bind("<Control-Right>", lambda e: (self._next_page(), "break")[1])
         self._register_toolbar_widget(next_lbl, 'next_page', activate=self._next_page,
                                       up=self._prev_page, down=self._next_page)
 
@@ -1206,6 +1210,8 @@ class GridViewManager:
         )
         jump_entry.pack(side=tk.LEFT, padx=(0, 2), ipady=1)
         jump_entry.bind("<Return>", lambda e: self._jump_to_page())
+        jump_entry.bind("<Control-Left>", lambda e: (self._prev_page(), "break")[1])
+        jump_entry.bind("<Control-Right>", lambda e: (self._next_page(), "break")[1])
         self._register_toolbar_widget(jump_entry, 'jump_page', activate=self._jump_to_page)
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -1792,12 +1798,18 @@ class GridViewManager:
     def _setup_grid_keyboard_nav(self, widget):
         for seq in ("<Up>", "<Down>", "<Left>", "<Right>", "<Return>", "<KP_Enter>"):
             widget.bind(seq, self._on_grid_keyboard, add="+")
+        widget.bind("<Control-Right>", lambda e: self._next_page(), add="+")
+        widget.bind("<Control-Left>", lambda e: self._prev_page(), add="+")
         if hasattr(self, 'canvas') and self.canvas:
             for seq in ("<Up>", "<Down>", "<Left>", "<Right>", "<Return>", "<KP_Enter>"):
                 self.canvas.bind(seq, self._on_grid_keyboard, add="+")
+            self.canvas.bind("<Control-Right>", lambda e: self._next_page(), add="+")
+            self.canvas.bind("<Control-Left>", lambda e: self._prev_page(), add="+")
         if hasattr(self, 'grid_frame') and self.grid_frame:
             for seq in ("<Up>", "<Down>", "<Left>", "<Right>", "<Return>", "<KP_Enter>"):
                 self.grid_frame.bind(seq, self._on_grid_keyboard, add="+")
+            self.grid_frame.bind("<Control-Right>", lambda e: self._next_page(), add="+")
+            self.grid_frame.bind("<Control-Left>", lambda e: self._prev_page(), add="+")
 
     def focus_primary(self):
         if hasattr(self, 'canvas') and self.canvas.winfo_exists():

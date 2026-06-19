@@ -1735,11 +1735,14 @@ class SeekPreviewCache:
     INTERVAL_S   = 4      # one frame every N seconds
     THUMB_W      = 160
     THUMB_H      = 90
+    THUMB_W_PORTRAIT = 120
+    THUMB_H_PORTRAIT = 148
     JPEG_QUALITY = 60
 
     def __init__(self):
         self._cache: Dict[str, Dict[int, Image.Image]] = {}  # stores PIL Images now
         self._photo_cache: Dict[str, Dict[int, ImageTk.PhotoImage]] = {}  # PhotoImage kept alive here
+        self._dims: Dict[str, tuple] = {}  # norm_path -> (tw, th) decided from first frame
         self._lock = threading.Lock()
         self._generating: set = set()
 
@@ -1770,6 +1773,11 @@ class SeekPreviewCache:
             self._photo_cache.setdefault(norm, {})[best] = photo
         return photo
 
+    def get_dims(self, video_path: str) -> Optional[tuple]:
+        norm = os.path.normpath(video_path)
+        with self._lock:
+            return self._dims.get(norm)
+
     def _generate(self, norm: str):
         try:
             cap = cv2.VideoCapture(norm)
@@ -1783,6 +1791,7 @@ class SeekPreviewCache:
                 if norm not in self._cache:
                     self._cache[norm] = {}
 
+            tw = th_dim = None
             idx = 0
             t = 0.0
             while t < duration_s:
@@ -1790,10 +1799,22 @@ class SeekPreviewCache:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no)
                 ret, frame = cap.read()
                 if ret and frame is not None:
-                    small = cv2.resize(frame, (self.THUMB_W, self.THUMB_H),
+                    if tw is None:
+                        fh, fw = frame.shape[:2]
+                        portrait = fh > fw
+                        box_w = self.THUMB_W_PORTRAIT if portrait else self.THUMB_W
+                        box_h = self.THUMB_H_PORTRAIT if portrait else self.THUMB_H
+                        scale = min(box_w / fw, box_h / fh)
+                        tw = max(2, int(fw * scale))
+                        th_dim = max(2, int(fh * scale))
+                        with self._lock:
+                            self._dims[norm] = (tw, th_dim)
+                    small = cv2.resize(frame, (tw, th_dim),
                                        interpolation=cv2.INTER_AREA)
                     rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
                     with self._lock:
+                        if norm not in self._cache:
+                            return
                         self._cache[norm][idx] = Image.fromarray(rgb)
                 idx += 1
                 t += self.INTERVAL_S
@@ -1810,11 +1831,13 @@ class SeekPreviewCache:
         with self._lock:
             self._cache.pop(norm, None)
             self._photo_cache.pop(norm, None)  # evict converted photos too
+            self._dims.pop(norm, None)
 
     def clear(self):
         with self._lock:
             self._cache.clear()
             self._photo_cache.clear()
+            self._dims.clear()
 
     def ensure_generated(self, video_path: str):
         norm = os.path.normpath(video_path)

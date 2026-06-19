@@ -1755,19 +1755,24 @@ class EmbeddedPlayer:
                     self._seek_preview_win,
                     bg=_CTRL_BG2, fg=_TXT,
                     font=("Segoe UI", 8, "bold"))
-                self._seek_preview_time.pack(pady=(0, 3))
+                self._seek_preview_time.pack(pady=0)
 
             if photo:
                 self._seek_preview_lbl.configure(image=photo)
                 self._seek_preview_lbl.image = photo
+                pw, ph = photo.width(), photo.height()
             else:
                 self._seek_preview_lbl.configure(image='')
                 self._seek_preview_lbl.image = None
+                dims = self._seek_preview_mgr.seek_preview.get_dims(self.videos[self.index])
+                pw, ph = dims if dims else (160, 90)
             self._seek_preview_time.configure(text=time_str)
 
-            sx = self._seek.winfo_rootx() + x - 80
-            sy = self._seek.winfo_rooty() - 115
-            self._seek_preview_win.geometry(f"160x105+{sx}+{sy}")
+            win_w = max(pw, 60)
+            win_h = ph + 16
+            sx = self._seek.winfo_rootx() + x - win_w // 2
+            sy = self._seek.winfo_rooty() - win_h - 10
+            self._seek_preview_win.geometry(f"{win_w}x{win_h}+{sx}+{sy}")
             self._seek_preview_win.deiconify()
         except Exception:
             pass
