@@ -13,6 +13,7 @@ APP_NAV_SHORTCUTS = [
         ("Ctrl+Tab",            "Cycle UI focus forward"),
         ("Ctrl+Shift+Tab",      "Cycle UI focus backward"),
         ("Ctrl+BackSpace",      "Focus directory panel"),
+        ("Ctrl+Space",           "Focus current tab body"),
     ]),
     ("Directory Panel", [
         ("Ctrl+D",              "Toggle directory panel"),

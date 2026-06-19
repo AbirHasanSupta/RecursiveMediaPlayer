@@ -5913,6 +5913,7 @@ def select_multiple_folders_and_play():
             self.root.bind("<Control-p>", self._global_play_shortcut)
             self.root.bind("<Control-P>", self._global_play_shortcut)
             self.root.bind("<Control-BackSpace>", lambda e: self._focus_directory_panel())
+            self.root.bind("<Control-space>", self._focus_current_tab_body)
             self.root.bind("<Escape>", self._on_global_escape)
 
         def _setup_directory_tree_keyboard(self):
@@ -6060,6 +6061,19 @@ def select_multiple_folders_and_play():
 
         def _focus_directory_panel(self, event=None):
             if not self._shortcuts_allowed():
+                return "break"
+            tree = getattr(self, 'exclusion_tree', None)
+            if tree and tree.winfo_exists() and tree.winfo_ismapped():
+                tree.focus_set()
+                self._set_keyboard_focus_zone('directory')
+            return "break"
+
+        def _focus_current_tab_body(self, event=None):
+            if not self._shortcuts_allowed():
+                return "break"
+            mgr = getattr(self, 'active_embedded_manager', None)
+            if mgr and hasattr(mgr, 'focus_primary'):
+                mgr.focus_primary()
                 return "break"
             tree = getattr(self, 'exclusion_tree', None)
             if tree and tree.winfo_exists() and tree.winfo_ismapped():
