@@ -138,6 +138,7 @@ class AnnotationBrowserManager:
         self._vid_canvas: Optional[tk.Canvas] = None
         self._vid_rows: list = []
         self._vid_selection: set = set()
+        self._vid_anchor: int | None = None
         self._row_height: int = 28
         self._tag_frame_inner: Optional[tk.Frame] = None
         self._tag_canvas: Optional[tk.Canvas] = None
@@ -800,6 +801,7 @@ class AnnotationBrowserManager:
 
         self._video_listbox = None
         self._vid_selection: set = set()
+        self._vid_anchor: int | None = None
         self._vid_rows = []
         self._vid_P = P
 
@@ -1029,14 +1031,26 @@ class AnnotationBrowserManager:
         if keysym not in ("Up", "Down") or not self._filtered_videos:
             return
 
-        sel = sorted(self._vid_selection) if self._vid_selection else [0]
-        idx = sel[0]
-        if keysym == "Up":
-            idx = max(0, idx - 1)
+        shift = bool(event.state & 0x1)
+        if shift and self._vid_anchor is not None:
+            cur = max(self._vid_selection) if keysym == "Down" else min(self._vid_selection)
         else:
-            idx = min(len(self._filtered_videos) - 1, idx + 1)
+            sel = sorted(self._vid_selection) if self._vid_selection else [0]
+            cur = sel[0]
+        if keysym == "Up":
+            idx = max(0, cur - 1)
+        else:
+            idx = min(len(self._filtered_videos) - 1, cur + 1)
 
-        self._vid_selection = {idx}
+        if shift:
+            if self._vid_anchor is None:
+                self._vid_anchor = cur
+            anchor = self._vid_anchor
+            self._vid_selection = set(range(min(anchor, idx), max(anchor, idx) + 1))
+        else:
+            self._vid_anchor = idx
+            self._vid_selection = {idx}
+
         self._refresh_row_colors()
         self._on_video_select()
         if idx < len(self._vid_rows) and keyboard_navigation is not None:
@@ -1595,14 +1609,16 @@ class AnnotationBrowserManager:
                     ctrl = bool(e.state & 0x4)
                     shift = bool(e.state & 0x1)
                     if shift and self._vid_selection:
-                        anchor = max(self._vid_selection)
+                        anchor = self._vid_anchor if self._vid_anchor is not None else next(iter(self._vid_selection))
                         self._vid_selection = set(range(min(anchor, idx_), max(anchor, idx_) + 1))
                     elif ctrl:
                         if idx_ in self._vid_selection:
                             self._vid_selection.discard(idx_)
                         else:
                             self._vid_selection.add(idx_)
+                            self._vid_anchor = idx_
                     else:
+                        self._vid_anchor = idx_
                         self._vid_selection = {idx_}
                         self._dragging_index = idx_
                     self._refresh_row_colors()
