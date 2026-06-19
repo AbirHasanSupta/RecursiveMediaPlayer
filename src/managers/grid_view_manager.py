@@ -1278,6 +1278,10 @@ class GridViewManager:
         self._update_selection_label()
         self._kb_focus_path = None
         self._last_anchor_path = None
+        current_paths = {it['path'] for it in self.items if it['type'] == 'video'}
+        stale = self.selected_items - current_paths
+        if stale:
+            self.selected_items -= stale
 
     # ─────────────────────────────────────────────────────────────────────────
     # Header row (new UI)
@@ -1797,6 +1801,14 @@ class GridViewManager:
 
     def focus_primary(self):
         if hasattr(self, 'canvas') and self.canvas.winfo_exists():
+            for entry in self._toolbar_widgets:
+                w = entry['widget']
+                try:
+                    if w.winfo_exists() and w == w.winfo_toplevel().focus_get():
+                        self.canvas.focus_set()
+                        break
+                except Exception:
+                    pass
             self.canvas.focus_set()
             self._claim_workspace_keyboard_focus(self.canvas)
 
@@ -1832,10 +1844,10 @@ class GridViewManager:
         widget.bind("<Return>", lambda e: self._toolbar_activate())
         widget.bind("<KP_Enter>", lambda e: self._toolbar_activate())
         widget.bind("<Escape>", lambda e: self._toolbar_escape())
-        widget.bind("<Up>", lambda e: self._toolbar_step(1), add="+")
-        widget.bind("<Down>", lambda e: self._toolbar_step(-1), add="+")
-        widget.bind("<Left>", lambda e: self._toolbar_nav_or_step(False), add="+")
-        widget.bind("<Right>", lambda e: self._toolbar_nav_or_step(True), add="+")
+        widget.bind("<Up>", lambda e, w=widget: self._toolbar_step(1) if w == w.focus_get() else None, add="+")
+        widget.bind("<Down>", lambda e, w=widget: self._toolbar_step(-1) if w == w.focus_get() else None, add="+")
+        widget.bind("<Left>", lambda e, w=widget: self._toolbar_nav_or_step(False) if w == w.focus_get() else None, add="+")
+        widget.bind("<Right>", lambda e, w=widget: self._toolbar_nav_or_step(True) if w == w.focus_get() else None, add="+")
         self._toolbar_widgets.append({
             'key': key, 'widget': widget,
             'activate': activate, 'up': up, 'down': down,
@@ -1906,6 +1918,11 @@ class GridViewManager:
         if not (0 <= self._toolbar_focus_idx < len(self._toolbar_widgets)):
             return
         entry = self._toolbar_widgets[self._toolbar_focus_idx]
+        try:
+            if entry['widget'] != entry['widget'].winfo_toplevel().focus_get():
+                return
+        except Exception:
+            return
         fn = entry['up'] if delta > 0 else entry['down']
         if fn:
             fn()
@@ -2004,6 +2021,13 @@ class GridViewManager:
             old_anchor = getattr(self, '_last_anchor_path', None)
             if not old_anchor and self.selected_items:
                 old_anchor = next(iter(self.selected_items))
+
+            if not self._kb_focus_path and not self.selected_items:
+                paths = list(self._card_positions.keys())
+                if len(paths) == 1:
+                    self._kb_select_card(paths[0])
+                    return "break"
+
             new_path = self._kb_navigate_card(direction, return_new=True)
             if new_path:
                 # If Shift is held, extend selection from anchor to new_path
@@ -2040,14 +2064,16 @@ class GridViewManager:
 
         current = self._kb_focus_path
         if current not in self._card_positions:
+            self._kb_focus_path = None
+            self._last_anchor_path = None
+            found = False
             if self.selected_items:
                 for sel in list(self.selected_items):
                     if sel in self._card_positions:
                         current = sel
+                        found = True
                         break
-                else:
-                    current = paths[0]
-            else:
+            if not found:
                 current = paths[0]
 
         row, col = self._card_positions[current]
