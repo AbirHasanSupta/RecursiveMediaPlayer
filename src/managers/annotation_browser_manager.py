@@ -1032,24 +1032,28 @@ class AnnotationBrowserManager:
             return
 
         shift = bool(event.state & 0x1)
-        if shift and self._vid_anchor is not None:
-            cur = max(self._vid_selection) if keysym == "Down" else min(self._vid_selection)
-        else:
-            sel = sorted(self._vid_selection) if self._vid_selection else [0]
-            cur = sel[0]
-        if keysym == "Up":
-            idx = max(0, cur - 1)
-        else:
-            idx = min(len(self._filtered_videos) - 1, cur + 1)
 
-        if shift:
+        if not shift:
+            sel = sorted(self._vid_selection) if self._vid_selection else [0]
+            cur = sel[0] if keysym == "Up" else sel[-1]
+            idx = max(0, cur - 1) if keysym == "Up" else min(len(self._filtered_videos) - 1, cur + 1)
+            self._vid_anchor = idx
+            self._vid_active = idx
+            self._vid_selection = {idx}
+        else:
             if self._vid_anchor is None:
-                self._vid_anchor = cur
+                self._vid_anchor = next(iter(self._vid_selection)) if self._vid_selection else 0
+            if not hasattr(self, '_vid_active') or self._vid_active is None:
+                self._vid_active = self._vid_anchor
+
+            if keysym == "Up":
+                self._vid_active = max(0, self._vid_active - 1)
+            else:
+                self._vid_active = min(len(self._filtered_videos) - 1, self._vid_active + 1)
+
+            idx = self._vid_active
             anchor = self._vid_anchor
             self._vid_selection = set(range(min(anchor, idx), max(anchor, idx) + 1))
-        else:
-            self._vid_anchor = idx
-            self._vid_selection = {idx}
 
         self._refresh_row_colors()
         self._on_video_select()
