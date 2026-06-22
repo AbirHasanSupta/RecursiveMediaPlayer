@@ -120,6 +120,10 @@ class SettingsData:
         self.incremental_preprocessing = True
         self.excluded_index_dirs = "raw"
         self.preprocessing_batch_size = 10
+        self.media_mode = "video"
+        self.slideshow_duration = 4.0
+        self.slideshow_transition = "fade"
+        self.slideshow_ken_burns = True
         self.preview_duration = 3
         self.use_video_preview = True
         self.enable_watch_history = True
@@ -142,6 +146,10 @@ class SettingsData:
             'incremental_preprocessing': self.incremental_preprocessing,
             'excluded_index_dirs': self.excluded_index_dirs,
             'preprocessing_batch_size': self.preprocessing_batch_size,
+            'media_mode': self.media_mode,
+            'slideshow_duration': self.slideshow_duration,
+            'slideshow_transition': self.slideshow_transition,
+            'slideshow_ken_burns': self.slideshow_ken_burns,
             'preview_duration': self.preview_duration,
             'use_video_preview': self.use_video_preview,
             'enable_watch_history': self.enable_watch_history,
@@ -166,6 +174,10 @@ class SettingsData:
         settings.incremental_preprocessing = data.get('incremental_preprocessing', settings.incremental_preprocessing)
         settings.excluded_index_dirs = data.get('excluded_index_dirs', data.get('skip_raw_directories', None) and "raw" or settings.excluded_index_dirs)
         settings.preprocessing_batch_size = data.get('preprocessing_batch_size', settings.preprocessing_batch_size)
+        settings.media_mode = data.get('media_mode', settings.media_mode)
+        settings.slideshow_duration = data.get('slideshow_duration', settings.slideshow_duration)
+        settings.slideshow_transition = data.get('slideshow_transition', settings.slideshow_transition)
+        settings.slideshow_ken_burns = data.get('slideshow_ken_burns', settings.slideshow_ken_burns)
         settings.preview_duration = data.get('preview_duration', settings.preview_duration)
         settings.use_video_preview = data.get('use_video_preview', settings.use_video_preview)
         settings.enable_watch_history = data.get('enable_watch_history', settings.enable_watch_history)
@@ -642,7 +654,85 @@ class SettingsUI:
         canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
 
-        # ── 1. Video Preview ──────────────────────────────────────────────────────
+        # ── 1. Media Library ────────────────────────────────────────────────────────
+        media_body = self._make_section(main_container, "Media Library", pady=(0, 8))
+
+        media_frame = tk.Frame(media_body, bg=tp.bg_color)
+        media_frame.pack(fill=tk.X, pady=(0, 4))
+        tk.Label(media_frame, text="Library Mode:", font=tp.normal_font,
+                 bg=tp.bg_color, fg=tp.text_color, width=22, anchor='w').pack(side=tk.LEFT)
+        self.media_mode_var = tk.StringVar(value=self.settings.media_mode)
+        media_om = tk.OptionMenu(
+            media_frame, self.media_mode_var,
+            "video", "photo", "both",
+        )
+        media_om.config(
+            font=tp.normal_font,
+            bg=getattr(tp, 'entry_bg', tp.surface_color),
+            fg=getattr(tp, 'entry_fg', tp.text_color),
+            relief=tk.FLAT, highlightthickness=1,
+            highlightbackground=tp.border_color,
+            width=12,
+        )
+        media_om["menu"].config(
+            bg=tp.surface_color, fg=tp.text_color,
+            activebackground=tp.hover_color, activeforeground=tp.text_color,
+        )
+        media_om.pack(side=tk.LEFT)
+        tk.Label(
+            media_frame,
+            text="Video = videos only · Photo = photos only · Both = photos and videos",
+            font=tp.small_font, bg=tp.bg_color, fg=tp.text_muted,
+        ).pack(side=tk.LEFT, padx=(8, 0))
+
+        slideshow_body = self._make_section(main_container, "Slideshow", pady=(0, 8))
+        ss_dur_frame = tk.Frame(slideshow_body, bg=tp.bg_color)
+        ss_dur_frame.pack(fill=tk.X, pady=(0, 4))
+        tk.Label(ss_dur_frame, text="Slide Duration (sec):", font=tp.normal_font,
+                 bg=tp.bg_color, fg=tp.text_color, width=22, anchor='w').pack(side=tk.LEFT)
+        self.slideshow_duration_var = tk.DoubleVar(value=self.settings.slideshow_duration)
+        ss_dur_spin = tk.Spinbox(
+            ss_dur_frame, from_=0.5, to=60.0, increment=0.5,
+            textvariable=self.slideshow_duration_var,
+            font=tp.normal_font, width=8,
+            bg=getattr(tp, 'entry_bg', tp.surface_color),
+            fg=getattr(tp, 'entry_fg', tp.text_color),
+            buttonbackground=tp.bg_color,
+            relief=tk.FLAT, bd=1,
+        )
+        ss_dur_spin.pack(side=tk.LEFT)
+
+        ss_trans_frame = tk.Frame(slideshow_body, bg=tp.bg_color)
+        ss_trans_frame.pack(fill=tk.X, pady=(0, 4))
+        tk.Label(ss_trans_frame, text="Default Transition:", font=tp.normal_font,
+                 bg=tp.bg_color, fg=tp.text_color, width=22, anchor='w').pack(side=tk.LEFT)
+        self.slideshow_transition_var = tk.StringVar(value=self.settings.slideshow_transition)
+        trans_om = tk.OptionMenu(
+            ss_trans_frame, self.slideshow_transition_var,
+            "fade", "slide_left", "slide_right", "zoom_in", "zoom_out", "none",
+        )
+        trans_om.config(
+            font=tp.normal_font,
+            bg=getattr(tp, 'entry_bg', tp.surface_color),
+            fg=getattr(tp, 'entry_fg', tp.text_color),
+            relief=tk.FLAT, highlightthickness=1,
+            highlightbackground=tp.border_color,
+            width=14,
+        )
+        trans_om["menu"].config(
+            bg=tp.surface_color, fg=tp.text_color,
+            activebackground=tp.hover_color, activeforeground=tp.text_color,
+        )
+        trans_om.pack(side=tk.LEFT)
+
+        self.slideshow_ken_burns_var = tk.BooleanVar(value=self.settings.slideshow_ken_burns)
+        ttk.Checkbutton(
+            slideshow_body, text="Ken Burns effect (slow pan & zoom)",
+            variable=self.slideshow_ken_burns_var,
+            style="Modern.TCheckbutton",
+        ).pack(anchor='w', pady=2)
+
+        # ── 2. Video Preview ──────────────────────────────────────────────────────
         preview_body = self._make_section(main_container, "Video Preview", pady=(0, 8))
 
         duration_frame = tk.Frame(preview_body, bg=tp.bg_color)
@@ -1185,6 +1275,14 @@ class SettingsUI:
             self.ai_index_path_var.set(settings.ai_index_path)
         if self.cleanup_days_var:
             self.cleanup_days_var.set(settings.auto_cleanup_days)
+        if hasattr(self, 'media_mode_var'):
+            self.media_mode_var.set(settings.media_mode)
+        if hasattr(self, 'slideshow_duration_var'):
+            self.slideshow_duration_var.set(settings.slideshow_duration)
+        if hasattr(self, 'slideshow_transition_var'):
+            self.slideshow_transition_var.set(settings.slideshow_transition)
+        if hasattr(self, 'slideshow_ken_burns_var'):
+            self.slideshow_ken_burns_var.set(settings.slideshow_ken_burns)
         self.preview_duration_var.set(settings.preview_duration)
         self.use_video_preview_var.set(settings.use_video_preview)
         self.enable_watch_history_var.set(settings.enable_watch_history)
@@ -1227,6 +1325,17 @@ class SettingsUI:
             self.settings.ai_index_path = self.ai_index_path_var.get().strip()
         if self.cleanup_days_var:
             self.settings.auto_cleanup_days = self.cleanup_days_var.get()
+        if hasattr(self, 'media_mode_var'):
+            self.settings.media_mode = self.media_mode_var.get()
+        if hasattr(self, 'slideshow_duration_var'):
+            try:
+                self.settings.slideshow_duration = max(0.5, float(self.slideshow_duration_var.get()))
+            except (ValueError, tk.TclError):
+                pass
+        if hasattr(self, 'slideshow_transition_var'):
+            self.settings.slideshow_transition = self.slideshow_transition_var.get()
+        if hasattr(self, 'slideshow_ken_burns_var'):
+            self.settings.slideshow_ken_burns = self.slideshow_ken_burns_var.get()
         self.settings.preview_duration = self.preview_duration_var.get()
         self.settings.use_video_preview = self.use_video_preview_var.get()
         self.settings.enable_watch_history = self.enable_watch_history_var.get()

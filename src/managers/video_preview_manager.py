@@ -45,6 +45,26 @@ def generate_thumbnail_worker(
     import tempfile as _tf
     from pathlib import Path as _Path
 
+    def _photo_static():
+        try:
+            from PIL import Image as _Image
+            import io as _io
+            with _Image.open(video_path) as img:
+                img = img.convert("RGB")
+                img.thumbnail((240, 240), _Image.Resampling.LANCZOS)
+                buf = _io.BytesIO()
+                img.save(buf, format="JPEG", quality=jpeg_quality)
+                return (buf.getvalue(), False)
+        except Exception:
+            return None
+
+    ext = _os.path.splitext(video_path)[1].lower()
+    _PHOTO_EXTS = {
+        '.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp', '.tiff', '.tif', '.heic', '.avif',
+    }
+    if ext in _PHOTO_EXTS:
+        return _photo_static()
+
     def _static():
         try:
             cap = _cv2.VideoCapture(video_path)
@@ -442,6 +462,12 @@ class ThumbnailGenerator:
 
     def generate_thumbnail(self, video_path: str):
         """Returns (raw_bytes: bytes, is_video: bool) or None."""
+        try:
+            from utils import is_photo
+            if is_photo(video_path):
+                return self._gen_photo_static(video_path)
+        except ImportError:
+            pass
         if self.use_video_preview:
             result = self._gen_video(video_path)
             if result:
@@ -450,6 +476,19 @@ class ThumbnailGenerator:
                 return self._gen_static(video_path)
             return None
         return self._gen_static(video_path)
+
+    def _gen_photo_static(self, photo_path: str):
+        try:
+            from PIL import Image
+            import io
+            with Image.open(photo_path) as img:
+                img = img.convert("RGB")
+                img.thumbnail((240, 240), Image.Resampling.LANCZOS)
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=self.JPEG_QUALITY)
+                return buf.getvalue(), False
+        except Exception:
+            return None
 
     def set_preview_duration(self, seconds: int):
         self.preview_duration = max(1, min(10, seconds))

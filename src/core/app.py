@@ -31,7 +31,12 @@ from managers.grid_view_manager import GridViewManager
 from managers.resource_manager import ThreadSafeDict, get_resource_manager, ManagedExecutor, MemoryMonitor, \
     ManagedThread
 from theme import ThemeSelector
-from utils import gather_videos_with_directories, is_video, gather_videos, check_vlc, show_vlc_missing_and_exit
+from utils import (
+    gather_videos_with_directories, gather_media_with_directories,
+    is_video, is_photo, is_media, gather_videos,
+    media_type_label, media_icon_for_path, normalize_media_mode,
+    check_vlc, show_vlc_missing_and_exit,
+)
 import keyboard_navigation
 from managers.playlist_manager import PlaylistManager
 from managers.watch_history_manager import WatchHistoryManager
@@ -42,6 +47,7 @@ from managers.video_preview_manager import VideoPreviewManager
 from managers.video_queue_manager import VideoQueueManager
 from managers.google_drive_manager import GoogleDriveManager
 from managers.dual_player_manager import DualPlayerManager
+from managers.slideshow_manager import SlideshowManager
 import struct
 import socket
 import time
@@ -259,6 +265,7 @@ def select_multiple_folders_and_play():
                 self.root.bind(f"<Control-KP_{i}>", lambda e, idx=i-1: self._switch_to_tab_by_index(idx))
             self._setup_app_keyboard_navigation()
             app_settings = self.settings_manager.get_settings()
+            self._last_media_mode = normalize_media_mode(getattr(app_settings, 'media_mode', 'video'))
             if hasattr(app_settings, 'dir_panel_width'):
                 self._dir_panel_width = app_settings.dir_panel_width
             if hasattr(app_settings, 'dir_panel_mode'):
@@ -290,6 +297,9 @@ def select_multiple_folders_and_play():
             self.video_preview_manager.attach_to_listbox = _patched_attach
             self.video_preview_manager.set_preview_duration(app_settings.preview_duration)
             self.video_preview_manager.set_video_preview_enabled(app_settings.use_video_preview)
+
+            self.slideshow_manager = SlideshowManager(self.root, self, self.update_console)
+            self.slideshow_manager.apply_settings(app_settings)
 
             self.grid_view_manager = GridViewManager(self.root, self, self.update_console)
             self.grid_view_manager.set_play_callback(self._play_grid_videos)
@@ -500,6 +510,7 @@ def select_multiple_folders_and_play():
                 'watch_history_manager', 'queue_manager', 'favorites_manager',
                 'filter_sort_manager', 'settings_manager', 'resume_manager',
                 'dual_player_manager', 'annotation_browser_manager', 'ai_search_manager',
+                'slideshow_manager',
             ]
             for manager_name in managers:
                 if hasattr(self, manager_name):
@@ -544,6 +555,88 @@ def select_multiple_folders_and_play():
                         pass
             except Exception as e:
                 print(f"Error cleaning player threads: {e}")
+
+        # ------------------------------------------------------------------
+        # Media mode helpers
+        # ------------------------------------------------------------------
+
+        def get_media_mode(self):
+            if hasattr(self, 'settings_manager'):
+                return normalize_media_mode(
+                    getattr(self.settings_manager.get_settings(), 'media_mode', 'video')
+                )
+            return 'video'
+
+        def _is_media(self, file_name):
+            return is_media(file_name, self.get_media_mode())
+
+        def _media_count_label(self):
+            return media_type_label(self.get_media_mode())
+
+        def _media_icon(self, path):
+            return media_icon_for_path(path)
+
+        def _media_tree_label(self, path, rel_path, extra=""):
+            return f"{self._media_icon(path)} {rel_path}{extra}"
+
+        def _rescan_all_directories(self):
+            self.scan_cache.clear()
+            with self._pending_scans_lock:
+                self.pending_scans.clear()
+            for directory in self.selected_dirs:
+                if isinstance(directory, str) and not directory.startswith("gdrive://"):
+                    self._submit_scan(directory)
+            selected_dir = self.get_current_selected_directory()
+            if selected_dir:
+                self.load_subdirectories(selected_dir, max_depth=self.current_max_depth)
+
+        def _launch_slideshow(self, photos, start_index=0):
+            photos = [p for p in photos if is_photo(p)]
+            if not photos:
+                self.update_console("No photos to show.")
+                return
+            start_index = max(0, min(start_index, len(photos) - 1))
+            if hasattr(self, 'slideshow_manager'):
+                self.slideshow_manager.apply_settings(self.settings_manager.get_settings())
+                self.slideshow_manager.show(photos, start_index)
+                self.update_console(f"Slideshow: {len(photos)} photos")
+
+        def _play_paths(self, paths, start_index=0):
+            """Route playback to slideshow (photos) or VLC player (videos)."""
+            if not paths:
+                return
+            paths = list(paths)
+            start_index = max(0, min(start_index, len(paths) - 1))
+            target = paths[start_index]
+
+            if is_photo(target):
+                photo_paths = [p for p in paths if is_photo(p)]
+                idx = photo_paths.index(target) if target in photo_paths else 0
+                self._launch_slideshow(photo_paths, idx)
+                return
+
+            if is_video(target):
+                video_paths = [p for p in paths if is_video(p)]
+                if not video_paths:
+                    self.update_console("No videos to play.")
+                    return
+                idx = video_paths.index(target) if target in video_paths else 0
+                all_video_to_dir = {}
+                for directory in self.selected_dirs:
+                    cache = self.scan_cache.get(directory)
+                    if cache:
+                        _, v2d, _ = cache
+                        all_video_to_dir.update(v2d)
+                for v in video_paths:
+                    if v not in all_video_to_dir:
+                        all_video_to_dir[v] = os.path.dirname(v)
+                all_directories = list(dict.fromkeys(all_video_to_dir[v] for v in video_paths))
+                self._launch_player(
+                    self._make_player(video_paths, all_video_to_dir, all_directories, idx)
+                )
+                return
+
+            self.update_console("Unsupported file type for playback.")
 
         def _clear_metadata_cache(self):
             try:
@@ -613,11 +706,11 @@ def select_multiple_folders_and_play():
                 if os.path.isdir(path):
                     self._add_directory_from_ipc(path)
                     added += 1
-                elif os.path.isfile(path) and is_video(path):
+                elif os.path.isfile(path) and self._is_media(path):
                     played.append(path)
 
             if played:
-                self._play_grid_videos(played)
+                self._play_paths(played)
             if added:
                 self.update_console(f"Dropped {added} director{'ies' if added > 1 else 'y'}")
                 self.toast.success("Dropped", f"{added} director{'ies' if added > 1 else 'y'} Dropped")
@@ -1124,9 +1217,12 @@ def select_multiple_folders_and_play():
             right_col = tk.Frame(body_row, bg=bg)
             right_col.grid(row=0, column=1, sticky="nsew")
 
+            mode = self.get_media_mode()
+            stat_icon = '🖼' if mode == 'photo' else ('🎞' if mode == 'both' else '🎬')
+            stat_label = {'video': 'Videos', 'photo': 'Photos', 'both': 'Media'}[mode]
             stat_data = [
                 ("📁", str(total_dirs), "Directories", accent, None),
-                ("🎬", str(total_lib_vids), "Videos", accent2, None),
+                (stat_icon, str(total_lib_vids), stat_label, accent2, None),
                 ("📅", "—", "Watched Today", "#06b6d4", self._show_watch_history),
                 ("✓", "—", "Avg Completion", "#34c98a", self._show_watch_history),
             ]
@@ -1796,19 +1892,23 @@ def select_multiple_folders_and_play():
                     return
                 self.pending_scans.add(directory)
 
-            future = self.executor.submit(gather_videos_with_directories, directory)
+            future = self.executor.submit(
+                gather_media_with_directories, directory, self.get_media_mode()
+            )
 
             def on_done(fut, dir_path=directory):
                 try:
                     res = fut.result()
                     self.scan_cache.set(dir_path, res)
-                    videos, _, directories = res
+                    media_files, _, directories = res
+                    label = self._media_count_label()
                     self.update_console(
-                        f"Found {len(videos)} videos in '{os.path.basename(dir_path)}' ({len(directories)} subdirs)")
+                        f"Found {len(media_files)} {label} in '{os.path.basename(dir_path)}' "
+                        f"({len(directories)} subdirs)")
                     if hasattr(self, 'video_preview_manager') and self.video_preview_manager:
                         self.root.after(
                             500,
-                            lambda vids=list(videos), d=dir_path: (
+                            lambda vids=list(media_files), d=dir_path: (
                                 self.video_preview_manager.prefetch_for_directory(d, vids)
                                 if hasattr(self, 'video_preview_manager') and self.video_preview_manager
                                 else None
@@ -1914,7 +2014,7 @@ def select_multiple_folders_and_play():
             self.dir_header_label.pack(side=tk.LEFT, anchor='w')
 
             _tree_actions = [
-                ("▤", "Toggle Videos", self.toggle_videos_visibility),
+                ("▤", "Toggle Media", self.toggle_videos_visibility),
                 ("⊟", "Collapse All", self._collapse_all_tree_nodes),
                 ("⊞", "Expand All", self._expand_all_tree_nodes),
                 ("⊡", "Open in Gallery", self._show_grid_view),
@@ -2486,7 +2586,7 @@ def select_multiple_folders_and_play():
         def _refresh_dir_action_states(self):
             if not hasattr(self, '_dir_action_btns'):
                 return
-            btn = self._dir_action_btns.get("Toggle Videos")
+            btn = self._dir_action_btns.get("Toggle Media")
             if btn:
                 active = getattr(self, 'show_videos', True)
                 btn._active = active
@@ -2673,7 +2773,7 @@ def select_multiple_folders_and_play():
                         if entry.is_dir():
                             child_iid = next_iid()
                             items.append((child_iid, full, True))
-                        elif show_videos and entry.is_file() and is_video(entry.name):
+                        elif show_videos and entry.is_file() and self._is_media(entry.name):
                             is_excl_v = norm_full in excluded_vid_set
                             if only_excl and not is_excl_v:
                                 continue
@@ -2867,7 +2967,7 @@ def select_multiple_folders_and_play():
             is_filtered_mode = getattr(self, '_is_filtered_mode', False)
 
             if is_filtered_mode:
-                if os.path.isfile(target_path) and is_video(target_path):
+                if os.path.isfile(target_path) and self._is_media(target_path):
                     self.exclusion_tree.selection_set(iid)
                     self.root.after(100, lambda p=target_path: self._play_from_double_click(p))
                 return
@@ -2884,7 +2984,7 @@ def select_multiple_folders_and_play():
                     self._lazy_expand_node(iid, target_path)
                 return
 
-            if not os.path.isfile(target_path) or not is_video(target_path):
+            if not os.path.isfile(target_path) or not self._is_media(target_path):
                 return
 
             self.exclusion_tree.selection_set(iid)
@@ -2902,7 +3002,7 @@ def select_multiple_folders_and_play():
 
             if iid and iid not in selection:
                 path = self.current_subdirs_mapping.get(iid)
-                if path and os.path.isfile(path) and is_video(path):
+                if path and os.path.isfile(path) and self._is_media(path):
                     self.video_preview_manager.right_clicked_item = iid
                     self.video_preview_manager._show_video_preview(path, event.x_root, event.y_root)
                     return
@@ -2914,7 +3014,7 @@ def select_multiple_folders_and_play():
                 # Right-click on empty space → show tooltip for nearest video
                 if iid:
                     path = self.current_subdirs_mapping.get(iid)
-                    if path and os.path.isfile(path) and is_video(path):
+                    if path and os.path.isfile(path) and self._is_media(path):
                         self.video_preview_manager.right_clicked_item = iid
                         self.video_preview_manager._show_video_preview(path, event.x_root, event.y_root)
                 return
@@ -2922,8 +3022,17 @@ def select_multiple_folders_and_play():
             first_iid  = selection[0]
             first_path = self.current_subdirs_mapping.get(first_iid)
 
+            sel_paths = [self.current_subdirs_mapping.get(iid) for iid in selection]
+            sel_paths = [p for p in sel_paths if p]
+            sel_photo_paths = [p for p in sel_paths if os.path.isfile(p) and is_photo(p)]
+
             context_menu = self.create_manager_context_menu(self.root)
             context_menu.add_command(label="Play Selected", command=self.play_selected_videos)
+            if sel_photo_paths:
+                context_menu.add_command(
+                    label="🖼 Slideshow",
+                    command=lambda photos=list(sel_photo_paths): self._launch_slideshow(photos),
+                )
             context_menu.add_separator()
 
             total_items    = self._tree_size()
@@ -2943,9 +3052,6 @@ def select_multiple_folders_and_play():
             selected_dir = self.get_current_selected_directory()
             excluded_dir_set = set(os.path.normpath(p) for p in self.excluded_subdirs.get(selected_dir, [])) if selected_dir else set()
 
-            sel_paths = [self.current_subdirs_mapping.get(iid) for iid in selection]
-            sel_paths = [p for p in sel_paths if p]
-
             has_non_excluded = any(
                 not (self.is_video_excluded(selected_dir, p) if (selected_dir and os.path.isfile(p)) else os.path.normpath(p) in excluded_dir_set)
                 for p in sel_paths
@@ -2955,7 +3061,7 @@ def select_multiple_folders_and_play():
                 for p in sel_paths
             )
 
-            sel_video_paths = [p for p in sel_paths if os.path.isfile(p) and is_video(p)]
+            sel_video_paths = [p for p in sel_paths if os.path.isfile(p) and self._is_media(p)]
             has_non_fav_videos = (selected_dir and hasattr(self, 'favorites_manager') and sel_video_paths and
                 any(not self.favorites_manager.is_favorite(p, selected_dir) for p in sel_video_paths))
             has_fav = (selected_dir and hasattr(self, 'favorites_manager') and sel_video_paths and
@@ -3089,7 +3195,7 @@ def select_multiple_folders_and_play():
                 and os.path.normpath(path) == self._now_playing_video_path
             )
 
-            prefix = "🎬 " if not is_now else "▶▶ "
+            prefix = f"{self._media_icon(path)} " if not is_now else "▶▶ "
             fav = " ⭐" if is_fav else ""
             excl   = "  ⊘ excluded" if is_excl else ""
             now    = "  ▮▮▮" if is_now else ""
@@ -3253,7 +3359,7 @@ def select_multiple_folders_and_play():
                                     for entry in sorted(it, key=lambda e: e.name.lower()):
                                         if not entry.is_file():
                                             continue
-                                        if not is_video(entry.name):
+                                        if not self._is_media(entry.name):
                                             continue
                                         full_path = entry.path
                                         norm_full = os.path.normpath(full_path)
@@ -3467,7 +3573,7 @@ def select_multiple_folders_and_play():
                         parent_iid = dir_iids.get(parent_d, "")
                         iid        = nxt()
                         self.exclusion_tree.insert(parent_iid, tk.END, iid=iid,
-                                                   text=f"🎬 {vname}", tags=("video",))
+                                                   text=f"{self._media_icon(v)} {vname}", tags=("video",))
                         mapping[iid] = v
                 else:
                     for v in videos:
@@ -3490,7 +3596,7 @@ def select_multiple_folders_and_play():
                             fp = os.path.join(dirpath, f)
                             total_size += os.path.getsize(fp)
                             file_count += 1
-                            if is_video(fp):
+                            if self._is_media(fp):
                                 video_count += 1
                         except Exception:
                             pass
@@ -3644,13 +3750,13 @@ def select_multiple_folders_and_play():
 
                             if is_excl:
                                 tag   = "video_fav_excl" if is_fav else "video_excl"
-                                label = f"🎬 {rel_path}  ⊘ excluded"
+                                label = self._media_tree_label(video_path, rel_path, "  ⊘ excluded")
                             elif is_fav:
                                 tag   = "video_fav"
-                                label = f"🎬 {rel_path} ⭐"
+                                label = self._media_tree_label(video_path, rel_path, " ⭐")
                             else:
                                 tag   = "video"
-                                label = f"🎬 {rel_path}"
+                                label = self._media_tree_label(video_path, rel_path)
 
                             iid = f"f{idx}"
                             self.exclusion_tree.insert("", tk.END, iid=iid,
@@ -3705,13 +3811,13 @@ def select_multiple_folders_and_play():
 
                 if is_excl:
                     tag   = "video_fav_excl" if is_fav else "video_excl"
-                    label = f"🎬 {rel_path}  ⊘ excluded"
+                    label = self._media_tree_label(video_path, rel_path, "  ⊘ excluded")
                 elif is_fav:
                     tag   = "video_fav"
-                    label = f"🎬 {rel_path} ⭐"
+                    label = self._media_tree_label(video_path, rel_path, " ⭐")
                 else:
                     tag   = "video"
-                    label = f"🎬 {rel_path}"
+                    label = self._media_tree_label(video_path, rel_path)
 
                 iid = f"f{idx}"
                 self.exclusion_tree.insert("", tk.END, iid=iid, text=label, tags=(tag,))
@@ -3755,7 +3861,7 @@ def select_multiple_folders_and_play():
                             if not self.is_video_excluded(root_pseudo, v):
                                 collected.append(v)
                     continue
-                if os.path.isfile(path) and is_video(path):
+                if os.path.isfile(path) and self._is_media(path):
                     if not (selected_dir and self.is_video_excluded(selected_dir, path)):
                         collected.append(path)
                     continue
@@ -3764,7 +3870,7 @@ def select_multiple_folders_and_play():
                         for root, dirs, files in os.walk(path):
                             for f in files:
                                 full = os.path.join(root, f)
-                                if is_video(full):
+                                if self._is_media(full):
                                     if not (selected_dir and self.is_video_excluded(selected_dir, full)):
                                         collected.append(full)
                     except Exception as e:
@@ -3881,25 +3987,32 @@ def select_multiple_folders_and_play():
         def _play_annotated_videos(self, video_paths: list):
             if not video_paths:
                 return
-            all_video_to_dir = {}
-            all_directories = []
-            for vp in video_paths:
-                vdir = os.path.dirname(vp) if os.path.isfile(vp) else None
-                if vdir:
-                    all_video_to_dir[vp] = vdir
-                    if vdir not in all_directories:
-                        all_directories.append(vdir)
-            all_directories.sort()
-            valid_videos = list(all_video_to_dir.keys())
-            if not valid_videos:
-                return
-            self._launch_player(self._make_player(valid_videos, all_video_to_dir, all_directories, 0))
+            self._play_paths(video_paths, 0)
 
         def play_videos(self):
-            videos, video_to_dir, directories = self._build_video_list()
+            media_files, media_to_dir, directories = self._build_video_list()
+            if not media_files:
+                self.update_console(f"No {self._media_count_label()} to play.")
+                return
+
+            mode = self.get_media_mode()
+            if mode == 'photo' or (mode == 'both' and all(is_photo(p) for p in media_files)):
+                idx = 0
+                if getattr(self, 'start_from_last_played', False) and getattr(self, 'last_played_video_path', ''):
+                    resume_path = os.path.normpath(self.last_played_video_path)
+                    for i, p in enumerate(media_files):
+                        if os.path.normpath(p) == resume_path:
+                            idx = i
+                            break
+                self._launch_slideshow(media_files, idx)
+                return
+
+            videos = [p for p in media_files if is_video(p)]
             if not videos:
                 self.update_console("No videos to play.")
                 return
+            video_to_dir = {v: media_to_dir.get(v, os.path.dirname(v)) for v in videos}
+            directories = list(dict.fromkeys(video_to_dir[v] for v in videos))
 
             idx = 0
             if getattr(self, 'start_from_last_played', False) and getattr(self, 'last_played_video_path', ''):
@@ -3936,64 +4049,23 @@ def select_multiple_folders_and_play():
             self._launch_player(self._make_player(videos, video_to_dir, directories, idx))
 
         def _play_from_double_click(self, target_path):
-            videos       = [target_path]
-            video_to_dir = {target_path: os.path.dirname(target_path)}
-            directories  = [os.path.dirname(target_path)]
-            self._launch_player(self._make_player(videos, video_to_dir, directories, 0))
+            self._play_paths([target_path], 0)
 
         def play_selected_videos(self):
             selected_dir = self.get_current_selected_directory()
             selection    = self._tree_selection_indices()
 
             if not selection:
-                self.update_console("No videos selected.")
+                self.update_console(f"No {self._media_count_label()} selected.")
                 return
 
-            selected_videos = []
-            seen = set()
-
-            for iid in selection:
-                path = self.current_subdirs_mapping.get(iid)
-                if not path:
-                    continue
-                if os.path.isfile(path) and is_video(path):
-                    if selected_dir and self.is_video_excluded(selected_dir, path):
-                        continue
-                    norm = os.path.normpath(path)
-                    if norm not in seen:
-                        seen.add(norm)
-                        selected_videos.append(path)
-                elif os.path.isdir(path):
-                    try:
-                        for root, dirs, files in os.walk(path):
-                            for f in sorted(files):
-                                full = os.path.join(root, f)
-                                if is_video(full):
-                                    if selected_dir and self.is_video_excluded(selected_dir, full):
-                                        continue
-                                    norm = os.path.normpath(full)
-                                    if norm not in seen:
-                                        seen.add(norm)
-                                        selected_videos.append(full)
-                    except (PermissionError, OSError):
-                        pass
-
-            if not selected_videos:
-                self.update_console("No valid non-excluded video files in selection.")
+            selected_items = self._resolve_iids_to_paths(selection)
+            if not selected_items:
+                self.update_console(f"No valid non-excluded {self._media_count_label()} in selection.")
                 return
 
-            all_v2d = {}
-            for directory in self.selected_dirs:
-                cache = self.scan_cache.get(directory)
-                if cache:
-                    _, dir_v2d, _ = cache
-                    all_v2d.update(dir_v2d)
-
-            sel_v2d  = {v: all_v2d.get(v, os.path.dirname(v)) for v in selected_videos}
-            sel_dirs = list(dict.fromkeys(sel_v2d[v] for v in selected_videos))
-
-            self.update_console(f"Playing {len(selected_videos)} selected video(s)")
-            self._launch_player(self._make_player(selected_videos, sel_v2d, sel_dirs, 0))
+            self.update_console(f"Playing {len(selected_items)} selected item(s)")
+            self._play_paths(selected_items, 0)
 
         def _on_player_closed(self):
             self._active_player = None
@@ -4232,7 +4304,7 @@ def select_multiple_folders_and_play():
                             if search_query in d.lower():
                                 return True
                         for f in files:
-                            if is_video(f) and search_query in f.lower():
+                            if self._is_media(f) and search_query in f.lower():
                                 return True
                 except (PermissionError, OSError):
                     pass
@@ -4322,45 +4394,46 @@ def select_multiple_folders_and_play():
                         subpaths.append(os.path.join(root, d))
                     for f in files:
                         full = os.path.join(root, f)
-                        if is_video(full):
+                        if self._is_media(full):
                             subpaths.append(full)
             except Exception as e:
                 self.update_console(f"Error getting subdirectories of {target_path}: {e}")
             return subpaths
 
         def update_video_count(self):
-            total_videos = 0
+            total_media = 0
             pending = 0
+            label = self._media_count_label()
 
             for directory in self.selected_dirs:
                 cache = self.scan_cache.get(directory)
                 if not cache:
                     pending += 1
                     continue
-                videos, _, _ = cache
-                total_videos += sum(1 for v in videos if not self.is_video_excluded(directory, v))
+                media_files, _, _ = cache
+                total_media += sum(1 for v in media_files if not self.is_video_excluded(directory, v))
 
-            self.video_count = total_videos
+            self.video_count = total_media
 
             if hasattr(self, 'workspace_context_label'):
                 suffix = f" (scanning {pending}…)" if pending else ""
                 self.workspace_context_label.config(
                     text=self._selected_directory_summary() if not pending else
-                    f"{total_videos} videos{suffix}"
+                    f"{total_media} {label}{suffix}"
                 )
 
             if (not pending and
                     not hasattr(self, '_last_reported_video_count') or
-                    (not pending and getattr(self, '_last_reported_video_count', None) != total_videos)):
-                self._last_reported_video_count = total_videos
+                    (not pending and getattr(self, '_last_reported_video_count', None) != total_media)):
+                self._last_reported_video_count = total_media
                 self.update_console(
-                    f"Total: {total_videos} videos from {len(self.selected_dirs)} "
+                    f"Total: {total_media} {label} from {len(self.selected_dirs)} "
                     f"director{'ies' if len(self.selected_dirs) != 1 else 'y'}")
             if getattr(self, '_active_app_view', None) == 'home':
                 if hasattr(self, '_home_dirs_label') and self._home_dirs_label.winfo_exists():
                     self._home_dirs_label.config(text=str(len(self.selected_dirs)))
                 if hasattr(self, '_home_vids_label') and self._home_vids_label.winfo_exists():
-                    self._home_vids_label.config(text=str(total_videos))
+                    self._home_vids_label.config(text=str(total_media))
 
         def exclude_all_subdirectories(self):
             selected_dir = self.get_current_selected_directory()
@@ -4388,7 +4461,7 @@ def select_multiple_folders_and_play():
                                 dir_paths.append(sp)
                         for f in files:
                             full = os.path.join(root, f)
-                            if is_video(full) and (not displayed or full in displayed):
+                            if self._is_media(full) and (not displayed or full in displayed):
                                 file_paths.append(full)
                 except Exception as e:
                     self.root.after(0, lambda: self.update_console(f"Error during Exclude All: {e}"))
@@ -4462,7 +4535,7 @@ def select_multiple_folders_and_play():
                                         dirs_to_exclude.add(sp)
                                 for f in files:
                                     full = os.path.join(root, f)
-                                    if is_video(full) and (not displayed or full in displayed):
+                                    if self._is_media(full) and (not displayed or full in displayed):
                                         vids_to_exclude.add(full)
                         else:
                             vids_to_exclude.add(target_path)
@@ -4547,7 +4620,7 @@ def select_multiple_folders_and_play():
                                         dirs_to_include.add(sp)
                                 for f in files:
                                     full = os.path.join(root, f)
-                                    if is_video(full) and (not displayed or full in displayed):
+                                    if self._is_media(full) and (not displayed or full in displayed):
                                         vids_to_include.add(full)
                         else:
                             vids_to_include.add(target_path)
@@ -4712,7 +4785,7 @@ def select_multiple_folders_and_play():
                             text=label, tags=(tag,), open=True, values=vals)
                         self.current_subdirs_mapping[child_iid] = full
                         expand_recursive(child_iid, full, root_dir)
-                    elif show_videos and entry.is_file() and is_video(entry.name):
+                    elif show_videos and entry.is_file() and self._is_media(entry.name):
                         norm_full = os.path.normpath(full)
                         is_excl_v = norm_full in excluded_vid_set
                         if only_excl and not is_excl_v:
@@ -5004,14 +5077,14 @@ def select_multiple_folders_and_play():
                 item_path = self.current_subdirs_mapping.get(iid)
                 if not item_path:
                     continue
-                if os.path.isfile(item_path) and is_video(item_path):
+                if os.path.isfile(item_path) and self._is_media(item_path):
                     if not self.is_video_excluded(selected_dir, item_path):
                         selected_videos.append(item_path)
                 elif os.path.isdir(item_path):
                     for root, dirs, files in os.walk(item_path):
                         for f in files:
                             full = os.path.join(root, f)
-                            if is_video(full) and not self.is_video_excluded(selected_dir, full):
+                            if self._is_media(full) and not self.is_video_excluded(selected_dir, full):
                                 selected_videos.append(full)
 
             if selected_videos:
@@ -5048,13 +5121,13 @@ def select_multiple_folders_and_play():
                 item_path = self.current_subdirs_mapping.get(iid)
                 if not item_path:
                     continue
-                if os.path.isfile(item_path) and is_video(item_path):
+                if os.path.isfile(item_path) and self._is_media(item_path):
                     selected_videos.append(item_path)
                 elif os.path.isdir(item_path):
                     for root, dirs, files in os.walk(item_path):
                         for f in files:
                             full = os.path.join(root, f)
-                            if is_video(full):
+                            if self._is_media(full):
                                 selected_videos.append(full)
 
             if selected_videos:
@@ -5093,10 +5166,8 @@ def select_multiple_folders_and_play():
         def _play_favorites_videos(self, videos):
             if not videos:
                 return
-            all_video_to_dir = {v: os.path.dirname(v) for v in videos}
-            all_directories  = sorted(list(set(all_video_to_dir.values())))
-            self.update_console(f"Playing {len(videos)} videos from favorites")
-            self._launch_player(self._make_player(videos, all_video_to_dir, all_directories, 0))
+            self.update_console(f"Playing {len(videos)} item(s) from favorites")
+            self._play_paths(videos, 0)
 
         def _context_add_to_playlist(self, selection):
             selected_dir = self.get_current_selected_directory()
@@ -5107,14 +5178,14 @@ def select_multiple_folders_and_play():
                 item_path = self.current_subdirs_mapping.get(iid)
                 if not item_path:
                     continue
-                if os.path.isfile(item_path) and is_video(item_path):
+                if os.path.isfile(item_path) and self._is_media(item_path):
                     if not self.is_video_excluded(selected_dir, item_path):
                         selected_videos.append(item_path)
                 elif os.path.isdir(item_path):
                     for root, dirs, files in os.walk(item_path):
                         for f in files:
                             full = os.path.join(root, f)
-                            if is_video(full) and not self.is_video_excluded(selected_dir, full):
+                            if self._is_media(full) and not self.is_video_excluded(selected_dir, full):
                                 selected_videos.append(full)
             if selected_videos:
                 added = self.playlist_manager.add_videos_to_playlist([], selected_videos)
@@ -5207,7 +5278,7 @@ def select_multiple_folders_and_play():
                             ep = os.path.normpath(entry.path)
                             if ep in existing_paths:
                                 continue
-                            if not entry.is_dir() and not is_video(entry.name):
+                            if not entry.is_dir() and not self._is_media(entry.name):
                                 continue
                             self._tree_iid_counter += 1
                             new_iid = f"loc_{self._tree_iid_counter}"
@@ -5220,7 +5291,7 @@ def select_multiple_folders_and_play():
                                                            text="  Loading…", tags=("placeholder",))
                             else:
                                 self.exclusion_tree.insert(current_iid, tk.END, iid=new_iid,
-                                                           text=f"🎬 {entry.name}", tags=("video",))
+                                                           text=f"{self._media_icon(entry.path)} {entry.name}", tags=("video",))
                             self.current_subdirs_mapping[new_iid] = entry.path
                             if ep == target_path:
                                 found_iid = new_iid
@@ -5423,25 +5494,8 @@ def select_multiple_folders_and_play():
             if not videos:
                 self.toast.warning("Warning", "Playlist is empty")
                 return
-            self.update_console("=" * 60)
-            self.update_console("STARTING PLAYLIST PLAYBACK")
-            self.update_console("=" * 60)
-            all_video_to_dir = {}
-            all_directories  = []
-            for vp in videos:
-                vdir = "STREAMS" if self._is_stream_url(vp) else (
-                    os.path.dirname(vp) if os.path.isfile(vp) else None)
-                if vdir:
-                    all_video_to_dir[vp] = vdir
-                    if vdir not in all_directories:
-                        all_directories.append(vdir)
-            all_directories.sort()
-            valid_videos = list(all_video_to_dir.keys())
-            if not valid_videos:
-                self.toast.warning("Warning", "No valid videos found in playlist")
-                return
-            self.update_console(f"Playing playlist with {len(valid_videos)} videos")
-            self._launch_player(self._make_player(valid_videos, all_video_to_dir, all_directories, 0))
+            self.update_console(f"Playing playlist with {len(videos)} item(s)")
+            self._play_paths(videos, 0)
 
         def _show_queue_manager(self):
             self._show_embedded_view(
@@ -5454,6 +5508,11 @@ def select_multiple_folders_and_play():
 
         def _play_queue_videos(self, videos):
             if not videos:
+                return
+            file_videos = [v for v in videos if os.path.isfile(v)]
+            if file_videos and all(is_photo(v) for v in file_videos):
+                self.update_console(f"Slideshow from queue: {len(file_videos)} photos")
+                self._play_paths(videos, 0)
                 return
             all_video_to_dir = {}
             all_directories = []
@@ -5583,27 +5642,10 @@ def select_multiple_folders_and_play():
 
         def _play_history_videos(self, videos):
             if not videos:
-                self.toast.warning("Warning", "No videos to play")
+                self.toast.warning("Warning", "No items to play")
                 return
-            self.update_console("=" * 60)
-            self.update_console("STARTING HISTORY VIDEO PLAYBACK")
-            self.update_console("=" * 60)
-            all_video_to_dir = {}
-            all_directories  = []
-            for vp in videos:
-                vdir = "STREAMS" if self._is_stream_url(vp) else (
-                    os.path.dirname(vp) if os.path.isfile(vp) else None)
-                if vdir:
-                    all_video_to_dir[vp] = vdir
-                    if vdir not in all_directories:
-                        all_directories.append(vdir)
-            all_directories.sort()
-            valid_videos = list(all_video_to_dir.keys())
-            if not valid_videos:
-                self.toast.warning("Warning", "No valid videos found")
-                return
-            self.update_console(f"Playing {len(valid_videos)} videos from history")
-            self._launch_player(self._make_player(valid_videos, all_video_to_dir, all_directories, 0))
+            self.update_console(f"Playing {len(videos)} item(s) from history")
+            self._play_paths(videos, 0)
 
         # ------------------------------------------------------------------
         # Grid view
@@ -5633,7 +5675,7 @@ def select_multiple_folders_and_play():
                         item_path = self.current_subdirs_mapping.get(iid)
                         if not item_path:
                             continue
-                        if os.path.isfile(item_path) and is_video(item_path):
+                        if os.path.isfile(item_path) and self._is_media(item_path):
                             if not self.is_video_excluded(selected_dir, item_path):
                                 selected_videos.append(item_path)
                         elif os.path.isdir(item_path):
@@ -5644,7 +5686,7 @@ def select_multiple_folders_and_play():
                             for root, dirs, files in os.walk(folder):
                                 for f in files:
                                     full = os.path.join(root, f)
-                                    if is_video(full) and not self.is_video_excluded(selected_dir, full):
+                                    if self._is_media(full) and not self.is_video_excluded(selected_dir, full):
                                         selected_videos.append(full)
                         except Exception as e:
                             self.update_console(f"Error reading folder {folder}: {e}")
@@ -5715,18 +5757,8 @@ def select_multiple_folders_and_play():
         def _play_grid_videos(self, videos, start_index=0):
             if not videos:
                 return
-            all_video_to_dir = {}
-            for directory in self.selected_dirs:
-                cache = self.scan_cache.get(directory)
-                if cache:
-                    _, v2d, _ = cache
-                    all_video_to_dir.update(v2d)
-            for v in videos:
-                if v not in all_video_to_dir:
-                    all_video_to_dir[v] = os.path.dirname(v)
-            all_directories = list(dict.fromkeys(all_video_to_dir[v] for v in videos))
-            self.update_console(f"Playing {len(videos)} videos from grid selection")
-            self._launch_player(self._make_player(videos, all_video_to_dir, all_directories, start_index))
+            self.update_console(f"Playing {len(videos)} item(s) from gallery")
+            self._play_paths(videos, start_index)
 
         def _add_to_playlist(self):
             selected_dir = self.get_current_selected_directory()
@@ -5749,7 +5781,7 @@ def select_multiple_folders_and_play():
                         all_videos = []
                         if search_active and self.current_subdirs_mapping:
                             for iid, path in self.current_subdirs_mapping.items():
-                                if os.path.isfile(path) and is_video(path):
+                                if os.path.isfile(path) and self._is_media(path):
                                     all_videos.append(path)
                         else:
                             cache = self.scan_cache.get(selected_dir)
@@ -5996,7 +6028,7 @@ def select_multiple_folders_and_play():
                 if len(selection) != 1:
                     return "break"
                 path = self.current_subdirs_mapping.get(selection[0])
-                if path and os.path.isfile(path) and is_video(path):
+                if path and os.path.isfile(path) and self._is_media(path):
                     self.video_preview_manager.right_clicked_item = selection[0]
                     x, y = keyboard_navigation.preview_coords_for_tree_item(tree, selection[0])
                     self.video_preview_manager._show_video_preview(path, x, y)
@@ -6400,9 +6432,18 @@ def select_multiple_folders_and_play():
 
         def _on_settings_changed(self, new_settings):
             self.update_console("Settings updated")
+            prev_mode = getattr(self, '_last_media_mode', None)
+            new_mode = normalize_media_mode(getattr(new_settings, 'media_mode', 'video'))
+            if hasattr(self, 'slideshow_manager'):
+                self.slideshow_manager.apply_settings(new_settings)
             if hasattr(self, 'video_preview_manager'):
                 self.video_preview_manager.set_preview_duration(new_settings.preview_duration)
                 self.video_preview_manager.set_video_preview_enabled(new_settings.use_video_preview)
+            if prev_mode is not None and prev_mode != new_mode:
+                self._last_media_mode = new_mode
+                self._rescan_all_directories()
+            else:
+                self._last_media_mode = new_mode
             if hasattr(self, 'resume_manager'):
                 self.resume_manager._auto_cleanup_days = new_settings.auto_cleanup_days
             if getattr(self, '_active_player', None) is not None:
