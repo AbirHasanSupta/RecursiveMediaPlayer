@@ -297,11 +297,6 @@ class ResourceManager:
 
         self.logger.info("Resource cleanup complete")
 
-        try:
-            sys.exit(0)
-        except:
-            os._exit(0)
-
     def is_shutdown(self) -> bool:
         """Check if shutdown is in progress"""
         with self._shutdown_lock:
@@ -314,7 +309,7 @@ class ManagedThread(threading.Thread):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.daemon = True
-        self._resource_manager = ResourceManager()
+        self._resource_manager = get_resource_manager()
         self._resource_manager.register_thread(self)
 
     def should_stop(self) -> bool:
@@ -333,13 +328,13 @@ class ManagedExecutor:
 
     def __init__(self, executor_class, *args, **kwargs):
         self.executor = executor_class(*args, **kwargs)
-        ResourceManager().register_executor(self.executor)
+        get_resource_manager().register_executor(self.executor)
 
     def __getattr__(self, name):
         return getattr(self.executor, name)
 
     def shutdown(self, wait=True, cancel_futures=False):
-        ResourceManager().unregister_executor(self.executor)
+        get_resource_manager().unregister_executor(self.executor)
         self.executor.shutdown(wait=wait, cancel_futures=cancel_futures)
 
 

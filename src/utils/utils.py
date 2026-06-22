@@ -7,7 +7,9 @@ PHOTO_EXTENSIONS = (
 )
 AUDIO_EXTENSIONS = ('.mp3', '.wav', '.ogg', '.flac', '.m4a', '.aac', '.wma')
 MEDIA_MODES = ('video', 'photo', 'both')
+MEDIA_TYPE_FILTERS = ('all', 'photo', 'video')
 VALID_MEDIA_MODES = set(MEDIA_MODES)
+VALID_MEDIA_TYPE_FILTERS = set(MEDIA_TYPE_FILTERS)
 
 
 def is_video(file_name: str) -> bool:
@@ -37,9 +39,36 @@ def is_media(file_name: str, media_mode: str = 'video') -> bool:
     return is_video(file_name) or is_photo(file_name)
 
 
+def normalize_media_type_filter(filter_type: str) -> str:
+    ft = (filter_type or 'all').lower()
+    return ft if ft in VALID_MEDIA_TYPE_FILTERS else 'all'
+
+
+def passes_media_type_filter(path: str, filter_type: str = 'all') -> bool:
+    """Return True if path passes the photo/video/all filter (both mode)."""
+    ft = normalize_media_type_filter(filter_type)
+    if ft == 'all':
+        return True
+    if ft == 'photo':
+        return is_photo(path)
+    if ft == 'video':
+        return is_video(path)
+    return True
+
+
 def media_type_label(media_mode: str) -> str:
     mode = normalize_media_mode(media_mode)
     return {'video': 'videos', 'photo': 'photos', 'both': 'media'}[mode]
+
+
+def media_item_label(media_mode: str, plural: bool = True) -> str:
+    """Singular/plural item noun for user-facing labels."""
+    mode = normalize_media_mode(media_mode)
+    if mode == 'photo':
+        return 'photos' if plural else 'photo'
+    if mode == 'video':
+        return 'videos' if plural else 'video'
+    return 'items' if plural else 'item'
 
 
 def media_icon_for_path(path: str) -> str:

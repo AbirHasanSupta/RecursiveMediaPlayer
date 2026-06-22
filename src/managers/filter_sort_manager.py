@@ -351,8 +351,18 @@ class FilterCriteria:
         self.frequently_played_threshold: int = 3
         self.filename_contains: str = ""
         self.path_contains: str = ""
+        self.media_type: str = "all"  # all | photo | video (both mode)
 
     def matches(self, m: VideoMetadata) -> bool:
+        if self.media_type and self.media_type != "all":
+            try:
+                from utils import is_photo, is_video
+                if self.media_type == "photo" and not is_photo(m.video_path):
+                    return False
+                if self.media_type == "video" and not is_video(m.video_path):
+                    return False
+            except Exception:
+                pass
         if self.min_size_mb is not None and m.size_mb < self.min_size_mb: return False
         if self.max_size_mb is not None and m.size_mb > self.max_size_mb: return False
         if self.modified_within_days is not None:
@@ -431,18 +441,20 @@ class AdvancedFilterSortManager:
         self.current_sort   = SortCriteria()
 
         self.quick_filters = {
-            "all":                ("All Videos",                FilterCriteria()),
+            "all":                ("All Media",                 FilterCriteria()),
             "recent_7days":       ("Added Last 7 Days",         self._recent(7)),
             "recent_30days":      ("Added Last 30 Days",        self._recent(30)),
             "played_today":       ("Played Today",              self._played_recently(1)),
             "played_week":        ("Played This Week",          self._played_recently(7)),
             "never_played":       ("Never Played",              self._never_played()),
             "frequently_played":  ("Frequently Played",         self._frequent()),
-            "hd_videos":          ("HD Videos (720p+)",         self._min_h(720)),
-            "full_hd_videos":     ("Full HD Videos (1080p+)",   self._min_h(1080)),
+            "hd_videos":          ("HD (720p+)",                self._min_h(720)),
+            "full_hd_videos":     ("Full HD (1080p+)",          self._min_h(1080)),
             "large_files":        ("Large Files (>1GB)",        self._large()),
-            "short_videos":       ("Short Videos (<5min)",      self._short()),
-            "long_videos":        ("Long Videos (>30min)",      self._long()),
+            "short_videos":       ("Short (<5min)",             self._short()),
+            "long_videos":        ("Long (>30min)",             self._long()),
+            "photos_only":        ("Photos Only",               self._photos_only()),
+            "videos_only":        ("Videos Only",               self._videos_only()),
         }
 
     # ------------------------------------------------------------------
@@ -464,6 +476,10 @@ class AdvancedFilterSortManager:
         c = FilterCriteria(); c.max_duration_seconds = 300; return c
     def _long(self):
         c = FilterCriteria(); c.min_duration_seconds = 1800; return c
+    def _photos_only(self):
+        c = FilterCriteria(); c.media_type = "photo"; return c
+    def _videos_only(self):
+        c = FilterCriteria(); c.media_type = "video"; return c
 
     # ------------------------------------------------------------------
     # Core
@@ -529,6 +545,7 @@ class AdvancedFilterSortManager:
         n = len(meta_list) or 1
         return {
             "total_videos":            len(meta_list),
+            "total_items":             len(meta_list),
             "total_size_gb":           total_size / (1024 ** 3),
             "total_duration_hours":    total_dur / 3600,
             "avg_size_mb":             (total_size / n) / (1024 ** 2),

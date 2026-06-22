@@ -8,6 +8,8 @@ import random
 import glob
 
 from utils import is_photo, is_audio, PHOTO_EXTENSIONS, AUDIO_EXTENSIONS
+from managers.settings_manager import DEFAULT_HOTKEYS
+from managers.resource_manager import get_resource_manager
 
 
 def _init_pygame():
@@ -89,6 +91,27 @@ class SlideshowManager:
         self._trans_var         = None
         self._kb_var            = None
         self._fullscreen        = False
+        self._hotkeys           = dict(DEFAULT_HOTKEYS)
+        self._registered_cbids  = []
+        self._fit_cache         = {}  # (path, cw, ch) -> rendered PIL
+        get_resource_manager().register_cleanup_callback(self.cleanup)
+
+    def _reset_widget_state(self):
+        """Clear canvas/widget refs after window destroy (fixes blank reopen)."""
+        self._canvas            = None
+        self._photo_img         = None
+        self._canvas_img_id     = None
+        self._play_btn          = None
+        self._counter_lbl       = None
+        self._progress_canvas   = None
+        self._now_playing_lbl   = None
+        self._mute_btn          = None
+        self._vol_canvas        = None
+        self._dur_var           = None
+        self._trans_var         = None
+        self._trans_display_var = None
+        self._kb_var            = None
+        self._registered_cbids  = []
 
     def apply_settings(self, settings):
         """Sync slideshow defaults from app settings."""
@@ -116,6 +139,7 @@ class SlideshowManager:
         self.photos  = list(photos)
         self.index   = max(0, min(start_index, len(photos) - 1))
         self._closing = False
+        self._fit_cache.clear()
 
         if self._win and self._win.winfo_exists():
             self._win.lift()
@@ -134,14 +158,27 @@ class SlideshowManager:
         self._cancel_timers()
         self._stop_audio()
         if self._win and self._win.winfo_exists():
-            self._win.destroy()
+            try:
+                self._win.destroy()
+            except Exception:
+                pass
         self._win = None
+        self._reset_widget_state()
+        self._fit_cache.clear()
+
+    def set_hotkeys(self, hotkeys):
+        """Live-reload key bindings from settings (same actions as embedded player)."""
+        self._hotkeys = dict(hotkeys) if hotkeys else dict(DEFAULT_HOTKEYS)
+        if self._win and self._win.winfo_exists():
+            self._rebind_keys(self._win)
 
     # ── Window construction ───────────────────────────────────────────────────
 
     def _build_window(self):
+        self._reset_widget_state()
+        self._canvas_img_id = None
         win = tk.Toplevel(self.root)
-        win.title("Slideshow")
+        win.title("Photo Viewer")
         win.configure(bg="#000000")
         win.geometry("1280x820")
         win.protocol("WM_DELETE_WINDOW", self.close)
@@ -159,7 +196,8 @@ class SlideshowManager:
         self._build_control_bar(win)
         self._bind_keys(win)
 
-        self.playing = True
+        # Viewer mode by default — press Play to start auto-advancing slideshow
+        self.playing = False
         self._update_play_btn()
 
     # ── Top bar ───────────────────────────────────────────────────────────────
@@ -169,7 +207,7 @@ class SlideshowManager:
         top.pack(fill=tk.X)
         top.pack_propagate(False)
 
-        tk.Label(top, text="🖼  Slideshow",
+        tk.Label(top, text="🖼  Photo Viewer",
                  font=("Segoe UI", 11, "bold"),
                  bg="#111111", fg="#ffffff").pack(side=tk.LEFT, padx=16, pady=10)
 
@@ -394,17 +432,87 @@ class SlideshowManager:
 
     # ── Keyboard bindings ─────────────────────────────────────────────────────
 
+    # Slideshow actions mapped to the same settings hotkey ids as EmbeddedPlayer
+    _ACTION_MAP = {
+        "toggle_pause":      ("_toggle_play",        ()),
+        "next_video":        ("_next",               ()),
+        "prev_video":        ("_prev",               ()),
+        "fast_forward":      ("_next",               ()),
+        "rewind":            ("_prev",               ()),
+        "toggle_fullscreen": ("_toggle_fullscreen",  ()),
+        "toggle_mute":       ("_toggle_mute",        ()),
+        "stop_video":        ("_stop_or_close",      ()),
+        "ab_set_a":          ("_prev_song",          ()),
+        "ab_set_b":          ("_next_song",          ()),
+    }
+
+    def _stop_or_close(self):
+        if self._fullscreen:
+            self._exit_fullscreen()
+        else:
+            self.close()
+
+    def _rebind_keys(self, win):
+        for seq, cbid in getattr(self, '_registered_cbids', []):
+            try:
+                win.unbind(seq, cbid)
+            except Exception:
+                pass
+        self._registered_cbids = []
+        hk = self._hotkeys
+
+        def _to_tk_seq(combo):
+            if not combo:
+                return None
+            parts = combo.lower().split('+')
+            key = parts[-1]
+            mods = parts[:-1]
+            _key_map = {
+                'space': 'space', 'esc': 'Escape', 'escape': 'Escape',
+                'enter': 'Return', 'return': 'Return',
+                'left': 'Left', 'right': 'Right', 'up': 'Up', 'down': 'Down',
+                'page_up': 'Prior', 'page_down': 'Next',
+                '=': 'equal', '-': 'minus', '+': 'plus',
+                '[': 'bracketleft', ']': 'bracketright',
+                '\\': 'backslash',
+                **{f'f{i}': f'F{i}' for i in range(1, 13)},
+            }
+            tk_key = _key_map.get(key, key)
+            mod_map = {'ctrl': 'Control', 'shift': 'Shift', 'alt': 'Alt'}
+            tk_mods = [mod_map.get(m, m.capitalize()) for m in mods]
+            inner = '-'.join(tk_mods + [tk_key]) if tk_mods else tk_key
+            return f'<{inner}>'
+
+        def _make_cb(method):
+            def _cb(e, _m=method):
+                try:
+                    _m()
+                except Exception:
+                    pass
+            return _cb
+
+        for action_id, (method_name, _extra) in self._ACTION_MAP.items():
+            combo = hk.get(action_id) or DEFAULT_HOTKEYS.get(action_id)
+            if not combo:
+                continue
+            seq = _to_tk_seq(combo)
+            if not seq:
+                continue
+            method = getattr(self, method_name, None)
+            if method is None:
+                continue
+            try:
+                cbid = win.bind(seq, _make_cb(method), add=True)
+                self._registered_cbids.append((seq, cbid))
+                if len(seq) == 3 and seq[1].isalpha() and seq[1].islower():
+                    upper_seq = f'<{seq[1].upper()}>'
+                    cbid2 = win.bind(upper_seq, _make_cb(method), add=True)
+                    self._registered_cbids.append((upper_seq, cbid2))
+            except Exception:
+                pass
+
     def _bind_keys(self, win):
-        win.bind("<Left>",        lambda e: self._prev())
-        win.bind("<Right>",       lambda e: self._next())
-        win.bind("<space>",       lambda e: self._toggle_play())
-        win.bind("<Escape>",      lambda e: (self._exit_fullscreen() if self._fullscreen else self.close()))
-        win.bind("<f>",           lambda e: self._toggle_fullscreen())
-        win.bind("<F>",           lambda e: self._toggle_fullscreen())
-        win.bind("<m>",           lambda e: self._toggle_mute())
-        win.bind("<M>",           lambda e: self._toggle_mute())
-        win.bind("<bracketleft>", lambda e: self._prev_song())
-        win.bind("<bracketright>",lambda e: self._next_song())
+        self._rebind_keys(win)
 
     # ── Image loading & PIL ───────────────────────────────────────────────────
 
@@ -451,25 +559,36 @@ class SlideshowManager:
 
     def _fit_image(self, pil_img, cw, ch, scale=1.0, offset_x=0.0, offset_y=0.0):
         """Letterbox-fit image into (cw, ch), applying optional scale/pan for Ken Burns."""
+        cache_key = (id(pil_img), cw, ch, round(scale, 3), round(offset_x, 3), round(offset_y, 3))
+        cached = self._fit_cache.get(cache_key)
+        if cached is not None:
+            return cached
         iw, ih = pil_img.size
         base_scale = min(cw / iw, ch / ih)
         s  = base_scale * scale
         nw = max(1, int(iw * s))
         nh = max(1, int(ih * s))
         resized = pil_img.resize((nw, nh), Image.Resampling.LANCZOS)
-        # Pan: offset is fraction of overflow pixels
         cx = (cw - nw) / 2 + offset_x * max(0, nw - cw)
         cy = (ch - nh) / 2 + offset_y * max(0, nh - ch)
         canvas_img = Image.new("RGB", (cw, ch), (0, 0, 0))
         canvas_img.paste(resized, (int(cx), int(cy)))
+        if len(self._fit_cache) > 24:
+            self._fit_cache.clear()
+        self._fit_cache[cache_key] = canvas_img
         return canvas_img
 
     def _show_pil_on_canvas(self, pil_img):
+        if not self._canvas or not self._canvas.winfo_exists():
+            return
         photo = ImageTk.PhotoImage(pil_img)
         self._photo_img = photo  # keep reference
         if self._canvas_img_id:
-            self._canvas.itemconfig(self._canvas_img_id, image=photo)
-        else:
+            try:
+                self._canvas.itemconfig(self._canvas_img_id, image=photo)
+            except tk.TclError:
+                self._canvas_img_id = None
+        if not self._canvas_img_id:
             cw, ch = self._canvas_size()
             self._canvas_img_id = self._canvas.create_image(
                 cw // 2, ch // 2, image=photo, anchor="center")
@@ -528,9 +647,10 @@ class SlideshowManager:
             self._kb_after = self._canvas.after(33, self._kb_tick)  # ~30 fps
 
     def _cancel_kb(self):
-        if self._kb_after:
+        if self._kb_after and self._canvas:
             try:
-                self._canvas.after_cancel(self._kb_after)
+                if self._canvas.winfo_exists():
+                    self._canvas.after_cancel(self._kb_after)
             except Exception:
                 pass
             self._kb_after = None
@@ -624,6 +744,8 @@ class SlideshowManager:
     # ── Playback scheduling ───────────────────────────────────────────────────
 
     def _schedule_next(self):
+        if not self._canvas or not self._canvas.winfo_exists():
+            return
         if self._after_id:
             try:
                 self._canvas.after_cancel(self._after_id)
@@ -639,13 +761,17 @@ class SlideshowManager:
 
     def _cancel_timers(self):
         self._cancel_kb()
+        canvas = self._canvas
         for attr in ('_after_id', '_transition_after'):
             aid = getattr(self, attr, None)
-            if aid:
+            if aid and canvas:
                 try:
-                    self._canvas.after_cancel(aid)
+                    if canvas.winfo_exists():
+                        canvas.after_cancel(aid)
                 except Exception:
                     pass
+                setattr(self, attr, None)
+            elif aid:
                 setattr(self, attr, None)
 
     # ── Playback controls ─────────────────────────────────────────────────────
@@ -770,9 +896,9 @@ class SlideshowManager:
                        activebackground="#333333",
                        activeforeground="#ffffff",
                        relief=tk.FLAT)
-        menu.add_command(label="⏵  Play / Pause",    command=self._toggle_play)
-        menu.add_command(label="⏪  Previous photo",  command=self._prev)
-        menu.add_command(label="⏩  Next photo",       command=self._next)
+        menu.add_command(label="⏵  Play Slideshow",  command=self._toggle_play)
+        menu.add_command(label="⏪  Previous",        command=self._prev)
+        menu.add_command(label="⏩  Next",            command=self._next)
         menu.add_separator()
         menu.add_command(label="⛶  Toggle Fullscreen", command=self._toggle_fullscreen)
         menu.add_separator()

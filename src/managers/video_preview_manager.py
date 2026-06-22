@@ -1436,6 +1436,13 @@ class VideoPreviewManager:
 
     def _show_video_preview(self, video_path: str, x: int, y: int):
         norm = os.path.normpath(video_path)
+        try:
+            from utils import is_photo
+            if is_photo(video_path):
+                self._show_photo_preview_direct(video_path, x, y)
+                return
+        except ImportError:
+            pass
         with self._lock:
             th = self._thumbnails.get(norm)
         if th and th.is_valid():
@@ -1447,6 +1454,21 @@ class VideoPreviewManager:
             already_queued = norm in self._generation_queue
         if not already_queued:
             self._generate_thumbnail_async(norm, x, y)
+
+    def _show_photo_preview_direct(self, photo_path: str, x: int, y: int):
+        """Show photo hover preview from original file — no thumbnail generation."""
+        try:
+            import io, base64
+            from PIL import Image
+            with Image.open(photo_path) as img:
+                img = img.convert("RGB")
+                img.thumbnail((480, 480), Image.Resampling.LANCZOS)
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=80)
+                td = "IMAGE:" + base64.b64encode(buf.getvalue()).decode("ascii")
+            self.tooltip.show_preview(photo_path, td, x, y)
+        except Exception:
+            pass
 
     def show_preview_at_position(self, video_path: str, position_sec: float, x: int, y: int):
         norm = os.path.normpath(video_path)
@@ -1533,6 +1555,13 @@ class VideoPreviewManager:
         ManagedThread(target=_work, name="CWPositionPreview").start()
 
     def _generate_thumbnail_async(self, video_path: str, x: int, y: int):
+        try:
+            from utils import is_photo
+            if is_photo(video_path):
+                self.parent.after(0, lambda: self._show_photo_preview_direct(video_path, x, y))
+                return
+        except ImportError:
+            pass
         with self._lock:
             if video_path in self._generation_queue:
                 return

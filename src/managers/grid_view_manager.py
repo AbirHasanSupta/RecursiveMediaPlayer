@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
 
 from managers.resource_manager import ManagedExecutor, get_resource_manager, ManagedThread
-from utils import _responsive_geometry
+from utils import _responsive_geometry, is_photo, is_video, media_item_label
 import keyboard_navigation
 from managers.video_preview_manager import get_thumb_pool, generate_thumbnail_worker
 
@@ -103,6 +103,10 @@ class GridViewManager:
         self.exclude_video_callback = None
         self.remove_exclusion_video_callback = None
         self.locate_in_panel_callback = None
+        self._media_type_filter_callback = None
+        self._on_media_type_filter_changed = None
+        self._media_type_filter_var = None
+        self._media_type_filter_frame = None
 
         self._drag_source = None
         self._drag_ghost = None
@@ -168,6 +172,11 @@ class GridViewManager:
 
     def set_locate_in_panel_callback(self, cb):
         self.locate_in_panel_callback = cb
+
+    def set_media_type_filter_callbacks(self, get_filter_fn, on_change_fn):
+        """Wire photo/video/all filter (both mode) from app."""
+        self._media_type_filter_callback = get_filter_fn
+        self._on_media_type_filter_changed = on_change_fn
 
     def _on_annotation_changed(self):
         if self.grid_window and self.grid_window.winfo_exists():
@@ -343,7 +352,7 @@ class GridViewManager:
 
         self.grid_window = tk.Toplevel(self.root)
         self.grid_window.withdraw()
-        self.grid_window.title("Video Gallery")
+        self.grid_window.title("Media Gallery")
         self.grid_window.geometry(_responsive_geometry(self.root, 1600, 900))
         self.grid_window.configure(bg=t['bg'])
 
@@ -504,7 +513,7 @@ class GridViewManager:
         title_box.pack(side=tk.LEFT, fill=tk.Y)
         tk.Label(title_box, text="🖼️", font=("Segoe UI Emoji", 18),
                  bg=t['header_bg'], fg=t['accent']).pack(side=tk.LEFT, padx=(0, 10), pady=14)
-        tk.Label(title_box, text="Video Gallery",
+        tk.Label(title_box, text="Media Gallery",
                  font=("Segoe UI", 15, "bold"),
                  bg=t['header_bg'], fg=t['text']).pack(side=tk.LEFT, pady=14)
 
@@ -561,6 +570,8 @@ class GridViewManager:
         self._tag_filter_btn.bind("<Button-1>", lambda e: self._show_tag_filter_menu(e))
         self._register_toolbar_widget(self._tag_filter_btn, 'tag_filter',
                                       activate=lambda: self._show_tag_filter_menu(None))
+
+        self._build_media_type_filter(inner_tb)
 
         right_tb = tk.Frame(inner_tb, bg=toolbar_bg)
         right_tb.pack(side=tk.RIGHT)
@@ -684,6 +695,66 @@ class GridViewManager:
     # ─────────────────────────────────────────────────────────────────────────
     # Widget helpers (new UI)
     # ─────────────────────────────────────────────────────────────────────────
+    def _build_media_type_filter(self, parent):
+        """Photo / Video / All dropdown — visible only in both media mode."""
+        tp = self.theme_provider
+        t = self._tok()
+        frame = tk.Frame(parent, bg=t.get('surface2', parent.cget('bg')))
+        self._media_type_filter_frame = frame
+        tk.Label(frame, text="Show", font=("Segoe UI", 8),
+                 bg=frame.cget('bg'), fg=t['text_muted']).pack(side=tk.LEFT, padx=(8, 4))
+        current = 'all'
+        if self._media_type_filter_callback:
+            try:
+                current = self._media_type_filter_callback() or 'all'
+            except Exception:
+                pass
+        self._media_type_filter_var = tk.StringVar(value=current.capitalize())
+        labels = {'All': 'all', 'Photos': 'photo', 'Videos': 'video'}
+        display = {v: k for k, v in labels.items()}
+        self._media_type_filter_var.set(display.get(current, 'All'))
+
+        def _on_pick(label):
+            val = labels.get(label, 'all')
+            if self._on_media_type_filter_changed:
+                self._on_media_type_filter_changed(val)
+
+        om = tk.OptionMenu(frame, self._media_type_filter_var, *labels.keys(), command=_on_pick)
+        om.configure(font=("Segoe UI", 8), bg=t['surface'], fg=t['text'],
+                     relief=tk.FLAT, highlightthickness=1, highlightbackground=t['border'],
+                     activebackground=t['surface2'], width=7)
+        om["menu"].configure(bg=t['surface'], fg=t['text'],
+                             activebackground=t['surface2'], activeforeground=t['text'])
+        om.pack(side=tk.LEFT, pady=12)
+        frame.pack(side=tk.LEFT, padx=(0, 4))
+        tk.Frame(parent, bg=t['border'], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=8, padx=8)
+        self._update_media_type_filter_visibility()
+
+    def _update_media_type_filter_visibility(self):
+        if not self._media_type_filter_frame:
+            return
+        show = False
+        try:
+            if hasattr(self.theme_provider, 'get_media_mode'):
+                show = self.theme_provider.get_media_mode() == 'both'
+        except Exception:
+            pass
+        if show:
+            if not self._media_type_filter_frame.winfo_ismapped():
+                self._media_type_filter_frame.pack(side=tk.LEFT, padx=(0, 4))
+        else:
+            self._media_type_filter_frame.pack_forget()
+
+    def _gallery_count_label(self, count):
+        mode = 'video'
+        try:
+            if hasattr(self.theme_provider, 'get_media_mode'):
+                mode = self.theme_provider.get_media_mode()
+        except Exception:
+            pass
+        noun = media_item_label(mode, plural=True)
+        return f"{count:,} {noun}"
+
     def _show_tag_filter_menu(self, event):
         if not self.annotation_service:
             return
@@ -791,7 +862,7 @@ class GridViewManager:
     def _show_sort_menu(self, event):
         menu = self.theme_provider.create_manager_context_menu(self.grid_window)
         options = [
-            ("name",      "Video Name"),
+            ("name",      "Name"),
             ("duration",  "Duration"),
             ("size",      "Size"),
             ("directory", "Directory"),
@@ -1038,9 +1109,9 @@ class GridViewManager:
             self.all_items = self.items.copy()
             self._pages_cache = None
 
-            # Prioritize these videos in the prefetch queue (original behaviour kept)
+            # Prioritize video thumbnails only (photos load directly from disk)
             if self.video_preview_manager:
-                grid_videos = [it['path'] for it in self.items if it['type'] == 'video']
+                grid_videos = [it['path'] for it in self.items if it['type'] == 'video' and is_video(it['path'])]
                 if grid_videos:
                     self.video_preview_manager.prioritize_for_grid(grid_videos)
 
@@ -1193,7 +1264,7 @@ class GridViewManager:
                                       up=self._prev_page, down=self._next_page)
 
         tk.Label(pg, text="·", font=("Segoe UI", 10), bg=bar_bg, fg=t['border']).pack(side=tk.LEFT, padx=3)
-        tk.Label(pg, text=f"{total_videos:,} videos",
+        tk.Label(pg, text=f"{self._gallery_count_label(total_videos)}",
                  font=("Segoe UI", 9), bg=bar_bg, fg=t['text_muted']).pack(side=tk.LEFT, padx=(4, 8))
         tk.Label(pg, text="·", font=("Segoe UI", 10), bg=bar_bg, fg=t['border']).pack(side=tk.LEFT, padx=3)
 
@@ -1248,7 +1319,7 @@ class GridViewManager:
         if not self.items:
             tk.Label(
                 self.grid_frame,
-                text="No videos found",
+                text="No items found",
                 font=("Segoe UI", 14),
                 bg=t['bg'], fg=t['text_muted']
             ).pack(pady=80)
@@ -1398,7 +1469,7 @@ class GridViewManager:
 
         thumb_label = tk.Label(
             thumb_container, bg=card_bg, fg="#2e323c",
-            text="▶", font=("Segoe UI", 18)
+            text="🖼" if is_photo(vp) else "▶", font=("Segoe UI", 18)
         )
         thumb_label.pack(fill=tk.BOTH, expand=True)
 
@@ -2993,6 +3064,8 @@ class GridViewManager:
             return
         item = self.items[idx]
         vp = item.video_path
+        if is_photo(vp):
+            return
         if not os.path.isfile(vp):
             return
         vp_norm = os.path.normpath(vp)
@@ -3010,14 +3083,53 @@ class GridViewManager:
     # Thumbnail loading (original three-level cache)
     # ─────────────────────────────────────────────────────────────────────────
 
+    def _photo_from_disk(self, path, item):
+        """Load photo thumbnail directly from original file (with LRU cache)."""
+        target_w, target_h = 270, 210
+        try:
+            pil_image = Image.open(path).convert("RGB")
+            src_w, src_h = pil_image.size
+            scale = min(target_w / src_w, target_h / src_h)
+            new_w = max(1, int(src_w * scale))
+            new_h = max(1, int(src_h * scale))
+            pil_image = pil_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
+            canvas.paste(pil_image, ((target_w - new_w) // 2, (target_h - new_h) // 2))
+            t = self._tok()
+            canvas = self._round_thumbnail(canvas, t['surface'])
+            photo = ImageTk.PhotoImage(canvas)
+            item.thumbnail_image = photo
+            return photo
+        except Exception:
+            return None
+
     def _load_thumbnail(self, item, label, video_path_norm=None):
-        """Load thumbnail — 3-level cache: LRU RAM → blob file → generate."""
+        """Load thumbnail — photos from disk; videos via blob cache / worker."""
         try:
             with self.loading_lock:
                 if not self.is_loading:
                     return
             if video_path_norm is None:
                 video_path_norm = os.path.normpath(item.video_path)
+
+            # Photos: serve directly from disk (LRU cache only)
+            if is_photo(item.video_path):
+                vpm = self.video_preview_manager
+                if vpm and hasattr(vpm, 'lru_cache'):
+                    photo = vpm.lru_cache.get(video_path_norm)
+                    if photo is not None:
+                        self._photo_cache[video_path_norm] = photo
+                        self.root.after(0, lambda lbl=label, p=photo: self._set_thumbnail(lbl, p))
+                        return
+                photo = self._photo_from_disk(item.video_path, item)
+                if photo:
+                    self._photo_cache[video_path_norm] = photo
+                    if vpm and hasattr(vpm, 'lru_cache'):
+                        vpm.lru_cache.put(video_path_norm, photo)
+                    self.root.after(0, lambda lbl=label, p=photo: self._set_thumbnail(lbl, p))
+                    return
+                self.root.after(0, lambda lbl=label: lbl.winfo_exists() and lbl.configure(text="No Preview"))
+                return
 
             vpm = self.video_preview_manager
             if vpm and hasattr(vpm, 'lru_cache'):

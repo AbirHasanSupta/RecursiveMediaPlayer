@@ -35,6 +35,7 @@ from utils import (
     gather_videos_with_directories, gather_media_with_directories,
     is_video, is_photo, is_media, gather_videos,
     media_type_label, media_icon_for_path, normalize_media_mode,
+    normalize_media_type_filter, passes_media_type_filter, media_item_label,
     check_vlc, show_vlc_missing_and_exit,
 )
 import keyboard_navigation
@@ -96,6 +97,9 @@ def select_multiple_folders_and_play():
             self.excluded_subdirs = {}
             self._view_tab_labels = {}  # will be filled in setup_action_buttons
             self._media_pill_btns = {}
+            self._media_pill_containers = {}
+            self._media_type_filter = 'all'
+            self._current_gallery_videos = []
             self.excluded_videos = {}
             self._is_filtered_mode = False
             self._filtered_videos = []
@@ -172,6 +176,7 @@ def select_multiple_folders_and_play():
             self.settings_manager = SettingsManager(self.root, self, self.update_console, enable_ai=True)
             self.help_manager = HelpManager(self.root, self)
             self._update_ai_search_visibility()
+            self._update_tab_visibility_for_media_mode()
             self.toast = Toast(self.root, self)
             self.setup_exclusion_section()
 
@@ -249,9 +254,7 @@ def select_multiple_folders_and_play():
                 self.selected_dirs = []
 
             self.settings_manager.add_settings_changed_callback(self._on_settings_changed)
-            self.settings_manager.set_hotkey_reload_callback(
-                lambda hk: reload_hotkeys(self.controller, hk)
-            )
+            self.settings_manager.set_hotkey_reload_callback(self._reload_player_hotkeys)
             self.root.bind("<Button-1>", self._handle_global_click)
             self.root.bind("<Control-f>", lambda e: self._show_filter_dialog_shortcut())
             self.root.bind("<Control-F>", lambda e: self._show_filter_dialog_shortcut())
@@ -300,9 +303,14 @@ def select_multiple_folders_and_play():
 
             self.slideshow_manager = SlideshowManager(self.root, self, self.update_console)
             self.slideshow_manager.apply_settings(app_settings)
+            self.slideshow_manager.set_hotkeys(app_settings.hotkeys)
 
             self.grid_view_manager = GridViewManager(self.root, self, self.update_console)
             self.grid_view_manager.set_play_callback(self._play_grid_videos)
+            self.grid_view_manager.set_media_type_filter_callbacks(
+                self.get_media_type_filter,
+                self._on_media_type_filter_changed,
+            )
 
             self.playlist_manager = PlaylistManager(self.root, self)
             self.playlist_manager.set_play_callback(self._play_playlist_videos)
@@ -573,6 +581,126 @@ def select_multiple_folders_and_play():
         def _media_count_label(self):
             return media_type_label(self.get_media_mode())
 
+        def get_media_type_filter(self):
+            return normalize_media_type_filter(getattr(self, '_media_type_filter', 'all'))
+
+        def _passes_media_type_filter(self, path):
+            if self.get_media_mode() != 'both':
+                return True
+            return passes_media_type_filter(path, self.get_media_type_filter())
+
+        def _filter_paths_by_type(self, paths):
+            if self.get_media_mode() != 'both':
+                return list(paths)
+            return [p for p in paths if passes_media_type_filter(p, self.get_media_type_filter())]
+
+        def _reload_player_hotkeys(self, hotkeys):
+            if getattr(self, '_active_player', None) is not None:
+                try:
+                    self._active_player.set_hotkeys(hotkeys)
+                except Exception as e:
+                    self.update_console(f"Hotkey reload error: {e}")
+            if hasattr(self, 'slideshow_manager') and self.slideshow_manager:
+                try:
+                    self.slideshow_manager.set_hotkeys(hotkeys)
+                except Exception as e:
+                    self.update_console(f"Slideshow hotkey reload error: {e}")
+
+        def _on_media_type_filter_changed(self, filter_type):
+            self._media_type_filter = normalize_media_type_filter(filter_type)
+            if hasattr(self, 'filter_sort_manager'):
+                self.filter_sort_manager.current_filter.media_type = self._media_type_filter
+            if hasattr(self, '_media_type_filter_var'):
+                labels = {'all': 'All', 'photo': 'Photos', 'video': 'Videos'}
+                self._media_type_filter_var.set(labels.get(self._media_type_filter, 'All'))
+            selected_dir = self.get_current_selected_directory()
+            if selected_dir:
+                self.load_subdirectories(selected_dir, max_depth=self.current_max_depth)
+            if getattr(self, '_active_app_view', None) == 'gallery' and getattr(self, '_current_gallery_videos', None):
+                filtered = self._filter_paths_by_type(self._current_gallery_videos)
+                if filtered:
+                    self._open_grid_view(filtered)
+            if hasattr(self, 'grid_view_manager') and self.grid_view_manager:
+                self.grid_view_manager._update_media_type_filter_visibility()
+
+        def _setup_media_type_filter_ui(self, parent):
+            if hasattr(self, '_dir_media_filter_frame') and self._dir_media_filter_frame:
+                try:
+                    self._dir_media_filter_frame.destroy()
+                except Exception:
+                    pass
+            self._dir_media_filter_frame = tk.Frame(parent, bg=self.bg_color)
+            self._media_type_filter_var = tk.StringVar(value='All')
+            labels = {'All': 'all', 'Photos': 'photo', 'Videos': 'video'}
+            display = {v: k for k, v in labels.items()}
+            self._media_type_filter_var.set(display.get(self.get_media_type_filter(), 'All'))
+
+            def _on_pick(label):
+                self._on_media_type_filter_changed(labels.get(label, 'all'))
+
+            tk.Label(self._dir_media_filter_frame, text="Show:",
+                     font=self.small_font, bg=self.bg_color,
+                     fg=self.text_muted).pack(side=tk.LEFT, padx=(6, 4))
+            om = tk.OptionMenu(
+                self._dir_media_filter_frame, self._media_type_filter_var,
+                *labels.keys(), command=_on_pick,
+            )
+            om.config(font=self.small_font, bg=self.entry_bg, fg=self.entry_fg,
+                      relief=tk.FLAT, highlightthickness=1,
+                      highlightbackground=self.entry_border, width=7)
+            om["menu"].config(bg=self.entry_bg, fg=self.entry_fg,
+                              activebackground=self.hover_color)
+            om.pack(side=tk.LEFT, padx=(0, 6), pady=2)
+            self._update_media_type_filter_ui_visibility()
+
+        def _update_media_type_filter_ui_visibility(self):
+            show = self.get_media_mode() == 'both'
+            frame = getattr(self, '_dir_media_filter_frame', None)
+            if not frame:
+                return
+            if show:
+                frame.pack(fill=tk.X, padx=6, pady=(0, 4), before=self.dir_frame)
+            else:
+                frame.pack_forget()
+                self._media_type_filter = 'all'
+
+        def _get_visible_tab_keys(self):
+            mode = self.get_media_mode()
+            if mode == 'photo':
+                keys = ["home", "gallery"]
+            else:
+                keys = ["home", "gallery", "playlist", "favourites", "queue", "tags", "history", "ai_search"]
+            visible = []
+            for k in keys:
+                if k == "ai_search" and not getattr(self.settings_manager.get_settings(), 'ai_search_enabled', True):
+                    continue
+                visible.append(k)
+            return visible
+
+        def _update_tab_visibility_for_media_mode(self):
+            photo_only = self.get_media_mode() == 'photo'
+            hidden_pills = {"Playlist", "Favourites", "Queue", "Tags & Ratings", "History", "AI Search"}
+            containers = getattr(self, '_media_pill_containers', {})
+            gallery_container = getattr(
+                getattr(self, '_media_pill_btns', {}).get("Gallery"), '_pill_container', None
+            )
+            for label, container in containers.items():
+                if photo_only and label in hidden_pills:
+                    container.pack_forget()
+                elif label == "AI Search":
+                    continue
+                elif not container.winfo_ismapped():
+                    if gallery_container and gallery_container.winfo_ismapped():
+                        container.pack(side=tk.LEFT, padx=2, after=gallery_container)
+                    else:
+                        container.pack(side=tk.LEFT, padx=2)
+            active = getattr(self, '_active_app_view', 'home')
+            if photo_only and active not in self._get_visible_tab_keys():
+                self._show_home_view()
+            self._update_media_type_filter_ui_visibility()
+            if hasattr(self, 'grid_view_manager') and self.grid_view_manager:
+                self.grid_view_manager._update_media_type_filter_visibility()
+
         def _media_icon(self, path):
             return media_icon_for_path(path)
 
@@ -598,6 +726,7 @@ def select_multiple_folders_and_play():
             start_index = max(0, min(start_index, len(photos) - 1))
             if hasattr(self, 'slideshow_manager'):
                 self.slideshow_manager.apply_settings(self.settings_manager.get_settings())
+                self.slideshow_manager.set_hotkeys(self.settings_manager.get_settings().hotkeys)
                 self.slideshow_manager.show(photos, start_index)
                 self.update_console(f"Slideshow: {len(photos)} photos")
 
@@ -618,7 +747,7 @@ def select_multiple_folders_and_play():
             if is_video(target):
                 video_paths = [p for p in paths if is_video(p)]
                 if not video_paths:
-                    self.update_console("No videos to play.")
+                    self.update_console(f"No {self._media_count_label()} to play.")
                     return
                 idx = video_paths.index(target) if target in video_paths else 0
                 all_video_to_dir = {}
@@ -1756,7 +1885,7 @@ def select_multiple_folders_and_play():
                     if cache:
                         videos, _, _ = cache
                         total += sum(1 for v in videos if not self.is_video_excluded(d, v))
-            return "Directory: " + ", ".join(names) + f"({total} videos)"
+            return "Directory: " + ", ".join(names) + f"({total} {self._media_count_label()})"
 
         def _refresh_media_pill_state(self):
             active_view = getattr(self, '_active_app_view', 'home')
@@ -2072,6 +2201,8 @@ def select_multiple_folders_and_play():
             self.search_entry.bind('<FocusOut>', _search_focus_out)
             self._search_wrap = search_wrap
             self._search_icon = search_icon
+
+            self._setup_media_type_filter_ui(self.dir_section)
 
             self.dir_frame = tk.Frame(self.dir_section, bg=self.bg_color)
             self.dir_frame.pack(fill=tk.BOTH, expand=True)
@@ -3362,6 +3493,8 @@ def select_multiple_folders_and_play():
                                         if not self._is_media(entry.name):
                                             continue
                                         full_path = entry.path
+                                        if not self._passes_media_type_filter(full_path):
+                                            continue
                                         norm_full = os.path.normpath(full_path)
                                         is_excl_v = norm_full in excluded_vid_set
                                         include_v = (not only_excl) or is_excl_v
@@ -3917,6 +4050,8 @@ def select_multiple_folders_and_play():
                     dir_videos, dir_v2d, _ = cache
                     for v in dir_videos:
                         if not self.is_video_excluded(directory, v):
+                            if not self._passes_media_type_filter(v):
+                                continue
                             videos.append(v)
                             video_to_dir[v] = dir_v2d.get(v, os.path.dirname(v))
 
@@ -4212,6 +4347,8 @@ def select_multiple_folders_and_play():
                     videos, _, _ = cache
                     for video in videos:
                         if self.is_video_excluded(directory, video):
+                            continue
+                        if not self._passes_media_type_filter(video):
                             continue
                         norm = os.path.normpath(video)
                         if norm not in seen:
@@ -5677,7 +5814,8 @@ def select_multiple_folders_and_play():
                             continue
                         if os.path.isfile(item_path) and self._is_media(item_path):
                             if not self.is_video_excluded(selected_dir, item_path):
-                                selected_videos.append(item_path)
+                                if self._passes_media_type_filter(item_path):
+                                    selected_videos.append(item_path)
                         elif os.path.isdir(item_path):
                             selected_folders.append(item_path)
 
@@ -5687,7 +5825,8 @@ def select_multiple_folders_and_play():
                                 for f in files:
                                     full = os.path.join(root, f)
                                     if self._is_media(full) and not self.is_video_excluded(selected_dir, full):
-                                        selected_videos.append(full)
+                                        if self._passes_media_type_filter(full):
+                                            selected_videos.append(full)
                         except Exception as e:
                             self.update_console(f"Error reading folder {folder}: {e}")
 
@@ -5702,7 +5841,7 @@ def select_multiple_folders_and_play():
                     if final:
                         self.root.after(0, lambda: self._open_grid_view(final))
                     else:
-                        self.root.after(0, lambda: self.toast.warning("Warning", "No videos found in selection"))
+                        self.root.after(0, lambda: self.toast.warning("Warning", f"No {self._media_count_label()} found in selection"))
 
                 relevant_dirs = list({os.path.dirname(self.current_subdirs_mapping.get(i, ''))
                                       for i in selection})
@@ -5727,6 +5866,8 @@ def select_multiple_folders_and_play():
                         for video in videos:
                             if self.is_video_excluded(directory, video):
                                 continue
+                            if not self._passes_media_type_filter(video):
+                                continue
                             norm = os.path.normpath(video)
                             if norm not in seen:
                                 seen.add(norm)
@@ -5734,13 +5875,13 @@ def select_multiple_folders_and_play():
                     if all_videos:
                         self.root.after(0, lambda: self._open_grid_view(all_videos))
                     else:
-                        self.root.after(0, lambda: self.toast.warning("Warning", "No videos found"))
+                        self.root.after(0, lambda: self.toast.warning("Warning", f"No {self._media_count_label()} found"))
 
                 self._wait_for_scans_then(selected_dirs,
                                           lambda: threading.Thread(target=collect_all, daemon=True).start())
         def _open_grid_view(self, videos):
             if not videos:
-                self.toast.warning("Warning", "No videos to display")
+                self.toast.warning("Warning", f"No {self._media_count_label()} to display")
                 return
             self._current_gallery_videos = list(videos)
             self.grid_view_manager.video_preview_manager = self.video_preview_manager
@@ -6239,11 +6380,9 @@ def select_multiple_folders_and_play():
         def _switch_to_tab_by_index(self, index):
             if not self._shortcuts_allowed():
                 return
-            tab_keys = ["home", "gallery", "playlist", "favourites", "queue", "tags", "history", "ai_search"]
+            tab_keys = self._get_visible_tab_keys()
             if 0 <= index < len(tab_keys):
                 view_name = tab_keys[index]
-                if view_name == "ai_search" and not getattr(self.settings_manager.get_settings(), 'ai_search_enabled', True):
-                    return "break"
                 cmd = {
                     "home": self._show_home_view,
                     "gallery": self._show_grid_view,
@@ -6260,12 +6399,7 @@ def select_multiple_folders_and_play():
         def _cycle_tabs(self, direction=1):
             if not self._shortcuts_allowed():
                 return
-            tab_keys = ["home", "gallery", "playlist", "favourites", "queue", "tags", "history", "ai_search"]
-            enabled_keys = []
-            for k in tab_keys:
-                if k == "ai_search" and not getattr(self.settings_manager.get_settings(), 'ai_search_enabled', True):
-                    continue
-                enabled_keys.append(k)
+            enabled_keys = self._get_visible_tab_keys()
             
             if not enabled_keys:
                 return "break"
@@ -6442,15 +6576,12 @@ def select_multiple_folders_and_play():
             if prev_mode is not None and prev_mode != new_mode:
                 self._last_media_mode = new_mode
                 self._rescan_all_directories()
+                self._update_tab_visibility_for_media_mode()
             else:
                 self._last_media_mode = new_mode
             if hasattr(self, 'resume_manager'):
                 self.resume_manager._auto_cleanup_days = new_settings.auto_cleanup_days
-            if getattr(self, '_active_player', None) is not None:
-                try:
-                    self._active_player.set_hotkeys(new_settings.hotkeys)
-                except Exception as e:
-                    self.update_console(f"Hotkey reload error: {e}")
+            self._reload_player_hotkeys(new_settings.hotkeys)
             if getattr(self, '_active_player', None) is not None:
                 try:
                     self._active_player.set_gaming_mode(new_settings.gaming_mode)
@@ -6477,6 +6608,7 @@ def select_multiple_folders_and_play():
                     self._toggle_annotation_columns(new_show)
 
             self._update_ai_search_visibility()
+            self._update_tab_visibility_for_media_mode()
             if not new_settings.ai_search_enabled and getattr(self, '_active_app_view', None) == "ai_search":
                 self._show_home_view()
 
@@ -6548,6 +6680,7 @@ def select_multiple_folders_and_play():
             self._bind_media_pill_hover(btn, label)
 
             self._media_pill_btns[label] = btn
+            self._media_pill_containers[label] = container
             return container, btn
 
         def setup_action_buttons(self):
