@@ -670,6 +670,8 @@ class SettingsUI:
             font=tp.normal_font,
             bg=getattr(tp, 'entry_bg', tp.surface_color),
             fg=getattr(tp, 'entry_fg', tp.text_color),
+            activebackground=tp.hover_color,
+            activeforeground=getattr(tp, 'entry_fg', tp.text_color),
             relief=tk.FLAT, highlightthickness=1,
             highlightbackground=tp.border_color,
             width=12,
@@ -684,53 +686,6 @@ class SettingsUI:
             text="Video = videos only · Photo = photos only · Both = photos and videos",
             font=tp.small_font, bg=tp.bg_color, fg=tp.text_muted,
         ).pack(side=tk.LEFT, padx=(8, 0))
-
-        slideshow_body = self._make_section(main_container, "Slideshow", pady=(0, 8))
-        ss_dur_frame = tk.Frame(slideshow_body, bg=tp.bg_color)
-        ss_dur_frame.pack(fill=tk.X, pady=(0, 4))
-        tk.Label(ss_dur_frame, text="Slide Duration (sec):", font=tp.normal_font,
-                 bg=tp.bg_color, fg=tp.text_color, width=22, anchor='w').pack(side=tk.LEFT)
-        self.slideshow_duration_var = tk.DoubleVar(value=self.settings.slideshow_duration)
-        ss_dur_spin = tk.Spinbox(
-            ss_dur_frame, from_=0.5, to=60.0, increment=0.5,
-            textvariable=self.slideshow_duration_var,
-            font=tp.normal_font, width=8,
-            bg=getattr(tp, 'entry_bg', tp.surface_color),
-            fg=getattr(tp, 'entry_fg', tp.text_color),
-            buttonbackground=tp.bg_color,
-            relief=tk.FLAT, bd=1,
-        )
-        ss_dur_spin.pack(side=tk.LEFT)
-
-        ss_trans_frame = tk.Frame(slideshow_body, bg=tp.bg_color)
-        ss_trans_frame.pack(fill=tk.X, pady=(0, 4))
-        tk.Label(ss_trans_frame, text="Default Transition:", font=tp.normal_font,
-                 bg=tp.bg_color, fg=tp.text_color, width=22, anchor='w').pack(side=tk.LEFT)
-        self.slideshow_transition_var = tk.StringVar(value=self.settings.slideshow_transition)
-        trans_om = tk.OptionMenu(
-            ss_trans_frame, self.slideshow_transition_var,
-            "fade", "slide_left", "slide_right", "zoom_in", "zoom_out", "none",
-        )
-        trans_om.config(
-            font=tp.normal_font,
-            bg=getattr(tp, 'entry_bg', tp.surface_color),
-            fg=getattr(tp, 'entry_fg', tp.text_color),
-            relief=tk.FLAT, highlightthickness=1,
-            highlightbackground=tp.border_color,
-            width=14,
-        )
-        trans_om["menu"].config(
-            bg=tp.surface_color, fg=tp.text_color,
-            activebackground=tp.hover_color, activeforeground=tp.text_color,
-        )
-        trans_om.pack(side=tk.LEFT)
-
-        self.slideshow_ken_burns_var = tk.BooleanVar(value=self.settings.slideshow_ken_burns)
-        ttk.Checkbutton(
-            slideshow_body, text="Ken Burns effect (slow pan & zoom)",
-            variable=self.slideshow_ken_burns_var,
-            style="Modern.TCheckbutton",
-        ).pack(anchor='w', pady=2)
 
         # ── 2. Video Preview ──────────────────────────────────────────────────────
         preview_body = self._make_section(main_container, "Video Preview", pady=(0, 8))
@@ -859,6 +814,56 @@ class SettingsUI:
             self._cleanup_watch_history, "warning", "sm"
         )
         self.cleanup_history_btn.pack(side=tk.LEFT)
+
+        # ── 6. Slideshow ─────────────────────────────────────────────────────────
+        slideshow_body = self._make_section(main_container, "Slideshow", pady=(0, 8))
+        ss_dur_frame = tk.Frame(slideshow_body, bg=tp.bg_color)
+        ss_dur_frame.pack(fill=tk.X, pady=(0, 4))
+        tk.Label(ss_dur_frame, text="Slide Duration (sec):", font=tp.normal_font,
+                 bg=tp.bg_color, fg=tp.text_color, width=22, anchor='w').pack(side=tk.LEFT)
+        self.slideshow_duration_var = tk.DoubleVar(value=self.settings.slideshow_duration)
+        ss_dur_spin = tk.Spinbox(
+            ss_dur_frame, from_=0.5, to=60.0, increment=0.5,
+            textvariable=self.slideshow_duration_var,
+            font=tp.normal_font, width=8,
+            bg=getattr(tp, 'entry_bg', tp.surface_color),
+            fg=getattr(tp, 'entry_fg', tp.text_color),
+            buttonbackground=tp.bg_color,
+            relief=tk.FLAT, bd=1,
+        )
+        ss_dur_spin.pack(side=tk.LEFT)
+
+        ss_trans_frame = tk.Frame(slideshow_body, bg=tp.bg_color)
+        ss_trans_frame.pack(fill=tk.X, pady=(0, 4))
+        tk.Label(ss_trans_frame, text="Default Transition:", font=tp.normal_font,
+                 bg=tp.bg_color, fg=tp.text_color, width=22, anchor='w').pack(side=tk.LEFT)
+        self.slideshow_transition_var = tk.StringVar(value=self.settings.slideshow_transition)
+        trans_om = tk.OptionMenu(
+            ss_trans_frame, self.slideshow_transition_var,
+            "fade", "slide_left", "slide_right", "zoom_in", "zoom_out", "none",
+        )
+        trans_om.config(
+            font=tp.normal_font,
+            bg=getattr(tp, 'entry_bg', tp.surface_color),
+            fg=getattr(tp, 'entry_fg', tp.text_color),
+            activebackground=tp.hover_color,
+            activeforeground=getattr(tp, 'entry_fg', tp.text_color),
+            relief=tk.FLAT, highlightthickness=1,
+            highlightbackground=tp.border_color,
+            width=14,
+        )
+        trans_om["menu"].config(
+            bg=tp.surface_color, fg=tp.text_color,
+            activebackground=tp.hover_color, activeforeground=tp.text_color,
+        )
+        trans_om.pack(side=tk.LEFT)
+
+        self.slideshow_ken_burns_var = tk.BooleanVar(value=self.settings.slideshow_ken_burns)
+        ttk.Checkbutton(
+            slideshow_body, text="Ken Burns effect (slow pan & zoom)",
+            variable=self.slideshow_ken_burns_var,
+            style="Modern.TCheckbutton",
+        ).pack(anchor='w', pady=2)
 
         return frame
 
