@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog
+from tkinter import font as tkfont
 from PIL import Image, ImageTk
 import os
 import threading
@@ -10,6 +11,24 @@ import glob
 from utils import is_photo, is_audio, PHOTO_EXTENSIONS, AUDIO_EXTENSIONS
 from managers.settings_manager import DEFAULT_HOTKEYS
 from managers.resource_manager import get_resource_manager
+
+
+# Fixed dark palette — always matches embedded player (not app light/dark toggle).
+_BG       = "#0F1217"
+_CTRL_BG  = "#0F1217"
+_CTRL_BG2 = "#1A1E26"
+_ACCENT   = "#7B9CFF"
+_ACCENT_HVR = "#9BB0FF"
+_TXT      = "#E2E8F0"
+_TXT_MED  = "#8A99B5"
+_TXT_DIM  = "#4A5568"
+_BTN      = "#1A1E26"
+_BTN_HVR  = "#252C38"
+_BTN_ACT  = "#2F3849"
+_TRACK    = "#252C38"
+_BORDER   = "#2A303C"
+_PLAY_FG  = "#0F1217"
+_SUCCESS  = "#34c98a"
 
 
 def _init_pygame():
@@ -42,6 +61,8 @@ class SlideshowManager:
         "zoom_out":   "Zoom Out",
         "none":       "Cut",
     }
+
+    INACTIVITY_S = 2.0
 
     def __init__(self, root, theme_provider, logger=None):
         self.root         = root
@@ -82,7 +103,13 @@ class SlideshowManager:
 
         # UI widget refs (set in _build_window)
         self._play_btn          = None
+        self._btn_prev          = None
+        self._btn_next          = None
+        self._btn_first         = None
+        self._btn_last          = None
         self._counter_lbl       = None
+        self._ctrl_counter_lbl  = None
+        self._pause_lbl         = None
         self._progress_canvas   = None
         self._now_playing_lbl   = None
         self._mute_btn          = None
@@ -93,10 +120,207 @@ class SlideshowManager:
         self._fullscreen        = False
         self._slideshow_mode    = False
         self._slideshow_opts_frame = None
+        self._top_bar             = None
+        self._audio_bar           = None
+        self._control_panel       = None
+        self._chrome_visible      = True
+        self._hide_job            = None
+        self._poll_job            = None
+        self._last_mouse          = (-1, -1)
+        self._last_move_t         = time.monotonic()
         self._hotkeys           = dict(DEFAULT_HOTKEYS)
         self._registered_cbids  = []
         self._fit_cache         = {}  # (path, cw, ch) -> rendered PIL
+        self._ui_frames         = {}
         get_resource_manager().register_cleanup_callback(self.cleanup)
+
+    def _ctrl(self):
+        """Always return embedded-player dark control colours."""
+        return {
+            "bg": _CTRL_BG,
+            "bg2": _CTRL_BG2,
+            "surface": _BTN,
+            "txt": _TXT,
+            "txt_med": _TXT_MED,
+            "txt_dim": _TXT_DIM,
+            "accent": _ACCENT,
+            "accent_hvr": _ACCENT_HVR,
+            "btn": _BTN,
+            "btn_hvr": _BTN_HVR,
+            "btn_act": _BTN_ACT,
+            "track": _TRACK,
+            "border": _BORDER,
+            "canvas": "#000000",
+            "play_fg": _PLAY_FG,
+            "success": _SUCCESS,
+        }
+
+    def _fonts(self):
+        return {
+            "title": tkfont.Font(family="Segoe UI", size=11, weight="bold"),
+            "sm": tkfont.Font(family="Segoe UI", size=8),
+            "md": tkfont.Font(family="Segoe UI", size=10),
+            "ico": tkfont.Font(family="Segoe UI", size=13),
+            "acc": tkfont.Font(family="Segoe UI", size=8, weight="bold"),
+            "xs": tkfont.Font(family="Segoe UI", size=7),
+        }
+
+    def _sep(self, parent, pady=4, padx=5):
+        c = self._ctrl()
+        tk.Frame(parent, width=1, bg=c["border"]).pack(
+            side=tk.LEFT, fill=tk.Y, pady=pady, padx=padx)
+
+    def _make_btn(self, parent, text, cmd, *, font=None, fg=None, accent=False, padx=8, pady=5):
+        c = self._ctrl()
+        F = self._fonts()
+        if accent:
+            b = tk.Button(
+                parent, text=text, command=cmd, font=font or F["ico"],
+                bg=c["accent"], fg=c["play_fg"], bd=0, padx=padx, pady=pady,
+                relief=tk.FLAT, cursor="hand2",
+                activebackground=c["accent_hvr"], activeforeground=c["play_fg"],
+            )
+            b.bind("<Enter>", lambda e, w=b: w.configure(bg=c["accent_hvr"]))
+            b.bind("<Leave>", lambda e, w=b: w.configure(bg=c["accent"]))
+        else:
+            b = tk.Button(
+                parent, text=text, command=cmd, font=font or F["ico"],
+                bg=c["btn"], fg=fg or c["txt_med"], bd=0, padx=padx, pady=pady,
+                relief=tk.FLAT, cursor="hand2",
+                activebackground=c["btn_act"], activeforeground=c["txt"],
+            )
+            b.bind("<Enter>", lambda e, w=b: w.configure(bg=c["btn_hvr"]))
+            b.bind("<Leave>", lambda e, w=b: w.configure(bg=c["btn"]))
+        b._accent = accent
+        b._btn_fg = fg
+        b.bind("<Enter>", lambda e: self._cancel_chrome_hide(), add="+")
+        b.bind("<Leave>", lambda e: self._schedule_chrome_hide(), add="+")
+        return b
+
+    def _restyle_btn(self, btn, *, accent=False, fg=None):
+        if not btn or not btn.winfo_exists():
+            return
+        c = self._ctrl()
+        if accent:
+            btn.configure(
+                bg=c["accent"], fg=c["play_fg"],
+                activebackground=c["accent_hvr"], activeforeground=c["play_fg"],
+            )
+        else:
+            btn.configure(
+                bg=c["btn"], fg=fg or c["txt_med"],
+                activebackground=c["btn_act"], activeforeground=c["txt"],
+            )
+
+    def _restyle_transport_btns(self):
+        for btn in (self._btn_first, self._btn_prev, self._btn_next, self._btn_last):
+            if btn:
+                self._restyle_btn(btn, fg=getattr(btn, '_btn_fg', None))
+        if self._play_btn:
+            self._restyle_btn(self._play_btn, accent=True)
+
+    def _style_option_menu(self, om, width=11):
+        c = self._ctrl()
+        F = self._fonts()
+        om.config(
+            font=F["sm"], bg=c["surface"], fg=c["txt"],
+            activebackground=c["btn_hvr"], activeforeground=c["txt"],
+            relief=tk.FLAT, highlightthickness=1,
+            highlightbackground=c["border"], width=width,
+        )
+        om["menu"].config(
+            bg=c["surface"], fg=c["txt"],
+            activebackground=c["btn_hvr"], activeforeground=c["txt"],
+            relief=tk.FLAT,
+        )
+
+    def _style_spinbox(self, spin):
+        c = self._ctrl()
+        F = self._fonts()
+        spin.config(
+            font=F["sm"], bg=c["surface"], fg=c["txt"],
+            relief=tk.FLAT, bd=0, highlightthickness=1,
+            highlightbackground=c["border"],
+            buttonbackground=c["surface"],
+            insertbackground=c["txt"],
+        )
+
+    def _context_menu(self):
+        c = self._ctrl()
+        return tk.Menu(
+            self._win, tearoff=0, bg=c["surface"], fg=c["txt"],
+            activebackground=c["btn_hvr"], activeforeground=c["txt"], relief=tk.FLAT,
+            font=("Segoe UI", 10),
+        )
+
+    def apply_theme(self):
+        """Re-apply fixed dark chrome (slideshow is always dark like embedded player)."""
+        if not self._win:
+            return
+        try:
+            if not self._win.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        c = self._ctrl()
+        F = self._fonts()
+        self._win.configure(bg=c["canvas"])
+        for key, frame in self._ui_frames.items():
+            if frame is None:
+                continue
+            try:
+                if not frame.winfo_exists():
+                    continue
+                bg = c["bg2"] if key == "btn_row" else c["bg"]
+                frame.configure(bg=bg)
+            except tk.TclError:
+                pass
+        for lbl in (getattr(self, '_title_lbl', None), getattr(self, '_counter_lbl', None)):
+            if lbl and lbl.winfo_exists():
+                lbl.configure(bg=c["bg"], fg=c["txt"] if lbl is self._title_lbl else c["txt_med"])
+        if getattr(self, '_counter_lbl', None) and self._counter_lbl.winfo_exists():
+            self._counter_lbl.configure(font=F["acc"])
+        for spin in (getattr(self, '_dur_spin', None),):
+            if spin and spin.winfo_exists():
+                self._style_spinbox(spin)
+        if getattr(self, '_trans_om', None) and self._trans_om.winfo_exists():
+            self._style_option_menu(self._trans_om)
+        if getattr(self, '_kb_chk', None) and self._kb_chk.winfo_exists():
+            self._kb_chk.configure(
+                bg=c["bg"], fg=c["txt_med"], selectcolor=c["btn_act"],
+                activebackground=c["bg"], activeforeground=c["txt"],
+            )
+        if getattr(self, '_slideshow_opts_frame', None) and self._slideshow_opts_frame.winfo_exists():
+            self._slideshow_opts_frame.configure(bg=c["bg"])
+            for child in self._slideshow_opts_frame.winfo_children():
+                try:
+                    if isinstance(child, tk.Label):
+                        child.configure(bg=c["bg"], fg=c["txt_med"])
+                except tk.TclError:
+                    pass
+        if getattr(self, '_mode_lbl', None) and self._mode_lbl.winfo_exists():
+            self._mode_lbl.configure(
+                bg=c["btn"], fg=c["accent"], highlightbackground=c["border"],
+            )
+        if getattr(self, '_pause_lbl', None) and self._pause_lbl.winfo_exists():
+            self._pause_lbl.configure(bg=c["btn"], highlightbackground=c["border"])
+        if getattr(self, '_ctrl_counter_lbl', None) and self._ctrl_counter_lbl.winfo_exists():
+            self._ctrl_counter_lbl.configure(bg=c["bg"], fg=c["txt_med"])
+        if self._canvas and self._canvas.winfo_exists():
+            self._canvas.configure(bg=c["canvas"])
+        if self._progress_canvas and self._progress_canvas.winfo_exists():
+            self._progress_canvas.configure(bg=c["bg"])
+        if self._vol_canvas and self._vol_canvas.winfo_exists():
+            self._vol_canvas.configure(bg=c["bg2"])
+        if getattr(self, '_now_playing_lbl', None) and self._now_playing_lbl.winfo_exists():
+            self._now_playing_lbl.configure(bg=c["bg2"], fg=c["txt_dim"])
+        self._update_progress()
+        self._draw_vol_slider()
+        self._update_play_btn()
+        self._update_pause_label()
+        self._restyle_transport_btns()
+        if hasattr(self.theme_provider, 'apply_title_bar_theme'):
+            self.theme_provider.apply_title_bar_theme(self._win)
 
     def _reset_widget_state(self):
         """Clear canvas/widget refs after window destroy (fixes blank reopen)."""
@@ -104,7 +328,13 @@ class SlideshowManager:
         self._photo_img         = None
         self._canvas_img_id     = None
         self._play_btn          = None
+        self._btn_prev          = None
+        self._btn_next          = None
+        self._btn_first         = None
+        self._btn_last          = None
         self._counter_lbl       = None
+        self._ctrl_counter_lbl  = None
+        self._pause_lbl         = None
         self._progress_canvas   = None
         self._now_playing_lbl   = None
         self._mute_btn          = None
@@ -113,7 +343,19 @@ class SlideshowManager:
         self._trans_var         = None
         self._trans_display_var = None
         self._kb_var            = None
+        self._dur_spin          = None
+        self._trans_om          = None
+        self._kb_chk            = None
+        self._title_lbl         = None
+        self._fs_btn            = None
+        self._top_bar           = None
+        self._audio_bar         = None
+        self._control_panel     = None
         self._registered_cbids  = []
+        self._ui_frames         = {}
+        self._chrome_visible    = True
+        self._hide_job          = None
+        self._poll_job          = None
 
     def apply_settings(self, settings):
         """Sync slideshow defaults from app settings."""
@@ -148,6 +390,9 @@ class SlideshowManager:
         if self._win and self._win.winfo_exists():
             self._win.lift()
             self._apply_slideshow_mode_ui()
+            self.apply_theme()
+            self._show_chrome()
+            self._start_mouse_poll()
             self._load_current()
             if self.playing:
                 self._schedule_next()
@@ -165,6 +410,8 @@ class SlideshowManager:
 
     def close(self):
         self._closing = True
+        self._cancel_chrome_hide()
+        self._stop_mouse_poll()
         self._cancel_timers()
         self._stop_audio()
         if self._win and self._win.winfo_exists():
@@ -187,9 +434,10 @@ class SlideshowManager:
     def _build_window(self):
         self._reset_widget_state()
         self._canvas_img_id = None
+        c = self._ctrl()
         win = tk.Toplevel(self.root)
         win.title("Photo Viewer")
-        win.configure(bg="#000000")
+        win.configure(bg=c["canvas"])
         win.geometry("1280x820")
         win.protocol("WM_DELETE_WINDOW", self.close)
         self._win = win
@@ -201,10 +449,164 @@ class SlideshowManager:
             pass
 
         self._build_top_bar(win)
-        self._build_audio_bar(win)
         self._build_canvas(win)
+        self._build_audio_bar(win)
         self._build_control_bar(win)
         self._bind_keys(win)
+        self.apply_theme()
+        self._update_play_btn()
+        self._update_counter()
+        self._setup_chrome_autohide()
+        self._show_chrome()
+        self._start_mouse_poll()
+
+    # ── Chrome auto-hide (embedded-player style) ──────────────────────────────
+
+    def _chrome_widgets(self):
+        return [w for w in (self._top_bar, self._audio_bar, self._control_panel) if w]
+
+    def _pointer_over_chrome(self):
+        try:
+            mx = self._win.winfo_pointerx()
+            my = self._win.winfo_pointery()
+            for w in self._chrome_widgets():
+                if not w.winfo_ismapped():
+                    continue
+                x, y = w.winfo_rootx(), w.winfo_rooty()
+                ww, wh = w.winfo_width(), w.winfo_height()
+                if ww > 0 and wh > 0 and x <= mx <= x + ww and y <= my <= y + wh:
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def _show_chrome(self):
+        self._cancel_chrome_hide()
+        if self._chrome_visible:
+            return
+        self._chrome_visible = True
+        try:
+            if self._top_bar and self._top_bar.winfo_exists():
+                self._top_bar.pack(fill=tk.X, side=tk.TOP)
+            if self._audio_bar and self._audio_bar.winfo_exists():
+                self._audio_bar.pack(fill=tk.X, side=tk.BOTTOM)
+            if self._control_panel and self._control_panel.winfo_exists():
+                self._control_panel.pack(fill=tk.X, side=tk.BOTTOM)
+            if self._win and self._win.winfo_exists():
+                self._win.configure(cursor="")
+            if self._canvas and self._canvas.winfo_exists():
+                self._canvas.configure(cursor="")
+        except Exception:
+            pass
+
+    def _hide_chrome(self):
+        self._hide_job = None
+        if not self._chrome_visible:
+            return
+        self._chrome_visible = False
+        for w in self._chrome_widgets():
+            try:
+                if w.winfo_exists():
+                    w.pack_forget()
+            except Exception:
+                pass
+        try:
+            if self._win and self._win.winfo_exists():
+                self._win.configure(cursor="none")
+            if self._canvas and self._canvas.winfo_exists():
+                self._canvas.configure(cursor="none")
+        except Exception:
+            pass
+
+    def _schedule_chrome_hide(self, delay_ms=2000):
+        if self._hide_job or not self._win:
+            return
+        try:
+            self._hide_job = self._win.after(delay_ms, self._hide_chrome)
+        except Exception:
+            pass
+
+    def _cancel_chrome_hide(self):
+        if self._hide_job and self._win:
+            try:
+                self._win.after_cancel(self._hide_job)
+            except Exception:
+                pass
+            self._hide_job = None
+
+    def _on_mouse_activity(self, event=None):
+        self._last_move_t = time.monotonic()
+        if event is not None:
+            try:
+                self._last_mouse = (event.x_root, event.y_root)
+            except Exception:
+                pass
+        self._show_chrome()
+
+    def _bind_chrome_hover(self, widget):
+        if widget is None:
+            return
+        widget.bind("<Enter>", lambda e: self._cancel_chrome_hide(), add="+")
+        widget.bind("<Leave>", lambda e: self._schedule_chrome_hide(), add="+")
+
+    def _setup_chrome_autohide(self):
+        if not self._win:
+            return
+        self._win.bind("<Motion>", self._on_mouse_activity, add="+")
+        if self._canvas:
+            self._canvas.bind("<Motion>", self._on_mouse_activity, add="+")
+        for w in self._chrome_widgets():
+            self._bind_chrome_hover(w)
+            try:
+                for child in w.winfo_children():
+                    self._bind_chrome_hover(child)
+            except Exception:
+                pass
+
+    def _start_mouse_poll(self):
+        self._stop_mouse_poll()
+        self._last_move_t = time.monotonic()
+        self._do_mouse_poll()
+
+    def _stop_mouse_poll(self):
+        if self._poll_job and self._win:
+            try:
+                self._win.after_cancel(self._poll_job)
+            except Exception:
+                pass
+        self._poll_job = None
+
+    def _do_mouse_poll(self):
+        if self._closing or not self._win:
+            return
+        try:
+            if not self._win.winfo_exists():
+                return
+            mx = self._win.winfo_pointerx()
+            my = self._win.winfo_pointery()
+            wx = self._win.winfo_rootx()
+            wy = self._win.winfo_rooty()
+            ww = self._win.winfo_width()
+            wh = self._win.winfo_height()
+            inside = (wx <= mx <= wx + ww) and (wy <= my <= wy + wh)
+            if inside:
+                if (mx, my) != self._last_mouse:
+                    self._last_mouse = (mx, my)
+                    self._last_move_t = time.monotonic()
+                    self._show_chrome()
+                else:
+                    idle = time.monotonic() - self._last_move_t
+                    if (idle >= self.INACTIVITY_S and self._chrome_visible
+                            and not self._hide_job and not self._pointer_over_chrome()):
+                        self._schedule_chrome_hide(100)
+            elif self._chrome_visible and not self._hide_job:
+                self._schedule_chrome_hide(300)
+        except Exception:
+            pass
+        try:
+            self._poll_job = self._win.after(120, self._do_mouse_poll)
+        except Exception:
+            self._poll_job = None
 
     def _apply_slideshow_mode_ui(self):
         """Viewer mode: static image only. Slideshow mode: show timing/transition controls."""
@@ -216,6 +618,10 @@ class SlideshowManager:
                 self._slideshow_opts_frame.pack_forget()
         if self._win and self._win.winfo_exists():
             self._win.title("Photo Slideshow" if self._slideshow_mode else "Photo Viewer")
+        if getattr(self, '_title_lbl', None) and self._title_lbl.winfo_exists():
+            self._title_lbl.config(
+                text="🖼  Photo Slideshow" if self._slideshow_mode else "🖼  Photo Viewer")
+        self._update_mode_label()
 
     def _enter_slideshow_mode(self):
         if self._slideshow_mode:
@@ -226,235 +632,243 @@ class SlideshowManager:
     # ── Top bar ───────────────────────────────────────────────────────────────
 
     def _build_top_bar(self, win):
-        top = tk.Frame(win, bg="#111111", height=44)
-        top.pack(fill=tk.X)
+        c = self._ctrl()
+        F = self._fonts()
+        top = tk.Frame(win, bg=c["bg"], height=48)
+        self._top_bar = top
+        self._ui_frames["header"] = top
+        top.pack(fill=tk.X, side=tk.TOP)
         top.pack_propagate(False)
 
-        tk.Label(top, text="🖼  Photo Viewer",
-                 font=("Segoe UI", 11, "bold"),
-                 bg="#111111", fg="#ffffff").pack(side=tk.LEFT, padx=16, pady=10)
+        inner = tk.Frame(top, bg=c["bg"])
+        inner.pack(fill=tk.BOTH, expand=True, padx=14, pady=6)
 
-        self._slideshow_opts_frame = tk.Frame(top, bg="#111111")
+        self._title_lbl = tk.Label(
+            inner, text="🖼  Photo Viewer", font=F["title"],
+            bg=c["bg"], fg=c["txt"],
+        )
+        self._title_lbl.pack(side=tk.LEFT)
+
+        self._slideshow_opts_frame = tk.Frame(inner, bg=c["bg"])
         opts = self._slideshow_opts_frame
 
-        # Duration spinbox
-        tk.Label(opts, text="Duration:",
-                 font=("Segoe UI", 9),
-                 bg="#111111", fg="#aaaaaa").pack(side=tk.LEFT, padx=(20, 4), pady=10)
+        tk.Label(opts, text="Duration:", font=F["sm"],
+                 bg=c["bg"], fg=c["txt_med"]).pack(side=tk.LEFT, padx=(16, 4))
         self._dur_var = tk.DoubleVar(value=self.duration)
-        dur_spin = tk.Spinbox(
+        self._dur_spin = tk.Spinbox(
             opts, from_=0.5, to=60.0, increment=0.5,
             textvariable=self._dur_var, width=5,
-            font=("Segoe UI", 9),
-            bg="#1e1e1e", fg="#ffffff",
-            relief=tk.FLAT, bd=0,
-            highlightthickness=1, highlightbackground="#333333",
-            buttonbackground="#1e1e1e",
-            insertbackground="#ffffff",
             command=self._on_duration_changed,
         )
-        dur_spin.pack(side=tk.LEFT, pady=10)
-        dur_spin.bind("<FocusOut>", lambda e: self._on_duration_changed())
-        tk.Label(opts, text="s",
-                 font=("Segoe UI", 9),
-                 bg="#111111", fg="#aaaaaa").pack(side=tk.LEFT, pady=10)
+        self._style_spinbox(self._dur_spin)
+        self._dur_spin.pack(side=tk.LEFT)
+        self._dur_spin.bind("<FocusOut>", lambda e: self._on_duration_changed())
+        tk.Label(opts, text="s", font=F["sm"],
+                 bg=c["bg"], fg=c["txt_med"]).pack(side=tk.LEFT, padx=(2, 0))
 
-        # Transition picker
-        tk.Label(opts, text="Transition:",
-                 font=("Segoe UI", 9),
-                 bg="#111111", fg="#aaaaaa").pack(side=tk.LEFT, padx=(20, 4), pady=10)
+        tk.Label(opts, text="Transition:", font=F["sm"],
+                 bg=c["bg"], fg=c["txt_med"]).pack(side=tk.LEFT, padx=(16, 4))
         self._trans_var = tk.StringVar(value=self.transition)
         trans_labels = [self.TRANSITION_LABELS[t] for t in self.TRANSITIONS]
         self._trans_label_to_key = {self.TRANSITION_LABELS[t]: t for t in self.TRANSITIONS}
         self._trans_display_var = tk.StringVar(value=self.TRANSITION_LABELS[self.transition])
-        trans_om = tk.OptionMenu(
-            opts, self._trans_display_var,
-            *trans_labels,
-            command=self._on_transition_changed,
+        self._trans_om = tk.OptionMenu(
+            opts, self._trans_display_var, *trans_labels, command=self._on_transition_changed,
         )
-        trans_om.config(
-            font=("Segoe UI", 9), bg="#1e1e1e", fg="#ffffff",
-            relief=tk.FLAT, highlightthickness=1, highlightbackground="#333333",
-            activebackground="#2a2a2a", width=11,
-        )
-        trans_om["menu"].config(
-            bg="#1e1e1e", fg="#ffffff",
-            activebackground="#333333", activeforeground="#ffffff",
-            relief=tk.FLAT,
-        )
-        trans_om.pack(side=tk.LEFT, pady=10)
+        self._style_option_menu(self._trans_om)
+        self._trans_om.pack(side=tk.LEFT)
 
-        # Ken Burns toggle
         self._kb_var = tk.BooleanVar(value=self.ken_burns)
-        kb_chk = tk.Checkbutton(
+        self._kb_chk = tk.Checkbutton(
             opts, text="Ken Burns", variable=self._kb_var,
-            font=("Segoe UI", 9),
-            bg="#111111", fg="#aaaaaa",
-            selectcolor="#333333",
-            activebackground="#111111",
-            activeforeground="#ffffff",
-            command=self._on_kb_changed,
+            font=F["sm"], bg=c["bg"], fg=c["txt_med"],
+            selectcolor=c["btn_act"], activebackground=c["bg"],
+            activeforeground=c["txt"], command=self._on_kb_changed,
         )
-        kb_chk.pack(side=tk.LEFT, padx=(20, 0), pady=10)
+        self._kb_chk.pack(side=tk.LEFT, padx=(16, 0))
 
-        # Fullscreen button
-        fs_btn = tk.Label(top, text="⛶",
-                          font=("Segoe UI", 14),
-                          bg="#111111", fg="#aaaaaa",
-                          cursor="hand2", padx=12)
-        fs_btn.pack(side=tk.RIGHT, pady=10)
-        fs_btn.bind("<Button-1>", lambda e: self._toggle_fullscreen())
-        fs_btn.bind("<Enter>",    lambda e: fs_btn.config(fg="#ffffff"))
-        fs_btn.bind("<Leave>",    lambda e: fs_btn.config(fg="#aaaaaa"))
+        right = tk.Frame(inner, bg=c["bg"])
+        right.pack(side=tk.RIGHT)
 
-        # Counter
-        self._counter_lbl = tk.Label(top, text="",
-                                      font=("Segoe UI", 9),
-                                      bg="#111111", fg="#666666")
-        self._counter_lbl.pack(side=tk.RIGHT, padx=12, pady=10)
+        self._counter_lbl = tk.Label(
+            right, text="", font=F["acc"], bg=c["bg"], fg=c["txt_med"],
+        )
+        self._counter_lbl.pack(side=tk.RIGHT, padx=(8, 0))
+
+        self._fs_btn = self._make_btn(
+            right, "⛶", self._toggle_fullscreen, padx=7, pady=4,
+        )
+        self._fs_btn.pack(side=tk.RIGHT, padx=(4, 0))
+
+        close_btn = self._make_btn(right, "✕", self.close, padx=7, pady=4, fg=c["txt_dim"])
+        close_btn.pack(side=tk.RIGHT)
+
+        tk.Frame(top, bg=c["border"], height=1).pack(fill=tk.X, side=tk.BOTTOM)
 
     # ── Audio bar ─────────────────────────────────────────────────────────────
 
     def _build_audio_bar(self, win):
-        audio_bar = tk.Frame(win, bg="#0d0d0d", height=40)
-        audio_bar.pack(fill=tk.X)
+        c = self._ctrl()
+        F = self._fonts()
+        audio_bar = tk.Frame(win, bg=c["bg2"], height=42)
+        self._audio_bar = audio_bar
+        self._ui_frames["audio"] = audio_bar
+        audio_bar.pack(fill=tk.X, side=tk.BOTTOM)
         audio_bar.pack_propagate(False)
 
-        # Add music button
-        add_btn = tk.Label(audio_bar, text="♪ Add Music",
-                           font=("Segoe UI", 9, "bold"),
-                           bg="#0d0d0d", fg="#5E81F4",
-                           cursor="hand2", padx=12, pady=10)
+        inner = tk.Frame(audio_bar, bg=c["bg2"])
+        inner.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
+
+        add_btn = tk.Label(
+            inner, text="♪ Add Music", font=F["acc"],
+            bg=c["bg2"], fg=c["accent"], cursor="hand2", padx=4,
+        )
         add_btn.pack(side=tk.LEFT)
         add_btn.bind("<Button-1>", lambda e: self._show_add_music_menu(add_btn))
-        add_btn.bind("<Enter>",    lambda e: add_btn.config(fg="#7c9ff5"))
-        add_btn.bind("<Leave>",    lambda e: add_btn.config(fg="#5E81F4"))
+        add_btn.bind("<Enter>", lambda e: (add_btn.config(fg=c["accent_hvr"]), self._cancel_chrome_hide()))
+        add_btn.bind("<Leave>", lambda e: (add_btn.config(fg=c["accent"]), self._schedule_chrome_hide()))
+        self._sep(inner, pady=6)
 
-        tk.Frame(audio_bar, bg="#222222", width=1).pack(
-            side=tk.LEFT, fill=tk.Y, pady=6)
+        self._make_btn(inner, "⏮", self._prev_song, padx=6, pady=3).pack(side=tk.LEFT, padx=1)
+        self._make_btn(inner, "⏭", self._next_song, padx=6, pady=3).pack(side=tk.LEFT, padx=1)
+        self._sep(inner, pady=6)
 
-        def _ab_btn(text, cmd):
-            lbl = tk.Label(audio_bar, text=text,
-                           font=("Segoe UI", 12),
-                           bg="#0d0d0d", fg="#777777",
-                           cursor="hand2", padx=8, pady=8)
-            lbl.bind("<Button-1>", lambda e: cmd())
-            lbl.bind("<Enter>",    lambda e: lbl.config(fg="#ffffff"))
-            lbl.bind("<Leave>",    lambda e: lbl.config(fg="#777777"))
-            return lbl
-
-        _ab_btn("⏮", self._prev_song).pack(side=tk.LEFT)
-        _ab_btn("⏭", self._next_song).pack(side=tk.LEFT)
-
-        tk.Frame(audio_bar, bg="#222222", width=1).pack(
-            side=tk.LEFT, fill=tk.Y, pady=6)
-
-        # Mute button
-        self._mute_btn = tk.Label(audio_bar, text="🔊",
-                                   font=("Segoe UI", 11),
-                                   bg="#0d0d0d", fg="#777777",
-                                   cursor="hand2", padx=8, pady=8)
+        self._mute_btn = tk.Label(
+            inner, text="🔊", font=F["md"], bg=c["bg2"], fg=c["txt_med"],
+            cursor="hand2", padx=4,
+        )
         self._mute_btn.pack(side=tk.LEFT)
         self._mute_btn.bind("<Button-1>", lambda e: self._toggle_mute())
-        self._mute_btn.bind("<Enter>",    lambda e: self._mute_btn.config(fg="#ffffff"))
-        self._mute_btn.bind("<Leave>",    lambda e: self._mute_btn.config(fg="#777777"))
+        self._mute_btn.bind("<Enter>", lambda e: self._mute_btn.config(fg=c["txt"]))
+        self._mute_btn.bind("<Leave>", lambda e: self._mute_btn.config(fg=c["txt_med"]))
 
-        # Volume label
-        tk.Label(audio_bar, text="Vol",
-                 font=("Segoe UI", 8),
-                 bg="#0d0d0d", fg="#444444").pack(side=tk.LEFT, padx=(4, 2))
+        tk.Label(inner, text="Vol", font=F["xs"],
+                 bg=c["bg2"], fg=c["txt_dim"]).pack(side=tk.LEFT, padx=(4, 2))
 
-        # Volume slider
-        self._vol_canvas = tk.Canvas(audio_bar, bg="#0d0d0d",
-                                      width=90, height=14,
-                                      highlightthickness=0, cursor="hand2")
-        self._vol_canvas.pack(side=tk.LEFT, pady=13)
-        self._vol_canvas.bind("<Button-1>",  self._on_vol_click)
+        self._vol_canvas = tk.Canvas(
+            inner, bg=c["bg2"], width=72, height=14,
+            highlightthickness=0, cursor="hand2",
+        )
+        self._vol_canvas.pack(side=tk.LEFT, padx=(0, 6))
+        self._vol_canvas.bind("<Button-1>", self._on_vol_click)
         self._vol_canvas.bind("<B1-Motion>", self._on_vol_click)
         self._vol_canvas.bind("<Configure>", lambda e: self._draw_vol_slider())
 
-        tk.Frame(audio_bar, bg="#222222", width=1).pack(
-            side=tk.LEFT, fill=tk.Y, pady=6, padx=6)
+        self._now_playing_lbl = tk.Label(
+            inner, text="No music added", font=F["sm"],
+            bg=c["bg2"], fg=c["txt_dim"], anchor="w",
+        )
+        self._now_playing_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 8))
 
-        # Now playing label
-        self._now_playing_lbl = tk.Label(audio_bar, text="No music added",
-                                          font=("Segoe UI", 9, "italic"),
-                                          bg="#0d0d0d", fg="#444444",
-                                          anchor="w")
-        self._now_playing_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
-
-        # Shuffle button
-        shuf_btn = tk.Label(audio_bar, text="🔀",
-                            font=("Segoe UI", 10),
-                            bg="#0d0d0d", fg="#444444",
-                            cursor="hand2", padx=8)
-        shuf_btn.pack(side=tk.RIGHT)
-        shuf_btn.bind("<Button-1>", lambda e: self._shuffle_songs())
-        shuf_btn.bind("<Enter>",    lambda e: shuf_btn.config(fg="#5E81F4"))
-        shuf_btn.bind("<Leave>",    lambda e: shuf_btn.config(fg="#444444"))
-
-        # Clear music button
-        clear_btn = tk.Label(audio_bar, text="✕",
-                              font=("Segoe UI", 10),
-                              bg="#0d0d0d", fg="#444444",
-                              cursor="hand2", padx=10)
-        clear_btn.pack(side=tk.RIGHT)
-        clear_btn.bind("<Button-1>", lambda e: self._clear_music())
-        clear_btn.bind("<Enter>",    lambda e: clear_btn.config(fg="#e05555"))
-        clear_btn.bind("<Leave>",    lambda e: clear_btn.config(fg="#444444"))
+        self._make_btn(inner, "🔀", self._shuffle_songs, padx=6, pady=3).pack(side=tk.RIGHT)
+        self._make_btn(
+            inner, "✕", self._clear_music, padx=6, pady=3, fg=c["txt_dim"],
+        ).pack(side=tk.RIGHT, padx=(0, 2))
 
     # ── Main canvas ───────────────────────────────────────────────────────────
 
     def _build_canvas(self, win):
-        self._canvas = tk.Canvas(win, bg="#000000", highlightthickness=0)
+        c = self._ctrl()
+        self._canvas = tk.Canvas(win, bg=c["canvas"], highlightthickness=0)
         self._canvas.pack(fill=tk.BOTH, expand=True)
-        self._canvas.bind("<Configure>",    lambda e: self._on_canvas_resize(e))
-        self._canvas.bind("<Button-1>",     lambda e: self._toggle_play())
-        self._canvas.bind("<Button-3>",     lambda e: self._show_context(e))
+        self._canvas.bind("<Configure>", lambda e: self._on_canvas_resize(e))
+        self._canvas.bind("<Button-3>", lambda e: self._show_context(e))
         self._canvas.bind("<Double-Button-1>", lambda e: self._toggle_fullscreen())
 
-    # ── Bottom control bar ────────────────────────────────────────────────────
+    # ── Bottom control bar (embedded-player style) ────────────────────────────
 
     def _build_control_bar(self, win):
-        ctrl = tk.Frame(win, bg="#111111", height=50)
-        ctrl.pack(fill=tk.X)
-        ctrl.pack_propagate(False)
+        c = self._ctrl()
+        F = self._fonts()
+        panel = tk.Frame(win, bg=c["bg"])
+        self._control_panel = panel
+        self._ui_frames["panel"] = panel
+        panel.pack(fill=tk.X, side=tk.BOTTOM)
 
-        def _ctrl_btn(text, cmd, fg="#cccccc", size=13):
-            lbl = tk.Label(ctrl, text=text,
-                           font=("Segoe UI", size),
-                           bg="#111111", fg=fg,
-                           cursor="hand2", padx=12, pady=12)
-            lbl.bind("<Button-1>", lambda e: cmd())
-            lbl.bind("<Enter>",    lambda e: lbl.config(fg="#5E81F4"))
-            lbl.bind("<Leave>",    lambda e: lbl.config(fg=fg))
-            return lbl
+        tk.Frame(panel, bg=c["border"], height=1).pack(fill=tk.X)
 
-        _ctrl_btn("⏮", self._go_first).pack(side=tk.LEFT)
-        _ctrl_btn("⏪", self._prev).pack(side=tk.LEFT)
+        info_row = tk.Frame(panel, bg=c["bg"])
+        self._ui_frames["info_row"] = info_row
+        info_row.pack(fill=tk.X, padx=14, pady=(6, 0))
+        tk.Label(
+            info_row, text="Navigation", font=F["sm"],
+            bg=c["bg"], fg=c["txt_med"],
+        ).pack(side=tk.LEFT)
+        self._ctrl_counter_lbl = tk.Label(
+            info_row, text="", font=F["acc"],
+            bg=c["bg"], fg=c["txt_med"],
+        )
+        self._ctrl_counter_lbl.pack(side=tk.RIGHT)
 
-        self._play_btn = tk.Label(ctrl, text="⏵",
-                                   font=("Segoe UI", 18),
-                                   bg="#111111", fg="#3ecf6e",
-                                   cursor="hand2", padx=12, pady=10)
-        self._play_btn.pack(side=tk.LEFT)
-        self._play_btn.bind("<Button-1>", lambda e: self._toggle_play())
-        self._play_btn.bind("<Enter>",    lambda e: self._play_btn.config(fg="#5E81F4"))
-        self._play_btn.bind("<Leave>",    lambda e: self._play_btn.config(
-            fg="#3ecf6e" if self.playing else "#cccccc"))
+        seek_row = tk.Frame(panel, bg=c["bg"])
+        self._ui_frames["seek_row"] = seek_row
+        seek_row.pack(fill=tk.X, padx=14, pady=(4, 0))
 
-        _ctrl_btn("⏩", self._next).pack(side=tk.LEFT)
-        _ctrl_btn("⏭", self._go_last).pack(side=tk.LEFT)
-
-        # Progress bar
-        self._progress_canvas = tk.Canvas(ctrl, bg="#1a1a1a",
-                                           height=6, highlightthickness=0,
-                                           cursor="hand2")
-        self._progress_canvas.pack(side=tk.LEFT, fill=tk.X, expand=True,
-                                    padx=16, pady=22)
-        self._progress_canvas.bind("<Button-1>",  self._on_progress_click)
+        self._progress_canvas = tk.Canvas(
+            seek_row, height=20, bg=c["bg"],
+            highlightthickness=0, cursor="hand2",
+        )
+        self._progress_canvas.pack(fill=tk.X, expand=True)
+        self._progress_canvas.bind("<Button-1>", self._on_progress_click)
         self._progress_canvas.bind("<B1-Motion>", self._on_progress_click)
         self._progress_canvas.bind("<Configure>", lambda e: self._update_progress())
+
+        btn_row = tk.Frame(panel, bg=c["bg2"])
+        self._ui_frames["btn_row"] = btn_row
+        btn_row.pack(fill=tk.X, pady=(4, 8))
+
+        zone_a = tk.Frame(btn_row, bg=c["bg2"])
+        zone_a.pack(side=tk.LEFT, padx=(10, 0), pady=4)
+
+        self._btn_first = self._make_btn(
+            zone_a, "⏮", self._go_first, padx=7, pady=4, fg=c["txt_dim"],
+        )
+        self._btn_first.pack(side=tk.LEFT, padx=(0, 2))
+
+        self._btn_prev = self._make_btn(zone_a, "⏪", self._prev, padx=7, pady=4)
+        self._btn_prev.pack(side=tk.LEFT, padx=2)
+
+        self._play_btn = self._make_btn(
+            zone_a, "▶  Play", self._toggle_play, accent=True,
+            font=F["acc"], padx=14, pady=5,
+        )
+        self._play_btn.pack(side=tk.LEFT, padx=6)
+
+        self._btn_next = self._make_btn(zone_a, "⏩", self._next, padx=7, pady=4)
+        self._btn_next.pack(side=tk.LEFT, padx=2)
+
+        self._btn_last = self._make_btn(
+            zone_a, "⏭", self._go_last, padx=7, pady=4, fg=c["txt_dim"],
+        )
+        self._btn_last.pack(side=tk.LEFT, padx=(2, 0))
+
+        zone_b = tk.Frame(btn_row, bg=c["bg2"])
+        zone_b.pack(side=tk.RIGHT, padx=(0, 10), pady=4)
+
+        self._pause_lbl = tk.Label(
+            zone_b, text="Paused", font=F["acc"],
+            bg=c["btn"], fg=c["txt_med"],
+            padx=8, pady=3,
+            highlightbackground=c["border"], highlightthickness=1,
+        )
+        self._pause_lbl.pack(side=tk.RIGHT, padx=(6, 0))
+
+        mode_lbl = tk.Label(
+            zone_b,
+            text="Viewer" if not self._slideshow_mode else "Slideshow",
+            font=F["acc"], bg=c["btn"], fg=c["accent"],
+            padx=8, pady=3,
+            highlightbackground=c["border"], highlightthickness=1,
+        )
+        mode_lbl.pack(side=tk.RIGHT)
+        self._mode_lbl = mode_lbl
+
+    def _update_mode_label(self):
+        if getattr(self, '_mode_lbl', None) and self._mode_lbl.winfo_exists():
+            self._mode_lbl.config(
+                text="Slideshow" if self._slideshow_mode else "Viewer",
+            )
+        self._update_pause_label()
 
     # ── Keyboard bindings ─────────────────────────────────────────────────────
 
@@ -840,38 +1254,60 @@ class SlideshowManager:
     def _update_play_btn(self):
         if not self._play_btn or not self._play_btn.winfo_exists():
             return
-        self._play_btn.config(text="⏸" if self.playing else "⏵",
-                               fg="#3ecf6e" if self.playing else "#cccccc")
+        self._play_btn.config(text="⏸  Pause" if self.playing else "▶  Play")
+        self._restyle_btn(self._play_btn, accent=True)
+        self._update_pause_label()
+
+    def _update_pause_label(self):
+        if not getattr(self, '_pause_lbl', None) or not self._pause_lbl.winfo_exists():
+            return
+        c = self._ctrl()
+        if self.playing:
+            self._pause_lbl.config(text="Playing", fg=c["success"])
+        elif self._slideshow_mode:
+            self._pause_lbl.config(text="Paused", fg=c["txt_med"])
+        else:
+            self._pause_lbl.config(text="Viewer", fg=c["txt_med"])
 
     def _update_counter(self):
-        if not self._counter_lbl or not self._counter_lbl.winfo_exists():
+        if not self.photos:
             return
-        self._counter_lbl.config(
-            text=f"{self.index + 1} / {len(self.photos)}")
+        text = f"{self.index + 1} / {len(self.photos)}"
+        if self._counter_lbl and self._counter_lbl.winfo_exists():
+            self._counter_lbl.config(text=text)
+        if getattr(self, '_ctrl_counter_lbl', None) and self._ctrl_counter_lbl.winfo_exists():
+            self._ctrl_counter_lbl.config(text=text)
 
     def _update_progress(self, within_fraction=0.0):
         if not self._progress_canvas or not self._progress_canvas.winfo_exists():
             return
+        c = self._ctrl()
         self._progress_canvas.delete("all")
         w = max(1, self._progress_canvas.winfo_width())
+        h = max(1, self._progress_canvas.winfo_height())
+        cy = h // 2
+        rail = 3
         n = max(1, len(self.photos) - 1)
         slide_frac = self.index / n
 
-        # Track
         self._progress_canvas.create_rectangle(
-            0, 1, w, 5, fill="#2a2a2a", outline="")
-        # Filled portion
+            0, cy - rail, w, cy + rail, fill=c["track"], outline="")
         filled_x = int(w * slide_frac)
         if filled_x > 0:
             self._progress_canvas.create_rectangle(
-                0, 1, filled_x, 5, fill="#5E81F4", outline="")
-        # Within-slide dot
+                0, cy - rail, filled_x, cy + rail, fill=c["accent"], outline="")
         if within_fraction > 0:
             per_slide = w / max(1, len(self.photos))
-            dot_x = max(5, min(w - 5,
-                               int(filled_x + per_slide * within_fraction)))
+            dot_x = max(rail + 2, min(w - rail - 2,
+                                      int(filled_x + per_slide * within_fraction)))
+            r = 5
             self._progress_canvas.create_oval(
-                dot_x - 4, -1, dot_x + 4, 7, fill="#ffffff", outline="")
+                dot_x - r, cy - r, dot_x + r, cy + r, fill="#FFFFFF", outline="")
+        elif filled_x > 0:
+            r = 5
+            dot_x = max(r, min(w - r, filled_x))
+            self._progress_canvas.create_oval(
+                dot_x - r, cy - r, dot_x + r, cy + r, fill="#FFFFFF", outline="")
 
     def _on_progress_click(self, event):
         w = max(1, self._progress_canvas.winfo_width())
@@ -912,25 +1348,25 @@ class SlideshowManager:
     def _toggle_fullscreen(self):
         self._fullscreen = not self._fullscreen
         self._win.attributes("-fullscreen", self._fullscreen)
+        if self._fullscreen:
+            self._schedule_chrome_hide(800)
 
     def _exit_fullscreen(self):
         self._fullscreen = False
         self._win.attributes("-fullscreen", False)
 
     def _show_context(self, event):
-        menu = tk.Menu(self._win, tearoff=0,
-                       bg="#1e1e1e", fg="#ffffff",
-                       activebackground="#333333",
-                       activeforeground="#ffffff",
-                       relief=tk.FLAT)
-        menu.add_command(label="⏵  Play Slideshow",  command=self._toggle_play)
-        menu.add_command(label="⏪  Previous",        command=self._prev)
-        menu.add_command(label="⏩  Next",            command=self._next)
+        menu = self._context_menu()
+        menu.add_command(label="▶  Play Slideshow", command=self._toggle_play)
+        menu.add_command(label="⏪  Previous", command=self._prev)
+        menu.add_command(label="⏩  Next", command=self._next)
         menu.add_separator()
         menu.add_command(label="⛶  Toggle Fullscreen", command=self._toggle_fullscreen)
         menu.add_separator()
-        menu.add_command(label="📁  Open File Location",
-                         command=lambda: self._open_location(self.photos[self.index]))
+        menu.add_command(
+            label="📁  Open File Location",
+            command=lambda: self._open_location(self.photos[self.index]),
+        )
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -952,21 +1388,13 @@ class SlideshowManager:
     # ── Audio ─────────────────────────────────────────────────────────────────
 
     def _show_add_music_menu(self, anchor):
-        menu = tk.Menu(self._win, tearoff=0,
-                       bg="#1e1e1e", fg="#ffffff",
-                       activebackground="#333333",
-                       activeforeground="#ffffff",
-                       relief=tk.FLAT)
-        menu.add_command(label="♪  Add individual songs…",
-                         command=self._pick_songs)
-        menu.add_command(label="📁  Add folder of songs…",
-                         command=self._pick_song_folder)
+        menu = self._context_menu()
+        menu.add_command(label="♪  Add individual songs…", command=self._pick_songs)
+        menu.add_command(label="📁  Add folder of songs…", command=self._pick_song_folder)
         if self._songs:
             menu.add_separator()
-            menu.add_command(label="🔀  Shuffle playlist",
-                             command=self._shuffle_songs)
-            menu.add_command(label="✕  Clear all music",
-                             command=self._clear_music)
+            menu.add_command(label="🔀  Shuffle playlist", command=self._shuffle_songs)
+            menu.add_command(label="✕  Clear all music", command=self._clear_music)
         try:
             x = anchor.winfo_rootx()
             y = anchor.winfo_rooty() + anchor.winfo_height()
@@ -1120,22 +1548,18 @@ class SlideshowManager:
     def _draw_vol_slider(self):
         if not self._vol_canvas or not self._vol_canvas.winfo_exists():
             return
+        c = self._ctrl()
         self._vol_canvas.delete("all")
         w = max(1, self._vol_canvas.winfo_width())
         h = max(1, self._vol_canvas.winfo_height())
-        cy      = h // 2
-        filled  = int(w * self._audio_volume)
-        # Track
-        self._vol_canvas.create_rectangle(0, cy - 2, w, cy + 2,
-                                           fill="#333333", outline="")
-        # Fill
+        cy = h // 2
+        filled = int(w * self._audio_volume)
+        self._vol_canvas.create_rectangle(0, cy - 2, w, cy + 2, fill=c["track"], outline="")
         if filled > 0:
-            self._vol_canvas.create_rectangle(0, cy - 2, filled, cy + 2,
-                                               fill="#5E81F4", outline="")
-        # Thumb
-        self._vol_canvas.create_oval(filled - 5, cy - 5,
-                                      filled + 5, cy + 5,
-                                      fill="#ffffff", outline="")
+            self._vol_canvas.create_rectangle(
+                0, cy - 2, filled, cy + 2, fill=c["accent"], outline="")
+        self._vol_canvas.create_oval(
+            filled - 4, cy - 4, filled + 4, cy + 4, fill="#FFFFFF", outline="")
 
     def _on_vol_click(self, event):
         w = max(1, self._vol_canvas.winfo_width())
@@ -1154,8 +1578,9 @@ class SlideshowManager:
     def _update_now_playing_label(self):
         if not self._now_playing_lbl or not self._now_playing_lbl.winfo_exists():
             return
+        c = self._ctrl()
         if not self._songs:
-            self._now_playing_lbl.config(text="No music added", fg="#444444")
+            self._now_playing_lbl.config(text="No music added", fg=c["txt_dim"])
             return
         name = os.path.splitext(
             os.path.basename(self._songs[self._song_index % len(self._songs)]))[0]
@@ -1164,5 +1589,5 @@ class SlideshowManager:
         pos = self._song_index % len(self._songs) + 1
         self._now_playing_lbl.config(
             text=f"♪  {name}   [{pos} / {len(self._songs)}]",
-            fg="#aaaaaa",
+            fg=c["txt_med"],
         )
