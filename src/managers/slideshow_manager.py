@@ -125,6 +125,7 @@ class SlideshowManager:
         self._fs_btn            = None
         self._mode_lbl          = None
         self._fullscreen        = False
+        self._pre_fs_geo        = "1280x820"   # saved geometry before borderless FS
         self._slideshow_mode    = False
         self._bar               = None  # single overlay bar (place-based)
         self._chrome_visible    = True
@@ -136,6 +137,20 @@ class SlideshowManager:
         self._registered_cbids  = []
         self._fit_cache         = {}  # (path, cw, ch) -> rendered PIL
         self._ui_frames         = {}
+        # Titlebar overlay (borderless fullscreen, same as embedded_player)
+        self._titlebar          = None
+        self._titlebar_job      = None
+        self._titlebar_anim     = None
+        self._tb_zone           = None
+        self._tb_h              = 32
+        self._tb_shown          = False
+        self._tb_y              = -32
+        # Music bar widget refs (inline controls)
+        self._music_btn_frame   = None
+        self._btn_prev_song     = None
+        self._btn_next_song     = None
+        self._btn_shuffle       = None
+        self._btn_add_music     = None
         get_resource_manager().register_cleanup_callback(self.cleanup)
 
     def _ctrl(self):
@@ -320,6 +335,18 @@ class SlideshowManager:
         self._chrome_visible    = True
         self._hide_job          = None
         self._poll_job          = None
+        # Titlebar
+        self._titlebar          = None
+        self._titlebar_job      = None
+        self._titlebar_anim     = None
+        self._tb_zone           = None
+        self._tb_shown          = False
+        # Music bar buttons
+        self._music_btn_frame   = None
+        self._btn_prev_song     = None
+        self._btn_next_song     = None
+        self._btn_shuffle       = None
+        self._btn_add_music     = None
 
     def apply_settings(self, settings):
         """Sync slideshow defaults from app settings."""
@@ -378,6 +405,15 @@ class SlideshowManager:
         self._stop_mouse_poll()
         self._cancel_timers()
         self._stop_audio()
+        # Tear down borderless state before destroying the window
+        if self._fullscreen:
+            self._destroy_titlebar()
+            try:
+                if self._win and self._win.winfo_exists():
+                    self._win.overrideredirect(False)
+            except Exception:
+                pass
+            self._fullscreen = False
         if self._win and self._win.winfo_exists():
             try:
                 self._win.destroy()
@@ -386,6 +422,7 @@ class SlideshowManager:
         self._win = None
         self._reset_widget_state()
         self._fit_cache.clear()
+
 
     def set_hotkeys(self, hotkeys):
         """Live-reload key bindings from settings (same actions as embedded player)."""
@@ -690,7 +727,42 @@ class SlideshowManager:
         self._vol_canvas.bind("<B1-Motion>", self._on_vol_click)
         self._vol_canvas.bind("<Configure>", lambda e: self._draw_vol_slider())
 
-        # Now-playing label (truncated, expands to fill)
+        # ── Inline music controls (hidden until songs are added) ───────────
+        self._music_btn_frame = tk.Frame(zone_r, bg=c["bg"])
+        self._music_btn_frame.pack(side=tk.LEFT)
+
+        self._btn_prev_song = self._make_btn(
+            self._music_btn_frame, "⏮", self._prev_song, padx=5, pady=3,
+            fg=c["txt_med"],
+        )
+        self._btn_next_song = self._make_btn(
+            self._music_btn_frame, "⏭", self._next_song, padx=5, pady=3,
+            fg=c["txt_med"],
+        )
+        self._btn_shuffle = self._make_btn(
+            self._music_btn_frame, "🔀", self._shuffle_songs, padx=5, pady=3,
+            fg=c["txt_med"],
+        )
+        # Highlight shuffle button on hover
+        def _on_shuffle_enter(e):
+            self._btn_shuffle.config(fg=c["accent"])
+            self._cancel_chrome_hide()
+        def _on_shuffle_leave(e):
+            self._btn_shuffle.config(fg=c["txt_med"])
+            self._schedule_chrome_hide()
+        self._btn_shuffle.bind("<Enter>", _on_shuffle_enter, add="+")
+        self._btn_shuffle.bind("<Leave>", _on_shuffle_leave, add="+")
+
+        # ♪+ Add music button — always visible
+        self._btn_add_music = self._make_btn(
+            zone_r, "♪+", lambda: self._show_add_music_menu(self._btn_add_music),
+            padx=6, pady=3, fg=c["accent"],
+        )
+        self._btn_add_music.pack(side=tk.LEFT, padx=(2, 0))
+
+        self._sep(zone_r, pady=6)
+
+        # Now-playing label (truncated)
         self._now_playing_lbl = tk.Label(
             zone_r, text="", font=F["sm"],
             bg=c["bg"], fg=c["txt_dim"], anchor="w",
@@ -699,7 +771,7 @@ class SlideshowManager:
 
         self._sep(zone_r, pady=6)
 
-        # ⋮ Settings button — opens dropdown with less-important options
+        # ⋮ Settings button — opens dropdown with slideshow options only
         settings_btn = self._make_btn(
             zone_r, "⋮", self._show_settings_menu, padx=7, pady=4,
         )
@@ -717,7 +789,7 @@ class SlideshowManager:
         close_btn = self._make_btn(zone_r, "✕", self.close, padx=7, pady=4, fg=c["txt_dim"])
         close_btn.pack(side=tk.LEFT)
 
-        # Bind hover so bar staying visible while mouse is over it
+        # Bind hover so bar stays visible while mouse is over it
         self._bind_chrome_hover(bar)
         for child in bar.winfo_children():
             self._bind_chrome_hover(child)
@@ -730,6 +802,35 @@ class SlideshowManager:
         self._trans_label_to_key = {self.TRANSITION_LABELS[t]: t for t in self.TRANSITIONS}
         self._trans_display_var = tk.StringVar(value=self.TRANSITION_LABELS[self.transition])
         self._kb_var = tk.BooleanVar(value=self.ken_burns)
+
+        # Hide music transport buttons until songs loaded
+        self._refresh_music_bar()
+
+    def _refresh_music_bar(self):
+        """Show or hide the song-transport buttons based on whether songs are loaded."""
+        if not self._music_btn_frame:
+            return
+        try:
+            if not self._music_btn_frame.winfo_exists():
+                return
+        except Exception:
+            return
+        c = self._ctrl()
+        if self._songs:
+            # Pack buttons if not already visible
+            for btn in (self._btn_prev_song, self._btn_next_song, self._btn_shuffle):
+                if btn and btn.winfo_exists() and not btn.winfo_ismapped():
+                    btn.pack(side=tk.LEFT, padx=1)
+            # Update the now-playing label color to active
+            if self._now_playing_lbl and self._now_playing_lbl.winfo_exists():
+                self._now_playing_lbl.config(fg=c["txt_med"])
+        else:
+            # Unpack buttons when no songs
+            for btn in (self._btn_prev_song, self._btn_next_song, self._btn_shuffle):
+                if btn and btn.winfo_exists() and btn.winfo_ismapped():
+                    btn.pack_forget()
+            if self._now_playing_lbl and self._now_playing_lbl.winfo_exists():
+                self._now_playing_lbl.config(fg=c["txt_dim"])
 
     # ── Main canvas (fills entire window, never resizes) ──────────────────────
 
@@ -748,7 +849,7 @@ class SlideshowManager:
     # ── Settings dropdown (less-important controls) ───────────────────────────
 
     def _show_settings_menu(self):
-        """Popup menu with slideshow settings + audio controls."""
+        """Popup menu with slideshow settings only (audio controls are in the main bar)."""
         c = self._ctrl()
         menu = self._context_menu()
 
@@ -775,24 +876,6 @@ class SlideshowManager:
 
         kb_label = "☑  Ken Burns  (on)" if self.ken_burns else "☐  Ken Burns  (off)"
         menu.add_command(label=kb_label, command=self._toggle_ken_burns)
-
-        menu.add_separator()
-
-        # ── Audio sub-section ──────────────────────────────────────────────
-        audio_menu = tk.Menu(
-            menu, tearoff=0, bg=c["surface"], fg=c["txt"],
-            activebackground=c["btn_hvr"], activeforeground=c["txt"], relief=tk.FLAT,
-            font=("Segoe UI", 10),
-        )
-        audio_menu.add_command(label="♪  Add songs…", command=self._pick_songs)
-        audio_menu.add_command(label="📁  Add folder…", command=self._pick_song_folder)
-        if self._songs:
-            audio_menu.add_separator()
-            audio_menu.add_command(label="⏮  Previous song", command=self._prev_song)
-            audio_menu.add_command(label="⏭  Next song", command=self._next_song)
-            audio_menu.add_command(label="🔀  Shuffle playlist", command=self._shuffle_songs)
-            audio_menu.add_command(label="✕  Clear music", command=self._clear_music)
-        menu.add_cascade(label="♪  Music", menu=audio_menu)
 
         try:
             btn = self._settings_btn
@@ -1401,14 +1484,226 @@ class SlideshowManager:
                 self._load_current()
 
     def _toggle_fullscreen(self):
+        """Toggle borderless fullscreen (overrideredirect, like embedded player)."""
         self._fullscreen = not self._fullscreen
-        self._win.attributes("-fullscreen", self._fullscreen)
         if self._fullscreen:
+            self._pre_fs_geo = self._win.geometry()
+            self._win.overrideredirect(True)
+            self._win.update_idletasks()
+            wx = self._win.winfo_x()
+            wy = self._win.winfo_y()
+            sw = self._win.winfo_screenwidth()
+            sh = self._win.winfo_screenheight()
+            fx, fy = 0, 0
+            try:
+                from screeninfo import get_monitors
+                for m in get_monitors():
+                    if m.x <= wx < m.x + m.width and m.y <= wy < m.y + m.height:
+                        sw, sh = m.width, m.height
+                        fx, fy = m.x, m.y
+                        break
+            except Exception:
+                pass
+            self._win.geometry(f"{sw}x{sh}+{fx}+{fy}")
+            self._win.lift()
+            self._win.focus_force()
+            self._build_titlebar_overlay()
             self._schedule_chrome_hide(800)
+        else:
+            self._exit_fullscreen()
 
     def _exit_fullscreen(self):
+        """Return from borderless fullscreen to windowed mode."""
         self._fullscreen = False
-        self._win.attributes("-fullscreen", False)
+        self._destroy_titlebar()
+        self._win.overrideredirect(False)
+        self._win.geometry(self._pre_fs_geo)
+        self._win.lift()
+        self._win.focus_force()
+
+    # ── Titlebar overlay (borderless fullscreen) ──────────────────────────
+
+    def _build_titlebar_overlay(self):
+        """Build the hover-reveal top titlebar for borderless fullscreen."""
+        TB_H = 32
+        self._tb_h = TB_H
+        self._tb_shown = False
+        self._tb_y = -TB_H
+        c = self._ctrl()
+
+        self._titlebar = tk.Frame(self._win, bg=c["bg2"],
+                                  highlightthickness=0, height=TB_H)
+        self._titlebar.place(x=0, y=-TB_H,
+                             width=self._win.winfo_width(), height=TB_H)
+        self._titlebar.lift()
+
+        # Close button
+        btn_close = tk.Button(
+            self._titlebar, text="✕", command=self.close,
+            bg=c["bg2"], fg=c["txt_med"], bd=0, padx=12, pady=0,
+            relief=tk.FLAT, cursor="hand2",
+            activebackground="#FF8A8A",
+            activeforeground="white", font=("Segoe UI", 10),
+        )
+        btn_close.pack(side=tk.RIGHT)
+        btn_close.bind("<Enter>", lambda e: btn_close.config(bg="#FF8A8A", fg="white"))
+        btn_close.bind("<Leave>", lambda e: btn_close.config(bg=c["bg2"], fg=c["txt_med"]))
+
+        # Restore/exit-fullscreen button
+        btn_restore = tk.Button(
+            self._titlebar, text="🗖", command=self._exit_fullscreen,
+            bg=c["bg2"], fg=c["txt_med"], bd=0, padx=10, pady=0,
+            relief=tk.FLAT, cursor="hand2",
+            activebackground=c["btn_hvr"], activeforeground=c["txt"],
+            font=("Segoe UI", 10),
+        )
+        btn_restore.pack(side=tk.RIGHT)
+        btn_restore.bind("<Enter>", lambda e: btn_restore.config(bg=c["btn_hvr"]))
+        btn_restore.bind("<Leave>", lambda e: btn_restore.config(bg=c["bg2"]))
+
+        # Minimize button
+        btn_min = tk.Button(
+            self._titlebar, text="—", command=self._fs_minimize,
+            bg=c["bg2"], fg=c["txt_med"], bd=0, padx=10, pady=0,
+            relief=tk.FLAT, cursor="hand2",
+            activebackground=c["btn_hvr"], activeforeground=c["txt"],
+            font=("Segoe UI", 10),
+        )
+        btn_min.pack(side=tk.RIGHT)
+        btn_min.bind("<Enter>", lambda e: btn_min.config(bg=c["btn_hvr"]))
+        btn_min.bind("<Leave>", lambda e: btn_min.config(bg=c["bg2"]))
+
+        tk.Frame(self._titlebar, width=1, bg=c["border"]).pack(
+            side=tk.RIGHT, fill=tk.Y, pady=6)
+
+        tk.Label(
+            self._titlebar, text="Photo Slideshow",
+            bg=c["bg2"], fg=c["txt_med"],
+            font=("Segoe UI", 9),
+        ).pack(side=tk.LEFT, padx=14)
+
+        # Invisible hot-zone at the very top of the screen
+        self._tb_zone = tk.Frame(self._win, bg="black", height=8,
+                                 highlightthickness=0)
+        self._tb_zone.place(x=0, y=0, width=self._win.winfo_width(), height=8)
+        self._tb_zone.lift()
+        self._tb_zone.bind("<Configure>", lambda e: self._tb_zone.lift())
+        self._win.bind("<Configure>", lambda e: self._reposition_tb_zone(), add=True)
+        self._tb_zone.bind("<Enter>", lambda e: self._titlebar_slide_in())
+
+        self._titlebar.bind("<Leave>", lambda e: self._titlebar_schedule_hide())
+        self._titlebar.bind("<Enter>", lambda e: self._titlebar_cancel_hide())
+        for child in self._titlebar.winfo_children():
+            child.bind("<Enter>", lambda e: self._titlebar_cancel_hide(), add="+")
+            child.bind("<Leave>", lambda e: self._titlebar_schedule_hide(), add="+")
+
+    def _destroy_titlebar(self):
+        if self._titlebar_anim:
+            try:
+                self._win.after_cancel(self._titlebar_anim)
+            except Exception:
+                pass
+            self._titlebar_anim = None
+        if self._titlebar_job:
+            try:
+                self._win.after_cancel(self._titlebar_job)
+            except Exception:
+                pass
+            self._titlebar_job = None
+        if self._titlebar:
+            try:
+                self._titlebar.destroy()
+            except Exception:
+                pass
+            self._titlebar = None
+        if self._tb_zone:
+            try:
+                self._tb_zone.destroy()
+            except Exception:
+                pass
+            self._tb_zone = None
+
+    def _reposition_tb_zone(self):
+        if not self._fullscreen or not self._tb_zone:
+            return
+        try:
+            self._tb_zone.place(x=0, y=0, width=self._win.winfo_width(), height=8)
+            self._tb_zone.lift()
+            if self._titlebar:
+                self._titlebar.place(
+                    x=0, y=self._tb_y,
+                    width=self._win.winfo_width(), height=self._tb_h)
+                self._titlebar.lift()
+        except Exception:
+            pass
+
+    def _titlebar_slide_in(self):
+        self._titlebar_cancel_hide()
+        if self._tb_shown:
+            return
+        self._tb_shown = True
+        self._tb_y = -self._tb_h
+        self._titlebar_animate_to(0)
+
+    def _titlebar_animate_to(self, target_y, step=3):
+        if not self._titlebar:
+            return
+        if self._titlebar_anim:
+            try:
+                self._win.after_cancel(self._titlebar_anim)
+            except Exception:
+                pass
+
+        def _tick():
+            if not self._titlebar:
+                return
+            y = self._tb_y
+            if y < target_y:
+                y = min(y + step, target_y)
+            elif y > target_y:
+                y = max(y - step, target_y)
+            self._tb_y = y
+            try:
+                self._titlebar.place(
+                    x=0, y=y,
+                    width=self._win.winfo_width(),
+                    height=self._tb_h)
+                if self._tb_zone:
+                    self._tb_zone.lift()
+                self._titlebar.lift()
+            except Exception:
+                return
+            if y != target_y:
+                self._titlebar_anim = self._win.after(8, _tick)
+            else:
+                self._titlebar_anim = None
+                if target_y < 0:
+                    self._tb_shown = False
+
+        _tick()
+
+    def _titlebar_schedule_hide(self, delay=1800):
+        self._titlebar_cancel_hide()
+        if self._titlebar:
+            self._titlebar_job = self._win.after(
+                delay, lambda: self._titlebar_animate_to(-self._tb_h))
+
+    def _titlebar_cancel_hide(self):
+        if self._titlebar_job:
+            try:
+                self._win.after_cancel(self._titlebar_job)
+            except Exception:
+                pass
+            self._titlebar_job = None
+
+    def _fs_minimize(self):
+        """Minimize from fullscreen: exit borderless, then iconify."""
+        self._fullscreen = False
+        self._destroy_titlebar()
+        self._win.overrideredirect(False)
+        self._win.geometry(self._pre_fs_geo)
+        self._win.update_idletasks()
+        self._win.iconify()
 
     def _show_context(self, event):
         menu = self._context_menu()
@@ -1504,6 +1799,7 @@ class SlideshowManager:
                 self.logger("Slideshow: install pygame for audio support (pip install pygame)")
         else:
             self._update_now_playing_label()
+        self._refresh_music_bar()
 
     def _shuffle_songs(self):
         if not self._songs:
@@ -1522,6 +1818,7 @@ class SlideshowManager:
         self._songs      = []
         self._song_index = 0
         self._update_now_playing_label()
+        self._refresh_music_bar()
 
     def _play_current_song(self):
         if not self._songs or not self._pygame:
