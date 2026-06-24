@@ -83,6 +83,8 @@ class GridViewManager:
         self._closing = False
         # Tracks which folder paths are collapsed; persisted in memory until restart
         self._collapsed_dirs = set()
+        self._tok_cache = None
+        self._card_refs = {}
         self.search_var = tk.StringVar()
         self.search_var.trace_add('write', lambda *_: self._on_search_changed())
 
@@ -144,6 +146,8 @@ class GridViewManager:
             self.excluded_items.clear()
             self.card_widgets.clear()
             self._photo_cache.clear()
+            self._card_refs.clear()
+            self._tok_cache = None
         except Exception:
             pass
 
@@ -193,17 +197,25 @@ class GridViewManager:
         for vp, card in list(self.card_widgets.items()):
             if not card.winfo_exists():
                 continue
-            info_frame = None
-            for child in card.winfo_children():
-                if getattr(child, '_is_info', False):
-                    info_frame = child
-                    break
-            if info_frame is None:
+            refs = self._card_refs.get(vp)
+            if refs:
+                info_frame = refs['info']
+                old_meta = refs.get('meta')
+                if old_meta and old_meta.winfo_exists():
+                    old_meta.destroy()
+            else:
+                info_frame = None
+                for child in card.winfo_children():
+                    if getattr(child, '_is_info', False):
+                        info_frame = child
+                        break
+                if info_frame is None:
+                    continue
+                for child in list(info_frame.winfo_children()):
+                    if getattr(child, '_is_meta', False):
+                        child.destroy()
+            if info_frame is None or not info_frame.winfo_exists():
                 continue
-            # Remove existing meta_frame
-            for child in list(info_frame.winfo_children()):
-                if getattr(child, '_is_meta', False):
-                    child.destroy()
             # Rebuild meta_frame
             svc = self.annotation_service
             tags = svc.get_tags(vp)
@@ -227,6 +239,9 @@ class GridViewManager:
                 tk.Label(meta_frame, text=f"#{tag}",
                          bg=t['accent_dim'], fg=t['accent'],
                          font=("Segoe UI", 7), padx=5, pady=1).pack(side=tk.LEFT, padx=(0, 3))
+            # Update cached ref to new meta_frame
+            if refs:
+                refs['meta'] = meta_frame
 
     def _refresh_card_meta(self, vp):
         """Immediately rebuild the meta row (fav ♥, rating ★, tags) for a single card."""
@@ -236,16 +251,25 @@ class GridViewManager:
         t = self._tok()
         is_sel = vp in self.selected_items
         info_bg = t['accent_dim'] if is_sel else t['surface']
-        info_frame = None
-        for child in card.winfo_children():
-            if getattr(child, '_is_info', False):
-                info_frame = child
-                break
-        if info_frame is None:
+        refs = self._card_refs.get(vp)
+        if refs:
+            info_frame = refs['info']
+            old_meta = refs.get('meta')
+            if old_meta and old_meta.winfo_exists():
+                old_meta.destroy()
+        else:
+            info_frame = None
+            for child in card.winfo_children():
+                if getattr(child, '_is_info', False):
+                    info_frame = child
+                    break
+            if info_frame is None:
+                return
+            for child in list(info_frame.winfo_children()):
+                if getattr(child, '_is_meta', False):
+                    child.destroy()
+        if info_frame is None or not info_frame.winfo_exists():
             return
-        for child in list(info_frame.winfo_children()):
-            if getattr(child, '_is_meta', False):
-                child.destroy()
         svc    = self.annotation_service
         tags   = svc.get_tags(vp)   if svc else []
         rating = svc.get_rating(vp) if svc else 0
@@ -267,6 +291,9 @@ class GridViewManager:
                      bg=t['accent_dim'], fg=t['accent'],
                      font=("Segoe UI", 7), padx=5, pady=1
                      ).pack(side=tk.LEFT, padx=(0, 3))
+        # Update cached ref to new meta_frame
+        if refs:
+            refs['meta'] = meta_frame
 
     # ─────────────────────────────────────────────────────────────────────────
     # Design tokens (new UI)
@@ -274,6 +301,8 @@ class GridViewManager:
 
     def _tok(self):
         """Return design-system tokens derived from theme_provider's dashboard palette."""
+        if self._tok_cache is not None:
+            return self._tok_cache
         base = self.theme_provider.get_manager_design_tokens()
         dark = getattr(self.theme_provider, 'dark_mode', False)
 
@@ -293,7 +322,7 @@ class GridViewManager:
             bar_bg  = "#EDF1F8"   # toolbar, status strip — subtle step from canvas
             hdr_bg  = base.get('header_bg', "#FFFFFF")  # header unchanged
 
-        return dict(
+        self._tok_cache = dict(
             # base tokens (direct passthrough)
             bg          = base['bg'],
             surface     = base['surface'],
@@ -321,6 +350,7 @@ class GridViewManager:
             scrollbar   = base['border'],
             card_hover  = card_hover,
         )
+        return self._tok_cache
 
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -487,6 +517,14 @@ class GridViewManager:
             except Exception:
                 pass
         self._cancel_drag()
+        # Cancel any in-flight progressive card build
+        if getattr(self, '_chunk_after_id', None) is not None:
+            try:
+                self.root.after_cancel(self._chunk_after_id)
+            except Exception:
+                pass
+            self._chunk_after_id = None
+        self._thumb_queue = []
         try:
             if hasattr(self, "canvas") and self.canvas.winfo_exists():
                 self.canvas.unbind_all("<MouseWheel>")
@@ -1061,6 +1099,7 @@ class GridViewManager:
                 return
         except tk.TclError:
             return
+        self._tok_cache = None
         t = self._tok()
         tp = self.theme_provider
         self.grid_window.configure(bg=t['bg'])
@@ -1344,11 +1383,21 @@ class GridViewManager:
         if hasattr(self, 'grid_size_var'):
             self._grid_cols = self.grid_size_var.get()
 
+        # Cancel any in-progress chunked build from a previous call
+        if getattr(self, '_chunk_after_id', None) is not None:
+            try:
+                self.root.after_cancel(self._chunk_after_id)
+            except Exception:
+                pass
+            self._chunk_after_id = None
+
         for w in self.grid_frame.winfo_children():
             w.destroy()
         self.card_widgets.clear()
         self._card_positions = {}
+        self._card_refs.clear()
 
+        # Cache tokens once for the entire rebuild
         t = self._tok()
         cols = self.grid_size_var.get()
 
@@ -1364,30 +1413,60 @@ class GridViewManager:
             return
 
         page_items = self._get_page_items()
+
+        # ── Pre-build a dir→vps index so _build_header doesn't do O(n) scans ──
+        dir_vps_index = {}
+        for it in self.items:
+            if it['type'] == 'video':
+                d = os.path.dirname(it['path'])
+                dir_vps_index.setdefault(d, []).append(it['path'])
+
+        # ── Batch-prefetch annotation metadata to avoid per-card callbacks ─────
+        svc = self.annotation_service
+        fav_cb = self.is_favourite_callback
+        _tags_cache   = {}
+        _rating_cache = {}
+        _fav_cache    = {}
+        if svc:
+            for it in page_items:
+                if it['type'] == 'video':
+                    vp = it['path']
+                    _tags_cache[vp]   = svc.get_tags(vp)
+                    _rating_cache[vp] = svc.get_rating(vp)
+        if fav_cb:
+            for it in page_items:
+                if it['type'] == 'video':
+                    vp = it['path']
+                    try:
+                        _fav_cache[vp] = bool(fav_cb(vp))
+                    except Exception:
+                        _fav_cache[vp] = False
+
+        # ── Build headers immediately; collect video items for chunked build ───
         grid_row = -1
         video_col = 0
         _current_dir_collapsed = False
+        # List of (item_data, grid_row, video_col) for cards to build in chunks
+        cards_to_build = []
 
         for item_data in page_items:
             if item_data['type'] == 'header':
                 grid_row += 1
                 video_col = 0
                 _current_dir_collapsed = item_data['path'] in self._collapsed_dirs
-                self._build_header(item_data, grid_row, cols, t)
+                self._build_header(item_data, grid_row, cols, t,
+                                   dir_vps_index=dir_vps_index)
                 if not _current_dir_collapsed:
                     grid_row += 1
                 continue
 
-            # Skip cards for collapsed directories
             if _current_dir_collapsed:
                 continue
 
-            item      = item_data['video_item']
-            vp        = item_data['path']
-            is_sel    = vp in self.selected_items
-            is_excl   = vp in self.excluded_items
-
-            self._build_card(item, vp, is_sel, is_excl, grid_row, video_col, t)
+            cards_to_build.append((
+                item_data, grid_row, video_col,
+                _tags_cache, _rating_cache, _fav_cache
+            ))
 
             video_col += 1
             if video_col >= cols:
@@ -1405,16 +1484,79 @@ class GridViewManager:
         if stale:
             self.selected_items -= stale
 
+        # ── Progressive chunked card rendering ──────────────────────────────────
+        # Build in chunks of CHUNK_SIZE so the event loop can process UI events
+        # between chunks, keeping the interface responsive at large page sizes.
+        CHUNK_SIZE = 30
+        # Stagger thumbnail submissions so the executor isn't flooded at once
+        THUMB_DELAY_MS = 8   # ms between thumbnail submission batches
+        self._chunk_after_id = None
+        self._thumb_queue = []  # filled as cards are built
+
+        def _build_chunk(start_idx):
+            if getattr(self, '_closing', False):
+                return
+            try:
+                if not self.grid_frame.winfo_exists():
+                    return
+            except Exception:
+                return
+
+            end_idx = min(start_idx + CHUNK_SIZE, len(cards_to_build))
+            for i in range(start_idx, end_idx):
+                item_data, g_row, v_col, tc, rc, fc = cards_to_build[i]
+                item   = item_data['video_item']
+                vp     = item_data['path']
+                is_sel  = vp in self.selected_items
+                is_excl = vp in self.excluded_items
+                self._build_card(
+                    item, vp, is_sel, is_excl, g_row, v_col, t,
+                    prefetched_tags=tc.get(vp, []),
+                    prefetched_rating=rc.get(vp, 0),
+                    prefetched_fav=fc.get(vp, False),
+                )
+
+            if end_idx < len(cards_to_build):
+                self._chunk_after_id = self.root.after(0, lambda: _build_chunk(end_idx))
+            else:
+                self._chunk_after_id = None
+                # Drain thumbnail queue in staggered batches
+                self._flush_thumb_queue(THUMB_DELAY_MS)
+
+        if cards_to_build:
+            _build_chunk(0)
+
+    def _flush_thumb_queue(self, delay_ms):
+        """Submit pending thumbnail jobs in small staggered batches."""
+        BATCH = 10
+        q = getattr(self, '_thumb_queue', [])
+        if not q:
+            return
+        batch, remaining = q[:BATCH], q[BATCH:]
+        self._thumb_queue = remaining
+        for (item, thumb_label, vpn) in batch:
+            try:
+                self.thumbnail_executor.submit(
+                    self._load_thumbnail, item, thumb_label, vpn)
+            except Exception:
+                pass
+        if remaining:
+            self.root.after(delay_ms, lambda: self._flush_thumb_queue(delay_ms))
+
     # ─────────────────────────────────────────────────────────────────────────
     # Header row (new UI)
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _build_header(self, item_data, grid_row, cols, t):
+    def _build_header(self, item_data, grid_row, cols, t, dir_vps_index=None):
         dir_path = item_data['path']
         is_collapsed = dir_path in self._collapsed_dirs
 
-        dir_vps = [it['path'] for it in self.items
-                   if it['type'] == 'video' and os.path.dirname(it['path']) == dir_path]
+        # Use pre-built index when available (avoids O(n) scan per header)
+        if dir_vps_index is not None:
+            dir_vps = dir_vps_index.get(dir_path, [])
+        else:
+            dir_vps = [it['path'] for it in self.items
+                       if it['type'] == 'video' and os.path.dirname(it['path']) == dir_path]
 
         # Determine selection state for header
         all_selected = bool(dir_vps and all(vp in self.selected_items for vp in dir_vps))
@@ -1669,13 +1811,13 @@ class GridViewManager:
 
         cols = self.grid_size_var.get()
 
-        # Re-compute page boundaries without clearing the cache unnecessarily
-        old_page = self._page
-        self._pages_cache = None
-        page_items = self._get_page_items()
+        # Reuse cached page items — collapse doesn't change items, only visibility
+        if self._pages_cache and 0 <= self._page < len(self._pages_cache):
+            page_items = self._pages_cache[self._page]
+        else:
+            page_items = self._get_page_items()
 
-        if self._page != old_page or not page_items:
-            # Page boundary shifted – fall back to full rebuild
+        if not page_items:
             return self._rebuild_grid()
 
         grid_row = -1
@@ -1730,7 +1872,8 @@ class GridViewManager:
     # Video card (new UI style, original thumbnail loading)
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _build_card(self, item, vp, is_sel, is_excl, grid_row, video_col, t):
+    def _build_card(self, item, vp, is_sel, is_excl, grid_row, video_col, t,
+                    prefetched_tags=None, prefetched_rating=None, prefetched_fav=None):
         # ── State-driven colours ──────────────────────────────────────────────
         dark = getattr(self.theme_provider, 'dark_mode', False)
         if is_sel:
@@ -1837,7 +1980,7 @@ class GridViewManager:
         q_btn.bind("<Button-1>",      lambda e, _vp=vp: self._add_single_to_queue(_vp))
         fav_btn.bind("<Button-1>",    lambda e, _vp=vp: self._toggle_favourite_single(_vp))
 
-        # ── Thumbnail loading (3-level cache, unchanged) ──────────────────────
+        # ── Thumbnail loading — queue for staggered submission ────────────────
         video_path_norm = os.path.normpath(vp)
         cached_photo = self._photo_cache.get(video_path_norm)
         if cached_photo is None and self.video_preview_manager and \
@@ -1848,16 +1991,19 @@ class GridViewManager:
         if cached_photo is not None:
             self._set_thumbnail(thumb_label, cached_photo)
         else:
-            self.thumbnail_executor.submit(
-                self._load_thumbnail, item, thumb_label, video_path_norm)
+            # Queue for staggered submission instead of submitting immediately
+            if not hasattr(self, '_thumb_queue'):
+                self._thumb_queue = []
+            self._thumb_queue.append((item, thumb_label, video_path_norm))
 
         # ── Info panel ────────────────────────────────────────────────────────
-        tk.Frame(card, bg=t['border'], height=1).pack(fill=tk.X)
+        divider = tk.Frame(card, bg=t['border'], height=1)
+        divider.pack(fill=tk.X)
         info_frame = tk.Frame(card, bg=info_bg, padx=10, pady=7, cursor="fleur")
         info_frame._is_info = True
         info_frame.pack(fill=tk.X)
 
-        # Show filename without extension
+        # Show filename without extension — use cached basename to avoid repeated os calls
         raw_name = os.path.basename(item.video_path)
         display_name = os.path.splitext(raw_name)[0]
         if len(display_name) > 34:
@@ -1871,11 +2017,10 @@ class GridViewManager:
         )
         name_label.pack(fill=tk.X)
 
-        # Meta row — always rendered (fixed height) so all cards are the same size
-        svc    = self.annotation_service
-        tags   = svc.get_tags(vp)   if svc else []
-        rating = svc.get_rating(vp) if svc else 0
-        is_fav = bool(self.is_favourite_callback and self.is_favourite_callback(vp))
+        # Meta row — use pre-fetched values when available (avoids per-card callbacks)
+        tags   = prefetched_tags   if prefetched_tags   is not None else (self.annotation_service.get_tags(vp)   if self.annotation_service else [])
+        rating = prefetched_rating if prefetched_rating is not None else (self.annotation_service.get_rating(vp) if self.annotation_service else 0)
+        is_fav = prefetched_fav    if prefetched_fav    is not None else bool(self.is_favourite_callback and self.is_favourite_callback(vp))
 
         meta_frame = tk.Frame(info_frame, bg=info_bg, height=18)
         meta_frame._is_meta = True
@@ -1916,6 +2061,17 @@ class GridViewManager:
         card.bind("<Enter>", lambda e, _vp=vp: self._on_card_enter(e, _vp))
         card.bind("<Leave>", lambda e, _vp=vp: self._on_card_leave(e, _vp))
 
+        # Cache sub-widget refs for fast access in hover / selection updates
+        self._card_refs[vp] = {
+            'thumb': thumb_container,
+            'thumb_lbl': thumb_label,
+            'action': action_strip,
+            'info': info_frame,
+            'name': name_label,
+            'meta': meta_frame,
+            'divider': divider,
+        }
+
     def _place_now_playing_badge(self, thumb_container, t):
         badge = tk.Label(
             thumb_container,
@@ -1950,11 +2106,13 @@ class GridViewManager:
 
             card.config(highlightbackground=border_col, highlightthickness=border_w)
 
-            thumb_container = None
-            for child in card.winfo_children():
-                if getattr(child, '_is_thumb', False):
-                    thumb_container = child
-                    break
+            refs = self._card_refs.get(video_path)
+            thumb_container = refs['thumb'] if refs else None
+            if thumb_container is None:
+                for child in card.winfo_children():
+                    if getattr(child, '_is_thumb', False):
+                        thumb_container = child
+                        break
             if thumb_container is None:
                 return
 
@@ -1990,68 +2148,97 @@ class GridViewManager:
         except Exception:
             pass
 
-    def _update_card_selection(self, video_path):
+    def _update_card_selection(self, video_path, t=None):
         if video_path not in self.card_widgets:
             return
         card = self.card_widgets[video_path]
         if not card.winfo_exists():
             return
 
-        t = self._tok()
+        if t is None:
+            t = self._tok()
         is_sel  = video_path in self.selected_items
         is_excl = video_path in self.excluded_items
 
         if is_sel:
-            border_col, border_w = t['accent'],    2
-            card_bg = info_bg    = t['accent_dim']
-            name_fg, name_w      = t['accent'], "bold"
+            border_col = t['accent']
+            card_bg = info_bg = t['accent_dim']
+            name_fg, name_w = t['accent'], "bold"
         elif is_excl:
-            border_col, border_w = t['excluded'],  2
-            card_bg = info_bg    = t['surface']
-            name_fg, name_w      = t['text_muted'], "normal"
+            border_col = t['excluded']
+            card_bg = info_bg = t['surface']
+            name_fg, name_w = t['text_muted'], "normal"
         else:
-            border_col, border_w = t['border'],    2
-            card_bg = info_bg    = t['surface']
-            name_fg, name_w      = t['text'], "normal"
+            border_col = t['border']
+            card_bg = info_bg = t['surface']
+            name_fg, name_w = t['text'], "normal"
 
         card.configure(bg=card_bg,
                        highlightbackground=border_col,
-                       highlightthickness=border_w)
+                       highlightthickness=2)
 
-        thumb_container = info_frame = name_label = None
-        for child in card.winfo_children():
-            if getattr(child, '_is_thumb', False):
-                thumb_container = child
-            elif getattr(child, '_is_info', False):
-                info_frame = child
-                for lbl in child.winfo_children():
-                    if isinstance(lbl, tk.Label) and name_label is None:
-                        name_label = lbl
+        refs = self._card_refs.get(video_path)
+        if refs:
+            thumb_container = refs['thumb']
+            info_frame = refs['info']
+            name_label = refs['name']
 
-        if info_frame:
-            info_frame.configure(bg=info_bg)
-            for lbl in info_frame.winfo_children():
+            if info_frame and info_frame.winfo_exists():
+                info_frame.configure(bg=info_bg)
+                for lbl in info_frame.winfo_children():
+                    try:
+                        lbl.configure(bg=info_bg)
+                    except tk.TclError:
+                        pass
+            if thumb_container and thumb_container.winfo_exists():
                 try:
-                    lbl.configure(bg=info_bg)
+                    thumb_container.configure(bg=card_bg)
+                    for sub in thumb_container.winfo_children():
+                        if not getattr(sub, '_is_action_strip', False):
+                            sub.configure(bg=card_bg)
+                except:
+                    pass
+            divider = refs.get('divider')
+            if divider and divider.winfo_exists():
+                try:
+                    divider.configure(bg=t['border'])
                 except tk.TclError:
                     pass
-        if thumb_container:
-            try:
-                thumb_container.configure(bg=card_bg)
-                for sub in thumb_container.winfo_children():
-                    if not getattr(sub, '_is_action_strip', False):
-                        sub.configure(bg=card_bg)
-            except:
-                pass
-        # Update the thin divider frame between thumb and info
-        for child in card.winfo_children():
-            if not getattr(child, '_is_thumb', False) and not getattr(child, '_is_info', False):
+            if name_label and name_label.winfo_exists():
+                name_label.configure(fg=name_fg, font=("Segoe UI", 8, name_w))
+        else:
+            thumb_container = info_frame = name_label = None
+            for child in card.winfo_children():
+                if getattr(child, '_is_thumb', False):
+                    thumb_container = child
+                elif getattr(child, '_is_info', False):
+                    info_frame = child
+                    for lbl in child.winfo_children():
+                        if isinstance(lbl, tk.Label) and name_label is None:
+                            name_label = lbl
+            if info_frame:
+                info_frame.configure(bg=info_bg)
+                for lbl in info_frame.winfo_children():
+                    try:
+                        lbl.configure(bg=info_bg)
+                    except tk.TclError:
+                        pass
+            if thumb_container:
                 try:
-                    child.configure(bg=t['border'])
-                except tk.TclError:
+                    thumb_container.configure(bg=card_bg)
+                    for sub in thumb_container.winfo_children():
+                        if not getattr(sub, '_is_action_strip', False):
+                            sub.configure(bg=card_bg)
+                except:
                     pass
-        if name_label:
-            name_label.configure(fg=name_fg, font=("Segoe UI", 8, name_w))
+            for child in card.winfo_children():
+                if not getattr(child, '_is_thumb', False) and not getattr(child, '_is_info', False):
+                    try:
+                        child.configure(bg=t['border'])
+                    except tk.TclError:
+                        pass
+            if name_label:
+                name_label.configure(fg=name_fg, font=("Segoe UI", 8, name_w))
 
         self._refresh_excluded_badge(thumb_container, is_excl)
 
@@ -2078,19 +2265,21 @@ class GridViewManager:
     # ─────────────────────────────────────────────────────────────────────────
 
     def _select_all(self):
+        t = self._tok()
         page_items = self._pages_cache[self._page] if self._pages_cache else self.items
         for item_data in page_items:
             if item_data['type'] == 'video':
                 self.selected_items.add(item_data['path'])
-                self._update_card_selection(item_data['path'])
+                self._update_card_selection(item_data['path'], t=t)
         self._update_selection_label()
 
     def _clear_selection(self):
         old = self.selected_items.copy()
         self.selected_items.clear()
         self._last_anchor_path = None
+        t = self._tok()
         for vp in old:
-            self._update_card_selection(vp)
+            self._update_card_selection(vp, t=t)
         # Refresh any collapsed folder headers that had selection styling
         affected_dirs = {os.path.dirname(vp) for vp in old}
         for dp in affected_dirs:
@@ -2538,26 +2727,27 @@ class GridViewManager:
             return
         idx = video_paths.index(vp)
 
+        t = self._tok()
         if shift:
             anchor = getattr(self, '_last_anchor_path', None)
             ai = video_paths.index(anchor) if anchor in video_paths else idx
             for i in range(min(ai, idx), max(ai, idx) + 1):
                 self.selected_items.add(video_paths[i])
-                self._update_card_selection(video_paths[i])
+                self._update_card_selection(video_paths[i], t=t)
         elif ctrl:
             if vp in self.selected_items:
                 self.selected_items.remove(vp)
             else:
                 self.selected_items.add(vp)
-            self._update_card_selection(vp)
+            self._update_card_selection(vp, t=t)
             self._last_anchor_path = vp
         else:
             old = self.selected_items.copy()
             self.selected_items = {vp}
             for op in old:
                 if op != vp:
-                    self._update_card_selection(op)
-            self._update_card_selection(vp)
+                    self._update_card_selection(op, t=t)
+            self._update_card_selection(vp, t=t)
             self._last_anchor_path = vp
 
         self._update_selection_label()
@@ -2574,13 +2764,14 @@ class GridViewManager:
             return
         all_vps = [it['path'] for it in self.items if it['type'] == 'video']
 
+        t = self._tok()
         if shift and getattr(self, '_last_anchor_path', None) in all_vps:
             ai  = all_vps.index(self._last_anchor_path)
             dis = [all_vps.index(vp) for vp in dir_vps]
             ti  = dis[-1] if dis[-1] > ai else dis[0]
             for i in range(min(ai, ti), max(ai, ti) + 1):
                 self.selected_items.add(all_vps[i])
-                self._update_card_selection(all_vps[i])
+                self._update_card_selection(all_vps[i], t=t)
         elif ctrl:
             all_sel = all(vp in self.selected_items for vp in dir_vps)
             for vp in dir_vps:
@@ -2588,23 +2779,23 @@ class GridViewManager:
                     self.selected_items.discard(vp)
                 else:
                     self.selected_items.add(vp)
-                self._update_card_selection(vp)
+                self._update_card_selection(vp, t=t)
             self._last_anchor_path = dir_vps[0]
         else:
             all_sel = all(vp in self.selected_items for vp in dir_vps)
             if all_sel:
                 for vp in dir_vps:
                     self.selected_items.discard(vp)
-                    self._update_card_selection(vp)
+                    self._update_card_selection(vp, t=t)
                 self._last_anchor_path = None
             else:
                 old = self.selected_items.copy()
                 self.selected_items = set(dir_vps)
                 for op in old:
                     if op not in self.selected_items:
-                        self._update_card_selection(op)
+                        self._update_card_selection(op, t=t)
                 for vp in dir_vps:
-                    self._update_card_selection(vp)
+                    self._update_card_selection(vp, t=t)
                 self._last_anchor_path = dir_vps[0]
 
         self._update_selection_label()
@@ -2624,39 +2815,69 @@ class GridViewManager:
             card.configure(highlightbackground=t['accent'],
                            highlightthickness=2 if not is_excl else 2)
 
+        refs = self._card_refs.get(vp)
+
         # Tint info area when unselected and unexcluded
         if not is_sel and not is_excl:
-            card.configure(bg=t['card_hover'])
-            for child in card.winfo_children():
-                if getattr(child, '_is_info', False):
-                    child.configure(bg=t['card_hover'])
-                    for lbl in child.winfo_children():
+            hover_bg = t['card_hover']
+            card.configure(bg=hover_bg)
+            if refs:
+                try:
+                    refs['thumb'].configure(bg=hover_bg)
+                    refs['thumb_lbl'].configure(bg=hover_bg)
+                except Exception:
+                    pass
+                try:
+                    refs['info'].configure(bg=hover_bg)
+                    refs['name'].configure(bg=hover_bg)
+                    meta = refs.get('meta')
+                    if meta and meta.winfo_exists():
+                        meta.configure(bg=hover_bg)
+                except Exception:
+                    pass
+                try:
+                    divider = refs.get('divider')
+                    if divider and divider.winfo_exists():
+                        divider.configure(bg=hover_bg)
+                except Exception:
+                    pass
+            else:
+                for child in card.winfo_children():
+                    if getattr(child, '_is_info', False):
+                        child.configure(bg=hover_bg)
+                        for lbl in child.winfo_children():
+                            try:
+                                lbl.configure(bg=hover_bg)
+                            except tk.TclError:
+                                pass
+                    elif getattr(child, '_is_thumb', False):
                         try:
-                            lbl.configure(bg=t['card_hover'])
+                            child.configure(bg=hover_bg)
+                            for sub in child.winfo_children():
+                                if not getattr(sub, '_is_action_strip', False):
+                                    sub.configure(bg=hover_bg)
+                        except:
+                            pass
+                    else:
+                        try:
+                            child.configure(bg=hover_bg)
                         except tk.TclError:
                             pass
-                elif getattr(child, '_is_thumb', False):
-                    try:
-                        child.configure(bg=t['card_hover'])
-                        for sub in child.winfo_children():
-                            if not getattr(sub, '_is_action_strip', False):
-                                sub.configure(bg=t['card_hover'])
-                    except:
-                        pass
-                else:
-                    try:
-                        child.configure(bg=t['card_hover'])
-                    except tk.TclError:
-                        pass
 
         # Reveal action strip at bottom of thumbnail
-        for child in card.winfo_children():
-            if getattr(child, '_is_thumb', False):
-                for sub in child.winfo_children():
-                    if getattr(sub, '_is_action_strip', False):
-                        sub.place(relx=0.0, rely=1.0, anchor='sw', relwidth=1.0)
-                        sub.lift()
-                break
+        if refs:
+            action = refs.get('action')
+            if action and action.winfo_exists():
+                action.place(relx=0.0, rely=1.0, anchor='sw', relwidth=1.0)
+                action.lift()
+        else:
+            for child in card.winfo_children():
+                if getattr(child, '_is_thumb', False):
+                    for sub in child.winfo_children():
+                        if getattr(sub, '_is_action_strip', False):
+                            sub.place(relx=0.0, rely=1.0, anchor='sw', relwidth=1.0)
+                            sub.lift()
+                    break
 
     def _on_card_leave(self, event, vp):
         self._hovered_card_path = None
@@ -2669,43 +2890,73 @@ class GridViewManager:
         is_excl = vp in self.excluded_items
         t = self._tok()
 
+        refs = self._card_refs.get(vp)
+
         # Restore border
         if is_sel:
             card.configure(highlightbackground=t['accent'], highlightthickness=2)
         elif is_excl:
             card.configure(highlightbackground=t['excluded'], highlightthickness=2)
         else:
+            surface_bg = t['surface']
             card.configure(highlightbackground=t['border'], highlightthickness=2,
-                           bg=t['surface'])
-            for child in card.winfo_children():
-                if getattr(child, '_is_info', False):
-                    child.configure(bg=t['surface'])
-                    for lbl in child.winfo_children():
+                           bg=surface_bg)
+            if refs:
+                try:
+                    refs['thumb'].configure(bg=surface_bg)
+                    refs['thumb_lbl'].configure(bg=surface_bg)
+                except Exception:
+                    pass
+                try:
+                    refs['info'].configure(bg=surface_bg)
+                    refs['name'].configure(bg=surface_bg)
+                    meta = refs.get('meta')
+                    if meta and meta.winfo_exists():
+                        meta.configure(bg=surface_bg)
+                except Exception:
+                    pass
+                try:
+                    divider = refs.get('divider')
+                    if divider and divider.winfo_exists():
+                        divider.configure(bg=t['border'])
+                except Exception:
+                    pass
+            else:
+                for child in card.winfo_children():
+                    if getattr(child, '_is_info', False):
+                        child.configure(bg=surface_bg)
+                        for lbl in child.winfo_children():
+                            try:
+                                lbl.configure(bg=surface_bg)
+                            except tk.TclError:
+                                pass
+                    elif getattr(child, '_is_thumb', False):
                         try:
-                            lbl.configure(bg=t['surface'])
+                            child.configure(bg=surface_bg)
+                            for sub in child.winfo_children():
+                                if not getattr(sub, '_is_action_strip', False):
+                                    sub.configure(bg=surface_bg)
+                        except:
+                            pass
+                    else:
+                        try:
+                            child.configure(bg=t['border'])
                         except tk.TclError:
                             pass
-                elif getattr(child, '_is_thumb', False):
-                    try:
-                        child.configure(bg=t['surface'])
-                        for sub in child.winfo_children():
-                            if not getattr(sub, '_is_action_strip', False):
-                                sub.configure(bg=t['surface'])
-                    except:
-                        pass
-                else:
-                    try:
-                        child.configure(bg=t['border'])
-                    except tk.TclError:
-                        pass
 
         # Conceal action strip
-        for child in card.winfo_children():
-            if getattr(child, '_is_thumb', False):
-                for sub in child.winfo_children():
-                    if getattr(sub, '_is_action_strip', False):
-                        sub.place_forget()
-                break
+        if refs:
+            action = refs.get('action')
+            if action and action.winfo_exists():
+                action.place_forget()
+        else:
+            for child in card.winfo_children():
+                if getattr(child, '_is_thumb', False):
+                    for sub in child.winfo_children():
+                        if getattr(sub, '_is_action_strip', False):
+                            sub.place_forget()
+                    break
+
 
     def _on_card_right_click(self, event, vp):
         # Original right‑click logic (unchanged)
@@ -3708,4 +3959,4 @@ class GridViewManager:
             else:
                 return self._rebuild_grid()
 
-        self._update_selection_label()
+        self._update_selection_label()
