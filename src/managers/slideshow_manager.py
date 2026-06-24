@@ -91,6 +91,8 @@ class SlideshowManager:
         self._trans_var         = None
         self._kb_var            = None
         self._fullscreen        = False
+        self._slideshow_mode    = False
+        self._slideshow_opts_frame = None
         self._hotkeys           = dict(DEFAULT_HOTKEYS)
         self._registered_cbids  = []
         self._fit_cache         = {}  # (path, cw, ch) -> rendered PIL
@@ -133,25 +135,33 @@ class SlideshowManager:
     def cleanup(self):
         self.close()
 
-    def show(self, photos, start_index=0):
+    def show(self, photos, start_index=0, slideshow_mode=False):
         if not photos:
             return
         self.photos  = list(photos)
         self.index   = max(0, min(start_index, len(photos) - 1))
         self._closing = False
         self._fit_cache.clear()
+        self._slideshow_mode = slideshow_mode
+        self.playing = slideshow_mode
 
         if self._win and self._win.winfo_exists():
             self._win.lift()
+            self._apply_slideshow_mode_ui()
             self._load_current()
             if self.playing:
                 self._schedule_next()
+            else:
+                self._cancel_timers()
+            self._update_play_btn()
             return
 
         self._build_window()
+        self._apply_slideshow_mode_ui()
         self._load_current()
         if self.playing:
             self._schedule_next()
+        self._update_play_btn()
 
     def close(self):
         self._closing = True
@@ -196,9 +206,22 @@ class SlideshowManager:
         self._build_control_bar(win)
         self._bind_keys(win)
 
-        # Viewer mode by default — press Play to start auto-advancing slideshow
-        self.playing = False
-        self._update_play_btn()
+    def _apply_slideshow_mode_ui(self):
+        """Viewer mode: static image only. Slideshow mode: show timing/transition controls."""
+        if self._slideshow_opts_frame:
+            if self._slideshow_mode:
+                if not self._slideshow_opts_frame.winfo_ismapped():
+                    self._slideshow_opts_frame.pack(side=tk.LEFT, fill=tk.Y)
+            else:
+                self._slideshow_opts_frame.pack_forget()
+        if self._win and self._win.winfo_exists():
+            self._win.title("Photo Slideshow" if self._slideshow_mode else "Photo Viewer")
+
+    def _enter_slideshow_mode(self):
+        if self._slideshow_mode:
+            return
+        self._slideshow_mode = True
+        self._apply_slideshow_mode_ui()
 
     # ── Top bar ───────────────────────────────────────────────────────────────
 
@@ -211,13 +234,16 @@ class SlideshowManager:
                  font=("Segoe UI", 11, "bold"),
                  bg="#111111", fg="#ffffff").pack(side=tk.LEFT, padx=16, pady=10)
 
+        self._slideshow_opts_frame = tk.Frame(top, bg="#111111")
+        opts = self._slideshow_opts_frame
+
         # Duration spinbox
-        tk.Label(top, text="Duration:",
+        tk.Label(opts, text="Duration:",
                  font=("Segoe UI", 9),
                  bg="#111111", fg="#aaaaaa").pack(side=tk.LEFT, padx=(20, 4), pady=10)
         self._dur_var = tk.DoubleVar(value=self.duration)
         dur_spin = tk.Spinbox(
-            top, from_=0.5, to=60.0, increment=0.5,
+            opts, from_=0.5, to=60.0, increment=0.5,
             textvariable=self._dur_var, width=5,
             font=("Segoe UI", 9),
             bg="#1e1e1e", fg="#ffffff",
@@ -229,12 +255,12 @@ class SlideshowManager:
         )
         dur_spin.pack(side=tk.LEFT, pady=10)
         dur_spin.bind("<FocusOut>", lambda e: self._on_duration_changed())
-        tk.Label(top, text="s",
+        tk.Label(opts, text="s",
                  font=("Segoe UI", 9),
                  bg="#111111", fg="#aaaaaa").pack(side=tk.LEFT, pady=10)
 
         # Transition picker
-        tk.Label(top, text="Transition:",
+        tk.Label(opts, text="Transition:",
                  font=("Segoe UI", 9),
                  bg="#111111", fg="#aaaaaa").pack(side=tk.LEFT, padx=(20, 4), pady=10)
         self._trans_var = tk.StringVar(value=self.transition)
@@ -242,7 +268,7 @@ class SlideshowManager:
         self._trans_label_to_key = {self.TRANSITION_LABELS[t]: t for t in self.TRANSITIONS}
         self._trans_display_var = tk.StringVar(value=self.TRANSITION_LABELS[self.transition])
         trans_om = tk.OptionMenu(
-            top, self._trans_display_var,
+            opts, self._trans_display_var,
             *trans_labels,
             command=self._on_transition_changed,
         )
@@ -261,7 +287,7 @@ class SlideshowManager:
         # Ken Burns toggle
         self._kb_var = tk.BooleanVar(value=self.ken_burns)
         kb_chk = tk.Checkbutton(
-            top, text="Ken Burns", variable=self._kb_var,
+            opts, text="Ken Burns", variable=self._kb_var,
             font=("Segoe UI", 9),
             bg="#111111", fg="#aaaaaa",
             selectcolor="#333333",
@@ -558,21 +584,21 @@ class SlideshowManager:
             return 1280, 700
 
     def _fit_image(self, pil_img, cw, ch, scale=1.0, offset_x=0.0, offset_y=0.0):
-        """Letterbox-fit image into (cw, ch), applying optional scale/pan for Ken Burns."""
-        cache_key = (id(pil_img), cw, ch, round(scale, 3), round(offset_x, 3), round(offset_y, 3))
+        """Letterbox-fit image into (cw, ch), applying optional centered scale for Ken Burns."""
+        cache_key = (id(pil_img), cw, ch, round(scale, 4), round(offset_x, 4), round(offset_y, 4))
         cached = self._fit_cache.get(cache_key)
         if cached is not None:
             return cached
         iw, ih = pil_img.size
         base_scale = min(cw / iw, ch / ih)
         s  = base_scale * scale
-        nw = max(1, int(iw * s))
-        nh = max(1, int(ih * s))
+        nw = max(1, int(round(iw * s)))
+        nh = max(1, int(round(ih * s)))
         resized = pil_img.resize((nw, nh), Image.Resampling.LANCZOS)
         cx = (cw - nw) / 2 + offset_x * max(0, nw - cw)
         cy = (ch - nh) / 2 + offset_y * max(0, nh - ch)
         canvas_img = Image.new("RGB", (cw, ch), (0, 0, 0))
-        canvas_img.paste(resized, (int(cx), int(cy)))
+        canvas_img.paste(resized, (round(cx), round(cy)))
         if len(self._fit_cache) > 24:
             self._fit_cache.clear()
         self._fit_cache[cache_key] = canvas_img
@@ -607,7 +633,8 @@ class SlideshowManager:
         self._update_counter()
         self._update_progress()
         self._preload_adjacent()
-        if self.ken_burns and self._kb_var and self._kb_var.get() and self._current_pil:
+        if (self.playing and self.ken_burns
+                and self._kb_var and self._kb_var.get() and self._current_pil):
             self._start_ken_burns()
 
     # ── Ken Burns ─────────────────────────────────────────────────────────────
@@ -616,31 +643,23 @@ class SlideshowManager:
         self._cancel_kb()
         if not self._current_pil:
             return
-        rng = random.Random()
-        start_scale = rng.uniform(1.00, 1.06)
-        end_scale   = rng.uniform(1.08, 1.18)
-        sx = rng.uniform(-0.25, 0.0)
-        sy = rng.uniform(-0.25, 0.0)
-        ex = rng.uniform(0.0,   0.25)
-        ey = rng.uniform(0.0,   0.25)
-        self._kb_params = (sx, sy, ex, ey, start_scale, end_scale)
+        # Smooth center zoom only — no pan (pan caused shaky movement).
+        self._kb_params = (1.0, 1.10)
         self._kb_start  = time.time()
         self._kb_tick()
 
     def _kb_tick(self):
-        if self._closing or not self._current_pil or not self._canvas.winfo_exists():
+        if self._closing or not self.playing or not self._current_pil or not self._canvas.winfo_exists():
             return
         elapsed = time.time() - self._kb_start
         total   = max(0.1, self.duration)
         t       = min(elapsed / total, 1.0)
         # Smooth ease-in-out
         t_ease  = t * t * (3 - 2 * t)
-        sx, sy, ex, ey, ss, es = self._kb_params
-        scale  = ss + (es - ss) * t_ease
-        ox     = sx + (ex - sx) * t_ease
-        oy     = sy + (ey - sy) * t_ease
+        start_scale, end_scale = self._kb_params
+        scale   = start_scale + (end_scale - start_scale) * t_ease
         cw, ch = self._canvas_size()
-        rendered = self._fit_image(self._current_pil, cw, ch, scale, ox, oy)
+        rendered = self._fit_image(self._current_pil, cw, ch, scale)
         self._show_pil_on_canvas(rendered)
         self._update_progress(t)
         if t < 1.0 and not self._closing:
@@ -661,6 +680,9 @@ class SlideshowManager:
         if not self.photos:
             return
         self.index  = new_index % len(self.photos)
+        if not self.playing:
+            self._load_current()
+            return
         next_path   = self.photos[self.index]
         next_pil    = self._load_pil(next_path)
         if not next_pil:
@@ -733,7 +755,7 @@ class SlideshowManager:
                 self._update_counter()
                 self._update_progress()
                 self._preload_adjacent()
-                if self.ken_burns and self._kb_var and self._kb_var.get():
+                if self.playing and self.ken_burns and self._kb_var and self._kb_var.get():
                     self._start_ken_burns()
                 if self.playing:
                     self._schedule_next()
@@ -777,14 +799,17 @@ class SlideshowManager:
     # ── Playback controls ─────────────────────────────────────────────────────
 
     def _toggle_play(self):
+        if not self.playing:
+            self._enter_slideshow_mode()
         self.playing = not self.playing
         self._update_play_btn()
         if self.playing:
             self._schedule_next()
-            if self.ken_burns and self._kb_var and self._kb_var.get() and self._current_pil:
+            if (self.ken_burns and self._kb_var and self._kb_var.get() and self._current_pil):
                 self._start_ken_burns()
         else:
             self._cancel_timers()
+            self._load_current()
 
     def _prev(self):
         self._cancel_timers()
@@ -881,6 +906,8 @@ class SlideshowManager:
             self._start_ken_burns()
         elif not self.ken_burns:
             self._cancel_kb()
+            if not self.playing:
+                self._load_current()
 
     def _toggle_fullscreen(self):
         self._fullscreen = not self._fullscreen

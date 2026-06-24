@@ -107,6 +107,8 @@ class GridViewManager:
         self._on_media_type_filter_changed = None
         self._media_type_filter_var = None
         self._media_type_filter_frame = None
+        self._media_type_filter_om = None
+        self._media_type_filter_label = None
 
         self._drag_source = None
         self._drag_ghost = None
@@ -701,8 +703,11 @@ class GridViewManager:
         t = self._tok()
         frame = tk.Frame(parent, bg=t.get('surface2', parent.cget('bg')))
         self._media_type_filter_frame = frame
-        tk.Label(frame, text="Show", font=("Segoe UI", 8),
-                 bg=frame.cget('bg'), fg=t['text_muted']).pack(side=tk.LEFT, padx=(8, 4))
+        self._media_type_filter_label = tk.Label(
+            frame, text="Show", font=("Segoe UI", 8),
+            bg=frame.cget('bg'), fg=t['text_muted'],
+        )
+        self._media_type_filter_label.pack(side=tk.LEFT, padx=(8, 4))
         current = 'all'
         if self._media_type_filter_callback:
             try:
@@ -720,15 +725,45 @@ class GridViewManager:
                 self._on_media_type_filter_changed(val)
 
         om = tk.OptionMenu(frame, self._media_type_filter_var, *labels.keys(), command=_on_pick)
-        om.configure(font=("Segoe UI", 8), bg=t['surface'], fg=t['text'],
-                     relief=tk.FLAT, highlightthickness=1, highlightbackground=t['border'],
-                     activebackground=t['surface2'], width=7)
-        om["menu"].configure(bg=t['surface'], fg=t['text'],
-                             activebackground=t['surface2'], activeforeground=t['text'])
+        self._media_type_filter_om = om
+        self._restyle_media_type_filter()
         om.pack(side=tk.LEFT, pady=12)
         frame.pack(side=tk.LEFT, padx=(0, 4))
         tk.Frame(parent, bg=t['border'], width=1).pack(side=tk.LEFT, fill=tk.Y, pady=8, padx=8)
         self._update_media_type_filter_visibility()
+
+    def _restyle_media_type_filter(self):
+        om = getattr(self, '_media_type_filter_om', None)
+        if om is None:
+            return
+        try:
+            if not om.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        t = self._tok()
+        om.configure(
+            font=("Segoe UI", 8), bg=t['surface'], fg=t['text'],
+            relief=tk.FLAT, highlightthickness=1, highlightbackground=t['border'],
+            activebackground=t['surface2'], activeforeground=t['text'], width=7,
+        )
+        om["menu"].configure(
+            bg=t['surface'], fg=t['text'],
+            activebackground=t['surface2'], activeforeground=t['text'],
+        )
+        frame = getattr(self, '_media_type_filter_frame', None)
+        if frame is not None:
+            try:
+                bg = t.get('surface2', t['bg'])
+                frame.configure(bg=bg)
+            except tk.TclError:
+                pass
+        label = getattr(self, '_media_type_filter_label', None)
+        if label is not None:
+            try:
+                label.configure(bg=frame.cget('bg') if frame else t['bg'], fg=t['text_muted'])
+            except tk.TclError:
+                pass
 
     def _update_media_type_filter_visibility(self):
         if not self._media_type_filter_frame:
@@ -1031,6 +1066,7 @@ class GridViewManager:
         tp.restyle_manager_buttons(self.grid_window)
         self._update_tag_filter_btn()
         self._update_sort_btn()
+        self._restyle_media_type_filter()
         self._rebuild_grid()
         if hasattr(self, '_page_size_menu') and self._page_size_menu.winfo_exists():
             t = self._tok()
@@ -2443,6 +2479,16 @@ class GridViewManager:
             context_menu.add_command(
                 label="Play This Video",
                 command=lambda: self._play_single(vp)
+            )
+
+        sel_photo_paths = [
+            p for p in self.selected_items
+            if os.path.isfile(p) and is_photo(p)
+        ]
+        if sel_photo_paths and hasattr(self.theme_provider, '_launch_slideshow'):
+            context_menu.add_command(
+                label="Open in Slideshow",
+                command=lambda photos=list(sel_photo_paths): self.theme_provider._launch_slideshow(photos),
             )
 
         context_menu.add_separator()

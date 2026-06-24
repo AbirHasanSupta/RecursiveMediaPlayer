@@ -9,7 +9,7 @@ from typing import List, Dict
 import uuid
 
 from managers.resource_manager import get_resource_manager
-from utils import _responsive_geometry
+from utils import _responsive_geometry, is_photo
 import keyboard_navigation
 
 
@@ -190,6 +190,8 @@ class WatchHistoryService:
 
     def add_watch_entry(self, video_path: str, duration_watched: int = 0,
                         total_duration: int = 0) -> WatchHistoryEntry:
+        if is_photo(video_path):
+            return None
         if duration_watched < 2 and total_duration > 10:
             with self._lock:
                 video_path_norm = os.path.normpath(video_path)
@@ -1386,6 +1388,8 @@ class WatchHistoryManager:
     def track_video_start(self, video_path: str):
         if not self._should_track_history():
             return
+        if is_photo(video_path):
+            return
         self._last_video_path = video_path
         self._last_start_time = datetime.now()
 
@@ -1393,6 +1397,8 @@ class WatchHistoryManager:
         if not self._should_track_history():
             return
         if not video_path or not os.path.exists(video_path):
+            return
+        if is_photo(video_path):
             return
         norm_path = os.path.normpath(video_path)
         if self._resume_entry_id and self._resume_video_path == norm_path:

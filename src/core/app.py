@@ -638,20 +638,54 @@ def select_multiple_folders_and_play():
             def _on_pick(label):
                 self._on_media_type_filter_changed(labels.get(label, 'all'))
 
-            tk.Label(self._dir_media_filter_frame, text="Show:",
-                     font=self.small_font, bg=self.bg_color,
-                     fg=self.text_muted).pack(side=tk.LEFT, padx=(6, 4))
+            self._dir_media_filter_label = tk.Label(
+                self._dir_media_filter_frame, text="Show:",
+                font=self.small_font, bg=self.bg_color, fg=self.text_muted,
+            )
+            self._dir_media_filter_label.pack(side=tk.LEFT, padx=(6, 4))
             om = tk.OptionMenu(
                 self._dir_media_filter_frame, self._media_type_filter_var,
                 *labels.keys(), command=_on_pick,
             )
-            om.config(font=self.small_font, bg=self.entry_bg, fg=self.entry_fg,
-                      relief=tk.FLAT, highlightthickness=1,
-                      highlightbackground=self.entry_border, width=7)
-            om["menu"].config(bg=self.entry_bg, fg=self.entry_fg,
-                              activebackground=self.hover_color)
+            self._dir_media_filter_om = om
+            self._restyle_media_type_filter_ui()
             om.pack(side=tk.LEFT, padx=(0, 6), pady=2)
             self._update_media_type_filter_ui_visibility()
+
+        def _restyle_media_type_filter_ui(self):
+            om = getattr(self, '_dir_media_filter_om', None)
+            if om is None:
+                return
+            try:
+                if not om.winfo_exists():
+                    return
+            except tk.TclError:
+                return
+            om.config(
+                font=self.small_font,
+                bg=self.entry_bg, fg=self.entry_fg,
+                activebackground=self.hover_color,
+                activeforeground=self.entry_fg,
+                relief=tk.FLAT, highlightthickness=1,
+                highlightbackground=self.entry_border, width=7,
+            )
+            om["menu"].config(
+                bg=self.entry_bg, fg=self.entry_fg,
+                activebackground=self.hover_color,
+                activeforeground=self.entry_fg,
+            )
+            frame = getattr(self, '_dir_media_filter_frame', None)
+            if frame is not None:
+                try:
+                    frame.configure(bg=self.bg_color)
+                except tk.TclError:
+                    pass
+            label = getattr(self, '_dir_media_filter_label', None)
+            if label is not None:
+                try:
+                    label.configure(bg=self.bg_color, fg=self.text_muted)
+                except tk.TclError:
+                    pass
 
         def _update_media_type_filter_ui_visibility(self):
             show = self.get_media_mode() == 'both'
@@ -727,11 +761,21 @@ def select_multiple_folders_and_play():
             if hasattr(self, 'slideshow_manager'):
                 self.slideshow_manager.apply_settings(self.settings_manager.get_settings())
                 self.slideshow_manager.set_hotkeys(self.settings_manager.get_settings().hotkeys)
-                self.slideshow_manager.show(photos, start_index)
+                self.slideshow_manager.show(photos, start_index, slideshow_mode=True)
                 self.update_console(f"Slideshow: {len(photos)} photos")
 
+        def _open_photo_viewer(self, photos, start_index=0):
+            photos = [p for p in photos if is_photo(p)]
+            if not photos:
+                self.update_console("No photos to show.")
+                return
+            start_index = max(0, min(start_index, len(photos) - 1))
+            if hasattr(self, 'slideshow_manager'):
+                self.slideshow_manager.show(photos, start_index, slideshow_mode=False)
+                self.update_console(f"Photo viewer: {os.path.basename(photos[start_index])}")
+
         def _play_paths(self, paths, start_index=0):
-            """Route playback to slideshow (photos) or VLC player (videos)."""
+            """Route playback to photo viewer (photos) or VLC player (videos)."""
             if not paths:
                 return
             paths = list(paths)
@@ -741,7 +785,7 @@ def select_multiple_folders_and_play():
             if is_photo(target):
                 photo_paths = [p for p in paths if is_photo(p)]
                 idx = photo_paths.index(target) if target in photo_paths else 0
-                self._launch_slideshow(photo_paths, idx)
+                self._open_photo_viewer(photo_paths, idx)
                 return
 
             if is_video(target):
@@ -2074,6 +2118,8 @@ def select_multiple_folders_and_play():
             if hasattr(self, 'help_manager'):
                 self.help_manager.apply_theme()
 
+            self._restyle_media_type_filter_ui()
+
         def _reapply_tree_columns(self):
             if not hasattr(self, 'exclusion_tree'):
                 return
@@ -3161,7 +3207,7 @@ def select_multiple_folders_and_play():
             context_menu.add_command(label="Play Selected", command=self.play_selected_videos)
             if sel_photo_paths:
                 context_menu.add_command(
-                    label="🖼 Slideshow",
+                    label="Open in Slideshow",
                     command=lambda photos=list(sel_photo_paths): self._launch_slideshow(photos),
                 )
             context_menu.add_separator()
@@ -4139,7 +4185,7 @@ def select_multiple_folders_and_play():
                         if os.path.normpath(p) == resume_path:
                             idx = i
                             break
-                self._launch_slideshow(media_files, idx)
+                self._open_photo_viewer(media_files, idx)
                 return
 
             videos = [p for p in media_files if is_video(p)]
