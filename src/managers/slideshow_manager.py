@@ -116,18 +116,22 @@ class SlideshowManager:
         self._vol_canvas        = None
         self._dur_var           = None
         self._trans_var         = None
+        self._trans_display_var = None
         self._kb_var            = None
+        self._dur_spin          = None
+        self._trans_om          = None
+        self._kb_chk            = None
+        self._title_lbl         = None
+        self._fs_btn            = None
+        self._mode_lbl          = None
         self._fullscreen        = False
         self._slideshow_mode    = False
-        self._slideshow_opts_frame = None
-        self._top_bar             = None
-        self._audio_bar           = None
-        self._control_panel       = None
-        self._chrome_visible      = True
-        self._hide_job            = None
-        self._poll_job            = None
-        self._last_mouse          = (-1, -1)
-        self._last_move_t         = time.monotonic()
+        self._bar               = None  # single overlay bar (place-based)
+        self._chrome_visible    = True
+        self._hide_job          = None
+        self._poll_job          = None
+        self._last_mouse        = (-1, -1)
+        self._last_move_t       = time.monotonic()
         self._hotkeys           = dict(DEFAULT_HOTKEYS)
         self._registered_cbids  = []
         self._fit_cache         = {}  # (path, cw, ch) -> rendered PIL
@@ -263,57 +267,17 @@ class SlideshowManager:
         except tk.TclError:
             return
         c = self._ctrl()
-        F = self._fonts()
         self._win.configure(bg=c["canvas"])
-        for key, frame in self._ui_frames.items():
-            if frame is None:
-                continue
-            try:
-                if not frame.winfo_exists():
-                    continue
-                bg = c["bg2"] if key == "btn_row" else c["bg"]
-                frame.configure(bg=bg)
-            except tk.TclError:
-                pass
-        for lbl in (getattr(self, '_title_lbl', None), getattr(self, '_counter_lbl', None)):
-            if lbl and lbl.winfo_exists():
-                lbl.configure(bg=c["bg"], fg=c["txt"] if lbl is self._title_lbl else c["txt_med"])
-        if getattr(self, '_counter_lbl', None) and self._counter_lbl.winfo_exists():
-            self._counter_lbl.configure(font=F["acc"])
-        for spin in (getattr(self, '_dur_spin', None),):
-            if spin and spin.winfo_exists():
-                self._style_spinbox(spin)
-        if getattr(self, '_trans_om', None) and self._trans_om.winfo_exists():
-            self._style_option_menu(self._trans_om)
-        if getattr(self, '_kb_chk', None) and self._kb_chk.winfo_exists():
-            self._kb_chk.configure(
-                bg=c["bg"], fg=c["txt_med"], selectcolor=c["btn_act"],
-                activebackground=c["bg"], activeforeground=c["txt"],
-            )
-        if getattr(self, '_slideshow_opts_frame', None) and self._slideshow_opts_frame.winfo_exists():
-            self._slideshow_opts_frame.configure(bg=c["bg"])
-            for child in self._slideshow_opts_frame.winfo_children():
-                try:
-                    if isinstance(child, tk.Label):
-                        child.configure(bg=c["bg"], fg=c["txt_med"])
-                except tk.TclError:
-                    pass
-        if getattr(self, '_mode_lbl', None) and self._mode_lbl.winfo_exists():
-            self._mode_lbl.configure(
-                bg=c["btn"], fg=c["accent"], highlightbackground=c["border"],
-            )
-        if getattr(self, '_pause_lbl', None) and self._pause_lbl.winfo_exists():
-            self._pause_lbl.configure(bg=c["btn"], highlightbackground=c["border"])
-        if getattr(self, '_ctrl_counter_lbl', None) and self._ctrl_counter_lbl.winfo_exists():
-            self._ctrl_counter_lbl.configure(bg=c["bg"], fg=c["txt_med"])
         if self._canvas and self._canvas.winfo_exists():
             self._canvas.configure(bg=c["canvas"])
+        if self._bar and self._bar.winfo_exists():
+            self._bar.configure(bg=c["bg"])
         if self._progress_canvas and self._progress_canvas.winfo_exists():
             self._progress_canvas.configure(bg=c["bg"])
         if self._vol_canvas and self._vol_canvas.winfo_exists():
-            self._vol_canvas.configure(bg=c["bg2"])
+            self._vol_canvas.configure(bg=c["bg"])
         if getattr(self, '_now_playing_lbl', None) and self._now_playing_lbl.winfo_exists():
-            self._now_playing_lbl.configure(bg=c["bg2"], fg=c["txt_dim"])
+            self._now_playing_lbl.configure(bg=c["bg"], fg=c["txt_dim"])
         self._update_progress()
         self._draw_vol_slider()
         self._update_play_btn()
@@ -321,6 +285,7 @@ class SlideshowManager:
         self._restyle_transport_btns()
         if hasattr(self.theme_provider, 'apply_title_bar_theme'):
             self.theme_provider.apply_title_bar_theme(self._win)
+        self._place_bar()
 
     def _reset_widget_state(self):
         """Clear canvas/widget refs after window destroy (fixes blank reopen)."""
@@ -348,9 +313,8 @@ class SlideshowManager:
         self._kb_chk            = None
         self._title_lbl         = None
         self._fs_btn            = None
-        self._top_bar           = None
-        self._audio_bar         = None
-        self._control_panel     = None
+        self._mode_lbl          = None
+        self._bar               = None
         self._registered_cbids  = []
         self._ui_frames         = {}
         self._chrome_visible    = True
@@ -448,10 +412,10 @@ class SlideshowManager:
         except Exception:
             pass
 
-        self._build_top_bar(win)
+        # Canvas fills the ENTIRE window — never resizes when bar shows/hides
         self._build_canvas(win)
-        self._build_audio_bar(win)
-        self._build_control_bar(win)
+        # Single overlay bar placed on top of the canvas (embedded-player style)
+        self._build_overlay_bar(win)
         self._bind_keys(win)
         self.apply_theme()
         self._update_play_btn()
@@ -460,10 +424,23 @@ class SlideshowManager:
         self._show_chrome()
         self._start_mouse_poll()
 
+    # ── Bar placement (overlay, like embedded video player) ──────────────────
+
+    def _place_bar(self):
+        """Position the overlay bar at the bottom of the canvas via place()."""
+        if not self._bar or not self._win:
+            return
+        try:
+            if self._bar.winfo_exists() and self._chrome_visible:
+                self._bar.place(relx=0.0, rely=1.0, anchor="sw", relwidth=1.0)
+                self._bar.lift()
+        except Exception:
+            pass
+
     # ── Chrome auto-hide (embedded-player style) ──────────────────────────────
 
     def _chrome_widgets(self):
-        return [w for w in (self._top_bar, self._audio_bar, self._control_panel) if w]
+        return [w for w in (self._bar,) if w]
 
     def _pointer_over_chrome(self):
         try:
@@ -486,12 +463,7 @@ class SlideshowManager:
             return
         self._chrome_visible = True
         try:
-            if self._top_bar and self._top_bar.winfo_exists():
-                self._top_bar.pack(fill=tk.X, side=tk.TOP)
-            if self._audio_bar and self._audio_bar.winfo_exists():
-                self._audio_bar.pack(fill=tk.X, side=tk.BOTTOM)
-            if self._control_panel and self._control_panel.winfo_exists():
-                self._control_panel.pack(fill=tk.X, side=tk.BOTTOM)
+            self._place_bar()
             if self._win and self._win.winfo_exists():
                 self._win.configure(cursor="")
             if self._canvas and self._canvas.winfo_exists():
@@ -504,13 +476,9 @@ class SlideshowManager:
         if not self._chrome_visible:
             return
         self._chrome_visible = False
-        for w in self._chrome_widgets():
-            try:
-                if w.winfo_exists():
-                    w.pack_forget()
-            except Exception:
-                pass
         try:
+            if self._bar and self._bar.winfo_exists():
+                self._bar.place_forget()
             if self._win and self._win.winfo_exists():
                 self._win.configure(cursor="none")
             if self._canvas and self._canvas.winfo_exists():
@@ -609,18 +577,8 @@ class SlideshowManager:
             self._poll_job = None
 
     def _apply_slideshow_mode_ui(self):
-        """Viewer mode: static image only. Slideshow mode: show timing/transition controls."""
-        if self._slideshow_opts_frame:
-            if self._slideshow_mode:
-                if not self._slideshow_opts_frame.winfo_ismapped():
-                    self._slideshow_opts_frame.pack(side=tk.LEFT, fill=tk.Y)
-            else:
-                self._slideshow_opts_frame.pack_forget()
         if self._win and self._win.winfo_exists():
             self._win.title("Photo Slideshow" if self._slideshow_mode else "Photo Viewer")
-        if getattr(self, '_title_lbl', None) and self._title_lbl.winfo_exists():
-            self._title_lbl.config(
-                text="🖼  Photo Slideshow" if self._slideshow_mode else "🖼  Photo Viewer")
         self._update_mode_label()
 
     def _enter_slideshow_mode(self):
@@ -629,183 +587,31 @@ class SlideshowManager:
         self._slideshow_mode = True
         self._apply_slideshow_mode_ui()
 
-    # ── Top bar ───────────────────────────────────────────────────────────────
+    # ── Single overlay control bar (embedded-player style) ────────────────────
 
-    def _build_top_bar(self, win):
+    def _build_overlay_bar(self, win):
+        """Build the single floating control bar placed over the canvas.
+
+        Layout (left → right):
+          [⏮] [⏪] [▶ Play] [⏩] [⏭]  ──progress──  [1/42]  [🔊] [vol] [♪ now-playing]  [⚙] [⛶] [✕]
+        The bar is placed at the bottom via place() so the canvas never resizes.
+        """
         c = self._ctrl()
         F = self._fonts()
-        top = tk.Frame(win, bg=c["bg"], height=48)
-        self._top_bar = top
-        self._ui_frames["header"] = top
-        top.pack(fill=tk.X, side=tk.TOP)
-        top.pack_propagate(False)
 
-        inner = tk.Frame(top, bg=c["bg"])
-        inner.pack(fill=tk.BOTH, expand=True, padx=14, pady=6)
+        bar = tk.Frame(win, bg=c["bg"])
+        self._bar = bar
+        # Don't pack/grid the bar — it lives as a place() overlay
 
-        self._title_lbl = tk.Label(
-            inner, text="🖼  Photo Viewer", font=F["title"],
-            bg=c["bg"], fg=c["txt"],
-        )
-        self._title_lbl.pack(side=tk.LEFT)
+        # Top border line
+        tk.Frame(bar, bg=c["border"], height=1).pack(fill=tk.X, side=tk.TOP)
 
-        self._slideshow_opts_frame = tk.Frame(inner, bg=c["bg"])
-        opts = self._slideshow_opts_frame
-
-        tk.Label(opts, text="Duration:", font=F["sm"],
-                 bg=c["bg"], fg=c["txt_med"]).pack(side=tk.LEFT, padx=(16, 4))
-        self._dur_var = tk.DoubleVar(value=self.duration)
-        self._dur_spin = tk.Spinbox(
-            opts, from_=0.5, to=60.0, increment=0.5,
-            textvariable=self._dur_var, width=5,
-            command=self._on_duration_changed,
-        )
-        self._style_spinbox(self._dur_spin)
-        self._dur_spin.pack(side=tk.LEFT)
-        self._dur_spin.bind("<FocusOut>", lambda e: self._on_duration_changed())
-        tk.Label(opts, text="s", font=F["sm"],
-                 bg=c["bg"], fg=c["txt_med"]).pack(side=tk.LEFT, padx=(2, 0))
-
-        tk.Label(opts, text="Transition:", font=F["sm"],
-                 bg=c["bg"], fg=c["txt_med"]).pack(side=tk.LEFT, padx=(16, 4))
-        self._trans_var = tk.StringVar(value=self.transition)
-        trans_labels = [self.TRANSITION_LABELS[t] for t in self.TRANSITIONS]
-        self._trans_label_to_key = {self.TRANSITION_LABELS[t]: t for t in self.TRANSITIONS}
-        self._trans_display_var = tk.StringVar(value=self.TRANSITION_LABELS[self.transition])
-        self._trans_om = tk.OptionMenu(
-            opts, self._trans_display_var, *trans_labels, command=self._on_transition_changed,
-        )
-        self._style_option_menu(self._trans_om)
-        self._trans_om.pack(side=tk.LEFT)
-
-        self._kb_var = tk.BooleanVar(value=self.ken_burns)
-        self._kb_chk = tk.Checkbutton(
-            opts, text="Ken Burns", variable=self._kb_var,
-            font=F["sm"], bg=c["bg"], fg=c["txt_med"],
-            selectcolor=c["btn_act"], activebackground=c["bg"],
-            activeforeground=c["txt"], command=self._on_kb_changed,
-        )
-        self._kb_chk.pack(side=tk.LEFT, padx=(16, 0))
-
-        right = tk.Frame(inner, bg=c["bg"])
-        right.pack(side=tk.RIGHT)
-
-        self._counter_lbl = tk.Label(
-            right, text="", font=F["acc"], bg=c["bg"], fg=c["txt_med"],
-        )
-        self._counter_lbl.pack(side=tk.RIGHT, padx=(8, 0))
-
-        self._fs_btn = self._make_btn(
-            right, "⛶", self._toggle_fullscreen, padx=7, pady=4,
-        )
-        self._fs_btn.pack(side=tk.RIGHT, padx=(4, 0))
-
-        close_btn = self._make_btn(right, "✕", self.close, padx=7, pady=4, fg=c["txt_dim"])
-        close_btn.pack(side=tk.RIGHT)
-
-        tk.Frame(top, bg=c["border"], height=1).pack(fill=tk.X, side=tk.BOTTOM)
-
-    # ── Audio bar ─────────────────────────────────────────────────────────────
-
-    def _build_audio_bar(self, win):
-        c = self._ctrl()
-        F = self._fonts()
-        audio_bar = tk.Frame(win, bg=c["bg2"], height=42)
-        self._audio_bar = audio_bar
-        self._ui_frames["audio"] = audio_bar
-        audio_bar.pack(fill=tk.X, side=tk.BOTTOM)
-        audio_bar.pack_propagate(False)
-
-        inner = tk.Frame(audio_bar, bg=c["bg2"])
-        inner.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
-
-        add_btn = tk.Label(
-            inner, text="♪ Add Music", font=F["acc"],
-            bg=c["bg2"], fg=c["accent"], cursor="hand2", padx=4,
-        )
-        add_btn.pack(side=tk.LEFT)
-        add_btn.bind("<Button-1>", lambda e: self._show_add_music_menu(add_btn))
-        add_btn.bind("<Enter>", lambda e: (add_btn.config(fg=c["accent_hvr"]), self._cancel_chrome_hide()))
-        add_btn.bind("<Leave>", lambda e: (add_btn.config(fg=c["accent"]), self._schedule_chrome_hide()))
-        self._sep(inner, pady=6)
-
-        self._make_btn(inner, "⏮", self._prev_song, padx=6, pady=3).pack(side=tk.LEFT, padx=1)
-        self._make_btn(inner, "⏭", self._next_song, padx=6, pady=3).pack(side=tk.LEFT, padx=1)
-        self._sep(inner, pady=6)
-
-        self._mute_btn = tk.Label(
-            inner, text="🔊", font=F["md"], bg=c["bg2"], fg=c["txt_med"],
-            cursor="hand2", padx=4,
-        )
-        self._mute_btn.pack(side=tk.LEFT)
-        self._mute_btn.bind("<Button-1>", lambda e: self._toggle_mute())
-        self._mute_btn.bind("<Enter>", lambda e: self._mute_btn.config(fg=c["txt"]))
-        self._mute_btn.bind("<Leave>", lambda e: self._mute_btn.config(fg=c["txt_med"]))
-
-        tk.Label(inner, text="Vol", font=F["xs"],
-                 bg=c["bg2"], fg=c["txt_dim"]).pack(side=tk.LEFT, padx=(4, 2))
-
-        self._vol_canvas = tk.Canvas(
-            inner, bg=c["bg2"], width=72, height=14,
-            highlightthickness=0, cursor="hand2",
-        )
-        self._vol_canvas.pack(side=tk.LEFT, padx=(0, 6))
-        self._vol_canvas.bind("<Button-1>", self._on_vol_click)
-        self._vol_canvas.bind("<B1-Motion>", self._on_vol_click)
-        self._vol_canvas.bind("<Configure>", lambda e: self._draw_vol_slider())
-
-        self._now_playing_lbl = tk.Label(
-            inner, text="No music added", font=F["sm"],
-            bg=c["bg2"], fg=c["txt_dim"], anchor="w",
-        )
-        self._now_playing_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 8))
-
-        self._make_btn(inner, "🔀", self._shuffle_songs, padx=6, pady=3).pack(side=tk.RIGHT)
-        self._make_btn(
-            inner, "✕", self._clear_music, padx=6, pady=3, fg=c["txt_dim"],
-        ).pack(side=tk.RIGHT, padx=(0, 2))
-
-    # ── Main canvas ───────────────────────────────────────────────────────────
-
-    def _build_canvas(self, win):
-        c = self._ctrl()
-        self._canvas = tk.Canvas(win, bg=c["canvas"], highlightthickness=0)
-        self._canvas.pack(fill=tk.BOTH, expand=True)
-        self._canvas.bind("<Configure>", lambda e: self._on_canvas_resize(e))
-        self._canvas.bind("<Button-3>", lambda e: self._show_context(e))
-        self._canvas.bind("<Double-Button-1>", lambda e: self._toggle_fullscreen())
-
-    # ── Bottom control bar (embedded-player style) ────────────────────────────
-
-    def _build_control_bar(self, win):
-        c = self._ctrl()
-        F = self._fonts()
-        panel = tk.Frame(win, bg=c["bg"])
-        self._control_panel = panel
-        self._ui_frames["panel"] = panel
-        panel.pack(fill=tk.X, side=tk.BOTTOM)
-
-        tk.Frame(panel, bg=c["border"], height=1).pack(fill=tk.X)
-
-        info_row = tk.Frame(panel, bg=c["bg"])
-        self._ui_frames["info_row"] = info_row
-        info_row.pack(fill=tk.X, padx=14, pady=(6, 0))
-        tk.Label(
-            info_row, text="Navigation", font=F["sm"],
-            bg=c["bg"], fg=c["txt_med"],
-        ).pack(side=tk.LEFT)
-        self._ctrl_counter_lbl = tk.Label(
-            info_row, text="", font=F["acc"],
-            bg=c["bg"], fg=c["txt_med"],
-        )
-        self._ctrl_counter_lbl.pack(side=tk.RIGHT)
-
-        seek_row = tk.Frame(panel, bg=c["bg"])
-        self._ui_frames["seek_row"] = seek_row
-        seek_row.pack(fill=tk.X, padx=14, pady=(4, 0))
+        # ── Progress row ───────────────────────────────────────────────────
+        prog_row = tk.Frame(bar, bg=c["bg"])
+        prog_row.pack(fill=tk.X, padx=12, pady=(5, 2))
 
         self._progress_canvas = tk.Canvas(
-            seek_row, height=20, bg=c["bg"],
+            prog_row, height=18, bg=c["bg"],
             highlightthickness=0, cursor="hand2",
         )
         self._progress_canvas.pack(fill=tk.X, expand=True)
@@ -813,61 +619,310 @@ class SlideshowManager:
         self._progress_canvas.bind("<B1-Motion>", self._on_progress_click)
         self._progress_canvas.bind("<Configure>", lambda e: self._update_progress())
 
-        btn_row = tk.Frame(panel, bg=c["bg2"])
-        self._ui_frames["btn_row"] = btn_row
-        btn_row.pack(fill=tk.X, pady=(4, 8))
+        # ── Buttons row ────────────────────────────────────────────────────
+        btn_row = tk.Frame(bar, bg=c["bg"])
+        btn_row.pack(fill=tk.X, padx=8, pady=(2, 6))
 
-        zone_a = tk.Frame(btn_row, bg=c["bg2"])
-        zone_a.pack(side=tk.LEFT, padx=(10, 0), pady=4)
+        # Left zone: transport
+        zone_l = tk.Frame(btn_row, bg=c["bg"])
+        zone_l.pack(side=tk.LEFT)
 
         self._btn_first = self._make_btn(
-            zone_a, "⏮", self._go_first, padx=7, pady=4, fg=c["txt_dim"],
+            zone_l, "⏮", self._go_first, padx=6, pady=4, fg=c["txt_dim"],
         )
-        self._btn_first.pack(side=tk.LEFT, padx=(0, 2))
+        self._btn_first.pack(side=tk.LEFT, padx=(0, 1))
 
-        self._btn_prev = self._make_btn(zone_a, "⏪", self._prev, padx=7, pady=4)
-        self._btn_prev.pack(side=tk.LEFT, padx=2)
+        self._btn_prev = self._make_btn(zone_l, "⏪", self._prev, padx=6, pady=4)
+        self._btn_prev.pack(side=tk.LEFT, padx=1)
 
         self._play_btn = self._make_btn(
-            zone_a, "▶  Play", self._toggle_play, accent=True,
+            zone_l, "▶  Play", self._toggle_play, accent=True,
             font=F["acc"], padx=14, pady=5,
         )
-        self._play_btn.pack(side=tk.LEFT, padx=6)
+        self._play_btn.pack(side=tk.LEFT, padx=5)
 
-        self._btn_next = self._make_btn(zone_a, "⏩", self._next, padx=7, pady=4)
-        self._btn_next.pack(side=tk.LEFT, padx=2)
+        self._btn_next = self._make_btn(zone_l, "⏩", self._next, padx=6, pady=4)
+        self._btn_next.pack(side=tk.LEFT, padx=1)
 
         self._btn_last = self._make_btn(
-            zone_a, "⏭", self._go_last, padx=7, pady=4, fg=c["txt_dim"],
+            zone_l, "⏭", self._go_last, padx=6, pady=4, fg=c["txt_dim"],
         )
-        self._btn_last.pack(side=tk.LEFT, padx=(2, 0))
+        self._btn_last.pack(side=tk.LEFT, padx=(1, 0))
 
-        zone_b = tk.Frame(btn_row, bg=c["bg2"])
-        zone_b.pack(side=tk.RIGHT, padx=(0, 10), pady=4)
+        # Counter badge
+        self._sep(btn_row, pady=6)
+        self._ctrl_counter_lbl = tk.Label(
+            btn_row, text="", font=F["acc"],
+            bg=c["bg"], fg=c["txt_med"],
+        )
+        self._ctrl_counter_lbl.pack(side=tk.LEFT, padx=(4, 0))
 
+        # Status badge (Playing / Paused / Viewer)
+        self._sep(btn_row, pady=6)
         self._pause_lbl = tk.Label(
-            zone_b, text="Paused", font=F["acc"],
+            btn_row, text="Viewer", font=F["acc"],
             bg=c["btn"], fg=c["txt_med"],
-            padx=8, pady=3,
+            padx=6, pady=2,
             highlightbackground=c["border"], highlightthickness=1,
         )
-        self._pause_lbl.pack(side=tk.RIGHT, padx=(6, 0))
+        self._pause_lbl.pack(side=tk.LEFT, padx=(4, 0))
 
-        mode_lbl = tk.Label(
-            zone_b,
-            text="Viewer" if not self._slideshow_mode else "Slideshow",
-            font=F["acc"], bg=c["btn"], fg=c["accent"],
-            padx=8, pady=3,
-            highlightbackground=c["border"], highlightthickness=1,
+        # Right zone: audio + settings + window
+        zone_r = tk.Frame(btn_row, bg=c["bg"])
+        zone_r.pack(side=tk.RIGHT)
+
+        # Audio: mute + volume slider
+        self._mute_btn = tk.Label(
+            zone_r, text="🔊", font=F["md"], bg=c["bg"], fg=c["txt_med"],
+            cursor="hand2", padx=4,
         )
-        mode_lbl.pack(side=tk.RIGHT)
-        self._mode_lbl = mode_lbl
+        self._mute_btn.pack(side=tk.LEFT)
+        self._mute_btn.bind("<Button-1>", lambda e: self._toggle_mute())
+        self._mute_btn.bind("<Enter>", lambda e: self._mute_btn.config(fg=c["txt"]))
+        self._mute_btn.bind("<Leave>", lambda e: self._mute_btn.config(fg=c["txt_med"]))
+
+        self._vol_canvas = tk.Canvas(
+            zone_r, bg=c["bg"], width=68, height=14,
+            highlightthickness=0, cursor="hand2",
+        )
+        self._vol_canvas.pack(side=tk.LEFT, padx=(2, 6))
+        self._vol_canvas.bind("<Button-1>", self._on_vol_click)
+        self._vol_canvas.bind("<B1-Motion>", self._on_vol_click)
+        self._vol_canvas.bind("<Configure>", lambda e: self._draw_vol_slider())
+
+        # Now-playing label (truncated, expands to fill)
+        self._now_playing_lbl = tk.Label(
+            zone_r, text="", font=F["sm"],
+            bg=c["bg"], fg=c["txt_dim"], anchor="w",
+        )
+        self._now_playing_lbl.pack(side=tk.LEFT, padx=(0, 4))
+
+        self._sep(zone_r, pady=6)
+
+        # ⋮ Settings button — opens dropdown with less-important options
+        settings_btn = self._make_btn(
+            zone_r, "⋮", self._show_settings_menu, padx=7, pady=4,
+        )
+        settings_btn.pack(side=tk.LEFT, padx=(0, 2))
+        self._settings_btn = settings_btn
+
+        self._sep(zone_r, pady=6)
+
+        # Fullscreen + Close
+        self._fs_btn = self._make_btn(
+            zone_r, "⛶", self._toggle_fullscreen, padx=7, pady=4,
+        )
+        self._fs_btn.pack(side=tk.LEFT, padx=(0, 2))
+
+        close_btn = self._make_btn(zone_r, "✕", self.close, padx=7, pady=4, fg=c["txt_dim"])
+        close_btn.pack(side=tk.LEFT)
+
+        # Bind hover so bar staying visible while mouse is over it
+        self._bind_chrome_hover(bar)
+        for child in bar.winfo_children():
+            self._bind_chrome_hover(child)
+            for grandchild in child.winfo_children():
+                self._bind_chrome_hover(grandchild)
+
+        # ── Initialise vars for settings (slideshow opts + audio) ──────────
+        self._dur_var = tk.DoubleVar(value=self.duration)
+        self._trans_var = tk.StringVar(value=self.transition)
+        self._trans_label_to_key = {self.TRANSITION_LABELS[t]: t for t in self.TRANSITIONS}
+        self._trans_display_var = tk.StringVar(value=self.TRANSITION_LABELS[self.transition])
+        self._kb_var = tk.BooleanVar(value=self.ken_burns)
+
+    # ── Main canvas (fills entire window, never resizes) ──────────────────────
+
+    def _build_canvas(self, win):
+        c = self._ctrl()
+        self._canvas = tk.Canvas(win, bg=c["canvas"], highlightthickness=0)
+        self._canvas.pack(fill=tk.BOTH, expand=True)
+        self._canvas.bind("<Double-Button-1>", lambda e: self._toggle_fullscreen())
+        self._canvas.bind("<Button-3>", lambda e: self._show_context(e))
+        # Reposition overlay bar when window is resized
+        self._canvas.bind("<Configure>", lambda e: (
+            self._on_canvas_resize(e),
+            self._place_bar(),
+        ), add="+")
+
+    # ── Settings dropdown (less-important controls) ───────────────────────────
+
+    def _show_settings_menu(self):
+        """Popup menu with slideshow settings + audio controls."""
+        c = self._ctrl()
+        menu = self._context_menu()
+
+        # ── Slideshow settings sub-section ─────────────────────────────────
+        menu.add_command(
+            label=f"⏱  Duration: {self.duration:.1f} s",
+            command=self._prompt_duration,
+        )
+
+        # Transition sub-menu
+        trans_menu = tk.Menu(
+            menu, tearoff=0, bg=c["surface"], fg=c["txt"],
+            activebackground=c["btn_hvr"], activeforeground=c["txt"], relief=tk.FLAT,
+            font=("Segoe UI", 10),
+        )
+        for t in self.TRANSITIONS:
+            label = self.TRANSITION_LABELS[t]
+            check = "✔  " if t == self.transition else "     "
+            trans_menu.add_command(
+                label=check + label,
+                command=lambda _t=t: self._set_transition(_t),
+            )
+        menu.add_cascade(label="✦  Transition", menu=trans_menu)
+
+        kb_label = "☑  Ken Burns  (on)" if self.ken_burns else "☐  Ken Burns  (off)"
+        menu.add_command(label=kb_label, command=self._toggle_ken_burns)
+
+        menu.add_separator()
+
+        # ── Audio sub-section ──────────────────────────────────────────────
+        audio_menu = tk.Menu(
+            menu, tearoff=0, bg=c["surface"], fg=c["txt"],
+            activebackground=c["btn_hvr"], activeforeground=c["txt"], relief=tk.FLAT,
+            font=("Segoe UI", 10),
+        )
+        audio_menu.add_command(label="♪  Add songs…", command=self._pick_songs)
+        audio_menu.add_command(label="📁  Add folder…", command=self._pick_song_folder)
+        if self._songs:
+            audio_menu.add_separator()
+            audio_menu.add_command(label="⏮  Previous song", command=self._prev_song)
+            audio_menu.add_command(label="⏭  Next song", command=self._next_song)
+            audio_menu.add_command(label="🔀  Shuffle playlist", command=self._shuffle_songs)
+            audio_menu.add_command(label="✕  Clear music", command=self._clear_music)
+        menu.add_cascade(label="♪  Music", menu=audio_menu)
+
+        try:
+            btn = self._settings_btn
+            x = btn.winfo_rootx()
+            y = btn.winfo_rooty()
+            menu.tk_popup(x, y)
+        except Exception:
+            pass
+        finally:
+            try:
+                menu.grab_release()
+            except Exception:
+                pass
+
+    def _prompt_duration(self):
+        """Custom dark-themed dialog for entering slide duration."""
+        if not self._win or not self._win.winfo_exists():
+            return
+
+        c = self._ctrl()
+        F = self._fonts()
+
+        dlg = tk.Toplevel(self._win)
+        dlg.withdraw()
+        dlg.title("Slide Duration")
+        dlg.configure(bg=c["bg2"])
+        dlg.resizable(False, False)
+        dlg.transient(self._win)
+        dlg.grab_set()
+
+        try:
+            from icon_helper import apply_icon
+            apply_icon(dlg)
+        except Exception:
+            pass
+
+        # Size and center relative to the slideshow window
+        dw, dh = 320, 160
+        dlg.update_idletasks()
+        pw = self._win.winfo_width()
+        ph = self._win.winfo_height()
+        px = self._win.winfo_rootx()
+        py = self._win.winfo_rooty()
+        dlg.geometry(f"{dw}x{dh}+{px + (pw - dw) // 2}+{py + (ph - dh) // 2}")
+        dlg.deiconify()
+
+        # Accent top border (matches embedded player dialogs)
+        tk.Frame(dlg, height=2, bg=c["accent"]).pack(fill=tk.X)
+
+        # Header
+        hdr = tk.Frame(dlg, bg=c["bg2"])
+        hdr.pack(fill=tk.X, padx=18, pady=(12, 6))
+        tk.Label(
+            hdr, text="⏱  Slide Duration",
+            font=("Segoe UI", 10, "bold"), bg=c["bg2"], fg=c["txt"],
+        ).pack(side=tk.LEFT)
+        tk.Label(
+            hdr, text="seconds per photo",
+            font=("Segoe UI", 8), bg=c["bg2"], fg=c["txt_dim"],
+        ).pack(side=tk.RIGHT)
+
+        # Entry
+        var = tk.StringVar(value=str(self.duration))
+        entry = tk.Entry(
+            dlg, textvariable=var,
+            font=("Segoe UI", 11), bg=c["surface"], fg=c["txt"],
+            insertbackground=c["txt"], relief=tk.FLAT,
+            highlightthickness=1, highlightbackground=c["border"],
+            justify="center",
+        )
+        entry.pack(fill=tk.X, padx=18, ipady=5)
+        entry.select_range(0, tk.END)
+        entry.focus_set()
+
+        # Hint label
+        tk.Label(
+            dlg, text="Range: 0.5 – 120  ·  Press Enter to confirm",
+            font=("Segoe UI", 7), bg=c["bg2"], fg=c["txt_dim"],
+        ).pack(pady=(3, 0))
+
+        # Buttons row
+        btn_row = tk.Frame(dlg, bg=c["bg2"])
+        btn_row.pack(pady=(8, 12))
+
+        def _apply(e=None):
+            try:
+                val = float(var.get().replace(",", "."))
+                val = max(0.5, min(120.0, val))
+                self.duration = val
+                if self._dur_var:
+                    self._dur_var.set(val)
+            except ValueError:
+                pass
+            dlg.destroy()
+
+        def _cancel(e=None):
+            dlg.destroy()
+
+        tk.Button(
+            btn_row, text="Set Duration", command=_apply,
+            bg=c["accent"], fg=c["play_fg"],
+            relief=tk.FLAT, font=("Segoe UI", 9, "bold"),
+            padx=16, pady=5, cursor="hand2",
+            activebackground=c["accent_hvr"], activeforeground=c["play_fg"],
+        ).pack(side=tk.LEFT, padx=(0, 8))
+
+        tk.Button(
+            btn_row, text="Cancel", command=_cancel,
+            bg=c["btn"], fg=c["txt_med"],
+            relief=tk.FLAT, font=("Segoe UI", 9),
+            padx=12, pady=5, cursor="hand2",
+            activebackground=c["btn_hvr"], activeforeground=c["txt"],
+        ).pack(side=tk.LEFT)
+
+        entry.bind("<Return>", _apply)
+        dlg.bind("<Escape>", _cancel)
+        dlg.wait_window()
+
+    def _set_transition(self, transition_key):
+        self.transition = transition_key
+        if self._trans_display_var:
+            self._trans_display_var.set(self.TRANSITION_LABELS[transition_key])
+
+    def _toggle_ken_burns(self):
+        self.ken_burns = not self.ken_burns
+        if self._kb_var:
+            self._kb_var.set(self.ken_burns)
+        self._on_kb_changed()
 
     def _update_mode_label(self):
-        if getattr(self, '_mode_lbl', None) and self._mode_lbl.winfo_exists():
-            self._mode_lbl.config(
-                text="Slideshow" if self._slideshow_mode else "Viewer",
-            )
         self._update_pause_label()
 
     # ── Keyboard bindings ─────────────────────────────────────────────────────
