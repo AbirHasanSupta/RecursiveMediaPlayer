@@ -81,6 +81,8 @@ class GridViewManager:
         self._sort_btn = None
         self._duration_cache = {}
         self._closing = False
+        # Tracks which folder paths are collapsed; persisted in memory until restart
+        self._collapsed_dirs = set()
         self.search_var = tk.StringVar()
         self.search_var.trace_add('write', lambda *_: self._on_search_changed())
 
@@ -1364,13 +1366,20 @@ class GridViewManager:
         page_items = self._get_page_items()
         grid_row = -1
         video_col = 0
+        _current_dir_collapsed = False
 
         for item_data in page_items:
             if item_data['type'] == 'header':
                 grid_row += 1
                 video_col = 0
+                _current_dir_collapsed = item_data['path'] in self._collapsed_dirs
                 self._build_header(item_data, grid_row, cols, t)
-                grid_row += 1
+                if not _current_dir_collapsed:
+                    grid_row += 1
+                continue
+
+            # Skip cards for collapsed directories
+            if _current_dir_collapsed:
                 continue
 
             item      = item_data['video_item']
@@ -1402,26 +1411,44 @@ class GridViewManager:
 
     def _build_header(self, item_data, grid_row, cols, t):
         dir_path = item_data['path']
+        is_collapsed = dir_path in self._collapsed_dirs
 
+        dir_vps = [it['path'] for it in self.items
+                   if it['type'] == 'video' and os.path.dirname(it['path']) == dir_path]
+
+        # Determine selection state for header
+        all_selected = bool(dir_vps and all(vp in self.selected_items for vp in dir_vps))
+        some_selected = bool(dir_vps and any(vp in self.selected_items for vp in dir_vps))
+        show_sel_style = is_collapsed and some_selected
+
+        hdr_bg = t['accent_dim'] if show_sel_style else t['bg']
+        accent_bar_col = t['accent'] if show_sel_style else t['accent']
+        folder_fg = t['accent'] if show_sel_style else t['text']
+        folder_weight = "bold"
+
+        # When collapsed, use less bottom padding since there are no cards below
+        pady_val = (28, 4) if is_collapsed else (28, 8)
         header = tk.Frame(
             self.grid_frame,
-            bg=t['bg'],
+            bg=hdr_bg,
             cursor="arrow"
         )
         header.grid(row=grid_row, column=0, columnspan=cols,
-                    sticky='ew', padx=_CARD_PAD_X, pady=(28, 8))
+                    sticky='ew', padx=_CARD_PAD_X, pady=pady_val)
         item_data['_header_widget'] = header
+        item_data['_header_dir_vps'] = dir_vps
 
-        # Accent left bar
-        tk.Frame(header, bg=t['accent'], width=3).pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
+        # Accent left bar — thicker/brighter when fully selected
+        accent_bar_w = 4 if show_sel_style and all_selected else 3
+        tk.Frame(header, bg=accent_bar_col, width=accent_bar_w).pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
 
-        left = tk.Frame(header, bg=t['bg'])
+        left = tk.Frame(header, bg=hdr_bg)
         left.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=2)
 
         drag_hint = tk.Label(
             left, text="⠿",
             font=("Segoe UI", 12),
-            bg=t['bg'], fg=t['text_muted'],
+            bg=hdr_bg, fg=t['text_muted'],
             cursor="fleur", padx=2
         )
         drag_hint.pack(side=tk.LEFT)
@@ -1429,22 +1456,54 @@ class GridViewManager:
         dir_label = tk.Label(
             left,
             text=f"📁  {item_data['name']}",
-            font=("Segoe UI", 12, "bold"),
-            bg=t['bg'], fg=t['text'],
+            font=("Segoe UI", 12, folder_weight),
+            bg=hdr_bg, fg=folder_fg,
             anchor='w', cursor="hand2"
         )
         dir_label.pack(side=tk.LEFT, padx=(6, 0))
 
         cnt = item_data.get('video_count', 0)
+        badge_text, badge_bg, badge_fg = self._get_header_badge_style(dir_vps, cnt, show_sel_style, all_selected, t)
+        
         count_badge = tk.Label(
             left,
-            text=f"  {cnt} video{'s' if cnt != 1 else ''}  ",
+            text=badge_text,
             font=("Segoe UI", 8),
-            bg=t['pill_bg'], fg=t['text_sub'],
+            bg=badge_bg, fg=badge_fg,
             padx=6, pady=3, cursor="hand2",
             relief=tk.FLAT
         )
         count_badge.pack(side=tk.LEFT, padx=10, anchor='w', pady=3)
+        item_data['_badge_widget'] = count_badge
+
+        # ── Collapse / expand toggle arrow ─────────────────────────────────────
+        arrow_text = "◀" if is_collapsed else "▼"
+        arrow_btn = tk.Label(
+            left,
+            text=arrow_text,
+            font=("Segoe UI", 10),
+            bg=hdr_bg, fg=t['text_muted'],
+            cursor="hand2", padx=6
+        )
+        arrow_btn.pack(side=tk.LEFT, padx=(2, 0), anchor='w')
+
+        def _toggle_collapse(event=None, dp=dir_path):
+            # Preserve scroll position across the rebuild
+            try:
+                scroll_pos = self.canvas.yview()[0]
+            except Exception:
+                scroll_pos = 0.0
+            if dp in self._collapsed_dirs:
+                self._collapsed_dirs.discard(dp)
+            else:
+                self._collapsed_dirs.add(dp)
+            self._rebuild_grid()
+            # Restore scroll position after layout has settled
+            self.root.after(0, lambda: self._restore_scroll(scroll_pos))
+
+        arrow_btn.bind("<Button-1>", _toggle_collapse)
+        arrow_btn.bind("<Enter>", lambda e: arrow_btn.config(fg=t['accent']))
+        arrow_btn.bind("<Leave>", lambda e: arrow_btn.config(fg=t['text_muted']))
 
         # Separator line
         tk.Frame(header, bg=t['divider'], height=1).pack(
@@ -1461,6 +1520,100 @@ class GridViewManager:
 
         for w in (header, dir_label, count_badge, left):
             w.bind("<Button-1>", lambda e, dp=dir_path: self._on_dir_click(e, dp))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Header helpers (collapse state + selection styling)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _get_header_badge_style(self, dir_vps, cnt, show_sel_style, all_selected, t):
+        """Return (text, bg, fg) for the folder count badge."""
+        dark = getattr(self.theme_provider, 'dark_mode', False)
+        if show_sel_style and all_selected:
+            text = f"  ✓ All {cnt} selected  "
+            bg   = t['accent']
+            fg   = "#ffffff" if dark else "#ffffff"
+        elif show_sel_style:
+            n_sel = sum(1 for vp in dir_vps if vp in self.selected_items)
+            text = f"  {n_sel}/{cnt} selected  "
+            bg   = t['accent_dim']
+            fg   = t['accent']
+        else:
+            text = f"  {cnt} video{'s' if cnt != 1 else ''}  "
+            bg   = t['pill_bg']
+            fg   = t['text_sub']
+        return text, bg, fg
+
+    def _restore_scroll(self, pos):
+        """Restore canvas scroll position (called via after(0) after _rebuild_grid)."""
+        try:
+            if self.canvas.winfo_exists():
+                self.canvas.yview_moveto(pos)
+        except Exception:
+            pass
+
+    def _update_header_selection(self, dir_path):
+        """Refresh the visual selection state of a folder header in-place.
+
+        Only has a visible effect when the folder is collapsed, since expanded
+        folders show selection through their individual cards.  Does NOT trigger
+        a full grid rebuild – it just recolours the existing header widgets.
+        """
+        # Find the item_data dict that owns this header
+        item_data = next(
+            (it for it in self.items
+             if it['type'] == 'header' and it['path'] == dir_path),
+            None
+        )
+        if item_data is None:
+            return
+        header = item_data.get('_header_widget')
+        if header is None or not header.winfo_exists():
+            return
+
+        is_collapsed  = dir_path in self._collapsed_dirs
+        dir_vps       = item_data.get('_header_dir_vps', [])
+        some_selected = bool(dir_vps and any(vp in self.selected_items for vp in dir_vps))
+        all_selected  = bool(dir_vps and all(vp in self.selected_items for vp in dir_vps))
+        show_sel      = is_collapsed and some_selected
+
+        t      = self._tok()
+        hdr_bg = t['accent_dim'] if show_sel else t['bg']
+        fg     = t['accent']     if show_sel else t['text']
+
+        # Re-colour the header frame and every child that should inherit bg
+        try:
+            header.configure(bg=hdr_bg)
+        except tk.TclError:
+            return
+        for child in header.winfo_children():
+            try:
+                # Skip the accent left-bar (tk.Frame with fixed width)
+                if isinstance(child, tk.Frame) and child.cget('width') in (3, 4):
+                    bar_w = 4 if (show_sel and all_selected) else 3
+                    child.configure(bg=t['accent'], width=bar_w)
+                    continue
+                child.configure(bg=hdr_bg)
+                # Recurse one level into the 'left' inner frame
+                for sub in child.winfo_children():
+                    try:
+                        sub.configure(bg=hdr_bg)
+                        # Folder name label – update colour
+                        if isinstance(sub, tk.Label) and '📁' in (sub.cget('text') or ''):
+                            sub.configure(fg=fg)
+                    except tk.TclError:
+                        pass
+            except tk.TclError:
+                pass
+
+        # Update the count badge
+        badge = item_data.get('_badge_widget')
+        if badge and badge.winfo_exists():
+            cnt   = item_data.get('video_count', len(dir_vps))
+            btxt, bbg, bfg = self._get_header_badge_style(dir_vps, cnt, show_sel, all_selected, t)
+            try:
+                badge.configure(text=btxt, bg=bbg, fg=bfg)
+            except tk.TclError:
+                pass
 
     # ─────────────────────────────────────────────────────────────────────────
     # Video card (new UI style, original thumbnail loading)
@@ -1827,6 +1980,10 @@ class GridViewManager:
         self._last_anchor_path = None
         for vp in old:
             self._update_card_selection(vp)
+        # Refresh any collapsed folder headers that had selection styling
+        affected_dirs = {os.path.dirname(vp) for vp in old}
+        for dp in affected_dirs:
+            self._update_header_selection(dp)
         self._update_selection_label()
 
     def _toggle_select(self, vp):
@@ -2340,6 +2497,7 @@ class GridViewManager:
                 self._last_anchor_path = dir_vps[0]
 
         self._update_selection_label()
+        self._update_header_selection(dir_path)
 
     def _on_card_enter(self, event, vp):
         self._hovered_card_path = vp
