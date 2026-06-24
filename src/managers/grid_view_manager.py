@@ -1391,11 +1391,14 @@ class GridViewManager:
                 pass
             self._chunk_after_id = None
 
-        for w in self.grid_frame.winfo_children():
-            w.destroy()
+        # Fast bulk teardown — clear Python-side caches first, then destroy
+        # Tk widgets in one pass (avoids repeated winfo_children traversals).
         self.card_widgets.clear()
         self._card_positions = {}
         self._card_refs.clear()
+        children = self.grid_frame.winfo_children()
+        for w in children:
+            w.destroy()
 
         # Cache tokens once for the entire rebuild
         t = self._tok()
@@ -1487,7 +1490,7 @@ class GridViewManager:
         # ── Progressive chunked card rendering ──────────────────────────────────
         # Build in chunks of CHUNK_SIZE so the event loop can process UI events
         # between chunks, keeping the interface responsive at large page sizes.
-        CHUNK_SIZE = 30
+        CHUNK_SIZE = 60
         # Stagger thumbnail submissions so the executor isn't flooded at once
         THUMB_DELAY_MS = 8   # ms between thumbnail submission batches
         self._chunk_after_id = None
@@ -1929,56 +1932,9 @@ class GridViewManager:
         if self.now_playing_path and os.path.normpath(vp) == self.now_playing_path:
             self._place_now_playing_badge(thumb_container, t)
 
-        # ── Hover action strip (hidden until hover) ───────────────────────────
-        action_strip = tk.Frame(
-            thumb_container, bg=_ACTION_STRIP_BG, height=_ACTION_STRIP_H
-        )
-        action_strip._is_action_strip = True
-        # Use grid inside action_strip so buttons expand evenly
-        action_strip.grid_columnconfigure(0, weight=1)
-        action_strip.grid_columnconfigure(1, weight=0)  # sep
-        action_strip.grid_columnconfigure(2, weight=1)
-        action_strip.grid_columnconfigure(3, weight=0)  # sep
-        action_strip.grid_columnconfigure(4, weight=1)
-
-        def _make_action_btn_grid(parent, text, col, fg=_ACTION_STRIP_FG, bold=False):
-            weight = "bold" if bold else "normal"
-            lbl = tk.Label(
-                parent, text=text,
-                bg=_ACTION_STRIP_BG, fg=fg,
-                font=("Segoe UI", 8, weight),
-                pady=0, cursor="hand2"
-            )
-            lbl.grid(row=0, column=col, sticky='nsew')
-            return lbl
-
-        def _sep_grid(parent, col):
-            f = tk.Frame(parent, bg=_ACTION_STRIP_SEP, width=1)
-            f.grid(row=0, column=col, sticky='ns', pady=4)
-
-        play_btn = _make_action_btn_grid(action_strip, "▶  Play", 0, fg="#ffffff", bold=True)
-        _sep_grid(action_strip, 1)
-        q_btn    = _make_action_btn_grid(action_strip, "+ Queue", 2)
-        _sep_grid(action_strip, 3)
-        fav_btn  = _make_action_btn_grid(action_strip, "♥ Fav", 4)
-        # Let the strip expand to its parent width
-        action_strip.grid_rowconfigure(0, weight=1)
-
-        _accent = t['accent']
-        for _btn, _hfg, _hbg in (
-            (play_btn, "#ffffff", _accent),
-            (q_btn,    "#d0d6e8", "#1a1d28"),
-            (fav_btn,  "#F5C518", "#1a1d28"),
-        ):
-            _btn.bind("<Enter>", lambda e, b=_btn, hf=_hfg, hb=_hbg:
-                      b.configure(fg=hf, bg=hb))
-            _btn.bind("<Leave>", lambda e, b=_btn:
-                      b.configure(fg="#ffffff" if b is play_btn else _ACTION_STRIP_FG,
-                                  bg=_ACTION_STRIP_BG))
-
-        play_btn.bind("<Button-1>",   lambda e, _vp=vp: self._play_single(_vp))
-        q_btn.bind("<Button-1>",      lambda e, _vp=vp: self._add_single_to_queue(_vp))
-        fav_btn.bind("<Button-1>",    lambda e, _vp=vp: self._toggle_favourite_single(_vp))
+        # ── Action strip deferred — built lazily on first hover ───────────────
+        # Saves ~6 widgets + ~10 bindings per card during initial load.
+        action_strip = None
 
         # ── Thumbnail loading — queue for staggered submission ────────────────
         video_path_norm = os.path.normpath(vp)
@@ -2055,9 +2011,6 @@ class GridViewManager:
         info_frame.bind("<B1-Motion>",       lambda e, _vp=vp: self._on_card_motion(e, _vp))
         info_frame.bind("<ButtonRelease-1>", lambda e, _vp=vp: self._on_card_release(e, _vp))
 
-        # Action strip buttons get their own Double-click so it doesn't bubble strangely
-        play_btn.bind("<Double-Button-1>", lambda e, _vp=vp: self._play_single(_vp))
-
         card.bind("<Enter>", lambda e, _vp=vp: self._on_card_enter(e, _vp))
         card.bind("<Leave>", lambda e, _vp=vp: self._on_card_leave(e, _vp))
 
@@ -2065,12 +2018,83 @@ class GridViewManager:
         self._card_refs[vp] = {
             'thumb': thumb_container,
             'thumb_lbl': thumb_label,
-            'action': action_strip,
+            'action': action_strip,  # None — built lazily on first hover
             'info': info_frame,
             'name': name_label,
             'meta': meta_frame,
             'divider': divider,
         }
+
+    def _ensure_action_strip(self, vp):
+        """Lazily build the hover action strip on first use.
+
+        Deferred from _build_card to avoid creating ~6 hidden widgets + ~10
+        bindings per card during initial grid load.  At 500 cards this saves
+        ~3 000 widget creations and ~5 000 bind() calls.
+        """
+        refs = self._card_refs.get(vp)
+        if not refs:
+            return None
+        existing = refs.get('action')
+        if existing is not None:
+            return existing
+
+        thumb_container = refs['thumb']
+        if not thumb_container or not thumb_container.winfo_exists():
+            return None
+
+        t = self._tok()
+        action_strip = tk.Frame(
+            thumb_container, bg=_ACTION_STRIP_BG, height=_ACTION_STRIP_H
+        )
+        action_strip._is_action_strip = True
+        action_strip.grid_columnconfigure(0, weight=1)
+        action_strip.grid_columnconfigure(1, weight=0)
+        action_strip.grid_columnconfigure(2, weight=1)
+        action_strip.grid_columnconfigure(3, weight=0)
+        action_strip.grid_columnconfigure(4, weight=1)
+
+        def _make_btn(parent, text, col, fg=_ACTION_STRIP_FG, bold=False):
+            weight = "bold" if bold else "normal"
+            lbl = tk.Label(
+                parent, text=text,
+                bg=_ACTION_STRIP_BG, fg=fg,
+                font=("Segoe UI", 8, weight),
+                pady=0, cursor="hand2"
+            )
+            lbl.grid(row=0, column=col, sticky='nsew')
+            return lbl
+
+        def _sep(parent, col):
+            f = tk.Frame(parent, bg=_ACTION_STRIP_SEP, width=1)
+            f.grid(row=0, column=col, sticky='ns', pady=4)
+
+        play_btn = _make_btn(action_strip, "▶  Play", 0, fg="#ffffff", bold=True)
+        _sep(action_strip, 1)
+        q_btn    = _make_btn(action_strip, "+ Queue", 2)
+        _sep(action_strip, 3)
+        fav_btn  = _make_btn(action_strip, "♥ Fav", 4)
+        action_strip.grid_rowconfigure(0, weight=1)
+
+        _accent = t['accent']
+        for _btn, _hfg, _hbg in (
+            (play_btn, "#ffffff", _accent),
+            (q_btn,    "#d0d6e8", "#1a1d28"),
+            (fav_btn,  "#F5C518", "#1a1d28"),
+        ):
+            _btn.bind("<Enter>", lambda e, b=_btn, hf=_hfg, hb=_hbg:
+                      b.configure(fg=hf, bg=hb))
+            _btn.bind("<Leave>", lambda e, b=_btn:
+                      b.configure(fg="#ffffff" if b is play_btn else _ACTION_STRIP_FG,
+                                  bg=_ACTION_STRIP_BG))
+
+        play_btn.bind("<Button-1>",   lambda e, _vp=vp: self._play_single(_vp))
+        q_btn.bind("<Button-1>",      lambda e, _vp=vp: self._add_single_to_queue(_vp))
+        fav_btn.bind("<Button-1>",    lambda e, _vp=vp: self._toggle_favourite_single(_vp))
+        play_btn.bind("<Double-Button-1>", lambda e, _vp=vp: self._play_single(_vp))
+
+        refs['action'] = action_strip
+        return action_strip
 
     def _place_now_playing_badge(self, thumb_container, t):
         badge = tk.Label(
@@ -2864,9 +2888,11 @@ class GridViewManager:
                         except tk.TclError:
                             pass
 
-        # Reveal action strip at bottom of thumbnail
+        # Reveal action strip at bottom of thumbnail (lazily built)
         if refs:
             action = refs.get('action')
+            if action is None:
+                action = self._ensure_action_strip(vp)
             if action and action.winfo_exists():
                 action.place(relx=0.0, rely=1.0, anchor='sw', relwidth=1.0)
                 action.lift()
