@@ -1487,19 +1487,8 @@ class GridViewManager:
         )
         arrow_btn.pack(side=tk.LEFT, padx=(2, 0), anchor='w')
 
-        def _toggle_collapse(event=None, dp=dir_path):
-            # Preserve scroll position across the rebuild
-            try:
-                scroll_pos = self.canvas.yview()[0]
-            except Exception:
-                scroll_pos = 0.0
-            if dp in self._collapsed_dirs:
-                self._collapsed_dirs.discard(dp)
-            else:
-                self._collapsed_dirs.add(dp)
-            self._rebuild_grid()
-            # Restore scroll position after layout has settled
-            self.root.after(0, lambda: self._restore_scroll(scroll_pos))
+        def _toggle_collapse(event=None, dp=dir_path, ab=arrow_btn):
+            self._toggle_collapse_in_place(dp, ab)
 
         arrow_btn.bind("<Button-1>", _toggle_collapse)
         arrow_btn.bind("<Enter>", lambda e: arrow_btn.config(fg=t['accent']))
@@ -1614,6 +1603,128 @@ class GridViewManager:
                 badge.configure(text=btxt, bg=bbg, fg=bfg)
             except tk.TclError:
                 pass
+
+    def _toggle_collapse_in_place(self, dir_path, arrow_btn=None):
+        """Collapse or expand a folder without destroying any widget.
+
+        Cards for the affected dir are shown/hidden via grid()/grid_remove().
+        All subsequent items are re-sequenced in-place.  No thumbnails are
+        re-loaded and the scroll position is fully preserved.
+        """
+        if getattr(self, '_closing', False):
+            return
+        try:
+            if not self.grid_frame or not self.grid_frame.winfo_exists():
+                return
+        except Exception:
+            return
+
+        # 1. Flip collapsed state
+        if dir_path in self._collapsed_dirs:
+            self._collapsed_dirs.discard(dir_path)
+            new_arrow = "▼"
+        else:
+            self._collapsed_dirs.add(dir_path)
+            new_arrow = "◀"
+
+        # 2. Update the arrow button text in-place (no rebuild needed)
+        if arrow_btn is not None:
+            try:
+                if arrow_btn.winfo_exists():
+                    arrow_btn.config(text=new_arrow)
+            except tk.TclError:
+                pass
+
+        # 3. Update the header's own padding and selection badge
+        item_data = next(
+            (it for it in self.items if it['type'] == 'header' and it['path'] == dir_path),
+            None
+        )
+        if item_data:
+            header = item_data.get('_header_widget')
+            if header and header.winfo_exists():
+                is_now_collapsed = dir_path in self._collapsed_dirs
+                pady_val = (28, 4) if is_now_collapsed else (28, 8)
+                cols = self.grid_size_var.get()
+                # We'll update the grid options after the full re-sequence below
+            self._update_header_selection(dir_path)
+
+        # 4. Re-sequence the entire page using the fast in-place approach
+        self._relayout_grid_with_collapse()
+
+    def _relayout_grid_with_collapse(self):
+        """Re-grid all widgets on the current page respecting _collapsed_dirs.
+
+        Uses .grid() / .grid_remove() so no widget is destroyed and no
+        thumbnail is re-loaded.  Falls back to _rebuild_grid only when a
+        widget that should exist is missing.
+        """
+        if getattr(self, '_closing', False):
+            return
+        try:
+            if not self.grid_frame or not self.grid_frame.winfo_exists():
+                return
+        except Exception:
+            return
+
+        cols = self.grid_size_var.get()
+
+        # Re-compute page boundaries without clearing the cache unnecessarily
+        old_page = self._page
+        self._pages_cache = None
+        page_items = self._get_page_items()
+
+        if self._page != old_page or not page_items:
+            # Page boundary shifted – fall back to full rebuild
+            return self._rebuild_grid()
+
+        grid_row = -1
+        video_col = 0
+        current_dir_collapsed = False
+
+        for item_data in page_items:
+            if item_data['type'] == 'header':
+                grid_row += 1
+                video_col = 0
+                dp = item_data['path']
+                current_dir_collapsed = dp in self._collapsed_dirs
+                is_now_collapsed = current_dir_collapsed
+                pady_val = (28, 4) if is_now_collapsed else (28, 8)
+
+                header_widget = item_data.get('_header_widget')
+                if header_widget and header_widget.winfo_exists():
+                    header_widget.grid(
+                        row=grid_row, column=0, columnspan=cols,
+                        sticky='ew', padx=_CARD_PAD_X, pady=pady_val
+                    )
+                else:
+                    # Widget missing – full rebuild needed
+                    return self._rebuild_grid()
+
+                if not current_dir_collapsed:
+                    grid_row += 1
+                continue
+
+            # Video card
+            vp = item_data['path']
+            card = self.card_widgets.get(vp)
+            if card is None or not card.winfo_exists():
+                return self._rebuild_grid()
+
+            if current_dir_collapsed:
+                # Hide the card without destroying it
+                card.grid_remove()
+            else:
+                card.grid(
+                    row=grid_row, column=video_col,
+                    padx=_CARD_PAD_X, pady=_CARD_PAD_Y, sticky='nsew'
+                )
+                video_col += 1
+                if video_col >= cols:
+                    video_col = 0
+                    grid_row += 1
+
+        self._update_selection_label()
 
     # ─────────────────────────────────────────────────────────────────────────
     # Video card (new UI style, original thumbnail loading)
@@ -3548,7 +3659,6 @@ class GridViewManager:
                 return
         except Exception:
             return
-        t = self._tok()
         cols = self.grid_size_var.get()
 
         old_page = self._page
@@ -3560,35 +3670,42 @@ class GridViewManager:
 
         grid_row = -1
         video_col = 0
+        current_dir_collapsed = False
 
         for item_data in new_page_items:
             if item_data['type'] == 'header':
                 grid_row += 1
                 video_col = 0
+                dp = item_data['path']
+                current_dir_collapsed = dp in self._collapsed_dirs
+                pady_val = (28, 4) if current_dir_collapsed else (28, 8)
                 header_widget = item_data.get('_header_widget')
                 if header_widget and header_widget.winfo_exists():
                     header_widget.grid(
                         row=grid_row, column=0, columnspan=cols,
-                        sticky='ew', padx=_CARD_PAD_X, pady=(28, 8)
+                        sticky='ew', padx=_CARD_PAD_X, pady=pady_val
                     )
                 else:
                     return self._rebuild_grid()
-                grid_row += 1
+                if not current_dir_collapsed:
+                    grid_row += 1
                 continue
 
             vp = item_data['path']
             card = self.card_widgets.get(vp)
             if card and card.winfo_exists():
-                card.grid(
-                    row=grid_row, column=video_col,
-                    padx=_CARD_PAD_X, pady=_CARD_PAD_Y, sticky='nsew'
-                )
+                if current_dir_collapsed:
+                    card.grid_remove()
+                else:
+                    card.grid(
+                        row=grid_row, column=video_col,
+                        padx=_CARD_PAD_X, pady=_CARD_PAD_Y, sticky='nsew'
+                    )
+                    video_col += 1
+                    if video_col >= cols:
+                        video_col = 0
+                        grid_row += 1
             else:
                 return self._rebuild_grid()
 
-            video_col += 1
-            if video_col >= cols:
-                video_col = 0
-                grid_row += 1
-
-        self._update_selection_label()
+        self._update_selection_label()
