@@ -622,7 +622,7 @@ class GridViewManager:
                  bg=toolbar_bg, fg=t['text_muted']).pack(side=tk.LEFT, pady=12)
         self._page_size_var = tk.StringVar(value=str(self._page_size))
         om = tk.OptionMenu(right_tb, self._page_size_var,
-                           "25", "50", "100", "200", "500",
+                           "25", "50", "100", "200", "500", '1000',
                            command=self._on_page_size_changed)
         om.configure(font=("Segoe UI", 8), bg=t['surface'], fg=t['text'],
                      relief=tk.FLAT, highlightthickness=1, highlightbackground=t['border'],

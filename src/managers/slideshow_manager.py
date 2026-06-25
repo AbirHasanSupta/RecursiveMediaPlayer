@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog
 from tkinter import font as tkfont
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageEnhance, ImageFilter
 import os
 import threading
 import time
@@ -100,6 +100,23 @@ class SlideshowManager:
         self._kb_params         = None
         self._preload_cache     = {}
         self._closing           = False
+
+        # ── Photo editing state ───────────────────────────────────────────────
+        # Per-photo transform dict: stores cumulative edits applied in memory.
+        # Keyed by photo path so edits survive photo navigation within the session.
+        self._edit_transforms   = {}   # {path: transform_dict}
+        self._edit_history      = {}   # {path: [list of transform_dict snapshots]}
+        self._edit_redo_stack   = {}   # {path: [list of transform_dict snapshots]}
+        self._edit_mode         = False
+        self._crop_active       = False
+        self._crop_start        = None  # (canvas_x, canvas_y)
+        self._crop_rect_id      = None
+        # Edit bar widget refs
+        self._edit_bar          = None
+        self._edit_btn          = None  # the ✏ Edit toggle button in the main bar
+        self._undo_btn          = None
+        self._redo_btn          = None
+        self._save_btn          = None
 
         # UI widget refs (set in _build_window)
         self._play_btn          = None
@@ -347,6 +364,11 @@ class SlideshowManager:
         self._btn_next_song     = None
         self._btn_shuffle       = None
         self._btn_add_music     = None
+        # Edit bar
+        self._edit_bar          = None
+        self._edit_btn          = None
+        self._undo_btn          = None
+        self._redo_btn          = None
 
     def apply_settings(self, settings):
         """Sync slideshow defaults from app settings."""
@@ -453,6 +475,8 @@ class SlideshowManager:
         self._build_canvas(win)
         # Single overlay bar placed on top of the canvas (embedded-player style)
         self._build_overlay_bar(win)
+        # Edit bar (top overlay, hidden by default)
+        self._build_edit_bar(win)
         self._bind_keys(win)
         self.apply_theme()
         self._update_play_btn()
@@ -777,6 +801,14 @@ class SlideshowManager:
         )
         settings_btn.pack(side=tk.LEFT, padx=(0, 2))
         self._settings_btn = settings_btn
+
+        self._sep(zone_r, pady=6)
+
+        # ✏ Edit toggle
+        self._edit_btn = self._make_btn(
+            zone_r, "✏ Edit", self._toggle_edit_mode, padx=7, pady=4,
+        )
+        self._edit_btn.pack(side=tk.LEFT, padx=(0, 2))
 
         self._sep(zone_r, pady=6)
 
@@ -1179,8 +1211,9 @@ class SlideshowManager:
         self._current_pil = self._load_pil(path)
         if not self._current_pil:
             return
+        display_pil = self._get_edited_pil() if self._edit_mode else self._current_pil
         cw, ch = self._canvas_size()
-        rendered = self._fit_image(self._current_pil, cw, ch)
+        rendered = self._fit_image(display_pil, cw, ch)
         self._show_pil_on_canvas(rendered)
         self._update_counter()
         self._update_progress()
@@ -1734,6 +1767,591 @@ class SlideshowManager:
                 subprocess.Popen(["xdg-open", os.path.dirname(norm)])
         except Exception as e:
             self.logger(f"Slideshow: cannot open location: {e}")
+
+    # ── Photo Editing ─────────────────────────────────────────────────────────
+
+    def _default_transform(self):
+        return {
+            "rotation": 0, "flip_h": False, "flip_v": False,
+            "crop_box": None, "brightness": 1.0, "contrast": 1.0, "sharpness": 1.0,
+            "tilt": 0.0, "resize": None,
+        }
+
+    def _current_path(self):
+        if not self.photos:
+            return None
+        return self.photos[self.index]
+
+    def _get_transform(self):
+        path = self._current_path()
+        if path not in self._edit_transforms:
+            self._edit_transforms[path] = self._default_transform()
+        return self._edit_transforms[path]
+
+    def _get_edited_pil(self):
+        if not self._current_pil:
+            return self._current_pil
+        t = self._get_transform()
+        img = self._current_pil.copy()
+        if t["crop_box"]:
+            try:
+                img = img.crop(t["crop_box"])
+            except Exception:
+                pass
+        if t["resize"]:
+            try:
+                img = img.resize(t["resize"], Image.Resampling.LANCZOS)
+            except Exception:
+                pass
+        if t["rotation"]:
+            img = img.rotate(-t["rotation"], expand=True, resample=Image.Resampling.BICUBIC)
+        if t["tilt"]:
+            img = img.rotate(-t["tilt"], expand=False, resample=Image.Resampling.BICUBIC)
+        if t["flip_h"]:
+            img = img.transpose(Image.FLIP_LEFT_RIGHT)
+        if t["flip_v"]:
+            img = img.transpose(Image.FLIP_TOP_BOTTOM)
+        if t["brightness"] != 1.0:
+            img = ImageEnhance.Brightness(img).enhance(t["brightness"])
+        if t["contrast"] != 1.0:
+            img = ImageEnhance.Contrast(img).enhance(t["contrast"])
+        if t["sharpness"] != 1.0:
+            img = ImageEnhance.Sharpness(img).enhance(t["sharpness"])
+        return img
+
+    def _push_edit_history(self):
+        path = self._current_path()
+        if not path:
+            return
+        import copy
+        hist = self._edit_history.setdefault(path, [])
+        hist.append(copy.deepcopy(self._get_transform()))
+        if len(hist) > 20:
+            hist.pop(0)
+        self._edit_redo_stack[path] = []
+        self._update_undo_redo_btns()
+
+    def _undo_edit(self):
+        path = self._current_path()
+        if not path:
+            return
+        hist = self._edit_history.get(path, [])
+        if not hist:
+            return
+        import copy
+        redo = self._edit_redo_stack.setdefault(path, [])
+        redo.append(copy.deepcopy(self._get_transform()))
+        self._edit_transforms[path] = hist.pop()
+        self._refresh_edit_display()
+        self._update_undo_redo_btns()
+
+    def _redo_edit(self):
+        path = self._current_path()
+        if not path:
+            return
+        redo = self._edit_redo_stack.get(path, [])
+        if not redo:
+            return
+        import copy
+        hist = self._edit_history.setdefault(path, [])
+        hist.append(copy.deepcopy(self._get_transform()))
+        self._edit_transforms[path] = redo.pop()
+        self._refresh_edit_display()
+        self._update_undo_redo_btns()
+
+    def _update_undo_redo_btns(self):
+        path = self._current_path()
+        c = self._ctrl()
+        if self._undo_btn and self._undo_btn.winfo_exists():
+            has_undo = bool(self._edit_history.get(path))
+            self._undo_btn.config(fg=c["txt"] if has_undo else c["txt_dim"])
+        if self._redo_btn and self._redo_btn.winfo_exists():
+            has_redo = bool(self._edit_redo_stack.get(path))
+            self._redo_btn.config(fg=c["txt"] if has_redo else c["txt_dim"])
+
+    def _refresh_edit_display(self):
+        if not self._current_pil:
+            return
+        display = self._get_edited_pil()
+        cw, ch = self._canvas_size()
+        self._fit_cache.clear()
+        rendered = self._fit_image(display, cw, ch)
+        self._show_pil_on_canvas(rendered)
+
+    def _apply_rotation(self, deg):
+        self._push_edit_history()
+        t = self._get_transform()
+        t["rotation"] = (t["rotation"] + deg) % 360
+        self._refresh_edit_display()
+
+    def _apply_flip(self, axis):
+        self._push_edit_history()
+        t = self._get_transform()
+        if axis == "h":
+            t["flip_h"] = not t["flip_h"]
+        else:
+            t["flip_v"] = not t["flip_v"]
+        self._refresh_edit_display()
+
+    def _start_crop(self):
+        if not self._canvas:
+            return
+        self._crop_active = True
+        self._canvas.config(cursor="crosshair")
+        self._canvas.bind("<Button-1>", self._on_crop_press, add="+")
+        self._canvas.bind("<B1-Motion>", self._on_crop_drag, add="+")
+        self._canvas.bind("<ButtonRelease-1>", self._on_crop_release, add="+")
+
+    def _stop_crop(self):
+        self._crop_active = False
+        if self._canvas and self._canvas.winfo_exists():
+            self._canvas.config(cursor="")
+            self._canvas.unbind("<Button-1>")
+            self._canvas.unbind("<B1-Motion>")
+            self._canvas.unbind("<ButtonRelease-1>")
+        if self._crop_rect_id and self._canvas:
+            try:
+                self._canvas.delete(self._crop_rect_id)
+            except Exception:
+                pass
+            self._crop_rect_id = None
+        self._crop_start = None
+
+    def _on_crop_press(self, event):
+        self._crop_start = (event.x, event.y)
+        if self._crop_rect_id:
+            self._canvas.delete(self._crop_rect_id)
+            self._crop_rect_id = None
+
+    def _on_crop_drag(self, event):
+        if not self._crop_start:
+            return
+        x0, y0 = self._crop_start
+        if self._crop_rect_id:
+            self._canvas.delete(self._crop_rect_id)
+        self._crop_rect_id = self._canvas.create_rectangle(
+            x0, y0, event.x, event.y,
+            outline="#FFD700", width=2, dash=(4, 4),
+        )
+
+    def _on_crop_release(self, event):
+        if not self._crop_start:
+            return
+        x0, y0 = self._crop_start
+        x1, y1 = event.x, event.y
+        self._stop_crop()
+        if abs(x1 - x0) < 10 or abs(y1 - y0) < 10:
+            return
+        lx, rx = min(x0, x1), max(x0, x1)
+        ty, by = min(y0, y1), max(y0, y1)
+        cw, ch = self._canvas_size()
+        pil = self._get_edited_pil()
+        if not pil:
+            return
+        iw, ih = pil.size
+        scale = min(cw / iw, ch / ih)
+        nw, nh = int(iw * scale), int(ih * scale)
+        ox, oy = (cw - nw) // 2, (ch - nh) // 2
+        px0 = max(0, int((lx - ox) / scale))
+        py0 = max(0, int((ty - oy) / scale))
+        px1 = min(iw, int((rx - ox) / scale))
+        py1 = min(ih, int((by - oy) / scale))
+        if px1 > px0 and py1 > py0:
+            self._apply_crop((px0, py0, px1, py1))
+
+    def _apply_crop(self, box):
+        self._push_edit_history()
+        t = self._get_transform()
+        cur = t["crop_box"]
+        if cur:
+            ox, oy = cur[0], cur[1]
+            box = (ox + box[0], oy + box[1], ox + box[2], oy + box[3])
+        t["crop_box"] = box
+        self._fit_cache.clear()
+        self._refresh_edit_display()
+
+    def _show_resize_dialog(self):
+        if not self._win:
+            return
+        pil = self._get_edited_pil()
+        if not pil:
+            return
+        orig_w, orig_h = pil.size
+        c = self._ctrl()
+        dlg = tk.Toplevel(self._win)
+        dlg.withdraw()
+        dlg.title("Resize Image")
+        dlg.configure(bg=c["bg2"])
+        dlg.resizable(False, False)
+        dlg.transient(self._win)
+        dlg.grab_set()
+        dw, dh = 320, 220
+        dlg.update_idletasks()
+        px, py = self._win.winfo_rootx(), self._win.winfo_rooty()
+        pw, ph = self._win.winfo_width(), self._win.winfo_height()
+        dlg.geometry(f"{dw}x{dh}+{px+(pw-dw)//2}+{py+(ph-dh)//2}")
+        dlg.deiconify()
+        tk.Frame(dlg, height=2, bg=c["accent"]).pack(fill=tk.X)
+        tk.Label(dlg, text=f"⤡  Resize  (current: {orig_w}×{orig_h})",
+                 font=("Segoe UI", 10, "bold"), bg=c["bg2"], fg=c["txt"]).pack(pady=(12, 4))
+        row = tk.Frame(dlg, bg=c["bg2"])
+        row.pack()
+        w_var = tk.StringVar(value=str(orig_w))
+        h_var = tk.StringVar(value=str(orig_h))
+        tk.Label(row, text="W:", bg=c["bg2"], fg=c["txt_med"], font=("Segoe UI", 9)).grid(row=0, column=0, padx=4)
+        tk.Entry(row, textvariable=w_var, width=7, bg=c["surface"], fg=c["txt"],
+                 insertbackground=c["txt"], relief=tk.FLAT, font=("Segoe UI", 10),
+                 highlightthickness=1, highlightbackground=c["border"]).grid(row=0, column=1, padx=4)
+        tk.Label(row, text="H:", bg=c["bg2"], fg=c["txt_med"], font=("Segoe UI", 9)).grid(row=0, column=2, padx=4)
+        tk.Entry(row, textvariable=h_var, width=7, bg=c["surface"], fg=c["txt"],
+                 insertbackground=c["txt"], relief=tk.FLAT, font=("Segoe UI", 10),
+                 highlightthickness=1, highlightbackground=c["border"]).grid(row=0, column=3, padx=4)
+        pct_var = tk.StringVar(value="100")
+        tk.Label(dlg, text="— or by % —", bg=c["bg2"], fg=c["txt_dim"], font=("Segoe UI", 8)).pack(pady=(8, 2))
+        tk.Entry(dlg, textvariable=pct_var, width=6, bg=c["surface"], fg=c["txt"],
+                 insertbackground=c["txt"], relief=tk.FLAT, font=("Segoe UI", 10),
+                 highlightthickness=1, highlightbackground=c["border"], justify="center").pack()
+        btn_row = tk.Frame(dlg, bg=c["bg2"])
+        btn_row.pack(pady=12)
+
+        def _apply(e=None):
+            try:
+                pct = float(pct_var.get())
+                if pct != 100:
+                    nw = max(1, int(orig_w * pct / 100))
+                    nh = max(1, int(orig_h * pct / 100))
+                else:
+                    nw = max(1, int(w_var.get()))
+                    nh = max(1, int(h_var.get()))
+                self._apply_resize(nw, nh)
+            except Exception:
+                pass
+            dlg.destroy()
+
+        tk.Button(btn_row, text="Resize", command=_apply, bg=c["accent"], fg=c["play_fg"],
+                  relief=tk.FLAT, font=("Segoe UI", 9, "bold"), padx=14, pady=4,
+                  cursor="hand2").pack(side=tk.LEFT, padx=(0, 8))
+        tk.Button(btn_row, text="Cancel", command=dlg.destroy, bg=c["btn"], fg=c["txt_med"],
+                  relief=tk.FLAT, font=("Segoe UI", 9), padx=10, pady=4,
+                  cursor="hand2").pack(side=tk.LEFT)
+        dlg.bind("<Return>", _apply)
+        dlg.bind("<Escape>", lambda e: dlg.destroy())
+        dlg.wait_window()
+
+    def _apply_resize(self, w, h):
+        self._push_edit_history()
+        self._get_transform()["resize"] = (w, h)
+        self._fit_cache.clear()
+        self._refresh_edit_display()
+
+    def _show_tilt_dialog(self):
+        if not self._win:
+            return
+        c = self._ctrl()
+        dlg = tk.Toplevel(self._win)
+        dlg.withdraw()
+        dlg.title("Tilt")
+        dlg.configure(bg=c["bg2"])
+        dlg.resizable(False, False)
+        dlg.transient(self._win)
+        dlg.grab_set()
+        dw, dh = 300, 160
+        dlg.update_idletasks()
+        px, py = self._win.winfo_rootx(), self._win.winfo_rooty()
+        pw, ph = self._win.winfo_width(), self._win.winfo_height()
+        dlg.geometry(f"{dw}x{dh}+{px+(pw-dw)//2}+{py+(ph-dh)//2}")
+        dlg.deiconify()
+        tk.Frame(dlg, height=2, bg=c["accent"]).pack(fill=tk.X)
+        tk.Label(dlg, text="◪  Tilt (−45° to +45°)",
+                 font=("Segoe UI", 10, "bold"), bg=c["bg2"], fg=c["txt"]).pack(pady=(12, 6))
+        cur_tilt = self._get_transform().get("tilt", 0.0)
+        angle_var = tk.DoubleVar(value=cur_tilt)
+        val_lbl = tk.Label(dlg, text=f"{cur_tilt:.1f}°", bg=c["bg2"], fg=c["accent"],
+                           font=("Segoe UI", 10, "bold"))
+        val_lbl.pack()
+        def _update_label(v):
+            val_lbl.config(text=f"{float(v):.1f}°")
+        sl = tk.Scale(dlg, variable=angle_var, from_=-45, to=45, resolution=0.5,
+                      orient=tk.HORIZONTAL, length=260, bg=c["bg2"], fg=c["txt"],
+                      troughcolor=c["track"], highlightthickness=0, showvalue=False,
+                      command=_update_label)
+        sl.pack(padx=16)
+        btn_row = tk.Frame(dlg, bg=c["bg2"])
+        btn_row.pack(pady=10)
+
+        def _apply(e=None):
+            self._apply_tilt(angle_var.get())
+            dlg.destroy()
+
+        tk.Button(btn_row, text="Apply", command=_apply, bg=c["accent"], fg=c["play_fg"],
+                  relief=tk.FLAT, font=("Segoe UI", 9, "bold"), padx=14, pady=4,
+                  cursor="hand2").pack(side=tk.LEFT, padx=(0, 8))
+        tk.Button(btn_row, text="Cancel", command=dlg.destroy, bg=c["btn"], fg=c["txt_med"],
+                  relief=tk.FLAT, font=("Segoe UI", 9), padx=10, pady=4,
+                  cursor="hand2").pack(side=tk.LEFT)
+        dlg.bind("<Return>", _apply)
+        dlg.bind("<Escape>", lambda e: dlg.destroy())
+        dlg.wait_window()
+
+    def _apply_tilt(self, angle):
+        self._push_edit_history()
+        self._get_transform()["tilt"] = angle
+        self._fit_cache.clear()
+        self._refresh_edit_display()
+
+    def _show_free_rotation_dialog(self):
+        if not self._win:
+            return
+        c = self._ctrl()
+        dlg = tk.Toplevel(self._win)
+        dlg.withdraw()
+        dlg.title("Free Rotation")
+        dlg.configure(bg=c["bg2"])
+        dlg.resizable(False, False)
+        dlg.transient(self._win)
+        dlg.grab_set()
+        dw, dh = 300, 160
+        dlg.update_idletasks()
+        px, py = self._win.winfo_rootx(), self._win.winfo_rooty()
+        pw, ph = self._win.winfo_width(), self._win.winfo_height()
+        dlg.geometry(f"{dw}x{dh}+{px+(pw-dw)//2}+{py+(ph-dh)//2}")
+        dlg.deiconify()
+        tk.Frame(dlg, height=2, bg=c["accent"]).pack(fill=tk.X)
+        tk.Label(dlg, text="↺  Free Rotation (degrees)",
+                 font=("Segoe UI", 10, "bold"), bg=c["bg2"], fg=c["txt"]).pack(pady=(12, 6))
+        angle_var = tk.StringVar(value="0")
+        tk.Entry(dlg, textvariable=angle_var, width=8, bg=c["surface"], fg=c["txt"],
+                 insertbackground=c["txt"], relief=tk.FLAT, font=("Segoe UI", 12),
+                 highlightthickness=1, highlightbackground=c["border"], justify="center").pack(ipady=4)
+        tk.Label(dlg, text="Positive = CW, Negative = CCW",
+                 bg=c["bg2"], fg=c["txt_dim"], font=("Segoe UI", 7)).pack(pady=(2, 0))
+        btn_row = tk.Frame(dlg, bg=c["bg2"])
+        btn_row.pack(pady=10)
+
+        def _apply(e=None):
+            try:
+                deg = float(angle_var.get())
+                self._apply_rotation(deg)
+            except Exception:
+                pass
+            dlg.destroy()
+
+        tk.Button(btn_row, text="Rotate", command=_apply, bg=c["accent"], fg=c["play_fg"],
+                  relief=tk.FLAT, font=("Segoe UI", 9, "bold"), padx=14, pady=4,
+                  cursor="hand2").pack(side=tk.LEFT, padx=(0, 8))
+        tk.Button(btn_row, text="Cancel", command=dlg.destroy, bg=c["btn"], fg=c["txt_med"],
+                  relief=tk.FLAT, font=("Segoe UI", 9), padx=10, pady=4,
+                  cursor="hand2").pack(side=tk.LEFT)
+        dlg.bind("<Return>", _apply)
+        dlg.bind("<Escape>", lambda e: dlg.destroy())
+        dlg.wait_window()
+
+    def _show_adjust_dialog(self, adjust_type):
+        if not self._win:
+            return
+        c = self._ctrl()
+        labels = {"brightness": ("☀  Brightness", "brightness"),
+                  "contrast":   ("◑  Contrast",   "contrast"),
+                  "sharpness":  ("⬡  Sharpness",  "sharpness")}
+        title_txt, key = labels[adjust_type]
+        cur_val = self._get_transform().get(key, 1.0)
+        dlg = tk.Toplevel(self._win)
+        dlg.withdraw()
+        dlg.title(title_txt.split()[-1])
+        dlg.configure(bg=c["bg2"])
+        dlg.resizable(False, False)
+        dlg.transient(self._win)
+        dlg.grab_set()
+        dw, dh = 300, 160
+        dlg.update_idletasks()
+        px, py = self._win.winfo_rootx(), self._win.winfo_rooty()
+        pw, ph = self._win.winfo_width(), self._win.winfo_height()
+        dlg.geometry(f"{dw}x{dh}+{px+(pw-dw)//2}+{py+(ph-dh)//2}")
+        dlg.deiconify()
+        tk.Frame(dlg, height=2, bg=c["accent"]).pack(fill=tk.X)
+        tk.Label(dlg, text=title_txt, font=("Segoe UI", 10, "bold"),
+                 bg=c["bg2"], fg=c["txt"]).pack(pady=(12, 6))
+        val_var = tk.DoubleVar(value=cur_val)
+        val_lbl = tk.Label(dlg, text=f"{cur_val:.2f}×", bg=c["bg2"], fg=c["accent"],
+                           font=("Segoe UI", 10, "bold"))
+        val_lbl.pack()
+        def _update_label(v):
+            val_lbl.config(text=f"{float(v):.2f}×")
+        sl = tk.Scale(dlg, variable=val_var, from_=0.0, to=3.0, resolution=0.05,
+                      orient=tk.HORIZONTAL, length=260, bg=c["bg2"], fg=c["txt"],
+                      troughcolor=c["track"], highlightthickness=0, showvalue=False,
+                      command=_update_label)
+        sl.pack(padx=16)
+        btn_row = tk.Frame(dlg, bg=c["bg2"])
+        btn_row.pack(pady=10)
+
+        def _apply(e=None):
+            self._push_edit_history()
+            self._get_transform()[key] = val_var.get()
+            self._fit_cache.clear()
+            self._refresh_edit_display()
+            dlg.destroy()
+
+        tk.Button(btn_row, text="Apply", command=_apply, bg=c["accent"], fg=c["play_fg"],
+                  relief=tk.FLAT, font=("Segoe UI", 9, "bold"), padx=14, pady=4,
+                  cursor="hand2").pack(side=tk.LEFT, padx=(0, 8))
+        tk.Button(btn_row, text="Cancel", command=dlg.destroy, bg=c["btn"], fg=c["txt_med"],
+                  relief=tk.FLAT, font=("Segoe UI", 9), padx=10, pady=4,
+                  cursor="hand2").pack(side=tk.LEFT)
+        dlg.bind("<Return>", _apply)
+        dlg.bind("<Escape>", lambda e: dlg.destroy())
+        dlg.wait_window()
+
+    def _save_edit(self, overwrite=True):
+        path = self._current_path()
+        if not path:
+            return
+        edited = self._get_edited_pil()
+        if not edited:
+            return
+        if overwrite:
+            from tkinter import messagebox
+            if not messagebox.askyesno(
+                "Overwrite?", f"Overwrite original file?\n{os.path.basename(path)}",
+                parent=self._win
+            ):
+                return
+            save_path = path
+        else:
+            ext = os.path.splitext(path)[1].lower() or ".jpg"
+            fmt_map = {".jpg": "JPEG", ".jpeg": "JPEG", ".png": "PNG",
+                       ".bmp": "BMP", ".tiff": "TIFF", ".tif": "TIFF"}
+            filetypes = [("Image files", "*.jpg *.jpeg *.png *.bmp *.tiff"), ("All", "*.*")]
+            save_path = filedialog.asksaveasfilename(
+                title="Save As", defaultextension=ext, filetypes=filetypes,
+                initialfile=os.path.basename(path), parent=self._win,
+            )
+            if not save_path:
+                return
+        try:
+            ext = os.path.splitext(save_path)[1].lower()
+            fmt = {".jpg": "JPEG", ".jpeg": "JPEG", ".png": "PNG",
+                   ".bmp": "BMP", ".tiff": "TIFF", ".tif": "TIFF"}.get(ext, "JPEG")
+            save_img = edited
+            if fmt == "JPEG" and save_img.mode != "RGB":
+                save_img = save_img.convert("RGB")
+            save_img.save(save_path, fmt, quality=95)
+            if overwrite and save_path == path:
+                if path in self._preload_cache:
+                    del self._preload_cache[path]
+                self._current_pil = self._load_pil(path)
+            self.logger(f"Slideshow: saved edit → {save_path}")
+        except Exception as e:
+            self.logger(f"Slideshow: save failed: {e}")
+
+    def _reset_edits(self):
+        path = self._current_path()
+        if not path:
+            return
+        self._edit_transforms.pop(path, None)
+        self._edit_history.pop(path, None)
+        self._edit_redo_stack.pop(path, None)
+        if path in self._preload_cache:
+            del self._preload_cache[path]
+        self._fit_cache.clear()
+        self._current_pil = self._load_pil(path)
+        self._refresh_edit_display()
+        self._update_undo_redo_btns()
+
+    def _toggle_edit_mode(self):
+        if self._edit_mode:
+            self._close_editor()
+        else:
+            self._open_editor()
+
+    def _open_editor(self):
+        self._edit_mode = True
+        if self._edit_bar and self._edit_bar.winfo_exists():
+            self._edit_bar.place(relx=0.0, rely=0.0, anchor="nw", relwidth=1.0)
+            self._edit_bar.lift()
+        if self._edit_btn and self._edit_btn.winfo_exists():
+            c = self._ctrl()
+            self._edit_btn.config(bg=c["accent"], fg=c["play_fg"])
+        self._update_undo_redo_btns()
+        self._refresh_edit_display()
+
+    def _close_editor(self):
+        self._stop_crop()
+        self._edit_mode = False
+        if self._edit_bar and self._edit_bar.winfo_exists():
+            self._edit_bar.place_forget()
+        if self._edit_btn and self._edit_btn.winfo_exists():
+            c = self._ctrl()
+            self._edit_btn.config(bg=c["btn"], fg=c["txt_med"])
+        self._load_current()
+
+    def _build_edit_bar(self, win):
+        c = self._ctrl()
+        F = self._fonts()
+        bar = tk.Frame(win, bg=c["bg"], bd=0)
+        self._edit_bar = bar
+
+        tk.Frame(bar, bg=c["border"], height=1).pack(fill=tk.X, side=tk.BOTTOM)
+
+        inner = tk.Frame(bar, bg=c["bg"])
+        inner.pack(fill=tk.X, padx=8, pady=4)
+
+        def _eb(parent, text, cmd, fg=None, accent=False):
+            b = self._make_btn(parent, text, cmd, font=F["sm"], fg=fg, accent=accent, padx=6, pady=3)
+            b.pack(side=tk.LEFT, padx=2)
+            return b
+
+        def _sep():
+            tk.Frame(inner, width=1, bg=c["border"]).pack(side=tk.LEFT, fill=tk.Y, pady=4, padx=3)
+
+        tk.Label(inner, text="ROTATE", bg=c["bg"], fg=c["txt_dim"],
+                 font=F["xs"]).pack(side=tk.LEFT, padx=(4, 2))
+        _eb(inner, "↺ 90°", lambda: self._apply_rotation(-90))
+        _eb(inner, "↻ 90°", lambda: self._apply_rotation(90))
+        _eb(inner, "↺ Free", self._show_free_rotation_dialog)
+
+        _sep()
+        tk.Label(inner, text="FLIP", bg=c["bg"], fg=c["txt_dim"],
+                 font=F["xs"]).pack(side=tk.LEFT, padx=(4, 2))
+        _eb(inner, "↔ H-Flip", lambda: self._apply_flip("h"))
+        _eb(inner, "↕ V-Flip", lambda: self._apply_flip("v"))
+
+        _sep()
+        tk.Label(inner, text="CROP", bg=c["bg"], fg=c["txt_dim"],
+                 font=F["xs"]).pack(side=tk.LEFT, padx=(4, 2))
+        _eb(inner, "⌂ Crop", self._start_crop)
+
+        _sep()
+        tk.Label(inner, text="RESIZE", bg=c["bg"], fg=c["txt_dim"],
+                 font=F["xs"]).pack(side=tk.LEFT, padx=(4, 2))
+        _eb(inner, "⤡ Resize", self._show_resize_dialog)
+
+        _sep()
+        tk.Label(inner, text="TILT", bg=c["bg"], fg=c["txt_dim"],
+                 font=F["xs"]).pack(side=tk.LEFT, padx=(4, 2))
+        _eb(inner, "◪ Tilt", self._show_tilt_dialog)
+
+        _sep()
+        tk.Label(inner, text="ADJUST", bg=c["bg"], fg=c["txt_dim"],
+                 font=F["xs"]).pack(side=tk.LEFT, padx=(4, 2))
+        _eb(inner, "☀ Brightness", lambda: self._show_adjust_dialog("brightness"))
+        _eb(inner, "◑ Contrast",   lambda: self._show_adjust_dialog("contrast"))
+        _eb(inner, "⬡ Sharpness",  lambda: self._show_adjust_dialog("sharpness"))
+
+        _sep()
+        self._undo_btn = _eb(inner, "↩ Undo", self._undo_edit, fg=c["txt_dim"])
+        self._redo_btn = _eb(inner, "↪ Redo", self._redo_edit, fg=c["txt_dim"])
+
+        _sep()
+        _eb(inner, "💾 Save",    self._save_edit, accent=True)
+        _eb(inner, "📋 Save As", lambda: self._save_edit(overwrite=False))
+
+        _sep()
+        _eb(inner, "✕ Reset All", self._reset_edits, fg=c["txt_dim"])
+
+        self._bind_chrome_hover(bar)
+        for child in bar.winfo_children():
+            self._bind_chrome_hover(child)
 
     # ── Audio ─────────────────────────────────────────────────────────────────
 

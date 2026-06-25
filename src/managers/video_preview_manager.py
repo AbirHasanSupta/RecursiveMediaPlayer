@@ -1,4 +1,4 @@
-﻿"""
+"""
 VideoPreviewManager — fast binary thumbnail cache + LRU in-memory cache + background prefetch.
 
 Changes vs previous version:
@@ -32,6 +32,7 @@ import pickle
 
 from managers.resource_manager import get_resource_manager, ManagedThread
 import multiprocessing
+from utils import is_photo
 
 
 def generate_thumbnail_worker(
@@ -63,7 +64,7 @@ def generate_thumbnail_worker(
         '.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp', '.tiff', '.tif', '.heic', '.avif',
     }
     if ext in _PHOTO_EXTS:
-        return _photo_static()
+        return None
 
     def _static():
         try:
@@ -285,6 +286,93 @@ class LRUPhotoCache:
             return len(self._cache)
 
 
+class LRUSplitCache:
+    def __init__(self, video_maxsize: int = 2000, photo_maxsize: int = 5000):
+        self.video_cache = LRUPhotoCache(maxsize=video_maxsize)
+        self.photo_cache = LRUPhotoCache(maxsize=photo_maxsize)
+
+    def get(self, key: str) -> Optional[tk.PhotoImage]:
+        if is_photo(key):
+            return self.photo_cache.get(key)
+        return self.video_cache.get(key)
+
+    def put(self, key: str, photo: tk.PhotoImage):
+        if is_photo(key):
+            self.photo_cache.put(key, photo)
+        else:
+            self.video_cache.put(key, photo)
+
+    def discard(self, key: str):
+        if is_photo(key):
+            self.photo_cache.discard(key)
+        else:
+            self.video_cache.discard(key)
+
+    def discard_prefix(self, prefix: str):
+        self.video_cache.discard_prefix(prefix)
+        self.photo_cache.discard_prefix(prefix)
+
+    def clear(self):
+        self.video_cache.clear()
+        self.photo_cache.clear()
+
+    def __len__(self):
+        return len(self.video_cache) + len(self.photo_cache)
+
+
+class MediaSeparatedDict:
+    def __init__(self, video_dict: dict, photo_dict: dict):
+        self.video_dict = video_dict
+        self.photo_dict = photo_dict
+
+    def __contains__(self, key):
+        if is_photo(str(key)):
+            return key in self.photo_dict
+        return key in self.video_dict
+
+    def __getitem__(self, key):
+        if is_photo(str(key)):
+            return self.photo_dict[key]
+        return self.video_dict[key]
+
+    def __setitem__(self, key, value):
+        if is_photo(str(key)):
+            self.photo_dict[key] = value
+        else:
+            self.video_dict[key] = value
+
+    def __delitem__(self, key):
+        if is_photo(str(key)):
+            del self.photo_dict[key]
+        else:
+            del self.video_dict[key]
+
+    def get(self, key, default=None):
+        if is_photo(str(key)):
+            return self.photo_dict.get(key, default)
+        return self.video_dict.get(key, default)
+
+    def pop(self, key, default=None):
+        if is_photo(str(key)):
+            return self.photo_dict.pop(key, default)
+        return self.video_dict.pop(key, default)
+
+    def clear(self):
+        self.video_dict.clear()
+        self.photo_dict.clear()
+
+    def __iter__(self):
+        from itertools import chain
+        return chain(self.video_dict, self.photo_dict)
+
+    def __len__(self):
+        return len(self.video_dict) + len(self.photo_dict)
+
+    def items(self):
+        from itertools import chain
+        return chain(self.video_dict.items(), self.photo_dict.items())
+
+
 # ---------------------------------------------------------------------------
 # VideoThumbnail
 # ---------------------------------------------------------------------------
@@ -351,7 +439,7 @@ class VideoThumbnail:
 class ThumbnailStorage:
     MAX_ENTRIES = 2000
 
-    def __init__(self):
+    def __init__(self, media_type: str = "video"):
         if os.name == "nt":
             base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
         elif os.sys.platform == "darwin":
@@ -359,11 +447,17 @@ class ThumbnailStorage:
         else:
             base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
 
-        self.thumbnails_dir = base / "Recursive Video Player" / "Thumbnails"
-        self.blobs_dir = self.thumbnails_dir / "blobs"
+        if media_type == "photo":
+            self.thumbnails_dir = base / "Recursive Video Player" / "PhotoThumbnails"
+            self.blobs_dir = self.thumbnails_dir / "photo_blobs"
+            self.index_file = self.thumbnails_dir / "photo_index.pkl"
+        else:
+            self.thumbnails_dir = base / "Recursive Video Player" / "Thumbnails"
+            self.blobs_dir = self.thumbnails_dir / "blobs"
+            self.index_file = self.thumbnails_dir / "index.pkl"
+
         self.blobs_dir.mkdir(parents=True, exist_ok=True)
         # _hide_file(self.blobs_dir)
-        self.index_file = self.thumbnails_dir / "index.pkl"
         self._index_lock = threading.Lock()
 
     def load_index(self) -> Dict[str, dict]:
@@ -462,12 +556,8 @@ class ThumbnailGenerator:
 
     def generate_thumbnail(self, video_path: str):
         """Returns (raw_bytes: bytes, is_video: bool) or None."""
-        try:
-            from utils import is_photo
-            if is_photo(video_path):
-                return self._gen_photo_static(video_path)
-        except ImportError:
-            pass
+        if is_photo(video_path):
+            return None
         if self.use_video_preview:
             result = self._gen_video(video_path)
             if result:
@@ -928,11 +1018,12 @@ class PrefetchQueue:
             t.start()
             self._workers.append(t)
 
-    def attach(self, thumbnails: Dict, storage: ThumbnailStorage,
+    def attach(self, thumbnails: Dict, storage: ThumbnailStorage, photo_storage: ThumbnailStorage,
                generator: ThumbnailGenerator, on_done_cb: Callable,
                batch_done_cb: Optional[Callable] = None):
         self._thumbnails_ref = thumbnails
         self._storage_ref = storage
+        self._photo_storage_ref = photo_storage
         self._generator_ref = generator
         self._on_done_cb = on_done_cb
         self._batch_done_cb = batch_done_cb
@@ -1036,7 +1127,11 @@ class PrefetchQueue:
                 raw_bytes, is_vid = result
                 ext = ".mp4" if is_vid else ".jpg"
                 hk = _file_hash_key(video_path)
-                blob_path = self._storage_ref.write_blob(hk, raw_bytes, ext)
+
+                if is_photo(video_path):
+                    blob_path = self._photo_storage_ref.write_blob(hk, raw_bytes, ext)
+                else:
+                    blob_path = self._storage_ref.write_blob(hk, raw_bytes, ext)
                 th_new = VideoThumbnail(video_path, blob_path, is_vid, hk)
                 self._thumbnails_ref[norm] = th_new
 
@@ -1081,7 +1176,8 @@ class VideoPreviewManager:
     """
 
     # How many decoded PhotoImages to keep in RAM
-    LRU_SIZE = 2000
+    LRU_VIDEO_SIZE = 2000
+    LRU_PHOTO_SIZE = 5000
     # Background worker threads for prefetch (raised from 2 → 4 for faster bulk gen)
     PREFETCH_WORKERS = 4
 
@@ -1089,16 +1185,19 @@ class VideoPreviewManager:
         self.parent = parent
         self.console_callback = console_callback
 
-        self.storage = ThumbnailStorage()
+        self.storage = ThumbnailStorage(media_type="video")
+        self.photo_storage = ThumbnailStorage(media_type="photo")
         self.generator = ThumbnailGenerator()
         self.tooltip = VideoPreviewTooltip(parent)
         self.seek_preview = SeekPreviewCache()
 
         # In-memory LRU cache: norm_path → PhotoImage
-        self.lru_cache = LRUPhotoCache(maxsize=self.LRU_SIZE)
+        self.lru_cache = LRUSplitCache(video_maxsize=self.LRU_VIDEO_SIZE, photo_maxsize=self.LRU_PHOTO_SIZE)
 
         # Disk-level thumbnail map: norm_path → VideoThumbnail
-        self._thumbnails: Dict[str, VideoThumbnail] = {}
+        self._video_thumbnails: Dict[str, VideoThumbnail] = {}
+        self._photo_thumbnails: Dict[str, VideoThumbnail] = {}
+        self._thumbnails = MediaSeparatedDict(self._video_thumbnails, self._photo_thumbnails)
         self._generation_queue: set = set()
         self._lock = threading.Lock()
         self._dirty = False
@@ -1109,6 +1208,7 @@ class VideoPreviewManager:
         self._prefetch.attach(
             self._thumbnails,
             self.storage,
+            self.photo_storage,
             self.generator,
             self._on_prefetch_done,
             batch_done_cb=self._on_prefetch_batch_done,
@@ -1171,9 +1271,22 @@ class VideoPreviewManager:
                 loaded[vp] = th
             else:
                 self.storage.delete_blob(th.blob_path)
-        self._thumbnails = loaded
+        self._video_thumbnails = loaded
+
+        photo_index = self.photo_storage.load_index()
+        photo_loaded = {}
+        for vp, entry in photo_index.items():
+            th = VideoThumbnail.from_index_entry(vp, entry)
+            if th.is_valid():
+                photo_loaded[vp] = th
+            else:
+                self.photo_storage.delete_blob(th.blob_path)
+        self._photo_thumbnails = photo_loaded
+
+        self._thumbnails = MediaSeparatedDict(self._video_thumbnails, self._photo_thumbnails)
+
         # Re-attach prefetch to new dict
-        self._prefetch.attach(self._thumbnails, self.storage,
+        self._prefetch.attach(self._thumbnails, self.storage, self.photo_storage,
                               self.generator, self._on_prefetch_done,
                               batch_done_cb=self._on_prefetch_batch_done)
 
@@ -1187,9 +1300,12 @@ class VideoPreviewManager:
 
     def _flush_index(self):
         with self._lock:
-            index = {vp: th.to_index_entry() for vp, th in self._thumbnails.items()}
-        index = self.storage.prune(index)
-        self.storage.save_index(index)
+            video_index = {vp: th.to_index_entry() for vp, th in self._video_thumbnails.items()}
+            photo_index = {vp: th.to_index_entry() for vp, th in self._photo_thumbnails.items()}
+        video_index = self.storage.prune(video_index)
+        self.storage.save_index(video_index)
+        photo_index = self.photo_storage.prune(photo_index)
+        self.photo_storage.save_index(photo_index)
         self._dirty = False
 
     def _cancel_save_timer(self):
@@ -1211,9 +1327,11 @@ class VideoPreviewManager:
         Only enqueues paths that don't already have a valid blob on disk.
         Videos with existing valid blobs are skipped — their cache is reused.
         """
+
         needed = [
             p for p in video_paths
             if os.path.isfile(p)
+            and not is_photo(p)
             and not self._has_valid_blob(os.path.normpath(p))
         ]
         if needed:
@@ -1226,7 +1344,8 @@ class VideoPreviewManager:
         Already-cached videos are skipped entirely — their blobs are reused
         from disk on next Grid View open without any regeneration.
         """
-        all_local = [p for p in video_paths if os.path.isfile(p)]
+
+        all_local = [p for p in video_paths if os.path.isfile(p) and not is_photo(p)]
         already_cached = [
             p for p in all_local
             if self._has_valid_blob(os.path.normpath(p))
@@ -1243,9 +1362,11 @@ class VideoPreviewManager:
         the prefetch queue so they are generated before videos in other
         directories that are already waiting.
         """
+
         needed = [
             p for p in video_paths
             if os.path.isfile(p)
+            and not is_photo(p)
             and not self._has_valid_blob(os.path.normpath(p))
         ]
         if needed:
@@ -1437,7 +1558,6 @@ class VideoPreviewManager:
     def _show_video_preview(self, video_path: str, x: int, y: int):
         norm = os.path.normpath(video_path)
         try:
-            from utils import is_photo
             if is_photo(video_path):
                 self._show_photo_preview_direct(video_path, x, y)
                 return
@@ -1556,7 +1676,7 @@ class VideoPreviewManager:
 
     def _generate_thumbnail_async(self, video_path: str, x: int, y: int):
         try:
-            from utils import is_photo
+
             if is_photo(video_path):
                 self.parent.after(0, lambda: self._show_photo_preview_direct(video_path, x, y))
                 return
@@ -1612,7 +1732,11 @@ class VideoPreviewManager:
                         if td:
                             self.parent.after(0, lambda: self.tooltip.show_preview(video_path, td, x, y))
                 else:
-                    self.storage.delete_blob(blob_path)
+
+                    if is_photo(video_path):
+                        self.photo_storage.delete_blob(blob_path)
+                    else:
+                        self.storage.delete_blob(blob_path)
 
             except Exception as e:
                 with self._lock:
@@ -1648,6 +1772,7 @@ class VideoPreviewManager:
             self._generation_queue.clear()
         self.lru_cache.clear()
         self.storage.clear()
+        self.photo_storage.clear()
         self._dirty = False
 
     def evict_for_directory(self, dir_path: str):
@@ -1668,7 +1793,11 @@ class VideoPreviewManager:
             ]
             for k in to_remove:
                 th = self._thumbnails.pop(k)
-                self.storage.delete_blob(th.blob_path)
+
+                if is_photo(k):
+                    self.photo_storage.delete_blob(th.blob_path)
+                else:
+                    self.storage.delete_blob(th.blob_path)
 
         # self.lru_cache.discard_prefix(root_norm)
 
@@ -1702,6 +1831,8 @@ class ContinueWatchingPreviewCache:
 
     def prefetch(self, entries: List[tuple]):
         """entries: [(video_path, resume_sec), …]"""
+
+        entries = [(vp, rs) for vp, rs in entries if not is_photo(vp)]
         keys = {self._cache_key(vp, rs) for vp, rs in entries}
         with self._lock:
             for k in [k for k in self._cache if k not in keys]:
@@ -1908,6 +2039,9 @@ class SeekPreviewCache:
             self._dims.clear()
 
     def ensure_generated(self, video_path: str):
+
+        if is_photo(video_path):
+            return
         norm = os.path.normpath(video_path)
         with self._lock:
             if norm in self._cache or norm in self._generating:
