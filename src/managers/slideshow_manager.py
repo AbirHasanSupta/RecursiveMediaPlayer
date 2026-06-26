@@ -883,8 +883,8 @@ class SlideshowManager:
         self._canvas.bind("<ButtonRelease-1>", self._on_canvas_release, add="+")
         # Scroll to zoom
         self._canvas.bind("<MouseWheel>", self._on_mouse_wheel, add="+")
-        self._canvas.bind("<Button-4>", lambda e: self._zoom_in(), add="+")
-        self._canvas.bind("<Button-5>", lambda e: self._zoom_out(), add="+")
+        self._canvas.bind("<Button-4>", lambda e: self._zoom_in(e.x, e.y), add="+")
+        self._canvas.bind("<Button-5>", lambda e: self._zoom_out(e.x, e.y), add="+")
         # Reposition overlay bar when window is resized
         self._canvas.bind("<Configure>", lambda e: (
             self._on_canvas_resize(e),
@@ -1877,20 +1877,67 @@ class SlideshowManager:
                                    offset_y=self._zoom_offset_y)
         self._show_pil_on_canvas(rendered)
 
-    def _zoom_in(self):
+    def _get_mouse_canvas_pos(self):
+        try:
+            mx = self._canvas.winfo_pointerx() - self._canvas.winfo_rootx()
+            my = self._canvas.winfo_pointery() - self._canvas.winfo_rooty()
+            cw, ch = self._canvas_size()
+            if 0 <= mx <= cw and 0 <= my <= ch:
+                return mx, my
+            return cw / 2, ch / 2
+        except Exception:
+            cw, ch = self._canvas_size()
+            return cw / 2, ch / 2
+
+    def _zoom_to_factor(self, new_factor, mx, my):
         if not self._current_pil:
             return
-        self._zoom_factor = min(10.0, self._zoom_factor + 0.1)
+        display_pil = self._get_display_pil()
+        if not display_pil:
+            return
+        cw, ch = self._canvas_size()
+        iw, ih = display_pil.size
+        base_scale = min(cw / iw, ch / ih)
+        
+        s_old = base_scale * self._zoom_factor
+        s_new = base_scale * new_factor
+        
+        max_dx_old = max(0, iw * s_old - cw)
+        max_dy_old = max(0, ih * s_old - ch)
+        
+        max_dx_new = max(0, iw * s_new - cw)
+        max_dy_new = max(0, ih * s_new - ch)
+        
+        if max_dx_new > 0:
+            offset_x_val = (mx - cw / 2 - (s_new / s_old) * (mx - cw / 2 - self._zoom_offset_x * max_dx_old)) / max_dx_new
+            self._zoom_offset_x = max(-0.5, min(0.5, offset_x_val))
+        else:
+            self._zoom_offset_x = 0.0
+            
+        if max_dy_new > 0:
+            offset_y_val = (my - ch / 2 - (s_new / s_old) * (my - ch / 2 - self._zoom_offset_y * max_dy_old)) / max_dy_new
+            self._zoom_offset_y = max(-0.5, min(0.5, offset_y_val))
+        else:
+            self._zoom_offset_y = 0.0
+            
+        self._zoom_factor = new_factor
         self._redraw_current()
 
-    def _zoom_out(self):
+    def _zoom_in(self, mx=None, my=None):
         if not self._current_pil:
             return
-        self._zoom_factor = max(0.1, self._zoom_factor - 0.1)
-        if self._zoom_factor <= 1.0:
-            self._zoom_offset_x = 0.0
-            self._zoom_offset_y = 0.0
-        self._redraw_current()
+        if mx is None or my is None:
+            mx, my = self._get_mouse_canvas_pos()
+        new_factor = min(10.0, self._zoom_factor + 0.1)
+        self._zoom_to_factor(new_factor, mx, my)
+
+    def _zoom_out(self, mx=None, my=None):
+        if not self._current_pil:
+            return
+        if mx is None or my is None:
+            mx, my = self._get_mouse_canvas_pos()
+        new_factor = max(0.1, self._zoom_factor - 0.1)
+        self._zoom_to_factor(new_factor, mx, my)
 
     def _zoom_reset(self):
         if not self._current_pil:
@@ -1950,9 +1997,9 @@ class SlideshowManager:
 
     def _on_mouse_wheel(self, event):
         if event.delta > 0:
-            self._zoom_in()
+            self._zoom_in(event.x, event.y)
         elif event.delta < 0:
-            self._zoom_out()
+            self._zoom_out(event.x, event.y)
 
     def _push_edit_history(self):
         path = self._current_path()
