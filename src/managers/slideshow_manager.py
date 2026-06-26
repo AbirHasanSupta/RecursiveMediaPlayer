@@ -111,6 +111,11 @@ class SlideshowManager:
         self._crop_active       = False
         self._crop_start        = None  # (canvas_x, canvas_y)
         self._crop_rect_id      = None
+        # Zoom & Temporary Rotate state
+        self._zoom_factor       = 1.0
+        self._zoom_offset_x     = 0.0
+        self._zoom_offset_y     = 0.0
+        self._temp_rotation     = 0
         # Edit bar widget refs
         self._edit_bar          = None
         self._edit_btn          = None  # the ✏ Edit toggle button in the main bar
@@ -872,6 +877,14 @@ class SlideshowManager:
         self._canvas.pack(fill=tk.BOTH, expand=True)
         self._canvas.bind("<Double-Button-1>", lambda e: self._toggle_fullscreen())
         self._canvas.bind("<Button-3>", lambda e: self._show_context(e))
+        # Drag to pan when zoomed
+        self._canvas.bind("<Button-1>", self._on_canvas_press, add="+")
+        self._canvas.bind("<B1-Motion>", self._on_canvas_drag, add="+")
+        self._canvas.bind("<ButtonRelease-1>", self._on_canvas_release, add="+")
+        # Scroll to zoom
+        self._canvas.bind("<MouseWheel>", self._on_mouse_wheel, add="+")
+        self._canvas.bind("<Button-4>", lambda e: self._zoom_in(), add="+")
+        self._canvas.bind("<Button-5>", lambda e: self._zoom_out(), add="+")
         # Reposition overlay bar when window is resized
         self._canvas.bind("<Configure>", lambda e: (
             self._on_canvas_resize(e),
@@ -1054,6 +1067,10 @@ class SlideshowManager:
         "stop_video":        ("_stop_or_close",      ()),
         "ab_set_a":          ("_prev_song",          ()),
         "ab_set_b":          ("_next_song",          ()),
+        "zoom_in":           ("_zoom_in",            ()),
+        "zoom_out":          ("_zoom_out",           ()),
+        "zoom_reset":        ("_zoom_reset",         ()),
+        "rotate_right":      ("_temp_rotate_right",  ()),
     }
 
     def _stop_or_close(self):
@@ -1211,9 +1228,16 @@ class SlideshowManager:
         self._current_pil = self._load_pil(path)
         if not self._current_pil:
             return
-        display_pil = self._get_edited_pil() if self._edit_mode else self._current_pil
+        self._zoom_factor = 1.0
+        self._zoom_offset_x = 0.0
+        self._zoom_offset_y = 0.0
+        self._temp_rotation = 0
+        display_pil = self._get_display_pil()
         cw, ch = self._canvas_size()
-        rendered = self._fit_image(display_pil, cw, ch)
+        rendered = self._fit_image(display_pil, cw, ch,
+                                   scale=self._zoom_factor,
+                                   offset_x=self._zoom_offset_x,
+                                   offset_y=self._zoom_offset_y)
         self._show_pil_on_canvas(rendered)
         self._update_counter()
         self._update_progress()
@@ -1491,7 +1515,11 @@ class SlideshowManager:
 
     def _on_canvas_resize(self, event):
         if self._current_pil:
-            rendered = self._fit_image(self._current_pil, event.width, event.height)
+            display_pil = self._get_display_pil()
+            rendered = self._fit_image(display_pil, event.width, event.height,
+                                       scale=self._zoom_factor,
+                                       offset_x=self._zoom_offset_x,
+                                       offset_y=self._zoom_offset_y)
             self._show_pil_on_canvas(rendered)
             # Reposition image to new center
             if self._canvas_img_id:
@@ -1744,6 +1772,12 @@ class SlideshowManager:
         menu.add_command(label="⏪  Previous", command=self._prev)
         menu.add_command(label="⏩  Next", command=self._next)
         menu.add_separator()
+        menu.add_command(label="🔍  Zoom In (Ctrl + =)", command=self._zoom_in)
+        menu.add_command(label="🔍  Zoom Out (Ctrl + -)", command=self._zoom_out)
+        menu.add_command(label="🔍  Reset Zoom (Ctrl + 0)", command=self._zoom_reset)
+        menu.add_separator()
+        menu.add_command(label="⟳  Rotate Clockwise (R) [Temp]", command=self._temp_rotate_right)
+        menu.add_separator()
         menu.add_command(label="⛶  Toggle Fullscreen", command=self._toggle_fullscreen)
         menu.add_separator()
         menu.add_command(
@@ -1818,6 +1852,107 @@ class SlideshowManager:
         if t["sharpness"] != 1.0:
             img = ImageEnhance.Sharpness(img).enhance(t["sharpness"])
         return img
+
+    def _get_display_pil(self):
+        if not self._current_pil:
+            return None
+        cache_key = (id(self._current_pil), self._edit_mode, getattr(self, '_temp_rotation', 0))
+        if hasattr(self, '_display_pil_cache_key') and self._display_pil_cache_key == cache_key:
+            return self._display_pil_cache
+        img = self._get_edited_pil() if self._edit_mode else self._current_pil
+        if hasattr(self, '_temp_rotation') and self._temp_rotation:
+            img = img.rotate(-self._temp_rotation, expand=True, resample=Image.Resampling.BICUBIC)
+        self._display_pil_cache_key = cache_key
+        self._display_pil_cache = img
+        return img
+
+    def _redraw_current(self):
+        if not self._current_pil:
+            return
+        display_pil = self._get_display_pil()
+        cw, ch = self._canvas_size()
+        rendered = self._fit_image(display_pil, cw, ch,
+                                   scale=self._zoom_factor,
+                                   offset_x=self._zoom_offset_x,
+                                   offset_y=self._zoom_offset_y)
+        self._show_pil_on_canvas(rendered)
+
+    def _zoom_in(self):
+        if not self._current_pil:
+            return
+        self._zoom_factor = min(10.0, self._zoom_factor + 0.1)
+        self._redraw_current()
+
+    def _zoom_out(self):
+        if not self._current_pil:
+            return
+        self._zoom_factor = max(0.1, self._zoom_factor - 0.1)
+        if self._zoom_factor <= 1.0:
+            self._zoom_offset_x = 0.0
+            self._zoom_offset_y = 0.0
+        self._redraw_current()
+
+    def _zoom_reset(self):
+        if not self._current_pil:
+            return
+        self._zoom_factor = 1.0
+        self._zoom_offset_x = 0.0
+        self._zoom_offset_y = 0.0
+        self._redraw_current()
+
+    def _temp_rotate_right(self):
+        if not self._current_pil:
+            return
+        self._temp_rotation = (self._temp_rotation + 90) % 360
+        self._redraw_current()
+
+    def _on_canvas_press(self, event):
+        if self._crop_active:
+            self._on_crop_press(event)
+            return
+        self._drag_start_x = event.x
+        self._drag_start_y = event.y
+        self._drag_start_offset_x = self._zoom_offset_x
+        self._drag_start_offset_y = self._zoom_offset_y
+
+    def _on_canvas_drag(self, event):
+        if self._crop_active:
+            self._on_crop_drag(event)
+            return
+        if self._zoom_factor <= 1.0:
+            return
+        dx = event.x - self._drag_start_x
+        dy = event.y - self._drag_start_y
+        cw, ch = self._canvas_size()
+        display_pil = self._get_display_pil()
+        if not display_pil:
+            return
+        iw, ih = display_pil.size
+        base_scale = min(cw / iw, ch / ih)
+        s = base_scale * self._zoom_factor
+        nw = max(1, int(round(iw * s)))
+        nh = max(1, int(round(ih * s)))
+        
+        max_dx = max(0, nw - cw)
+        max_dy = max(0, nh - ch)
+        
+        if max_dx > 0:
+            self._zoom_offset_x = max(-0.5, min(0.5, self._drag_start_offset_x + dx / max_dx))
+        if max_dy > 0:
+            self._zoom_offset_y = max(-0.5, min(0.5, self._drag_start_offset_y + dy / max_dy))
+            
+        self._redraw_current()
+
+    def _on_canvas_release(self, event):
+        if self._crop_active:
+            self._on_crop_release(event)
+            return
+
+    def _on_mouse_wheel(self, event):
+        if event.delta > 0:
+            self._zoom_in()
+        elif event.delta < 0:
+            self._zoom_out()
 
     def _push_edit_history(self):
         path = self._current_path()
@@ -1898,17 +2033,11 @@ class SlideshowManager:
             return
         self._crop_active = True
         self._canvas.config(cursor="crosshair")
-        self._canvas.bind("<Button-1>", self._on_crop_press, add="+")
-        self._canvas.bind("<B1-Motion>", self._on_crop_drag, add="+")
-        self._canvas.bind("<ButtonRelease-1>", self._on_crop_release, add="+")
 
     def _stop_crop(self):
         self._crop_active = False
         if self._canvas and self._canvas.winfo_exists():
             self._canvas.config(cursor="")
-            self._canvas.unbind("<Button-1>")
-            self._canvas.unbind("<B1-Motion>")
-            self._canvas.unbind("<ButtonRelease-1>")
         if self._crop_rect_id and self._canvas:
             try:
                 self._canvas.delete(self._crop_rect_id)
