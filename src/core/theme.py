@@ -258,6 +258,8 @@ class ThemeSelector:
             'is_muted': getattr(self, 'is_muted', False),
             'loop_mode': getattr(self, 'loop_mode', 'loop_on'),
             'show_console': getattr(self, 'show_console', False),
+            'grid_page_size': getattr(self, 'grid_page_size', 50),
+            'grid_column_size': getattr(self, 'grid_column_size', 6),
         }
         threading.Thread(target=self.config.save, args=(prefs,), daemon=True).start()
 

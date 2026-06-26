@@ -65,8 +65,8 @@ class GridViewManager:
         self.pending_tasks = set()
         self._photo_cache = {}
         self._page = 0
-        self._page_size = 50
-        self._grid_cols = 6
+        self._page_size = getattr(theme_provider, 'grid_page_size', 50)
+        self._grid_cols = getattr(theme_provider, 'grid_column_size', 6)
         self._pages_cache = None
         self.now_playing_path = None
         self._now_playing_badge = None
@@ -411,7 +411,7 @@ class GridViewManager:
         self.grid_window.deiconify()
 
     def show_grid_view_embedded(self, parent, videos, video_preview_manager=None, close_callback=None):
-        if not videos:
+        if videos is None:
             return
 
         with self.loading_lock:
@@ -1282,6 +1282,14 @@ class GridViewManager:
 
     def _on_page_size_changed(self, value):
         self._page_size = int(value)
+        if hasattr(self.theme_provider, 'grid_page_size'):
+            self.theme_provider.grid_page_size = self._page_size
+            if hasattr(self.theme_provider, 'settings_manager'):
+                settings = self.theme_provider.settings_manager.get_settings()
+                settings.grid_page_size = self._page_size
+                self.theme_provider.settings_manager.storage.save_settings(settings)
+            else:
+                self.theme_provider.save_preferences()
         self._page = 0
         self._pages_cache = None
         self._rebuild_grid()
@@ -1381,7 +1389,17 @@ class GridViewManager:
             self._pages_cache = None
 
         if hasattr(self, 'grid_size_var'):
-            self._grid_cols = self.grid_size_var.get()
+            new_cols = self.grid_size_var.get()
+            if getattr(self, '_grid_cols', None) != new_cols:
+                self._grid_cols = new_cols
+                if hasattr(self.theme_provider, 'grid_column_size'):
+                    self.theme_provider.grid_column_size = self._grid_cols
+                    if hasattr(self.theme_provider, 'settings_manager'):
+                        settings = self.theme_provider.settings_manager.get_settings()
+                        settings.grid_column_size = self._grid_cols
+                        self.theme_provider.settings_manager.storage.save_settings(settings)
+                    else:
+                        self.theme_provider.save_preferences()
 
         # Cancel any in-progress chunked build from a previous call
         if getattr(self, '_chunk_after_id', None) is not None:
@@ -1672,7 +1690,7 @@ class GridViewManager:
             bg   = t['accent_dim']
             fg   = t['accent']
         else:
-            text = f"  {cnt} video{'s' if cnt != 1 else ''}  "
+            text = f"  {cnt} item{'s' if cnt != 1 else ''}  "
             bg   = t['pill_bg']
             fg   = t['text_sub']
         return text, bg, fg
@@ -3015,6 +3033,8 @@ class GridViewManager:
         if not self.selected_items:
             return
 
+        is_photo_item = is_photo(vp)
+
         # Play
         if vp in self.selected_items:
             context_menu.add_command(
@@ -3023,19 +3043,20 @@ class GridViewManager:
             )
         else:
             context_menu.add_command(
-                label="Play This Video",
+                label="Play This Item",
                 command=lambda: self._play_single(vp)
             )
 
-        sel_photo_paths = [
-            p for p in self.selected_items
-            if os.path.isfile(p) and is_photo(p)
-        ]
-        if sel_photo_paths and hasattr(self.theme_provider, '_launch_slideshow'):
-            context_menu.add_command(
-                label="Open in Slideshow",
-                command=lambda photos=list(sel_photo_paths): self.theme_provider._launch_slideshow(photos),
-            )
+        if not is_photo_item:
+            sel_photo_paths = [
+                p for p in self.selected_items
+                if os.path.isfile(p) and is_photo(p)
+            ]
+            if sel_photo_paths and hasattr(self.theme_provider, '_launch_slideshow'):
+                context_menu.add_command(
+                    label="Open in Slideshow",
+                    command=lambda photos=list(sel_photo_paths): self.theme_provider._launch_slideshow(photos),
+                )
 
         context_menu.add_separator()
 
@@ -3047,7 +3068,7 @@ class GridViewManager:
             label = (
                 f"Exclude Selected ({len(selected_not_excluded)} items)"
                 if len(selected_not_excluded) > 1
-                else "Exclude This Video"
+                else "Exclude This Item"
             )
             context_menu.add_command(label=label, command=self._exclude_selected)
 
@@ -3062,11 +3083,12 @@ class GridViewManager:
         context_menu.add_separator()
         context_menu.add_command(label="Select All", command=self._select_all)
         context_menu.add_command(label="Clear Selection", command=self._clear_selection)
-        context_menu.add_separator()
 
-        # Add to Playlist / Queue
-        context_menu.add_command(label="Add to Playlist", command=self._context_add_to_playlist)
-        context_menu.add_command(label="Add to Queue", command=self._context_add_to_queue)
+        if not is_photo_item:
+            context_menu.add_separator()
+            # Add to Playlist / Queue
+            context_menu.add_command(label="Add to Playlist", command=self._context_add_to_playlist)
+            context_menu.add_command(label="Add to Queue", command=self._context_add_to_queue)
 
         # Favourites
         if self.is_favourite_callback and (self.add_to_favourites_callback or self.remove_from_favourites_callback):
@@ -3079,30 +3101,31 @@ class GridViewManager:
                 context_menu.add_command(label="Add to Favourites",
                                          command=self._context_add_to_favourites)
 
-        context_menu.add_separator()
-
-        # Dual player options (Win 1)
-        context_menu.add_command(label="▶ Win 1 › Player 1",
-                                 command=lambda: self._context_play_in_dual_player(slot=1))
-        context_menu.add_command(label="▶ Win 1 › Player 2",
-                                 command=lambda: self._context_play_in_dual_player(slot=2))
-        context_menu.add_command(label="▶ Win 1 › Player 3",
-                                 command=lambda: self._context_play_in_dual_player(slot=3))
-
-        # Win 2 (only if callbacks are set)
-        if any([self.play_in_dual_player_win2_1_callback,
-                self.play_in_dual_player_win2_2_callback,
-                self.play_in_dual_player_win2_3_callback]):
+        if not is_photo_item:
             context_menu.add_separator()
-            if self.play_in_dual_player_win2_1_callback:
-                context_menu.add_command(label="▶ Win 2 › Player 1",
-                                         command=lambda: self._context_play_in_dual_player_win2(slot=1))
-            if self.play_in_dual_player_win2_2_callback:
-                context_menu.add_command(label="▶ Win 2 › Player 2",
-                                         command=lambda: self._context_play_in_dual_player_win2(slot=2))
-            if self.play_in_dual_player_win2_3_callback:
-                context_menu.add_command(label="▶ Win 2 › Player 3",
-                                         command=lambda: self._context_play_in_dual_player_win2(slot=3))
+
+            # Dual player options (Win 1)
+            context_menu.add_command(label="▶ Win 1 › Player 1",
+                                     command=lambda: self._context_play_in_dual_player(slot=1))
+            context_menu.add_command(label="▶ Win 1 › Player 2",
+                                     command=lambda: self._context_play_in_dual_player(slot=2))
+            context_menu.add_command(label="▶ Win 1 › Player 3",
+                                     command=lambda: self._context_play_in_dual_player(slot=3))
+
+            # Win 2 (only if callbacks are set)
+            if any([self.play_in_dual_player_win2_1_callback,
+                    self.play_in_dual_player_win2_2_callback,
+                    self.play_in_dual_player_win2_3_callback]):
+                context_menu.add_separator()
+                if self.play_in_dual_player_win2_1_callback:
+                    context_menu.add_command(label="▶ Win 2 › Player 1",
+                                             command=lambda: self._context_play_in_dual_player_win2(slot=1))
+                if self.play_in_dual_player_win2_2_callback:
+                    context_menu.add_command(label="▶ Win 2 › Player 2",
+                                             command=lambda: self._context_play_in_dual_player_win2(slot=2))
+                if self.play_in_dual_player_win2_3_callback:
+                    context_menu.add_command(label="▶ Win 2 › Player 3",
+                                             command=lambda: self._context_play_in_dual_player_win2(slot=3))
 
         context_menu.add_separator()
 

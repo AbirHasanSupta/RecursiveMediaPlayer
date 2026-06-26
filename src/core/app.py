@@ -137,6 +137,8 @@ def select_multiple_folders_and_play():
             self.is_muted = preferences.get('is_muted', False)
             self.loop_mode = preferences.get('loop_mode', 'loop_on')
             self.show_console = preferences.get('show_console', True)
+            self.grid_page_size = preferences.get('grid_page_size', 50)
+            self.grid_column_size = preferences.get('grid_column_size', 6)
 
             self.setup_theme()
 
@@ -275,6 +277,9 @@ def select_multiple_folders_and_play():
                 self._set_directory_panel_mode(app_settings.dir_panel_mode)
             else:
                 self._set_directory_panel_mode(self._directory_panel_mode)
+            self.grid_page_size = getattr(app_settings, 'grid_page_size', 50)
+            self.grid_column_size = getattr(app_settings, 'grid_column_size', 6)
+            self._media_type_filter = normalize_media_type_filter(getattr(app_settings, 'media_type_filter', 'all'))
 
             self.video_preview_manager = VideoPreviewManager(self.root, self.update_console)
             _orig_attach = self.video_preview_manager.attach_to_listbox
@@ -608,6 +613,11 @@ def select_multiple_folders_and_play():
 
         def _on_media_type_filter_changed(self, filter_type):
             self._media_type_filter = normalize_media_type_filter(filter_type)
+            if hasattr(self, 'settings_manager'):
+                settings = self.settings_manager.get_settings()
+                if getattr(settings, 'media_type_filter', None) != self._media_type_filter:
+                    settings.media_type_filter = self._media_type_filter
+                    self.settings_manager.storage.save_settings(settings)
             if hasattr(self, 'filter_sort_manager'):
                 self.filter_sort_manager.current_filter.media_type = self._media_type_filter
             if hasattr(self, '_media_type_filter_var'):
@@ -616,10 +626,8 @@ def select_multiple_folders_and_play():
             selected_dir = self.get_current_selected_directory()
             if selected_dir:
                 self.load_subdirectories(selected_dir, max_depth=self.current_max_depth)
-            if getattr(self, '_active_app_view', None) == 'gallery' and getattr(self, '_current_gallery_videos', None):
-                filtered = self._filter_paths_by_type(self._current_gallery_videos)
-                if filtered:
-                    self._open_grid_view(filtered)
+            if getattr(self, '_active_app_view', None) == 'gallery':
+                self._show_grid_view()
             if hasattr(self, 'grid_view_manager') and self.grid_view_manager:
                 self.grid_view_manager._update_media_type_filter_visibility()
 
@@ -4402,6 +4410,9 @@ def select_multiple_folders_and_play():
                             all_videos.append(video)
                 if all_videos:
                     self.root.after(0, lambda: self._open_grid_view(all_videos))
+                else:
+                    if getattr(self, '_active_app_view', None) == 'gallery':
+                        self.root.after(0, lambda: self._open_grid_view([]))
 
             self._wait_for_scans_then(
                 selected_dirs,
@@ -5887,7 +5898,10 @@ def select_multiple_folders_and_play():
                     if final:
                         self.root.after(0, lambda: self._open_grid_view(final))
                     else:
-                        self.root.after(0, lambda: self.toast.warning("Warning", f"No {self._media_count_label()} found in selection"))
+                        if getattr(self, '_active_app_view', None) == 'gallery':
+                            self.root.after(0, lambda: self._open_grid_view([]))
+                        else:
+                            self.root.after(0, lambda: self.toast.warning("Warning", f"No {self._media_count_label()} found in selection"))
 
                 relevant_dirs = list({os.path.dirname(self.current_subdirs_mapping.get(i, ''))
                                       for i in selection})
@@ -5921,14 +5935,20 @@ def select_multiple_folders_and_play():
                     if all_videos:
                         self.root.after(0, lambda: self._open_grid_view(all_videos))
                     else:
-                        self.root.after(0, lambda: self.toast.warning("Warning", f"No {self._media_count_label()} found"))
+                        if getattr(self, '_active_app_view', None) == 'gallery':
+                            self.root.after(0, lambda: self._open_grid_view([]))
+                        else:
+                            self.root.after(0, lambda: self.toast.warning("Warning", f"No {self._media_count_label()} found"))
 
                 self._wait_for_scans_then(selected_dirs,
                                           lambda: threading.Thread(target=collect_all, daemon=True).start())
         def _open_grid_view(self, videos):
             if not videos:
-                self.toast.warning("Warning", f"No {self._media_count_label()} to display")
-                return
+                if getattr(self, '_active_app_view', None) == 'gallery':
+                    pass
+                else:
+                    self.toast.warning("Warning", f"No {self._media_count_label()} to display")
+                    return
             self._current_gallery_videos = list(videos)
             self.grid_view_manager.video_preview_manager = self.video_preview_manager
             self._show_embedded_view(

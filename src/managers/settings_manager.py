@@ -135,6 +135,9 @@ class SettingsData:
         self.ai_server_url: str = ""
         self.dir_panel_width = 380
         self.dir_panel_mode = "expanded"
+        self.grid_page_size = 50
+        self.grid_column_size = 6
+        self.media_type_filter = "all"
 
     def to_dict(self) -> dict:
         return {
@@ -161,6 +164,9 @@ class SettingsData:
             'ai_search_enabled': self.ai_search_enabled,
             'dir_panel_width': self.dir_panel_width,
             'dir_panel_mode': self.dir_panel_mode,
+            'grid_page_size': self.grid_page_size,
+            'grid_column_size': self.grid_column_size,
+            'media_type_filter': self.media_type_filter,
         }
 
     @classmethod
@@ -188,6 +194,9 @@ class SettingsData:
         settings.ai_search_enabled = data.get('ai_search_enabled', False)
         settings.dir_panel_width = data.get('dir_panel_width', settings.dir_panel_width)
         settings.dir_panel_mode = data.get('dir_panel_mode', settings.dir_panel_mode)
+        settings.grid_page_size = data.get('grid_page_size', settings.grid_page_size)
+        settings.grid_column_size = data.get('grid_column_size', settings.grid_column_size)
+        settings.media_type_filter = data.get('media_type_filter', settings.media_type_filter)
         saved_hotkeys = data.get('hotkeys', {})
         if isinstance(saved_hotkeys, dict):
             settings.hotkeys.update(saved_hotkeys)
